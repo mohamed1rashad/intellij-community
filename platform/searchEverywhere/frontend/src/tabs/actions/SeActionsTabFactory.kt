@@ -17,14 +17,15 @@ import org.jetbrains.annotations.ApiStatus.Internal
 class SeActionsTabFactory : SeEssentialTabFactory {
   override val id: String get() = SeActionsTab.ID
   override val name: String get() = SeActionsTab.NAME
+  override val priority: Int get() = SeActionsTab.PRIORITY
 
   override suspend fun getTab(scope: CoroutineScope, project: Project?, session: SeSession, initEvent: AnActionEvent, registerShortcut: (AnAction) -> Unit): SeTab? {
-    val delegate = SeTabDelegate(project,
-                                 session,
-                                 "Actions",
-                                 listOf(SeProviderId(SeProviderIdUtils.ACTIONS_ID)),
-                                 initEvent,
-                                 scope)
+    val delegate = SeTabDelegate.create(project,
+                                        session,
+                                        "Actions",
+                                        listOf(SeProviderId(SeProviderIdUtils.ACTIONS_ID)),
+                                        initEvent,
+                                        scope)
 
     return SeActionsTab(delegate)
   }

@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.platform.execution.serviceView.backend` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "backend_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "backend",
   module_name = "intellij.platform.execution.serviceView.backend",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":backend_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "@lib//:kotlin-stdlib",
     "//platform/execution.serviceView",
@@ -27,6 +22,36 @@ jvm_library(
     "@lib//:jetbrains-annotations",
     "//platform/core-impl",
     "//platform/util",
+    "//fleet/rhizomedb",
+  ]
+)
+
+jvm_library(
+  name = "backend_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.execution.serviceView.backend",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":backend",
+    "//platform/execution.serviceView:execution.serviceView_test_lib",
+    "//platform/platform-impl/rpc:rpc_test_lib",
+    "//fleet/rpc:rpc_test_lib",
+    "//platform/extensions:extensions_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//platform/project/shared:project_test_lib",
+    "//platform/kernel/rpc.backend:rpc.backend_test_lib",
+    "//platform/kernel/backend:backend_test_lib",
+    "//platform/execution:execution_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+    "//platform/util:util_test_lib",
+    "//fleet/rhizomedb:rhizomedb_test_lib",
   ]
 )
 ### auto-generated section `build intellij.platform.execution.serviceView.backend` end
+
+### auto-generated section `iml intellij.platform.execution.serviceView.backend` start
+exports_files([
+  "intellij.platform.execution.serviceView.backend.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.execution.serviceView.backend` end

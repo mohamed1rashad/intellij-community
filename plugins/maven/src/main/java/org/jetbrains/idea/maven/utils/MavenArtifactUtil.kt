@@ -64,12 +64,6 @@ object MavenArtifactUtil {
 
   @JvmStatic
   @Deprecated("this method does not support split repositories")
-  fun getArtifactFile(localRepository: File, id: MavenId, type: String): Path {
-    return getArtifactNioPath(localRepository.toPath(), id.groupId, id.artifactId, id.version, type)
-  }
-
-  @JvmStatic
-  @Deprecated("this method does not support split repositories")
   fun getArtifactFile(localRepository: Path, id: MavenId, type: String): Path {
     return getArtifactNioPath(localRepository, id.groupId, id.artifactId, id.version, type)
   }

@@ -4,6 +4,7 @@
 
 package org.jetbrains.kotlin.idea.gradleCodeInsightCommon
 
+import com.intellij.modcommand.ModCommand
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.roots.DependencyScope
@@ -18,9 +19,11 @@ import org.jetbrains.kotlin.idea.compiler.configuration.IdeKotlinVersion
 import org.jetbrains.kotlin.idea.configuration.ChangedConfiguratorFiles
 import org.jetbrains.kotlin.idea.configuration.getJvmTargetNumber
 import org.jetbrains.kotlin.idea.projectConfiguration.RepositoryDescription
-import org.jetbrains.kotlin.tools.projectWizard.Versions
+import org.jetbrains.kotlin.tools.projectWizard.compatibility.GradleToPluginsCompatibilityStore
+import org.jetbrains.plugins.gradle.frameworkSupport.settingsScript.isFoojayPluginSupported
 
-val SCRIPT_PRODUCTION_DEPENDENCY_STATEMENTS: Set<String> = setOf("classpath", "compile", "api", "implementation", "compileOnly", "runtimeOnly")
+val SCRIPT_PRODUCTION_DEPENDENCY_STATEMENTS: Set<String> =
+    setOf("classpath", "compile", "api", "implementation", "compileOnly", "runtimeOnly")
     @ApiStatus.Internal get
 
 val FOOJAY_RESOLVER_NAME: String = "org.gradle.toolchains.foojay-resolver"
@@ -33,30 +36,56 @@ class DefinedKotlinPluginManagementVersion(
     val parsedVersion: IdeKotlinVersion?
 )
 
+const val COMPILER_OPTIONS: String = "compilerOptions"
+
 interface GradleBuildScriptManipulator<out Psi : PsiFile> {
     fun isApplicable(file: PsiFile): Boolean
 
     val scriptFile: Psi
     val preferNewSyntax: Boolean
 
+    fun usesOldSyntax(kotlinPluginName: String): Boolean
     fun isConfiguredWithOldSyntax(kotlinPluginName: String): Boolean
     fun isConfigured(kotlinPluginExpression: String): Boolean
+
+    /**
+     * Returns true if the Kotlin plugin is applied with the "apply false" argument, for example:
+     * ```
+     * plugins {
+     *    kotlin("jvm") apply false
+     * }
+     * ```
+     */
+    fun hasKotlinPluginApplyFalse(): Boolean
 
     fun configureBuildScripts(
         kotlinPluginName: String,
         kotlinPluginExpression: String,
-        stdlibArtifactName: String,
         addVersion: Boolean,
         version: IdeKotlinVersion,
         jvmTarget: String?,
         changedFiles: ChangedConfiguratorFiles
     )
 
+    fun configurePluginInPluginsGroup(
+        kotlinPluginExpression: String,
+        addVersion: Boolean,
+        version: IdeKotlinVersion,
+        applyFalse: Boolean,
+        changedFiles: ChangedConfiguratorFiles
+    )
+
+    fun configurePluginOptions(
+        kotlinPluginName: String,
+        changedFiles: ChangedConfiguratorFiles,
+        vararg options: String
+    )
+
     fun configureProjectBuildScript(kotlinPluginName: String, version: IdeKotlinVersion): Boolean
 
     fun configureSettingsFile(kotlinPluginName: String, version: IdeKotlinVersion): Boolean
 
-    fun getKotlinVersionFromBuildScript(): IdeKotlinVersion?
+    fun getKotlinVersion(): IdeKotlinVersion?
 
     fun hasExplicitlyDefinedKotlinVersion(): Boolean
 
@@ -80,20 +109,11 @@ interface GradleBuildScriptManipulator<out Psi : PsiFile> {
         libraryDescriptor: ExternalLibraryDescriptor
     )
 
-    fun getKotlinStdlibVersion(): String?
-
-    fun addJdkSpec(
-        jvmTarget: String,
-        version: IdeKotlinVersion,
-        gradleVersion: GradleVersionInfo,
-        applySpec: (
-            useToolchain: Boolean,
-            useToolchainHelper: Boolean,
-            targetVersionNumber: String
-        ) -> Unit
-    ) {
-
-    }
+    fun addKotlinLibraryToModuleBuildScriptModCommand(
+        targetModule: Module?,
+        scope: DependencyScope,
+        libraryDescriptor: ExternalLibraryDescriptor
+    ): ModCommand = ModCommand.nop()
 
     /**
      * Finds a "parent" block containing the current element with the [name] – be it a closure block or the whole line containing the [name].
@@ -140,8 +160,10 @@ interface GradleBuildScriptManipulator<out Psi : PsiFile> {
         containingFile?.let {
             changedFiles.storeOriginalFileContent(it)
         }
+
+        val rawGradleVersion = (gradleVersion as? GradleVersionProvider.OpaqueGradleVersion)?.raw ?: return
         val useToolchain =
-            gradleVersion >= GradleVersionProvider.getVersion(Versions.GRADLE_PLUGINS.MIN_GRADLE_FOOJAY_VERSION.text)
+            isFoojayPluginSupported(rawGradleVersion)
                     && kotlinVersion.compare("1.5.30") >= 0 && jvmTargetIsAtLeast(jvmTarget, minimum = 8)
 
         val targetVersion = getJvmTargetVersion(jvmTarget, kotlinVersion, useToolchain)
@@ -155,7 +177,9 @@ interface GradleBuildScriptManipulator<out Psi : PsiFile> {
             } else {
                 addKotlinExtendedDslToolchain(targetVersion)
             }
-            addFoojayPlugin(changedFiles)
+            val gradleToPluginsCompatibilityStore = GradleToPluginsCompatibilityStore.getInstance()
+            val foojayVersion = gradleToPluginsCompatibilityStore.getFoojayVersion(rawGradleVersion) ?: return
+            addFoojayPlugin(changedFiles, foojayVersion)
         } else {
             changeKotlinTaskParameter("jvmTarget", targetVersion, forTests = false, kotlinVersion)
             changeKotlinTaskParameter("jvmTarget", targetVersion, forTests = true, kotlinVersion)
@@ -196,9 +220,9 @@ interface GradleBuildScriptManipulator<out Psi : PsiFile> {
 
     fun addResolutionStrategy(pluginId: String)
 
-    fun addFoojayPlugin(changedFiles: ChangedConfiguratorFiles)
+    fun addFoojayPlugin(changedFiles: ChangedConfiguratorFiles, foojayVersion: String)
 
-    fun addFoojayPlugin(settingsFile: PsiFile)
+    fun addFoojayPlugin(settingsFile: PsiFile, foojayVersion: String)
 }
 
 fun GradleBuildScriptManipulator<*>.usesNewMultiplatform(): Boolean {
@@ -214,7 +238,7 @@ fun GradleBuildScriptManipulator<*>.useNewSyntax(kotlinPluginName: String, gradl
 
     if (gradleVersion < GradleVersionProvider.getVersion(MIN_GRADLE_VERSION_FOR_NEW_PLUGIN_SYNTAX.version)) return false
 
-    if (isConfiguredWithOldSyntax(kotlinPluginName)) return false
+    if (usesOldSyntax(kotlinPluginName)) return false
 
     val fileText = runReadAction { scriptFile.text }
     val hasOldApply = fileText.contains("apply plugin:")

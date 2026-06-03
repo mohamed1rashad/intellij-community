@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.inspections
 
 import com.intellij.codeInsight.FileModificationService
@@ -17,12 +17,24 @@ import org.jetbrains.kotlin.analysis.api.components.buildSubstitutor
 import org.jetbrains.kotlin.analysis.api.components.containingDeclaration
 import org.jetbrains.kotlin.analysis.api.components.defaultType
 import org.jetbrains.kotlin.analysis.api.components.isSubtypeOf
-import org.jetbrains.kotlin.analysis.api.components.resolveToCall
+import org.jetbrains.kotlin.analysis.api.components.resolveCall
 import org.jetbrains.kotlin.analysis.api.components.resolveToSymbol
 import org.jetbrains.kotlin.analysis.api.components.resolveToSymbols
 import org.jetbrains.kotlin.analysis.api.components.semanticallyEquals
-import org.jetbrains.kotlin.analysis.api.resolution.*
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaSingleOrMultiCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaVariableAccessCall
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassKind
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaReceiverParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaTypeParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.receiverType
+import org.jetbrains.kotlin.analysis.api.symbols.symbol
 import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.analysis.api.types.symbol
@@ -41,9 +53,39 @@ import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.idea.search.KotlinSearchUsagesSupport.SearchUtils.isOverridable
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.*
+import org.jetbrains.kotlin.psi.EditCommaSeparatedListHelper
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassLiteralExpression
+import org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExperimentalApi
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtForExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtThisExpression
+import org.jetbrains.kotlin.psi.KtTypeConstraint
+import org.jetbrains.kotlin.psi.KtTypeConstraintList
+import org.jetbrains.kotlin.psi.KtTypeParameter
+import org.jetbrains.kotlin.psi.KtTypeParameterList
+import org.jetbrains.kotlin.psi.KtTypeReference
+import org.jetbrains.kotlin.psi.KtVisitor
+import org.jetbrains.kotlin.psi.KtVisitorVoid
+import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
+import org.jetbrains.kotlin.psi.psiUtil.forEachDescendantOfType
+import org.jetbrains.kotlin.psi.psiUtil.getChildOfType
+import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypesAndPredicate
+import org.jetbrains.kotlin.psi.psiUtil.getPrevSiblingIgnoringWhitespaceAndComments
+import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.hasActualModifier
+import org.jetbrains.kotlin.psi.psiUtil.parents
 import org.jetbrains.kotlin.psi.typeRefHelpers.setReceiverTypeReference
+import org.jetbrains.kotlin.resolution.KtResolvableCall
 
 internal class UnusedReceiverParameterInspection : AbstractKotlinInspection() {
     override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean): KtVisitor<*, *> = object : KtVisitorVoid() {
@@ -228,8 +270,8 @@ private fun removeUnusedTypeParameters(typeParameters: List<KtTypeParameter>) {
  * We use this function to check if the callable symbol has a receiver that might potentially be used as a context receiver of this symbol.
  * This is needed because the analysis API does not expose passed context receivers yet: KT-73709
  */
-context(_: KaSession)
 @OptIn(KaExperimentalApi::class)
+context(_: KaSession)
 private fun KaCallableMemberCall<*, *>.hasContextReceiverOfType(type: KaType): Boolean {
     val substitutor = buildSubstitutor {
         substitutions(typeArgumentsMapping)
@@ -253,12 +295,13 @@ private fun isUsageOfReifiedType(reifiedTypes: Set<KaTypeParameterSymbol>, eleme
 /**
  * Returns whether the [symbol] is being used by the [element] by referencing it.
  */
+@OptIn(KtExperimentalApi::class, KaExperimentalApi::class)
 context(_: KaSession)
 private fun isUsageOfSymbol(symbol: KaDeclarationSymbol, element: KtElement): Boolean {
     if (element !is KtExpression) return false
 
     val receiverType = (symbol as? KaCallableSymbol)?.receiverType
-    fun isUsageOfSymbolInResolvedCall(resolvedCall: KaCall): Boolean = when (resolvedCall) {
+    fun isUsageOfSymbolInResolvedCall(resolvedCall: KaSingleOrMultiCall): Boolean = when (resolvedCall) {
         is KaFunctionCall<*>, is KaVariableAccessCall -> {
             val partiallyAppliedSymbol = resolvedCall.partiallyAppliedSymbol
 
@@ -284,28 +327,26 @@ private fun isUsageOfSymbol(symbol: KaDeclarationSymbol, element: KtElement): Bo
         return operatorFunctions.any { receiverType?.symbol == it.containingDeclaration }
     }
 
-    when (element) {
+    return when (element) {
         is KtThisExpression -> { // Check if this refers to our receiver
             val referencedSymbol = element.instanceReference.mainReference.resolveToSymbol()
-            return referencedSymbol is KaReceiverParameterSymbol && referencedSymbol.owningCallableSymbol == symbol
+            referencedSymbol is KaReceiverParameterSymbol && referencedSymbol.owningCallableSymbol == symbol
         }
 
-        is KtDestructuringDeclarationEntry -> {
-            return processOperators(element)
-        }
+        is KtDestructuringDeclarationEntry -> processOperators(element)
 
         is KtProperty -> {
             val propertyDelegate = element.delegate
-            return propertyDelegate != null && processOperators(propertyDelegate)
+            propertyDelegate != null && processOperators(propertyDelegate)
         }
 
-        is KtForExpression -> {
-            return processOperators(element)
+        is KtForExpression -> processOperators(element)
+
+        is KtResolvableCall -> {
+            val resolvedCall = element.resolveCall() ?: return false
+            isUsageOfSymbolInResolvedCall(resolvedCall)
         }
 
-        else -> {
-            val resolvedCall = element.resolveToCall()?.successfulCallOrNull<KaCall>() ?: return false
-            return isUsageOfSymbolInResolvedCall(resolvedCall)
-        }
+        else -> false
     }
 }

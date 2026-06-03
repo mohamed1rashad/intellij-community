@@ -3,8 +3,12 @@ package org.intellij.plugins.markdown.preview.jcef
 
 import com.intellij.openapi.application.EDT
 import com.intellij.testFramework.ExtensionTestUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandler
@@ -120,7 +124,9 @@ class MarkdownPreviewSecurityTest: MarkdownJcefTestCase() {
       }
     }
 
-    assertTrue(message.contains("Refused to load the script 'https://evil.example.com/some-script.js'"))
+    val blocked = message.contains("Refused to load the script 'https://evil.example.com/some-script.js'") ||
+                  message.contains("The action has been blocked.")
+    assertTrue(blocked, "Expected blocked script message but got: '$message'")
   }
 
   @Timeout(TIMEOUT)
@@ -160,7 +166,12 @@ class MarkdownPreviewSecurityTest: MarkdownJcefTestCase() {
       }
     }
 
-    assertTrue(message.contains("Refused to execute inline script because it violates the following Content Security Policy directive"))
+    val blocked =
+      // CEF 137
+      message.contains("Refused to execute inline script because it violates the following Content Security Policy directive") ||
+      // CEF 144
+      message.contains("The action has been blocked.")
+    assertTrue(blocked, "Expected blocked script message but got: '$message'")
   }
 
   companion object {

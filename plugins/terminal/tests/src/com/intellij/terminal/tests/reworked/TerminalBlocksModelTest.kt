@@ -7,14 +7,18 @@ import com.intellij.terminal.tests.reworked.util.TerminalTestUtil.update
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import org.jetbrains.plugins.terminal.block.reworked.MutableTerminalOutputModel
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOffset
-import org.jetbrains.plugins.terminal.block.reworked.TerminalOutputModel
 import org.jetbrains.plugins.terminal.block.reworked.TerminalSessionModelImpl
 import org.jetbrains.plugins.terminal.session.impl.TerminalBlocksModelState
-import org.jetbrains.plugins.terminal.view.shellIntegration.*
+import org.jetbrains.plugins.terminal.view.TerminalOffset
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModel
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlockIdImpl
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalCommandBlock
+import org.jetbrains.plugins.terminal.view.shellIntegration.getOutputText
+import org.jetbrains.plugins.terminal.view.shellIntegration.getTypedCommandText
 import org.jetbrains.plugins.terminal.view.shellIntegration.impl.TerminalBlocksModelImpl
 import org.jetbrains.plugins.terminal.view.shellIntegration.impl.TerminalCommandBlockImpl
+import org.jetbrains.plugins.terminal.view.shellIntegration.wasExecuted
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -97,6 +101,59 @@ internal class TerminalBlocksModelTest : BasePlatformTestCase() {
     assertEquals("myPrompt: ", outputModel.getTextAsString(block.startOffset, block.commandStartOffset!!))
     assertEquals(null, block.outputStartOffset)
     assertEquals("myPrompt: \n\n\n", outputModel.getTextAsString(block.startOffset, block.endOffset))
+  }
+
+  @Test
+  fun `command start offset is updated correctly after prompt reprinting`() = runBlocking(Dispatchers.EDT) {
+    val outputModel = TerminalTestUtil.createOutputModel()
+    val blocksModel = createBlocksModel(outputModel)
+
+    // Prepare
+    outputModel.update(0, "\n\n\n")
+    blocksModel.startNewBlock(TerminalOffset.ZERO)
+    outputModel.update(0, "myPrompt ... > \n\n\n")
+    blocksModel.updateCommandStartOffset(TerminalOffset.of(15))
+    outputModel.update(0, "myPrompt ... > 123\n\n\n")
+
+    // Test
+    blocksModel.startNewBlock(TerminalOffset.ZERO)
+    outputModel.update(0, "myPrompt (main) > 123\n\n\n")
+    blocksModel.updateCommandStartOffset(TerminalOffset.of(18))
+
+
+    assertEquals(1, blocksModel.blocks.size)
+    val block = blocksModel.activeBlock as TerminalCommandBlock
+
+    assertEquals(TerminalOffset.ZERO, block.startOffset)
+    assertEquals(TerminalOffset.of(18), block.commandStartOffset)
+    assertEquals(null, block.outputStartOffset)
+    assertEquals(TerminalOffset.of(24), block.endOffset)
+    assertEquals("123", block.getTypedCommandText(outputModel))
+  }
+
+  @Test
+  fun `command start offset is updated text change inside prompt`() = runBlocking(Dispatchers.EDT) {
+    val outputModel = TerminalTestUtil.createOutputModel()
+    val blocksModel = createBlocksModel(outputModel)
+
+    // Prepare
+    outputModel.update(0, "\n\n\n")
+    blocksModel.startNewBlock(TerminalOffset.ZERO)
+    outputModel.update(0, "myPrompt ... > \n\n\n")
+    blocksModel.updateCommandStartOffset(TerminalOffset.of(15))
+    outputModel.update(0, "myPrompt ... > 123\n\n\n")
+
+    // Test
+    outputModel.update(0, "myPrompt (main) > 123\n\n\n")
+
+    assertEquals(1, blocksModel.blocks.size)
+    val block = blocksModel.activeBlock as TerminalCommandBlock
+
+    assertEquals(TerminalOffset.ZERO, block.startOffset)
+    assertEquals(TerminalOffset.of(18), block.commandStartOffset)
+    assertEquals(null, block.outputStartOffset)
+    assertEquals(TerminalOffset.of(24), block.endOffset)
+    assertEquals("123", block.getTypedCommandText(outputModel))
   }
 
   @Test

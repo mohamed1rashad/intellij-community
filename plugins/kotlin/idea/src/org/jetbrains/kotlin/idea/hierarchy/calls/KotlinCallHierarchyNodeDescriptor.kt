@@ -5,7 +5,6 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.hierarchy.HierarchyNodeDescriptor
 import com.intellij.ide.hierarchy.call.CallHierarchyNodeDescriptor
-import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.roots.ui.util.CompositeAppearance
 import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.Iconable
@@ -15,14 +14,30 @@ import com.intellij.pom.Navigatable
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiReference
 import com.intellij.ui.LayeredIcon
-import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.K1Deprecation
+import org.jetbrains.kotlin.descriptors.ClassDescriptor
+import org.jetbrains.kotlin.descriptors.ConstructorDescriptor
+import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
+import org.jetbrains.kotlin.descriptors.FunctionDescriptor
+import org.jetbrains.kotlin.descriptors.ModuleDescriptor
+import org.jetbrains.kotlin.descriptors.PackageFragmentDescriptor
+import org.jetbrains.kotlin.descriptors.ValueParameterDescriptor
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.caches.resolve.resolveToDescriptorIfAny
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtEnumEntry
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiUtil
 import org.jetbrains.kotlin.renderer.DescriptorRenderer
 import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
-import java.awt.Font
 
+@K1Deprecation
 class KotlinCallHierarchyNodeDescriptor(
     parentDescriptor: HierarchyNodeDescriptor?,
     element: KtElement,
@@ -82,11 +97,7 @@ class KotlinCallHierarchyNodeDescriptor(
             elementIcon
         }
 
-        val mainTextAttributes: TextAttributes? = if (myColor != null) {
-            TextAttributes(myColor, null, null, null, Font.PLAIN)
-        } else {
-            null
-        }
+        val mainTextAttributes = textAttributesFor(targetElement)
 
         myHighlightedText = CompositeAppearance()
         myHighlightedText.ending.addText(elementText, mainTextAttributes)
@@ -100,7 +111,7 @@ class KotlinCallHierarchyNodeDescriptor(
         @NlsSafe
         val packageName = KtPsiUtil.getPackageName(targetElement as KtElement) ?: ""
 
-        myHighlightedText.ending.addText("  ($packageName)", getPackageNameAttributes())
+        myHighlightedText.ending.addText(" ($packageName)", getPackageNameAttributes())
         myName = myHighlightedText.text
 
         if (!(Comparing.equal(myHighlightedText, oldText) && Comparing.equal(icon, oldIcon))) {

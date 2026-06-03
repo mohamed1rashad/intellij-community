@@ -1,106 +1,39 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.util.ExceptionUtil;
-import com.intellij.util.ObjectUtils;
-import com.intellij.util.ReflectionUtil;
 import com.intellij.util.ThrowableRunnable;
-import com.intellij.util.concurrency.annotations.RequiresEdt;
-import org.jetbrains.annotations.ApiStatus;
+import com.intellij.util.ui.EDT;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * See <a href="https://plugins.jetbrains.com/docs/intellij/threading-model.html">Threading Model</a>
  *
- * @param <T> Result type.
  * @see ReadAction
  */
-public abstract class WriteAction<T> extends BaseActionRunnable<T> {
+public final class WriteAction {
   private static final Logger LOG = Logger.getInstance(WriteAction.class);
 
-  /**
-   * @deprecated Use {@link #run(ThrowableRunnable)} or {@link #compute(ThrowableComputable)} or similar method instead
-   */
-  @ApiStatus.ScheduledForRemoval
-  @Deprecated
-  public WriteAction() {
-  }
-
-  /**
-   * @deprecated use {@link #run(ThrowableRunnable)}
-   * or {@link #compute(ThrowableComputable)}
-   * or (if really desperate) {@link #computeAndWait(ThrowableComputable)} instead
-   */
-  @Deprecated
-  @Override
-  public @NotNull RunResult<T> execute() {
-    final RunResult<T> result = new RunResult<>(this);
-
-    Application application = ApplicationManager.getApplication();
-    if (application.isWriteIntentLockAcquired()) {
-      try(AccessToken ignored = ApplicationManager.getApplication().acquireWriteActionLock(getClass())) {
-        result.run();
-      }
-      return result;
-    }
-
-    if (application.isReadAccessAllowed()) {
-      LOG.error("Must not start write action from within read action in the other thread - deadlock is coming");
-    }
-
-    WriteThread.invokeAndWait(() -> {
-      try(AccessToken ignored = ApplicationManager.getApplication().acquireWriteActionLock(getClass())){
-        result.run();
-      }
-    });
-
-    result.throwException();
-    return result;
-  }
-
-  /**
-   * @deprecated Use {@link #run(ThrowableRunnable)} or {@link #compute(ThrowableComputable)} instead
-   * @see #run(ThrowableRunnable)
-   * @see #compute(ThrowableComputable)
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval
-  public static @NotNull AccessToken start() {
-    // get useful information about the write action
-    Class<?> callerClass = ObjectUtils.notNull(ReflectionUtil.getCallerClass(3), WriteAction.class);
-    return ApplicationManager.getApplication().acquireWriteActionLock(callerClass);
+  private WriteAction() {
   }
 
   /**
    * Executes {@code action} inside write action.
    */
-  @RequiresEdt
   public static <E extends Throwable> void run(@NotNull ThrowableRunnable<E> action) throws E {
-    ApplicationManager.getApplication().runWriteAction((ThrowableComputable<Void, E>)() -> {
-      action.run();
-      return null;
-    });
+    ApplicationManager.getApplication().runWriteAction(CoroutinesKt.throwableRunnableToThrowableComputable(action));
   }
 
   /**
    * Executes {@code action} inside write action and returns the result.
    */
-  @RequiresEdt
   public static <T, E extends Throwable> T compute(@NotNull ThrowableComputable<T, E> action) throws E {
     return ApplicationManager.getApplication().runWriteAction(action);
   }
-
-  /**
-   * @deprecated use {@link #run(ThrowableRunnable)} or {@link #compute(ThrowableComputable)} instead
-   */
-  @Deprecated
-  @Override
-  protected abstract void run(@NotNull Result<? super T> result) throws Throwable;
 
   /**
    * Executes {@code action} inside write action.
@@ -110,10 +43,7 @@ public abstract class WriteAction<T> extends BaseActionRunnable<T> {
    * <br/>Instead, please use {@link #run(ThrowableRunnable)}.
    */
   public static <E extends Throwable> void runAndWait(@NotNull ThrowableRunnable<E> action) throws E {
-    computeAndWait(() -> {
-      action.run();
-      return null;
-    });
+    computeAndWait(CoroutinesKt.throwableRunnableToThrowableComputable(action));
   }
 
   /**
@@ -133,7 +63,7 @@ public abstract class WriteAction<T> extends BaseActionRunnable<T> {
       return application.runWriteAction(action);
     }
 
-    if (SwingUtilities.isEventDispatchThread()) {
+    if (EDT.isCurrentThreadEdt()) {
       return application.runWriteIntentReadAction(() -> application.runWriteAction(action));
     }
 

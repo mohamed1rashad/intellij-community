@@ -5,7 +5,15 @@ import com.intellij.openapi.diagnostic.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -27,8 +35,9 @@ abstract class AccountManagerBase<A : Account, Cred : Any>(
 
   override val canPersistCredentials: Flow<Boolean> by lazy { persistentCredentials.canPersistCredentials }
 
-  private val _accountsState = MutableStateFlow(persistentAccounts.accounts)
-  override val accountsState: StateFlow<Set<A>> = _accountsState.asStateFlow()
+  private val _accountsState: MutableStateFlow<Set<A>> = MutableStateFlow(persistentAccounts.accounts)
+  override val accountsState: StateFlow<Set<A>> = (persistentAccounts as? ObservableAccountsRepository)?.accountsFlow
+                                                  ?: _accountsState.asStateFlow()
 
   private val accountsEventsFlow = MutableSharedFlow<Event<A, Cred>>()
   private val mutex = Mutex()
@@ -75,8 +84,8 @@ abstract class AccountManagerBase<A : Account, Cred : Any>(
             logger.debug("Added new account: $account")
             currentSet + account
           }
-          persistentAccounts.accounts = newSet
           saveCredentialsSafe(account, credentials)
+          persistentAccounts.accounts = newSet
           _accountsState.value = newSet
           accountsEventsFlow.emit(Event.AccountsAddedOrUpdated(mapOf(account to credentials)))
           logger.debug("Updated credentials for account: $account")
@@ -92,8 +101,8 @@ abstract class AccountManagerBase<A : Account, Cred : Any>(
           val currentSet = persistentAccounts.accounts
           val newSet = currentSet - account
           if (newSet.size != currentSet.size) {
-            persistentAccounts.accounts = newSet
             saveCredentialsSafe(account, null)
+            persistentAccounts.accounts = newSet
             _accountsState.value = newSet
             accountsEventsFlow.emit(Event.AccountsRemoved(setOf(account)))
             logger.debug("Removed account: $account")

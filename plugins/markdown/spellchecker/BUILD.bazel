@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.markdown.spellchecker` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "spellchecker_resources",
-  srcs = glob(["src/main/resources/**/*"]),
-  strip_prefix = "src/main/resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "spellchecker",
   module_name = "intellij.markdown.spellchecker",
   visibility = ["//visibility:public"],
   srcs = glob(["src/main/kotlin/**/*.kt", "src/main/kotlin/**/*.java", "src/main/kotlin/**/*.form"], allow_empty = True),
-  resources = [":spellchecker_resources"],
+  resources = glob(["src/main/resources/**/*"]),
+  resource_strip_prefix = "src/main/resources",
   deps = [
     "//plugins/markdown/core:markdown",
     "//platform/core-api:core",
@@ -22,4 +17,27 @@ jvm_library(
   ],
   runtime_deps = ["//platform/backend"]
 )
+
+jvm_library(
+  name = "spellchecker_test_lib",
+  testonly = True,
+  module_name = "intellij.markdown.spellchecker",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":spellchecker",
+    "//plugins/markdown/core:markdown_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//platform/util:util_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+    "//spellchecker:spellchecker_test_lib",
+    "//platform/backend:backend_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.markdown.spellchecker` end
+
+### auto-generated section `iml intellij.markdown.spellchecker` start
+exports_files([
+  "intellij.markdown.spellchecker.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.markdown.spellchecker` end

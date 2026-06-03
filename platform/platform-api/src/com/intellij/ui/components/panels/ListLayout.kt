@@ -4,8 +4,13 @@ package com.intellij.ui.components.panels
 import com.intellij.ui.components.panels.ListLayout.Companion.getDeltaFactor
 import com.intellij.util.ui.JBInsets
 import com.intellij.util.ui.JBValue
-import org.jetbrains.annotations.ApiStatus
-import java.awt.*
+import java.awt.Component
+import java.awt.Container
+import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.LayoutManager2
+import java.awt.Point
+import java.awt.Rectangle
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -40,7 +45,6 @@ import kotlin.math.min
  * @see [ListLayout.vertical]
  * @see [ListLayout.horizontal]
  */
-@ApiStatus.Experimental
 class ListLayout private constructor(
   private val majorAxis: Axis,
   private val minorAxisAlignment: Alignment,

@@ -6,7 +6,11 @@ import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
 import com.intellij.debugger.impl.DebuggerUtilsAsync;
 import com.intellij.debugger.impl.DebuggerUtilsImpl;
 import com.intellij.debugger.settings.NodeRendererSettings;
-import com.intellij.debugger.ui.impl.watch.*;
+import com.intellij.debugger.ui.impl.watch.FieldDescriptorImpl;
+import com.intellij.debugger.ui.impl.watch.NodeDescriptorImpl;
+import com.intellij.debugger.ui.impl.watch.NodeDescriptorProvider;
+import com.intellij.debugger.ui.impl.watch.NodeManagerImpl;
+import com.intellij.debugger.ui.impl.watch.StaticDescriptorImpl;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -19,7 +23,7 @@ import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -80,7 +84,7 @@ public class JavaStaticGroup extends XValueGroup implements NodeDescriptorProvid
                 .map(l -> createNodes(l, refType))
                 .toArray(CompletableFuture[]::new);
               CompletableFuture.allOf(futures)
-                .thenAccept(__ -> {
+                .thenAccept(_ -> {
                   StreamEx.of(futures).map(CompletableFuture::join).forEach(c -> node.addChildren(c, false));
                   node.addChildren(XValueChildrenList.EMPTY, true);
                 });

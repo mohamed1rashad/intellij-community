@@ -2,7 +2,14 @@
 package com.intellij.psi.impl.source.tree.java;
 
 import com.intellij.lang.ASTNode;
-import com.intellij.psi.*;
+import com.intellij.psi.GenericsUtil;
+import com.intellij.psi.JavaElementVisitor;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiSwitchExpression;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypes;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceSession;
 import com.intellij.psi.impl.source.resolve.graphInference.PsiPolyExpressionUtil;
 import com.intellij.psi.impl.source.tree.JavaElementType;
@@ -26,12 +33,6 @@ public class PsiSwitchExpressionImpl extends PsiSwitchBlockImpl implements PsiSw
 
   @Override
   public PsiType getType() {
-    if (PsiUtil.isLanguageLevel8OrHigher(this) &&
-        PsiPolyExpressionUtil.isPolyExpression(this) &&
-        !MethodCandidateInfo.isOverloadCheck(PsiUtil.skipParenthesizedExprUp(getParent()))) {
-      return InferenceSession.getTargetType(this);
-    }
-
     List<PsiExpression> resultExpressions = PsiUtil.getSwitchResultExpressions(this);
 
     Set<PsiType> resultTypes = new HashSet<>();
@@ -39,6 +40,19 @@ public class PsiSwitchExpressionImpl extends PsiSwitchBlockImpl implements PsiSw
       PsiType resultExpressionType = expression.getType();
       if (resultExpressionType == null) return null;
       resultTypes.add(resultExpressionType);
+    }
+
+    if (PsiUtil.isLanguageLevel8OrHigher(this) &&
+        PsiPolyExpressionUtil.isPolyExpression(this) &&
+        !MethodCandidateInfo.isOverloadCheck(PsiUtil.skipParenthesizedExprUp(getParent()))) {
+      PsiType targetType = InferenceSession.getTargetType(this);
+      if (MethodCandidateInfo.isOverloadCheck() && targetType != null &&
+          ContainerUtil.exists(resultTypes, t -> !targetType.isAssignableFrom(t))) {
+        return null;
+      }
+      if (targetType != null) {
+        return targetType;
+      }
     }
 
     if (resultTypes.isEmpty()) return null;

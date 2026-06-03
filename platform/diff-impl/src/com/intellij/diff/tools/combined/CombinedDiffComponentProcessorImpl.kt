@@ -1,7 +1,12 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.combined
 
-import com.intellij.diff.*
+import com.intellij.diff.DiffContext
+import com.intellij.diff.DiffExtension
+import com.intellij.diff.DiffManagerEx
+import com.intellij.diff.DiffTool
+import com.intellij.diff.DiffToolType
+import com.intellij.diff.FrameDiffTool
 import com.intellij.diff.editor.DiffEditorTabFilesUtil
 import com.intellij.diff.impl.DiffEditorViewer
 import com.intellij.diff.impl.DiffEditorViewerListener
@@ -36,7 +41,11 @@ private val LOG = logger<CombinedDiffComponentProcessor>()
 
 @ApiStatus.Experimental
 interface CombinedDiffManager {
-  fun createProcessor(diffPlace: String? = null): CombinedDiffComponentProcessor
+  fun createProcessor(
+    diffPlace: String? = null,
+    contextActions: List<AnAction>? = null,
+    goToChangeToolbarActions: List<AnAction>? = null,
+  ): CombinedDiffComponentProcessor
 
   companion object {
     fun getInstance(project: Project): CombinedDiffManager = project.service()
@@ -46,7 +55,7 @@ interface CombinedDiffManager {
 @ApiStatus.Internal
 class CombinedDiffComponentProcessorImpl(
   val model: CombinedDiffModel,
-  goToChangeAction: AnAction?,
+  goToChangeAction: AnAction,
 ) : CombinedDiffComponentProcessor {
 
   override val disposable = Disposer.newCheckedDisposable()
@@ -148,7 +157,7 @@ class CombinedDiffComponentProcessorImpl(
     return CombinedDiffViewer(context, MyBlockListener(), blockState, mainUi.getUiState()).also { viewer ->
       Disposer.register(disposable, viewer)
       context.putUserData(COMBINED_DIFF_VIEWER_KEY, viewer)
-      mainUi.setContent(viewer, blockState)
+      mainUi.setContent(viewer)
     }
   }
 

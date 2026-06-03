@@ -2,13 +2,54 @@ package com.intellij.database.run.ui.table;
 
 import com.intellij.application.options.EditorFontsConstants;
 import com.intellij.database.actions.ShowEditMaximizedAction;
-import com.intellij.database.datagrid.*;
+import com.intellij.database.datagrid.DataGrid;
+import com.intellij.database.datagrid.DataGridListener;
+import com.intellij.database.datagrid.DataGridWithNestedTables;
+import com.intellij.database.datagrid.GridCellRequest;
+import com.intellij.database.datagrid.GridCellRequestKt;
+import com.intellij.database.datagrid.GridColumn;
+import com.intellij.database.datagrid.GridColumnLayout;
+import com.intellij.database.datagrid.GridHelper;
+import com.intellij.database.datagrid.GridModel;
+import com.intellij.database.datagrid.GridRequestSource;
+import com.intellij.database.datagrid.GridRow;
+import com.intellij.database.datagrid.GridSortingModel;
+import com.intellij.database.datagrid.GridUtil;
+import com.intellij.database.datagrid.GridUtilCore;
+import com.intellij.database.datagrid.HierarchicalColumnsCollapseManager;
 import com.intellij.database.datagrid.HierarchicalColumnsDataGridModel.HierarchicalGridColumn;
+import com.intellij.database.datagrid.HierarchicalReader;
+import com.intellij.database.datagrid.ModelIndex;
+import com.intellij.database.datagrid.ModelIndexSet;
+import com.intellij.database.datagrid.NestedTable;
+import com.intellij.database.datagrid.RawIndexConverter;
+import com.intellij.database.datagrid.ResultView;
+import com.intellij.database.datagrid.ResultViewColumn;
+import com.intellij.database.datagrid.SelectionModel;
+import com.intellij.database.datagrid.SelectionModelUtil;
+import com.intellij.database.datagrid.ViewIndex;
+import com.intellij.database.datagrid.ViewIndexSet;
 import com.intellij.database.extractors.DisplayType;
 import com.intellij.database.remote.jdbc.LobInfo;
 import com.intellij.database.run.actions.ColumnLocalFilterAction;
-import com.intellij.database.run.ui.*;
-import com.intellij.database.run.ui.grid.*;
+import com.intellij.database.run.ui.DataAccessType;
+import com.intellij.database.run.ui.DataGridRequestPlace;
+import com.intellij.database.run.ui.EditMaximizedView;
+import com.intellij.database.run.ui.GridTableCellEditor;
+import com.intellij.database.run.ui.ResultViewWithCells;
+import com.intellij.database.run.ui.ResultViewWithColumns;
+import com.intellij.database.run.ui.ResultViewWithRows;
+import com.intellij.database.run.ui.TableAggregatorWidgetHelper;
+import com.intellij.database.run.ui.ValueTabInfoProvider;
+import com.intellij.database.run.ui.grid.CellAttributes;
+import com.intellij.database.run.ui.grid.CellRenderingUtils;
+import com.intellij.database.run.ui.grid.DataGridSearchSession;
+import com.intellij.database.run.ui.grid.DummyGridColumnLayout;
+import com.intellij.database.run.ui.grid.GridColorsScheme;
+import com.intellij.database.run.ui.grid.GridSearchSession;
+import com.intellij.database.run.ui.grid.JBTableWithResizableCells;
+import com.intellij.database.run.ui.grid.ResizableCellEditorsSupport;
+import com.intellij.database.run.ui.grid.TableCellImageCache;
 import com.intellij.database.run.ui.grid.editors.GridCellEditorFactory;
 import com.intellij.database.run.ui.grid.editors.GridCellEditorFactoryProvider;
 import com.intellij.database.run.ui.grid.renderers.GridCellRenderer;
@@ -26,9 +67,19 @@ import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
 import com.intellij.ide.ui.UISettingsUtils;
 import com.intellij.lang.Language;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionPopupMenu;
+import com.intellij.openapi.actionSystem.ActionUiKind;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.UiDataProvider;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteIntentReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColorsListener;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.EditorFontType;
@@ -43,7 +94,17 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
-import com.intellij.ui.*;
+import com.intellij.ui.CellRendererPanel;
+import com.intellij.ui.ClientProperty;
+import com.intellij.ui.ComponentUtil;
+import com.intellij.ui.ComponentWithExpandableItems;
+import com.intellij.ui.ExpandableItemsHandler;
+import com.intellij.ui.IconManager;
+import com.intellij.ui.IdeBorderFactory;
+import com.intellij.ui.SideBorder;
+import com.intellij.ui.TableCell;
+import com.intellij.ui.TableExpandableItemsHandler;
+import com.intellij.ui.TableUtil;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.Magnificator;
@@ -61,29 +122,91 @@ import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.ActionMap;
+import javax.swing.BoxLayout;
+import javax.swing.CellRendererPane;
+import javax.swing.DefaultRowSorter;
+import javax.swing.GroupLayout;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JViewport;
+import javax.swing.RowFilter;
+import javax.swing.RowSorter;
+import javax.swing.SortOrder;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ListSelectionListener;
 import javax.swing.event.TableColumnModelEvent;
 import javax.swing.event.TableModelEvent;
-import javax.swing.table.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.util.*;
+import javax.swing.table.DefaultTableColumnModel;
+import javax.swing.table.JTableHeader;
+import javax.swing.table.TableCellEditor;
+import javax.swing.table.TableCellRenderer;
+import javax.swing.table.TableColumn;
+import javax.swing.table.TableColumnModel;
+import javax.swing.table.TableModel;
+import javax.swing.table.TableRowSorter;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.event.ActionEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionAdapter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.EventObject;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
-
+import static com.intellij.database.datagrid.GridUtilKt.isArrayCell;
 import static com.intellij.database.datagrid.GridUtilKt.setupDynamicRowHeight;
 import static com.intellij.database.run.ui.DataAccessType.DATA_WITH_MUTATIONS;
 import static com.intellij.database.run.ui.EditMaximizedViewKt.EDIT_MAXIMIZED_GRID_KEY;
 import static com.intellij.database.run.ui.GridTableCellEditor.TABLE_CELL_EDITOR_PROPERTY;
-import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.*;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetBackground;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetForeground;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetGridColor;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetSelectionBackground;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetSelectionForeground;
 import static com.intellij.database.run.ui.grid.TableCellImageCache.MAX_COLUMNS;
 import static com.intellij.database.run.ui.grid.TableCellImageCache.MAX_ROWS;
 import static com.intellij.database.run.ui.table.UnparsedValueHoverListener.Companion.Place.CENTER;
-import static com.intellij.util.containers.ContainerUtil.*;
+import static com.intellij.util.containers.ContainerUtil.all;
+import static com.intellij.util.containers.ContainerUtil.emptyList;
+import static com.intellij.util.containers.ContainerUtil.exists;
+import static com.intellij.util.containers.ContainerUtil.filter;
+import static com.intellij.util.containers.ContainerUtil.getFirstItem;
 import static com.intellij.util.ui.SwingTextTrimmer.ELLIPSIS_AT_RIGHT;
 import static com.intellij.util.ui.UIUtil.getFontWithFallback;
 import static java.awt.event.InputEvent.ALT_DOWN_MASK;
@@ -127,6 +250,8 @@ public final class TableResultView extends JBTableWithResizableCells
   private final TableFloatingToolbar myFloatingToolbar;
 
   private StatisticsTableHeader myStatisticsHeader;
+
+  private static final Logger LOG = Logger.getInstance(TableResultView.class);
 
   public TableResultView(@NotNull DataGrid resultPanel,
                          @NotNull ActionGroup columnHeaderPopupActions,
@@ -310,9 +435,19 @@ public final class TableResultView extends JBTableWithResizableCells
                          @NotNull ModelIndex<GridColumn> column,
                          boolean allowImmediateUpdate,
                          @NotNull GridRequestSource source) {
+    setValueAt(v, row, column, allowImmediateUpdate, source, null);
+  }
+
+  @Override
+  public void setValueAt(@Nullable Object v,
+                         @NotNull ModelIndex<GridRow> row,
+                         @NotNull ModelIndex<GridColumn> column,
+                         boolean allowImmediateUpdate,
+                         @NotNull GridRequestSource source,
+                         @Nullable Object metadata) {
     int viewRowIdx = isTransposed() ? column.toView(myResultPanel).asInteger() : row.toView(myResultPanel).asInteger();
     int viewColumnIdx = isTransposed() ? row.toView(myResultPanel).asInteger() : column.toView(myResultPanel).asInteger();
-    setValueAt(v, viewRowIdx, viewColumnIdx, allowImmediateUpdate, source);
+    setValueAt(v, viewRowIdx, viewColumnIdx, allowImmediateUpdate, source, metadata);
   }
 
   @Override
@@ -371,7 +506,9 @@ public final class TableResultView extends JBTableWithResizableCells
   public void addSelectionChangedListener(@NotNull Consumer<Boolean> listener) {
     ListSelectionListener l = e -> {
       if (!myDisableSelectionListeners) {
-        listener.accept(e.getValueIsAdjusting());
+        WriteIntentReadAction.run(() -> {
+          listener.accept(e.getValueIsAdjusting());
+        });
       }
     };
     getColumnModel().getSelectionModel().addListSelectionListener(l);
@@ -1304,6 +1441,22 @@ public final class TableResultView extends JBTableWithResizableCells
     return myResultPanel.isCellEditingAllowed();
   }
 
+  public void withCurrentValue(@Nullable Object value, @NotNull Runnable r) {
+    withCurrentValue(value, true, r);
+  }
+
+  public void withCurrentValue(@Nullable Object value, boolean shouldMoveFocus, @NotNull Runnable r) {
+    ClientProperty.put(this, GridTableCellEditor.CURRENT_VALUE_CLIENT_PROPERTY_KEY, value);
+    ClientProperty.put(this, GridTableCellEditor.SUPPRESS_MOVE_FOCUS_CLIENT_PROPERTY_KEY, !shouldMoveFocus);
+    try {
+      r.run();
+    }
+    finally {
+      ClientProperty.remove(this, GridTableCellEditor.CURRENT_VALUE_CLIENT_PROPERTY_KEY);
+      ClientProperty.remove(this, GridTableCellEditor.SUPPRESS_MOVE_FOCUS_CLIENT_PROPERTY_KEY);
+    }
+  }
+
   @Override
   public boolean editCellAt(int row, int column, EventObject e) {
     ClientProperty.put(this, GridTableCellEditor.EDITING_STARTER_CLIENT_PROPERTY_KEY, e);
@@ -1312,7 +1465,7 @@ public final class TableResultView extends JBTableWithResizableCells
       return false;
     }
     try {
-      return super.editCellAt(row, column, e);
+      return WriteIntentReadAction.compute(() -> super.editCellAt(row, column, e));
     }
     finally {
       ClientProperty.put(this, GridTableCellEditor.EDITING_STARTER_CLIENT_PROPERTY_KEY, null);
@@ -1322,8 +1475,24 @@ public final class TableResultView extends JBTableWithResizableCells
   private boolean shouldDisplayValueEditor(int row, int column) {
     var tableModel = getModel();
     var cellValue = tableModel.getValueAt(row, column);
-    return (cellValue instanceof LobInfo.ClobInfo clob && clob.isFullyReloaded()) ||
-           (cellValue instanceof LobInfo.BlobInfo blob && blob.isFullyReloaded());
+    if ((cellValue instanceof LobInfo.ClobInfo clob && clob.isFullyReloaded()) ||
+        (cellValue instanceof LobInfo.BlobInfo blob && blob.isFullyReloaded()) ||
+        isArrayViewCell(row, column)) {
+      return true;
+    }
+    return false;
+  }
+
+  private boolean isArrayViewCell(int row, int column) {
+    var settings = GridUtil.getSettings(myResultPanel);
+    if (Registry.is("database.new.arrays.editor") && (settings != null && !settings.isEditArrayAsText())) {
+      int modelColumnIdx = convertColumnIndexToModel(column);
+      int modelRowIdx = convertRowIndexToModel(row);
+      var columnIndex = ModelIndex.forColumn(myResultPanel, modelColumnIdx);
+      var rowIndex = ModelIndex.forRow(myResultPanel, modelRowIdx);
+      return isArrayCell(GridCellRequestKt.request(myResultPanel, rowIndex, columnIndex));
+    }
+    return false;
   }
 
   private void showValueEditor(EventObject e) {
@@ -1907,14 +2076,25 @@ public final class TableResultView extends JBTableWithResizableCells
   }
 
   @Override
+  public void editSelectedCellWithValue(Object value) {
+    withCurrentValue(value, this::editSelectedCell);
+  }
+
+  public void editSelectedCellWithValue(Object value, boolean shouldMoveFocus) {
+    withCurrentValue(value, shouldMoveFocus, this::editSelectedCell);
+  }
+
+  @Override
   public boolean isMultiEditingAllowed() {
     int[] selectedColumns = isTransposed() ? getSelectedRows() : getSelectedColumns();
     int[] selectedRows = isTransposed() ? getSelectedColumns() : getSelectedRows();
     ModelIndexSet<GridColumn> indexSet = ViewIndexSet.forColumns(myResultPanel, selectedColumns).toModel(myResultPanel);
     List<GridColumn> columns = myResultPanel.getDataModel(DataAccessType.DATABASE_DATA).getColumns(indexSet);
     GridColumn uniqueColumn = GridHelper.get(myResultPanel).findUniqueColumn(myResultPanel, columns);
+    GridTableCellEditor editor = ObjectUtils.tryCast(getCellEditor(), GridTableCellEditor.class);
+    boolean uniqueOk = uniqueColumn == null || selectedRows.length == 1 || (editor != null && editor.allowsUniqueMultiEdit());
     return myCommonValue != null &&
-           (uniqueColumn == null || selectedRows.length == 1) &&
+           uniqueOk &&
            GridHelper.get(myResultPanel).canEditTogether(myResultPanel, columns);
   }
 
@@ -1986,10 +2166,13 @@ public final class TableResultView extends JBTableWithResizableCells
   public TableCellEditor getCellEditor(int row, int column) {
     ModelIndex<GridRow> rowIdx = ViewIndex.forRow(myResultPanel, isTransposed() ? column : row).toModel(myResultPanel);
     ModelIndex<GridColumn> columnIdx = ViewIndex.forColumn(myResultPanel, isTransposed() ? row : column).toModel(myResultPanel);
-    GridCellEditorFactoryProvider factoryProvider = GridCellEditorFactoryProvider.get(myResultPanel);
-    GridCellEditorFactory editorFactory =
-      factoryProvider == null ? null : factoryProvider.getEditorFactory(myResultPanel, rowIdx, columnIdx);
-    GridColumn dataColumn = myResultPanel.getDataModel(DATA_WITH_MUTATIONS).getColumn(columnIdx);
+    GridCellRequest<GridRow, GridColumn> request = GridCellRequestKt.request(myResultPanel, rowIdx, columnIdx);
+    Object currentValue = ClientProperty.get(this, GridTableCellEditor.CURRENT_VALUE_CLIENT_PROPERTY_KEY);
+    if (currentValue != null) {
+      request = GridCellRequestKt.overrideValue(request, currentValue);
+    }
+    GridCellEditorFactory editorFactory = GridCellEditorFactoryProvider.provideEditorFactory(request);
+    GridColumn dataColumn = request.getColumn();
     return dataColumn != null && !GridUtilCore.isRowId(dataColumn) && !GridUtilCore.isVirtualColumn(dataColumn) && editorFactory != null ?
            new GridTableCellEditor(myResultPanel, rowIdx, columnIdx, editorFactory) :
            null;
@@ -2003,14 +2186,15 @@ public final class TableResultView extends JBTableWithResizableCells
 
   @Override
   public void setValueAt(Object value, int viewRowIdx, int viewColumnIdx) {
-    setValueAt(value, viewRowIdx, viewColumnIdx, true, new GridRequestSource(new DataGridRequestPlace(myResultPanel)));
+    setValueAt(value, viewRowIdx, viewColumnIdx, true, new GridRequestSource(new DataGridRequestPlace(myResultPanel)), null);
   }
 
   private void setValueAt(Object value,
                           int viewRowIdx,
                           int viewColumnIdx,
                           boolean allowImmediateUpdate,
-                          @NotNull GridRequestSource source) {
+                          @NotNull GridRequestSource source,
+                          @Nullable Object metadata) {
     boolean allowed = isMultiEditingAllowed();
     int[] rows = allowed ? getSelectedRows() : new int[]{viewRowIdx};
     int[] columns = allowed ? getSelectedColumns() : new int[]{viewColumnIdx};
@@ -2027,7 +2211,8 @@ public final class TableResultView extends JBTableWithResizableCells
                              value,
                              allowImmediateUpdate,
                              moveToNextCellRunnable,
-                             source);
+                             source,
+                             metadata);
   }
 
   private void moveToNextCell(@NotNull ViewIndex<GridRow> rowIndex, @NotNull ViewIndex<GridColumn> colIndex) {
@@ -2156,7 +2341,8 @@ public final class TableResultView extends JBTableWithResizableCells
     public @NotNull TableCellRenderer getRenderer(int row, int column) {
       ModelIndex<GridRow> rowIdx = ViewIndex.forRow(myGrid, myResultView.isTransposed() ? column : row).toModel(myGrid);
       ModelIndex<GridColumn> columnIdx = ViewIndex.forColumn(myGrid, myResultView.isTransposed() ? row : column).toModel(myGrid);
-      GridCellRenderer gridCellRenderer = GridCellRenderer.getRenderer(myGrid, rowIdx, columnIdx);
+      GridCellRequest<GridRow, GridColumn> request = GridCellRequestKt.request(myGrid, rowIdx, columnIdx);
+      GridCellRenderer gridCellRenderer = GridCellRenderer.getRenderer(request);
 
       TableCellRenderer renderer = myTableCellRenderers.get(gridCellRenderer);
       if (renderer == null) {
@@ -2193,7 +2379,8 @@ public final class TableResultView extends JBTableWithResizableCells
     private final JPanel myCompositeLabel;
     private final List<JLabel> myIconLabels;
     private JLabel filterLabel;
-    private final Icon filterIconEnabled = new BadgeIcon(AllIcons.General.Filter, JBUI.CurrentTheme.IconBadge.SUCCESS);
+    private final Icon filterIconEnabled =
+      IconManager.getInstance().withIconBadge(AllIcons.General.Filter, JBUI.CurrentTheme.IconBadge.SUCCESS);
 
     private final List<JPanel> myHeaderLinePanels;
     private TableResultViewColumn myCurrentColumn;
@@ -2220,7 +2407,7 @@ public final class TableResultView extends JBTableWithResizableCells
     }
 
     protected Rectangle getNameRect() {
-      return getLabelTextRect(myNameLabels.get(0));
+      return getLabelTextRect(myNameLabels.getFirst());
     }
 
     protected int getModelIdx() {
@@ -2430,7 +2617,7 @@ public final class TableResultView extends JBTableWithResizableCells
           if (isColumnEnabled(sibling, myTable.myResultPanel)) return false;
         }
         else {
-          HierarchicalGridColumn leftMostChildOfSibling = sibling.getChildren().get(0);
+          HierarchicalGridColumn leftMostChildOfSibling = sibling.getChildren().getFirst();
           if (isColumnEnabled(leftMostChildOfSibling, myTable.myResultPanel)) return false;
           // We do not check every descendant down to the leaf level.
           // It is not possible to disable all child columns without disabling the leftmost column, and vice versa,
@@ -2442,6 +2629,12 @@ public final class TableResultView extends JBTableWithResizableCells
     }
 
     private void setPlaceholderIntoHeaderLine(int headerLineIdx) {
+      if (headerLineIdx < 0 || headerLineIdx >= myNameLabels.size()) {
+        LOG.error("Header line index out of bounds: idx=" + headerLineIdx +
+                  ", myNameLabels.size()=" + myNameLabels.size() +
+                  ", myHeaderLinePanels.size()=" + myHeaderLinePanels.size());
+        return;
+      }
       myNameLabels.get(headerLineIdx).setText(HEADER_PLACEHOLDER);
     }
 

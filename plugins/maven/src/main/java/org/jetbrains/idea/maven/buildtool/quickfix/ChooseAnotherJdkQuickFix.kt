@@ -4,7 +4,7 @@ package org.jetbrains.idea.maven.buildtool.quickfix
 import com.intellij.build.issue.BuildIssueQuickFix
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.JavaSdkType
@@ -33,10 +33,10 @@ class ChooseAnotherJdkQuickFix : BuildIssueQuickFix {
       }.onSdkSelected { sdk ->
         val cs = MavenCoroutineScopeProvider.getCoroutineScope(project)
         cs.launch {
-          val table = ProjectJdkTable.getInstance()
+          val table = ProjectJdkTable.getInstance(project)
 
           if (table.findJdk(sdk.name) == null) {
-            writeAction {
+            edtWriteAction {
               table.addJdk(sdk)
             }
           }

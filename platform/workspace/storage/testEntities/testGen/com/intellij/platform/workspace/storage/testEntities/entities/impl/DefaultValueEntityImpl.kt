@@ -1,16 +1,16 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Default
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
@@ -18,19 +18,17 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.DefaultValueEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableDefaultValueEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.DefaultValueEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntityData) : DefaultValueEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntityData) : DefaultValueEntity,
+                                                                                        WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -39,7 +37,6 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
       readField("name")
       return dataSource.name
     }
-
   override var isGenerated: Boolean = dataSource.isGenerated
 
   override var anotherName: String = dataSource.anotherName
@@ -55,8 +52,8 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
   }
 
 
-  internal class Builder(result: DefaultValueEntityData?) : ModifiableWorkspaceEntityBase<DefaultValueEntity, DefaultValueEntityData>(
-    result), ModifiableDefaultValueEntity {
+  internal class Builder(result: DefaultValueEntityData?) :
+    ModifiableWorkspaceEntityBase<DefaultValueEntity, DefaultValueEntityData>(result), DefaultValueEntityBuilder {
     internal constructor() : this(DefaultValueEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -69,15 +66,13 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
           error("Entity DefaultValueEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -115,7 +110,6 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
         changedProperty.add("entitySource")
 
       }
-
     override var name: String
       get() = getEntityData().name
       set(value) {
@@ -123,7 +117,6 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
         getEntityData(true).name = value
         changedProperty.add("name")
       }
-
     override var isGenerated: Boolean
       get() = getEntityData().isGenerated
       set(value) {
@@ -131,7 +124,6 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
         getEntityData(true).isGenerated = value
         changedProperty.add("isGenerated")
       }
-
     override var anotherName: String
       get() = getEntityData().anotherName
       set(value) {
@@ -142,6 +134,7 @@ internal class DefaultValueEntityImpl(private val dataSource: DefaultValueEntity
 
     override fun getEntityClass(): Class<DefaultValueEntity> = DefaultValueEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -152,14 +145,13 @@ internal class DefaultValueEntityData : WorkspaceEntityData<DefaultValueEntity>(
 
   internal fun isNameInitialized(): Boolean = ::name.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<DefaultValueEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<DefaultValueEntity> {
     val modifiable = DefaultValueEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): DefaultValueEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -171,15 +163,14 @@ internal class DefaultValueEntityData : WorkspaceEntityData<DefaultValueEntity>(
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.DefaultValueEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.DefaultValueEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return DefaultValueEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return DefaultValueEntity(name, entitySource) {
       this.isGenerated = this@DefaultValueEntityData.isGenerated
       this.anotherName = this@DefaultValueEntityData.anotherName
@@ -194,9 +185,7 @@ internal class DefaultValueEntityData : WorkspaceEntityData<DefaultValueEntity>(
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as DefaultValueEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.name != other.name) return false
     if (this.isGenerated != other.isGenerated) return false
@@ -207,9 +196,7 @@ internal class DefaultValueEntityData : WorkspaceEntityData<DefaultValueEntity>(
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as DefaultValueEntityData
-
     if (this.name != other.name) return false
     if (this.isGenerated != other.isGenerated) return false
     if (this.anotherName != other.anotherName) return false

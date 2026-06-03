@@ -65,7 +65,6 @@ private const val _NO_NAME_PROVIDED_ = "`<no name provided>`"
  */
 object KotlinElementFactory {
     context(_: KaSession)
-    @OptIn(KaExperimentalApi::class)
     fun newClassElement(clazz: KtClassOrObject): ClassElement {
         val ce = ClassElement()
 
@@ -103,6 +102,7 @@ object KotlinElementFactory {
     fun newFieldElement(property: KtProperty): FieldElement {
         val fe = FieldElement()
         fe.name = property.nameIdentifier?.text ?: _NO_NAME_PROVIDED_
+        fe.accessor = property.nameIdentifier?.text
         if (property.hasModifier(KtTokens.CONST_KEYWORD)) fe.isConstant = true
 
         val propertySymbol = property.symbol as? KaPropertySymbol ?: return fe
@@ -121,6 +121,7 @@ object KotlinElementFactory {
     fun newFieldElement(parameter: KtParameter): FieldElement {
         val fe = FieldElement()
         fe.name = parameter.nameIdentifier?.text ?: _NO_NAME_PROVIDED_
+        fe.accessor = parameter.nameIdentifier?.text
         setElementInfo(fe, parameter.returnType, parameter.modifierList)
         return fe
     }
@@ -147,8 +148,8 @@ object KotlinElementFactory {
         return me
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     fun setElementInfo(element: AbstractElement, type: KaType, modifiersList: KtModifierList?) {
         val typeSymbol = type.symbol
         element.typeName = typeSymbol?.classId?.shortClassName?.asString()

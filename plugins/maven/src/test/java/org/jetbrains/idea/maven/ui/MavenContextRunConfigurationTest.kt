@@ -8,7 +8,6 @@ import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
-import com.intellij.testFramework.RunAll
 import junit.framework.TestCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -33,13 +32,6 @@ class MavenContextRunConfigurationTest : MavenDomTestCase() {
     myNavigator.groupModules = true
   }
 
-  public override fun tearDown() {
-    RunAll.runAll({
-                    waitForMavenUtilRunnablesComplete()
-                  },
-                  { super.tearDown() })
-  }
-
   @Test
   fun testCreateMavenRunConfigurationFromToolWindow() = runBlocking {
     val projectPom = createProjectPom("""
@@ -47,7 +39,8 @@ class MavenContextRunConfigurationTest : MavenDomTestCase() {
   <artifactId>project</artifactId>
   <version>1</version>
   """.trimIndent())
-    projectsManager.projectsTree.resetManagedFilesAndProfiles(listOf(projectPom), MavenExplicitProfiles.NONE)
+    projectsManager.state.originalFiles = listOf(projectPom.path)
+    projectsManager.explicitProfiles = MavenExplicitProfiles.NONE
     updateAllProjects()
     projectsManager.fireActivatedInTests()
 
@@ -67,7 +60,8 @@ class MavenContextRunConfigurationTest : MavenDomTestCase() {
   <artifactId>project</artifactId>
   <version>1</version>
   """.trimIndent())
-    projectsManager.projectsTree.resetManagedFilesAndProfiles(listOf(projectPom), MavenExplicitProfiles.NONE)
+    projectsManager.state.originalFiles = listOf(projectPom.path)
+    projectsManager.explicitProfiles = MavenExplicitProfiles.NONE
     updateAllProjects()
     projectsManager.fireActivatedInTests()
 
@@ -113,7 +107,8 @@ class MavenContextRunConfigurationTest : MavenDomTestCase() {
                             <version>1</version>
                           </parent>
                           <artifactId>m2</artifactId>""")
-    projectsManager.projectsTree.resetManagedFilesAndProfiles(listOf(projectPom, m2, m2), MavenExplicitProfiles.NONE)
+    projectsManager.state.originalFiles = (listOf(projectPom, m2, m2)).map { it.path }
+    projectsManager.explicitProfiles = MavenExplicitProfiles.NONE
     updateAllProjects()
     projectsManager.fireActivatedInTests()
 
@@ -173,7 +168,8 @@ class MavenContextRunConfigurationTest : MavenDomTestCase() {
                             <version>1</version>
                           </parent>
                           <artifactId>m2</artifactId>""")
-    projectsManager.projectsTree.resetManagedFilesAndProfiles(listOf(projectPom, m2, m2), MavenExplicitProfiles.NONE)
+    projectsManager.state.originalFiles = listOf(projectPom, m2, m2).map { it.path }
+    projectsManager.explicitProfiles = MavenExplicitProfiles.NONE
     updateAllProjects()
     projectsManager.fireActivatedInTests()
 

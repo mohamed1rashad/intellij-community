@@ -1,5 +1,6 @@
 package com.intellij.platform.ide.nonModalWelcomeScreen.actions
 
+import com.intellij.ide.projectView.impl.ProjectViewImpl
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -8,9 +9,9 @@ import com.intellij.openapi.actionSystem.ex.ActionRuntimeRegistrar
 import com.intellij.openapi.actionSystem.impl.ActionConfigurationCustomizer
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehavior
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification
-import com.intellij.openapi.project.DumbAwareAction
-import com.intellij.openapi.wm.ex.WelcomeScreenProjectProvider.Companion.isWelcomeScreenProject
+import com.intellij.openapi.project.DumbAwareAction import com.intellij.platform.ide.nonModalWelcomeScreen.leftPanel.WelcomeScreenLeftPanel
 import com.intellij.platform.ide.nonModalWelcomeScreen.leftPanel.WelcomeScreenLeftTabActionNew
+import com.intellij.util.PlatformUtils
 import org.intellij.lang.annotations.Language
 
 internal class WelcomeScreenAwareActionsCustomizer : ActionConfigurationCustomizer, ActionConfigurationCustomizer.LightCustomizeStrategy {
@@ -20,7 +21,9 @@ internal class WelcomeScreenAwareActionsCustomizer : ActionConfigurationCustomiz
       replaceExistingAction("RenameProject") { hideActionOnWelcomeScreen(it) }
       replaceExistingAction("NewDir") { hideActionOnWelcomeScreen(it) }
       replaceExistingAction("NewFile") { WelcomeScreenProxyAction(it, CreateEmptyFileAction()) }
-      replaceExistingAction("NewElement") { WelcomeScreenProxyAction(it, WelcomeScreenLeftTabActionNew()) }
+      if (!PlatformUtils.isPyCharm() && !PlatformUtils.isDataGrip()) {
+        replaceExistingAction("NewElement") { WelcomeScreenProxyAction(it, WelcomeScreenLeftTabActionNew(), false) }
+      }
 
       // Hide project view toolbar actions
       replaceExistingAction("SelectInProjectView") { hideActionOnWelcomeScreen(it) }
@@ -51,16 +54,16 @@ private fun hideActionOnWelcomeScreen(action: AnAction): AnAction {
   }
 }
 
-private class WelcomeScreenHiddenActionWithRemoteSpec<T>(val actionWithSpec: T) : WelcomeScreenHiddenAction(actionWithSpec),
-                                                                                  ActionRemoteBehaviorSpecification
+internal class WelcomeScreenHiddenActionWithRemoteSpec<T>(val actionWithSpec: T) : WelcomeScreenHiddenAction(actionWithSpec),
+                                                                                   ActionRemoteBehaviorSpecification
   where T : AnAction, T : ActionRemoteBehaviorSpecification {
   override fun getBehavior(): ActionRemoteBehavior? = actionWithSpec.getBehavior()
 }
 
-private open class WelcomeScreenHiddenAction(action: AnAction) : AnActionWrapper(action) {
+internal open class WelcomeScreenHiddenAction(action: AnAction) : AnActionWrapper(action) {
   override fun update(e: AnActionEvent) {
     val project = e.project
-    if (project != null && isWelcomeScreenProject(project)) {
+    if (project != null && ProjectViewImpl.getInstance(project).currentViewId == WelcomeScreenLeftPanel.ID) {
       e.presentation.isEnabledAndVisible = false
       return
     }
@@ -68,10 +71,14 @@ private open class WelcomeScreenHiddenAction(action: AnAction) : AnActionWrapper
   }
 }
 
-private class WelcomeScreenProxyAction(val action: AnAction, val welcomeScreenBehaviour: AnAction) : DumbAwareAction(action.templatePresentation.text) {
+internal class WelcomeScreenProxyAction(
+  val action: AnAction,
+  val welcomeScreenBehaviour: AnAction,
+  private val isVisible: Boolean = true
+) : DumbAwareAction(action.templatePresentation.text) {
   override fun actionPerformed(e: AnActionEvent) {
     val project = e.project
-    if (project != null && isWelcomeScreenProject(project)) {
+    if (project != null && ProjectViewImpl.getInstance(project).currentViewId == WelcomeScreenLeftPanel.ID) {
       welcomeScreenBehaviour.actionPerformed(e)
       return
     }
@@ -80,12 +87,12 @@ private class WelcomeScreenProxyAction(val action: AnAction, val welcomeScreenBe
 
   override fun update(e: AnActionEvent) {
     val project = e.project
-    if (project != null && isWelcomeScreenProject(project)) {
+    if (project != null && ProjectViewImpl.getInstance(project).currentViewId == WelcomeScreenLeftPanel.ID) {
+      e.presentation.isVisible = isVisible
       welcomeScreenBehaviour.update(e)
       return
     }
     action.update(e)
-    welcomeScreenBehaviour.update(e)
   }
 
   override fun getActionUpdateThread(): ActionUpdateThread {

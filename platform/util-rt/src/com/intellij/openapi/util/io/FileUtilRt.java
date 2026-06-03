@@ -1,28 +1,57 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.util.io;
 
 import com.intellij.openapi.diagnostic.LoggerRt;
 import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.util.ArrayUtilRt;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileFilter;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.Reader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
-import java.nio.file.*;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Queue;
+import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 import static java.lang.System.getProperty;
 
 /**
- * A stripped-down version of {@link com.intellij.openapi.util.io.FileUtil}.
- * Intended to use by external (out-of-IDE-process) runners and helpers, so it should not contain any library dependencies.
+ * Obsolete; please use NIO API instead ({@link Path}, {@link Files}, {@link NioFiles}, etc.)
  */
+@SuppressWarnings({"IO_FILE_USAGE", "IOStreamConstructor"})
+@ApiStatus.Obsolete
 public final class FileUtilRt {
   private static final int KILOBYTE = 1024;
   private static final int DEFAULT_INTELLISENSE_LIMIT = 2500 * KILOBYTE;
@@ -507,7 +536,6 @@ public final class FileUtilRt {
 
   @NotNull
   private static File doCreateTempFile(@NotNull File dir, @NotNull String prefix, @Nullable String suffix, boolean isDirectory) throws IOException {
-    //noinspection ResultOfMethodCallIgnored
     dir.mkdirs();
 
     if (prefix.length() < 3) {
@@ -720,7 +748,7 @@ public final class FileUtilRt {
   }
 
   /**
-   * @deprecated Prefer using @link {@link com.intellij.openapi.vfs.limits.FileSizeLimit#isTooLarge}
+   * @deprecated Prefer using @link {@link com.intellij.openapi.vfs.limits.FileSizeLimit#isTooLargeForContentLoading}
    */
   @SuppressWarnings("DeprecatedIsStillUsed")
   @Deprecated
@@ -864,8 +892,9 @@ public final class FileUtilRt {
   }
 
   private static void doDelete(@NotNull Path path) throws IOException {
-    //Issues with file removal usually happen on Windows, *nix-type OSes usually don't need >1 attempt:
-    int attemptsCount = SystemInfoRt.isWindows ? MAX_FILE_IO_ATTEMPTS : 1;
+    // Issues with file removal usually happen on Windows
+    // On mac os, .DS_Store files can sporadically appear, so we have to deal with that too.
+    int attemptsCount = SystemInfoRt.isWindows || SystemInfoRt.isMac ? MAX_FILE_IO_ATTEMPTS : 1;
     IOException previousException = null;
     for (int attemptsLeft = attemptsCount - 1; attemptsLeft >= 0; attemptsLeft--) {
       try {
@@ -896,6 +925,8 @@ public final class FileUtilRt {
         if (e instanceof AccessDeniedException) {
           // a file could be read-only, then fallback to legacy java.io API helps
           try {
+            // Dos readonly Attribute isn't cleared since JDK 25
+            Files.setAttribute(path, "dos:readonly", false);
             //noinspection IO_FILE_USAGE
             File file = path.toFile();
             if (file.delete() || !file.exists()) {
@@ -940,19 +971,25 @@ public final class FileUtilRt {
 
 
   public interface RepeatableIOOperation<T, E extends Throwable> {
+    /**
+     * @return null if an operation is failed but could be retried
+     * @throws E if an operation failed and shouldn't be retried
+     */
     @Nullable T execute(boolean lastAttempt) throws E;
   }
 
-  @Nullable
-  public static <T, E extends Throwable> T doIOOperation(@NotNull RepeatableIOOperation<T, E> ioTask) throws E {
-    for (int i = MAX_FILE_IO_ATTEMPTS; i > 0; i--) {
-      T result = ioTask.execute(i == 1);
-      if (result != null) return result;
+  /** Does few attempts to execute the ioTask, until it 1) returns a non-null value or 2) throws an exception */
+  public static <T, E extends Throwable> @Nullable T doIOOperation(@NotNull RepeatableIOOperation<T, E> ioTask) throws E {
+    for (int i = 0; i < MAX_FILE_IO_ATTEMPTS; i++) {
+      boolean lastAttempt = (i == MAX_FILE_IO_ATTEMPTS - 1);
+      T result = ioTask.execute(lastAttempt);
+      if (result != null) {
+        return result;
+      }
 
       try {
-        Thread.sleep(10);
-      }
-      catch (InterruptedException ignored) { }
+        Thread.sleep(5 /*ms*/ * (1 + i));//linear backoff
+      } catch (InterruptedException ignored) { /*nothing*/ }
     }
     return null;
   }

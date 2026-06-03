@@ -4,7 +4,12 @@ package org.jetbrains.java.decompiler.modules.decompiler;
 import org.jetbrains.java.decompiler.code.CodeConstants;
 import org.jetbrains.java.decompiler.main.DecompilerContext;
 import org.jetbrains.java.decompiler.main.collectors.CounterContainer;
-import org.jetbrains.java.decompiler.modules.decompiler.exps.*;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.AssignmentExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.FunctionExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.IfExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.VarExprent;
 import org.jetbrains.java.decompiler.modules.decompiler.stats.IfStatement;
 import org.jetbrains.java.decompiler.modules.decompiler.stats.Statement;
 import org.jetbrains.java.decompiler.modules.decompiler.stats.Statement.StatementType;
@@ -117,6 +122,26 @@ public final class SecondaryFunctionsHelper {
     return false;
   }
 
+  /**
+   * Simplifies a single expression by recognizing higher-level Java constructs from low-level bytecode patterns.
+   * <p>
+   * Transformations performed:
+   * <ul>
+   *   <li>Boolean negation propagation ({@code !!x → x}, De Morgan's laws)</li>
+   *   <li>Long/float/double comparison folding ({@code lcmp(a,b) >= 0 → a >= b})</li>
+   *   <li>Ternary-to-boolean reduction ({@code cond ? true : false → cond})</li>
+   *   <li>Compound assignment detection ({@code x = x + y → x += y})</li>
+   *   <li>String concatenation contraction</li>
+   * </ul>
+   * <p>
+   * Returns a replacement expression if the original should be substituted in the parent,
+   * or {@code null} if the expression was either left unchanged or modified in place
+   * (as is the case for compound assignment conversion).
+   *
+   * @param exprent        the expression to simplify
+   * @param statement_level whether this expression is a top-level statement (affects string concat eligibility)
+   * @param varProc        variable processor, used for type information during ternary simplification
+   */
   private static Exprent identifySecondaryFunctions(Exprent exprent, boolean statement_level, VarProcessor varProc) {
     if (exprent.type == Exprent.EXPRENT_FUNCTION) {
       FunctionExprent fexpr = (FunctionExprent)exprent;
@@ -305,6 +330,9 @@ public final class SecondaryFunctionsHelper {
       }
       case Exprent.EXPRENT_ASSIGNMENT -> { // check for conditional assignment
         AssignmentExprent asexpr = (AssignmentExprent)exprent;
+        if (asexpr.getCondType() != AssignmentExprent.CONDITION_NONE) {
+          return null; // already a compound assignment, don't re-process
+        }
         Exprent right = asexpr.getRight();
         Exprent left = asexpr.getLeft();
 

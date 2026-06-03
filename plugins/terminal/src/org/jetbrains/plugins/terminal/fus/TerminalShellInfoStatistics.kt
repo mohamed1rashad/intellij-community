@@ -6,13 +6,13 @@ import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.eventLog.events.StringEventField
 import com.intellij.internal.statistic.eventLog.validator.rules.impl.AllowedItemsResourceWeakRefStorage
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.PathUtil
+import com.intellij.util.execution.ParametersListUtil
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.terminal.fus.TerminalShellInfoStatistics.shellVersionField
-import java.util.*
+import java.util.Locale
 
 @ApiStatus.Internal
 object TerminalShellInfoStatistics {
@@ -32,8 +32,11 @@ object TerminalShellInfoStatistics {
   val isOhMyBashField: BooleanEventField = EventFields.Boolean("is_oh_my_bash", "Bash only")
   val isBashItField: BooleanEventField = EventFields.Boolean("is_bash_it", "Bash only")
 
-  val KNOWN_SHELLS: Set<String> = setOf("unspecified",
-                                        "other",
+  const val UNSPECIFIED_SHELL_NAME: String = "unspecified"
+  const val OTHER_SHELL_NAME: String = "other"
+
+  val KNOWN_SHELLS: Set<String> = setOf(UNSPECIFIED_SHELL_NAME,
+                                        OTHER_SHELL_NAME,
                                         "activate",
                                         "anaconda3",
                                         "ash",
@@ -73,7 +76,7 @@ object TerminalShellInfoStatistics {
                                         "xonsh",
                                         "zsh")
 
-  private val KNOWN_EXTENSIONS = setOf("exe", "bat", "cmd")
+  private val KNOWN_EXTENSIONS: List<String> = listOf("exe", "bat", "cmd")
 
   private val JSON: Json = Json { ignoreUnknownKeys = true }
 
@@ -153,20 +156,19 @@ object TerminalShellInfoStatistics {
     return AllowedItemsResourceWeakRefStorage(TerminalShellInfoStatistics::class.java, path).items
   }
 
-  fun getShellNameForStat(shellName: String?): String {
-    if (shellName == null) return "unspecified"
-    var name = shellName.trimStart()
-    val ind = name.indexOf(" ")
-    name = if (ind < 0) name else name.substring(0, ind)
-    if (SystemInfo.isFileSystemCaseSensitive) {
-      name = name.lowercase(Locale.ENGLISH)
-    }
-    name = PathUtil.getFileName(name)
-    name = trimKnownExt(name)
-    return if (KNOWN_SHELLS.contains(name)) name else "other"
+  /**
+   * @param shellCommand shell command line to extract the shell name from
+   */
+  fun getShellNameForStat(shellCommand: String?): String {
+    if (shellCommand == null) return UNSPECIFIED_SHELL_NAME
+    val command = ParametersListUtil.parse(shellCommand, false, true)
+    val shellPath = command.firstOrNull() ?: return UNSPECIFIED_SHELL_NAME
+    val shellName = PathUtil.getFileName(shellPath).lowercase(Locale.ENGLISH)
+    val trimmedName = trimKnownExt(shellName)
+    return if (KNOWN_SHELLS.contains(trimmedName)) trimmedName else OTHER_SHELL_NAME
   }
 
-  private fun trimKnownExt(name: String): String {
+  internal fun trimKnownExt(name: String): String {
     val ext = PathUtil.getFileExtension(name)
     return if (ext != null && KNOWN_EXTENSIONS.contains(ext)) name.substring(0, name.length - ext.length - 1) else name
   }

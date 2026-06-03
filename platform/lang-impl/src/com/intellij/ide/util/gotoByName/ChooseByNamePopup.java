@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.util.gotoByName;
 
 import com.google.common.util.concurrent.UncheckedTimeoutException;
@@ -8,7 +8,9 @@ import com.intellij.ide.ui.UISettings;
 import com.intellij.lang.LangBundle;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.CoroutinesKt;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.impl.TestOnlyThreading;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.ComponentPopupBuilder;
@@ -27,12 +29,30 @@ import com.intellij.util.SmartList;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
-import com.intellij.util.ui.update.MergingUpdateQueue;
-import com.intellij.util.ui.update.Update;
-import org.jetbrains.annotations.*;
+import com.intellij.util.ui.update.DebouncedUpdates;
+import com.intellij.util.ui.update.UpdateQueue;
+import kotlin.Unit;
+import kotlinx.coroutines.Dispatchers;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Action;
+import javax.swing.ActionMap;
+import javax.swing.InputMap;
+import javax.swing.JComponent;
+import javax.swing.JLayeredPane;
+import javax.swing.JScrollBar;
+import javax.swing.KeyStroke;
+import javax.swing.LayoutFocusTraversalPolicy;
+import javax.swing.ListModel;
+import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Window;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -54,7 +74,11 @@ public class ChooseByNamePopup extends ChooseByNameBase implements ChooseByNameP
   private ActionMap myActionMap;
   private InputMap myInputMap;
   private @NlsContexts.PopupAdvertisement String myAdText;
-  private final MergingUpdateQueue myRepaintQueue = new MergingUpdateQueue("ChooseByNamePopup repaint", 50, true, myList, this);
+  private final UpdateQueue<Unit> myRepaintQueue = DebouncedUpdates.<Unit>forComponent(myList, "ChooseByNamePopup repaint", 50)
+    .withContext(CoroutinesKt.getUI(Dispatchers.INSTANCE))
+    .restartTimerOnAdd(true)
+    .runLatest(ignored -> repaintListImmediate())
+    .cancelOnDispose(this);
 
   protected ChooseByNamePopup(final @Nullable Project project,
                               @NotNull ChooseByNameModel model,
@@ -461,13 +485,7 @@ public class ChooseByNamePopup extends ChooseByNameBase implements ChooseByNameP
   }
 
   public void repaintList() {
-    myRepaintQueue.cancelAllUpdates();
-    myRepaintQueue.queue(new Update(this) {
-      @Override
-      public void run() {
-        repaintListImmediate();
-      }
-    });
+    myRepaintQueue.queue(Unit.INSTANCE);
   }
 
   public void repaintListImmediate() {
@@ -493,7 +511,9 @@ public class ChooseByNamePopup extends ChooseByNameBase implements ChooseByNameP
     });
     long start = System.currentTimeMillis();
     while (!semaphore.waitFor(10) && System.currentTimeMillis() - start < 20_000) {
-      UIUtil.dispatchAllInvocationEvents();
+      TestOnlyThreading.releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(() -> {
+        UIUtil.dispatchAllInvocationEvents();
+      });
     }
     if (!semaphore.waitFor(10)) {
       PerformanceWatcher.dumpThreadsToConsole("Thread dump:");

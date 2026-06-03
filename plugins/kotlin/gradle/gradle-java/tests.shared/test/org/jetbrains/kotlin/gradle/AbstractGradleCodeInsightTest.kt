@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.gradle
 
 import com.intellij.openapi.Disposable
@@ -20,7 +20,7 @@ import org.jetbrains.kotlin.idea.test.KotlinTestUtils.toSlashEndingDirPath
 import org.jetbrains.kotlin.idea.test.TestFiles
 import org.jetbrains.plugins.gradle.frameworkSupport.GradleDsl
 import org.jetbrains.plugins.gradle.testFramework.GradleTestFixtureBuilder
-import org.jetbrains.plugins.gradle.testFramework.util.assumeThatKotlinIsSupported
+import org.jetbrains.plugins.gradle.testFramework.util.assertThatKotlinIsSupported
 import org.jetbrains.plugins.gradle.testFramework.util.withBuildFile
 import org.jetbrains.plugins.gradle.testFramework.util.withSettingsFile
 import org.junit.jupiter.api.BeforeEach
@@ -57,7 +57,7 @@ abstract class AbstractGradleCodeInsightTest : AbstractKotlinGradleCodeInsightBa
         get() = runReadAction { getFile(mainTestDataFile.path).getPsiFile(project) }
 
     override fun setUp() {
-        assumeThatKotlinIsSupported(gradleVersion)
+        assertThatKotlinIsSupported(gradleVersion)
 
         super.setUp()
 
@@ -93,9 +93,12 @@ abstract class AbstractGradleCodeInsightTest : AbstractKotlinGradleCodeInsightBa
 
     protected fun dataFile(fileName: String): File = File(getTestDataPath(), fileName)
 
-    protected fun dataFile(): File = dataFile(fileName())
+    protected fun dataFile(): File? {
+        val testMetadataFileName = fileName() ?: return null
+        return dataFile(testMetadataFileName)
+    }
 
-    protected open fun fileName(): String = getMethodMetadata(testInfo.testMethod.get()) ?: error("no @TestMetadata")
+    protected open fun fileName(): String? = getMethodMetadata(testInfo.testMethod.get())
 
     protected val document: Document
         get() {
@@ -103,23 +106,30 @@ abstract class AbstractGradleCodeInsightTest : AbstractKotlinGradleCodeInsightBa
             return fileEditorManager.selectedTextEditor?.document ?: error("no document found")
         }
 
+    protected open val testFileFactory = object : TestFiles.TestFileFactoryNoModules<TestFile>() {
+        override fun create(fileName: String, text: String, directives: Directives): TestFile {
+            val linesWithoutDirectives = text.lines().filter { !it.startsWith("// FILE") }
+            return TestFile(fileName, linesWithoutDirectives.joinToString(separator = "\n"), directives)
+        }
+    }
+
     private fun loadTestDataFiles() {
         val mainFile = dataFile()
+        if (mainFile == null) {
+            // when a test method doesn't have @TestMetadata
+            _testDataFiles = emptyList()
+            return
+        }
         val multiFileText = FileUtil.loadFile(mainFile, true)
 
         _testDataFiles = TestFiles.createTestFiles(
             mainFile.name,
             multiFileText,
-            object : TestFiles.TestFileFactoryNoModules<TestFile>() {
-                override fun create(fileName: String, text: String, directives: Directives): TestFile {
-                    val linesWithoutDirectives = text.lines().filter { !it.startsWith("// FILE") }
-                    return TestFile(fileName, linesWithoutDirectives.joinToString(separator = "\n"))
-                }
-            }
+            testFileFactory
         )
     }
 
-    class TestFile internal constructor(val path: String, val content: String)
+    class TestFile(val path: String, val content: String, val directives: Directives)
 
     companion object {
         @JvmStatic
@@ -130,6 +140,12 @@ abstract class AbstractGradleCodeInsightTest : AbstractKotlinGradleCodeInsightBa
                 includeBuild("includedBuildWithoutSettings")
                 addCode(
                     $$"""
+                    dependencyResolutionManagement {
+                        versionCatalogs {
+                            create("customLibs") { from(files("customPath/customLibs.toml")) }
+                        }
+                    }     
+                   
                     fun includeSubprojectsDynamically(path: String) {
                         val dirsWithBuildScripts = file(path).listFiles()
                             ?.filter { File(it, "build.gradle.kts").exists() }
@@ -146,18 +162,8 @@ abstract class AbstractGradleCodeInsightTest : AbstractKotlinGradleCodeInsightBa
                 withKotlinDsl()
                 withMavenCentral()
             }
-            withFile("gradle/libs.versions.toml", /* language=TOML */ """
-                [libraries]
-                some_test-library = { module = "org.junit.jupiter:junit-jupiter" }
-                [plugins]
-                kotlin = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin"}
-                [versions]
-                test_library-version = "1.0"
-                kotlin = "1.9.24"
-                [bundles]
-                some_test-bundle = [ "some_test-library" ]
-                """.trimIndent()
-            )
+            withFile("gradle/libs.versions.toml", "")
+            withFile("customPath/customLibs.toml", "")
             // subprojects files
             withBuildFile(gradleVersion, "subprojectsDir/subproject1", gradleDsl = GradleDsl.KOTLIN) {
                 withKotlinDsl()
@@ -169,23 +175,10 @@ abstract class AbstractGradleCodeInsightTest : AbstractKotlinGradleCodeInsightBa
                 withKotlinMultiplatformPlugin()
                 withMavenCentral()
             }
-            withFile("includedBuild1/gradle/libs.versions.toml", /* language=TOML */ """
-                [libraries]
-                some_test-library = { module = "org.junit.jupiter:junit-jupiter" }
-                [plugins]
-                kotlin = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin"}
-                [versions]
-                test_library-version = "1.0"
-                kotlin = "1.9.24"
-                """.trimIndent()
-            )
+            withFile("includedBuild1/gradle/libs.versions.toml", "")
             // included build without settings
             withBuildFile(gradleVersion, "includedBuildWithoutSettings", gradleDsl = GradleDsl.KOTLIN) {}
-            withFile("includedBuildWithoutSettings/gradle/libs.versions.toml", /* language=TOML */ """
-                [libraries]
-                some_test-library = { module = "org.junit.jupiter:junit-jupiter" }
-                """.trimIndent()
-            )
+            withFile("includedBuildWithoutSettings/gradle/libs.versions.toml", "")
         }
     }
 }

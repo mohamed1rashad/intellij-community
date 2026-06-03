@@ -33,7 +33,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
+import javax.swing.JList;
 import java.util.ArrayList;
 import java.util.Map;
 
@@ -109,7 +109,7 @@ class AddLibraryDependencyFix extends OrderEntryFix {
     ModalityState modality = ModalityState.defaultModalityState();
     JavaProjectModelModificationService.getInstance(project)
       .addDependency(myCurrentModule, library, myScope, myExported)
-      .onSuccess(__ -> {
+      .onSuccess(_ -> {
         if (editor == null) return;
         ReadAction.nonBlocking(() -> {
             PsiReference reference = restoreReference();

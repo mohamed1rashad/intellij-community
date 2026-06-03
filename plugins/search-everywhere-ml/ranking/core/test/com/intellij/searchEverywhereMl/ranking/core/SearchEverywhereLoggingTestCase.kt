@@ -3,6 +3,7 @@ package com.intellij.searchEverywhereMl.ranking.core
 import com.intellij.ide.actions.searcheverywhere.ActionSearchEverywhereContributor
 import com.intellij.ide.actions.searcheverywhere.SearchAdapter
 import com.intellij.ide.actions.searcheverywhere.SearchEverywhereUI
+import com.intellij.ide.actions.searcheverywhere.SearchEverywhereMlService
 import com.intellij.internal.statistic.FUCollectorTestCase
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.thisLogger
@@ -10,9 +11,7 @@ import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
-import com.intellij.searchEverywhereMl.log.MLSE_RECORDER_ID
-import com.intellij.searchEverywhereMl.ranking.core.SearchEverywhereMLStatisticsCollector.SEARCH_RESTARTED
-import com.intellij.searchEverywhereMl.ranking.core.SearchEverywhereMLStatisticsCollector.SESSION_FINISHED
+import com.intellij.searchEverywhereMl.MLSE_RECORDER_ID
 import com.intellij.testFramework.LightPlatformTestCase
 import com.intellij.testFramework.PlatformTestUtil
 import com.jetbrains.fus.reporting.model.lion3.LogEvent
@@ -28,14 +27,15 @@ abstract class SearchEverywhereLoggingTestCase : LightPlatformTestCase() {
       val emptyDisposable = Disposer.newDisposable()
       disposables.add(emptyDisposable)
 
-      return FUCollectorTestCase.collectLogEvents(MLSE_RECORDER_ID, emptyDisposable) {
+      return FUCollectorTestCase.collectLogEvents(MLSE_RECORDER_ID, emptyDisposable, true) {
         val searchEverywhereUI = this.provide(project)
         disposables.add(searchEverywhereUI)
 
+        SearchEverywhereMlService.getInstance()?.onSessionStarted(project, searchEverywhereUI.selectedTabID, searchEverywhereUI.mixedListInfo)
         PlatformTestUtil.waitForAlarm(10)  // wait for rebuild list (session started)
 
         testProcedure(searchEverywhereUI)
-      }.filter { it.event.id in listOf(SESSION_FINISHED.eventId, SEARCH_RESTARTED.eventId) }
+      }
     }
     finally {
       disposables.forEach { Disposer.dispose(it) }

@@ -3,7 +3,12 @@ package training.onboarding
 
 import com.intellij.lang.documentation.DocumentationProvider
 import com.intellij.openapi.util.TextRange
-import com.intellij.psi.*
+import com.intellij.psi.PsiComment
+import com.intellij.psi.PsiDocCommentBase
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiRecursiveElementVisitor
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.impl.FakePsiElement
 import com.intellij.psi.tree.IElementType
 import java.util.function.Consumer
@@ -44,11 +49,16 @@ abstract class AbstractOnboardingTipsDocumentationProvider(private val commentTo
   }
 
   override fun findDocComment(file: PsiFile, range: TextRange): PsiDocCommentBase? {
-    if (isEnabledForFile(file)) return null
+    if (!isEnabledForFile(file)) return null
+    val filePath = file.virtualFile?.path ?: return null
+    if (filePath != file.project.filePathWithOnboardingTips) return null
+
     var result: PsiDocCommentBase? = null
     file.accept(object: PsiRecursiveElementVisitor() {
       override fun visitComment(comment: PsiComment) {
         if (comment.textRange.startOffset != range.startOffset) return
+        if (comment.node.elementType != commentTokenType) return
+        if (!comment.text.startsWith(tipPrefix)) return
         result = OnboardingTipComment(comment.parent, range, commentTokenType)
       }
     })

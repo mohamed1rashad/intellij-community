@@ -14,7 +14,12 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.*;
+import com.intellij.openapi.progress.EmptyProgressIndicator;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressIndicatorProvider;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.progress.util.ProgressWrapper;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.AnnotationOrderRootType;
@@ -36,6 +41,7 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.platform.eel.EelMachine;
 import com.intellij.platform.eel.provider.EelProviderUtil;
 import com.intellij.util.Processor;
+import com.intellij.util.SlowOperations;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -44,7 +50,11 @@ import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.transfer.RepositoryOfflineException;
 import org.eclipse.aether.transfer.TransferCancelledException;
 import org.eclipse.aether.version.Version;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.jetbrains.concurrency.AsyncPromise;
 import org.jetbrains.concurrency.Promise;
 import org.jetbrains.idea.maven.aether.ArtifactDependencyNode;
@@ -56,13 +66,21 @@ import org.jetbrains.idea.maven.utils.library.RepositoryLibraryProperties;
 import org.jetbrains.jps.model.library.JpsMavenRepositoryLibraryDescriptor;
 import org.slf4j.LoggerFactory;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -86,17 +104,8 @@ public final class JarRepositoryManager {
   private static final String DEFAULT_REPOSITORY_PATH = ".m2/repository";
   private static final AtomicInteger ourTasksInProgress = new AtomicInteger();
 
-  private static final Map<String, OrderRootType> ourClassifierToRootType = new HashMap<>();
-
   // slf4j logger handles format strings with a throwable in the end
   private static final org.slf4j.Logger slf4jLogger = LoggerFactory.getLogger(JarRepositoryManager.class);
-
-  static {
-    ourClassifierToRootType.put(ArtifactKind.ARTIFACT.getClassifier(), OrderRootType.CLASSES);
-    ourClassifierToRootType.put(ArtifactKind.JAVADOC.getClassifier(), JavadocOrderRootType.getInstance());
-    ourClassifierToRootType.put(ArtifactKind.SOURCES.getClassifier(), OrderRootType.SOURCES);
-    ourClassifierToRootType.put(ArtifactKind.ANNOTATIONS.getClassifier(), AnnotationOrderRootType.getInstance());
-  }
 
   static final ExecutorService DOWNLOADER_EXECUTOR = AppExecutorUtil.createBoundedApplicationPoolExecutor("RemoteLibraryDownloader",
                                                                                                           ProcessIOExecutorService.INSTANCE,
@@ -541,6 +550,9 @@ public final class JarRepositoryManager {
   private static @Nullable <T> T submitModalJob(@Nullable Project project,
                                                 @NlsContexts.DialogTitle String title,
                                                 Function<? super ProgressIndicator, ? extends T> job) {
+    // Sync call of resolver on EDT is not allowed
+    SlowOperations.assertSlowOperationsAreAllowed();
+
     Ref<T> result = Ref.create(null);
     new Task.Modal(project, title, true) {
       @Override
@@ -672,7 +684,7 @@ public final class JarRepositoryManager {
     final List<OrderRoot> result = new ArrayList<>();
     final VirtualFileManager manager = VirtualFileManager.getInstance();
     String repositoryPath = getJPSLocalMavenRepositoryForIdeaProject(project).toString();
-    final EelMachine targetRepositoryMachine = EelProviderUtil.getEelDescriptor(Path.of(repositoryPath)).getMachine();
+    final EelMachine targetRepositoryMachine = EelProviderUtil.getEelMachine(project);
     for (Artifact each : artifacts) {
       long ms = System.currentTimeMillis();
       try {
@@ -684,7 +696,7 @@ public final class JarRepositoryManager {
             FileUtil.copy(repoFile, toFile);
           }
         }
-        else if (!targetRepositoryMachine.equals(EelProviderUtil.getEelDescriptor(Path.of(each.getFile().getPath())).getMachine())) {
+        else if (!EelProviderUtil.ownsPath(targetRepositoryMachine, Path.of(each.getFile().getPath()))) {
           // if .m2 is located remotely, then we need to copy the files to the remote location
           String suffix = repoFile.getAbsolutePath().substring(repositoryPath.length());
           String actualPath = repositoryPath + suffix;
@@ -700,7 +712,7 @@ public final class JarRepositoryManager {
           final String url = VfsUtil.getUrlForLibraryRoot(toFile);
           final VirtualFile file = manager.refreshAndFindFileByUrl(url);
           if (file != null) {
-            OrderRootType rootType = ourClassifierToRootType.getOrDefault(each.getClassifier(), OrderRootType.CLASSES);
+            OrderRootType rootType = getRootType(each.getClassifier());
 
             result.add(new OrderRoot(file, rootType));
           }
@@ -716,6 +728,19 @@ public final class JarRepositoryManager {
       }
     }
     return result;
+  }
+
+  private static @NotNull OrderRootType getRootType(@Nullable String classifier) {
+    if (ArtifactKind.JAVADOC.getClassifier().equals(classifier)) {
+      return JavadocOrderRootType.getInstance();
+    }
+    if (ArtifactKind.SOURCES.getClassifier().equals(classifier)) {
+      return OrderRootType.SOURCES;
+    }
+    if (ArtifactKind.ANNOTATIONS.getClassifier().equals(classifier)) {
+      return AnnotationOrderRootType.getInstance();
+    }
+    return OrderRootType.CLASSES;
   }
 
   private static class LibraryResolveJob extends AetherJob<Collection<Artifact>> {

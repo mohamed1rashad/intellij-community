@@ -4,16 +4,19 @@ package com.intellij.psi.impl.cache;
 import com.intellij.codeInsight.ExternalAnnotationsManager;
 import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiModifierListOwner;
 import com.intellij.psi.TypeAnnotationProvider;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.List;
 
 /**
  * A container that reports external type annotations. External type annotations are described in annotation.xml files
  * with additional {@code typePath} attribute. The attribute contains several components starting with '/' and separated with '/'
  * (no ending '/' is allowed). The allowed components are the following:
  * <ul>
- *   <li>{@code number} - one-based type argument index (1-255)
+ *   <li>{@code number} - one-based type argument index (1-255). Also, it is used to choose the bounds for type parameters.
  *   <li>{@code *} (asterisk) - bound of a wildcard type
  *   <li>{@code []} (square brackets) - array element (also works for varargs)
  *   <li>{@code .} (dot) - enclosing type of inner type
@@ -28,7 +31,7 @@ public final class ExternalTypeAnnotationContainer implements TypeAnnotationCont
     myTypePath = typePath;
     myOwner = owner;
   }
-  
+
   @Override
   public @NotNull TypeAnnotationContainer forArrayElement() {
     return new ExternalTypeAnnotationContainer(myTypePath + "/[]", myOwner);
@@ -48,16 +51,27 @@ public final class ExternalTypeAnnotationContainer implements TypeAnnotationCont
   public @NotNull TypeAnnotationContainer forTypeArgument(int index) {
     return new ExternalTypeAnnotationContainer(myTypePath + "/" + (index + 1), myOwner);
   }
-  
+
   @Override
   public @NotNull TypeAnnotationProvider getProvider(PsiElement parent) {
-    // We don't expect any top-level type annotations: they will be stored as element (method/field/parameter) annotations,
-    // so let's spare some memory and avoid creating a provider
-    if (myTypePath.isEmpty()) return TypeAnnotationProvider.EMPTY;
+    ExternalAnnotationsManager manager = ExternalAnnotationsManager.getInstance(myOwner.getProject());
+    List<PsiFile> files = manager.findExternalAnnotationsFiles(myOwner);
+    if (files == null || files.isEmpty()) return TypeAnnotationProvider.EMPTY;
     return new TypeAnnotationProvider() {
       @Override
+      public @NotNull TypeAnnotationProvider removeExternalAnnotations() {
+        return EMPTY;
+      }
+
+      @Override
+      public boolean isValid() {
+        // Assume that external annotations are never invalidated, as they are non-physical
+        return true;
+      }
+
+      @Override
       public @NotNull PsiAnnotation @NotNull [] getAnnotations() {
-        return ExternalAnnotationsManager.getInstance(myOwner.getProject()).findExternalTypeAnnotations(myOwner, myTypePath);
+        return manager.findExternalTypeAnnotations(myOwner, myTypePath);
       }
     };
   }

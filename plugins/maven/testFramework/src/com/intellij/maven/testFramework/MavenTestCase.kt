@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.maven.testFramework
 
 import com.intellij.UtilBundle
@@ -6,7 +6,11 @@ import com.intellij.diagnostic.ThreadDumper
 import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DataContext
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.module.JavaModuleType
@@ -24,20 +28,31 @@ import com.intellij.openapi.roots.ex.ProjectRootManagerEx
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.ThrowableComputable
-import com.intellij.openapi.util.io.*
+import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.util.io.NioFiles
+import com.intellij.openapi.util.io.findOrCreateFile
+import com.intellij.openapi.util.io.toCanonicalPath
+import com.intellij.openapi.util.io.toNioPathOrNull
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
+import com.intellij.platform.backend.observation.Observation
 import com.intellij.platform.eel.provider.LocalEelDescriptor
 import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.platform.testFramework.core.FileComparisonFailedError
 import com.intellij.platform.testFramework.eelJava.EelTestJdkProvider
-import com.intellij.testFramework.*
+import com.intellij.testFramework.EdtTestUtil
+import com.intellij.testFramework.LoggedErrorProcessor
+import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.PsiTestUtil
+import com.intellij.testFramework.RunAll
+import com.intellij.testFramework.UsefulTestCase
 import com.intellij.testFramework.fixtures.IdeaProjectTestFixture
 import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory
 import com.intellij.testFramework.utils.io.createFile
 import com.intellij.util.ExceptionUtil
 import com.intellij.util.ThrowableRunnable
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.containers.CollectionFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,7 +60,15 @@ import org.intellij.lang.annotations.Language
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.idea.maven.indices.MavenIndicesManager
 import org.jetbrains.idea.maven.model.MavenConstants
-import org.jetbrains.idea.maven.project.*
+import org.jetbrains.idea.maven.project.MavenGeneralSettings
+import org.jetbrains.idea.maven.project.MavenImportListener
+import org.jetbrains.idea.maven.project.MavenImportingSettings
+import org.jetbrains.idea.maven.project.MavenInSpecificPath
+import org.jetbrains.idea.maven.project.MavenProject
+import org.jetbrains.idea.maven.project.MavenProjectsManager
+import org.jetbrains.idea.maven.project.MavenSettingsCache
+import org.jetbrains.idea.maven.project.MavenWorkspacePersistedSettings
+import org.jetbrains.idea.maven.project.MavenWorkspaceSettingsComponent
 import org.jetbrains.idea.maven.server.MavenServerConnector
 import org.jetbrains.idea.maven.server.MavenServerConnectorImpl
 import org.jetbrains.idea.maven.server.MavenServerManager
@@ -53,16 +76,21 @@ import org.jetbrains.idea.maven.server.RemotePathTransformerFactory
 import org.jetbrains.idea.maven.utils.MavenLog
 import org.jetbrains.idea.maven.utils.MavenProgressIndicator
 import org.jetbrains.idea.maven.utils.MavenProgressIndicator.MavenProgressTracker
-import org.jetbrains.idea.maven.utils.MavenUtil
 import org.junit.Assume.assumeTrue
 import java.awt.HeadlessException
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.*
 import java.util.concurrent.TimeUnit
-import kotlin.io.path.*
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.io.path.absolutePathString
+import kotlin.io.path.createDirectory
+import kotlin.io.path.createParentDirectories
+import kotlin.io.path.exists
+import kotlin.io.path.isDirectory
+import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.readBytes
 
 abstract class MavenTestCase : UsefulTestCase() {
   protected var mavenProgressIndicator: MavenProgressIndicator? = null
@@ -85,7 +113,7 @@ abstract class MavenTestCase : UsefulTestCase() {
 
   var modelVersion: String
     get() = myModelVersion ?: MavenConstants.MODEL_VERSION_4_0_0
-    set(value : String) {
+    set(value: String) {
       myModelVersion = value
     }
 
@@ -124,6 +152,7 @@ abstract class MavenTestCase : UsefulTestCase() {
   protected fun useModel410() {
     myModelVersion = "4.1.0"
   }
+
   override fun setUp() {
     super.setUp()
 
@@ -146,7 +175,6 @@ abstract class MavenTestCase : UsefulTestCase() {
 
     mavenGeneralSettings.isAlwaysUpdateSnapshots = true
 
-    MavenUtil.cleanAllRunnables()
     MavenSettingsCache.getInstance(project).reload()
 
     EdtTestUtil.runInEdtAndWait<IOException> {
@@ -167,10 +195,11 @@ abstract class MavenTestCase : UsefulTestCase() {
   }
 
   private fun setupCustomJdk() {
-    val jdkPath = EelTestJdkProvider.getJdkPath()
+    val jdkPath = EelTestJdkProvider.getJdkPath(myProject!!.getEelDescriptor())
+    VfsRootAccess.allowRootAccess(testRootDisposable, jdkPath.toString())
     if (myJdk == null && jdkPath != null) {
       myJdk = JavaSdk.getInstance().createJdk("Maven Test JDK", jdkPath.toString())
-      val jdkTable = ProjectJdkTable.getInstance()
+      val jdkTable = ProjectJdkTable.getInstance(project)
       WriteAction.runAndWait<RuntimeException> { jdkTable.addJdk(myJdk!!) }
     }
     if (myJdk != null) {
@@ -181,16 +210,10 @@ abstract class MavenTestCase : UsefulTestCase() {
   private fun tearDownJdk() {
     if (myJdk != null) {
       WriteAction.runAndWait<RuntimeException> {
-        val jdkTable = ProjectJdkTable.getInstance()
+        val jdkTable = ProjectJdkTable.getInstance(project)
         jdkTable.removeJdk(myJdk!!)
       }
     }
-  }
-
-  protected fun waitForMavenUtilRunnablesComplete() {
-    PlatformTestUtil.waitWithEventsDispatching(
-      { "Waiting for MavenUtils runnables completed" + MavenUtil.uncompletedRunnables },
-      { MavenUtil.noUncompletedRunnables() }, 15)
   }
 
   private fun isNetworkNameError(t: Throwable, message: String): Boolean {
@@ -223,23 +246,21 @@ abstract class MavenTestCase : UsefulTestCase() {
 
   override fun tearDown() {
     RunAll(
-      ThrowableRunnable {
-        myProject?.serviceIfCreated<MavenProgressTracker>()?.assertProgressTasksCompleted()
-      },
-      ThrowableRunnable { MavenServerManager.getInstance().closeAllConnectorsAndWait() },
-      ThrowableRunnable { checkAllMavenConnectorsDisposed() },
-      ThrowableRunnable { myProject = null },
-      ThrowableRunnable { tearDownJdk() },
-      ThrowableRunnable {
+      { myProject?.serviceIfCreated<MavenProgressTracker>()?.assertProgressTasksCompleted() },
+      { MavenServerManager.getInstance().closeAllConnectorsAndWait() },
+      { checkAllMavenConnectorsDisposed() },
+      { tearDownJdk() },
+      { myProject = null },
+      {
         val defaultProject = ProjectManager.getInstance().defaultProject
         val mavenIndicesManager = defaultProject.getServiceIfCreated(MavenIndicesManager::class.java)
         if (mavenIndicesManager != null) {
           Disposer.dispose(mavenIndicesManager)
         }
       },
-      ThrowableRunnable { doTearDownFixtures() },
-      ThrowableRunnable { deleteDirOnTearDown(myDir) },
-      ThrowableRunnable { super.tearDown() }
+      { doTearDownFixtures() },
+      { deleteDirOnTearDown(myDir) },
+      { super.tearDown() }
     ).run()
   }
 
@@ -327,7 +348,11 @@ abstract class MavenTestCase : UsefulTestCase() {
     return pathFromBasedir(myProjectRoot, relPath)
   }
 
-  protected fun createSettingsXml(@Language(value = "XML", prefix = "<settings>", suffix = "</settings>") innerContent: String): VirtualFile {
+  protected fun createSettingsXml(
+    @Language(value = "XML",
+              prefix = "<settings>",
+              suffix = "</settings>") innerContent: String,
+  ): VirtualFile {
     val content = createSettingsXmlContent(innerContent)
     val path = myDir.resolve("settings.xml")
     Files.writeString(path, content)
@@ -335,7 +360,11 @@ abstract class MavenTestCase : UsefulTestCase() {
     return LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path)!!
   }
 
-  protected suspend fun updateSettingsXml(@Language(value = "XML", prefix = "<settings>", suffix = "</settings>") content: String): VirtualFile {
+  protected suspend fun updateSettingsXml(
+    @Language(value = "XML",
+              prefix = "<settings>",
+              suffix = "</settings>") content: String,
+  ): VirtualFile {
     return updateSettingsXmlFully(createSettingsXmlContent(content)).also {
       MavenSettingsCache.getInstance(project).reloadAsync()
     }
@@ -381,8 +410,11 @@ abstract class MavenTestCase : UsefulTestCase() {
   protected fun createModule(name: String): Module = createModule(name, JavaModuleType.getModuleType())
 
 
-  protected fun createProjectPom(@Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String): VirtualFile {
-    return createPomFile(projectRoot, xml).also { myProjectPom = it }
+  protected fun createProjectPom(
+    @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String,
+    omitModelVersionTag: Boolean = false,
+  ): VirtualFile {
+    return createPomFile(projectRoot, xml, omitModelVersionTag).also { myProjectPom = it }
   }
 
   protected fun updateProjectPom(@Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String): VirtualFile {
@@ -394,15 +426,17 @@ abstract class MavenTestCase : UsefulTestCase() {
   protected fun createModulePom(
     relativePath: String,
     @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String,
+    omitModelVersionTag: Boolean = false,
   ): VirtualFile {
-    return createPomFile(createProjectSubDir(relativePath), xml)
+    return createPomFile(createProjectSubDir(relativePath), xml, omitModelVersionTag)
   }
 
   protected fun updateModulePom(
     relativePath: String,
     @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String,
+    omitModelVersionTag: Boolean = false,
   ): VirtualFile {
-    val pom = createModulePom(relativePath, xml)
+    val pom = createModulePom(relativePath, xml, omitModelVersionTag)
     refreshFiles(listOf(pom))
     return pom
   }
@@ -410,16 +444,18 @@ abstract class MavenTestCase : UsefulTestCase() {
   protected fun createPomFile(
     dir: VirtualFile,
     @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String,
+    omitModelVersionTag: Boolean = false,
   ): VirtualFile {
-    return createPomFile(dir, "pom.xml", xml)
+    return createPomFile(dir, "pom.xml", xml, omitModelVersionTag)
   }
 
   protected fun createPomFile(
     dir: VirtualFile, fileName: String = "pom.xml",
     @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String,
+    omitModelVersionTag: Boolean = false,
   ): VirtualFile {
     val filePath = Path.of(dir.path, fileName)
-    setPomContent(filePath, xml)
+    setPomContent(filePath, xml, omitModelVersionTag)
     dir.refresh(false, false)
     val f = dir.findChild(fileName) ?: throw AssertionError("can't find file ${filePath.absolutePathString()} in VFS")
     myAllPoms.add(f)
@@ -486,7 +522,7 @@ abstract class MavenTestCase : UsefulTestCase() {
 
   protected fun refreshFiles(files: List<VirtualFile>) {
     val relativePaths = files.map { dir.relativize(it.path.toNioPathOrNull()!!) }
-    MavenLog.LOG.warn("Refreshing files: $relativePaths")
+    MavenLog.LOG.debug("Refreshing files: $relativePaths")
     LocalFileSystem.getInstance().refreshFiles(files)
   }
 
@@ -620,12 +656,20 @@ abstract class MavenTestCase : UsefulTestCase() {
            "</profilesXml>"
   }
 
-  protected fun setPomContent(file: VirtualFile, @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String?) {
-    setFileContent(file, createPomXml(xml))
+  protected fun setPomContent(
+    file: VirtualFile,
+    @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String?,
+    omitModelVersionTag: Boolean = false,
+  ) {
+    setFileContent(file, createPomXml(xml, omitModelVersionTag))
   }
 
-  private fun setPomContent(file: Path, @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String?) {
-    setFileContent(file, createPomXml(xml))
+  private fun setPomContent(
+    file: Path,
+    @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: String?,
+    omitModelVersionTag: Boolean = false,
+  ) {
+    setFileContent(file, createPomXml(xml, omitModelVersionTag))
   }
 
   private fun setFileContent(file: VirtualFile, content: String) {
@@ -634,7 +678,7 @@ abstract class MavenTestCase : UsefulTestCase() {
 
   private fun setFileContent(file: Path, content: String) {
     val relativePath = dir.relativize(file)
-    MavenLog.LOG.warn("Writing content to $relativePath")
+    MavenLog.LOG.debug("Writing content to $relativePath")
     Files.write(file, content.toByteArray(StandardCharsets.UTF_8))
   }
 
@@ -646,6 +690,13 @@ abstract class MavenTestCase : UsefulTestCase() {
     for (i in expected.indices) {
       val expectedElement = expected[i]
       val actualElement = actualList[i]
+      if (actualElement != expectedElement) {
+        failNotEquals(
+          "collections have different elements or order",
+          expected.joinToString("\n"),
+          actual.joinToString("\n"),
+        )
+      }
       assertEquals(s, expectedElement, actualElement)
     }
   }
@@ -666,7 +717,8 @@ abstract class MavenTestCase : UsefulTestCase() {
     assertEquals(createFilePathSet(expected), createFilePathSet(actual))
   }
 
-  private fun createFilePathSet(expected: Collection<String>) = CollectionFactory.createFilePathSet(expected.map { FileUtil.toSystemIndependentName(it) })
+  private fun createFilePathSet(expected: Collection<String>) =
+    CollectionFactory.createFilePathSet(expected.map { FileUtil.toSystemIndependentName(it) })
 
   protected fun <T> assertUnorderedElementsAreEqual(actual: Array<T>, vararg expected: T) {
     assertUnorderedElementsAreEqual(actual.toList(), *expected)
@@ -745,30 +797,114 @@ abstract class MavenTestCase : UsefulTestCase() {
     }
   }
 
-  protected fun getRelativePath(base: Path, path: String) : String {
+  protected fun getRelativePath(base: Path, path: String): String {
     return base.relativize(Path.of(path)).toCanonicalPath()
   }
 
   @Language("XML")
-  fun createPomXml(@Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: @NonNls String?): @NonNls String {
-    return createPomXml(modelVersion, xml)
+  fun createPomXml(
+    @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: @NonNls String?,
+    omitModelVersionTag: Boolean = false,
+  ): @NonNls String {
+    return createPomXml(modelVersion, xml, omitModelVersionTag)
   }
 
   protected fun assumeOnLocalEnvironmentOnly(cause: String) {
     assumeTrue("Unable to run the test in non-local environment: $cause", LocalEelDescriptor == project.getEelDescriptor())
   }
 
-  companion object {
-    @Language("XML")
-    fun createPomXml(modelVersion: String, @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: @NonNls String?): @NonNls String {
-      return """
-             <?xml version="1.0"?>
-             <project xmlns="http://maven.apache.org/POM/$modelVersion"
-                      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                      xsi:schemaLocation="http://maven.apache.org/POM/$modelVersion http://maven.apache.org/xsd/maven-$modelVersion.xsd">
-               <modelVersion>$modelVersion</modelVersion>
-             
-             """.trimIndent() + xml + "</project>"
+  protected fun setRawPomFile(content: String) {
+    Files.write(projectPath.resolve("pom.xml"), content.toByteArray(StandardCharsets.UTF_8))
+    projectRoot.refresh(false, false)
+    val f = projectRoot.findChild("pom.xml") ?: throw AssertionError("can't find pom.xml in vfs")
+    myProjectPom = f
+    refreshFiles(listOf(f))
+  }
+
+  @RequiresBackgroundThread
+  protected suspend fun waitForImportWithinTimeout(action: suspend () -> Unit) {
+    MavenLog.LOG.warn("waitForImportWithinTimeout started")
+    val importStarted = AtomicBoolean(false)
+    val importFinished = AtomicBoolean(false)
+    val pluginResolutionFinished = AtomicBoolean(true)
+    val artifactDownloadingFinished = AtomicBoolean(true)
+    project.messageBus.connect(testRootDisposable)
+      .subscribe(MavenImportListener.TOPIC, object : MavenImportListener {
+        override fun importStarted() {
+          importStarted.set(true)
+        }
+
+        override fun importFinished(importedProjects: MutableCollection<MavenProject>, newModules: MutableList<Module>) {
+          if (importStarted.get()) {
+            importFinished.set(true)
+          }
+        }
+
+        override fun pluginResolutionStarted() {
+          pluginResolutionFinished.set(false)
+        }
+
+        override fun pluginResolutionFinished() {
+          pluginResolutionFinished.set(true)
+        }
+
+        override fun artifactDownloadingStarted() {
+          artifactDownloadingFinished.set(false)
+        }
+
+        override fun artifactDownloadingFinished() {
+          artifactDownloadingFinished.set(true)
+        }
+      })
+
+    action()
+
+    awaitConfiguration()
+
+    assertTrue("Import failed: start", importStarted.get())
+    assertTrue("Import failed: finish", importFinished.get())
+    assertTrue("Import failed: plugins", pluginResolutionFinished.get())
+    assertTrue("Import failed: artifacts", artifactDownloadingFinished.get())
+    MavenLog.LOG.warn("waitForImportWithinTimeout finished")
+  }
+
+  @RequiresBackgroundThread
+  protected suspend fun awaitConfiguration() {
+    val isEdt = ApplicationManager.getApplication().isDispatchThread
+    if (isEdt) {
+      MavenLog.LOG.warn("Calling awaitConfiguration() from EDT sometimes causes deadlocks, even though it shouldn't")
+    }
+    assertFalse("Call awaitConfiguration() from background thread", isEdt)
+    Observation.awaitConfiguration(project) { message ->
+      logConfigurationMessage(message)
     }
   }
+
+  private fun logConfigurationMessage(message: String) {
+    if (message.contains("scanning")) return
+    MavenLog.LOG.warn(message)
+  }
+
+  companion object {
+    @Language("XML")
+    fun createPomXml(
+      modelVersion: String,
+      @Language(value = "XML", prefix = "<project>", suffix = "</project>") xml: @NonNls String?,
+      omitModelVersionTag: Boolean,
+    ): @NonNls String {
+      val projectStartTag = """
+        <?xml version="1.0"?>
+        <project xmlns="http://maven.apache.org/POM/$modelVersion"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xsi:schemaLocation="http://maven.apache.org/POM/$modelVersion http://maven.apache.org/xsd/maven-$modelVersion.xsd">
+      """.trimIndent()
+      return if (omitModelVersionTag) {
+        "$projectStartTag\n$xml</project>"
+      }
+      else {
+        "$projectStartTag\n  <modelVersion>$modelVersion</modelVersion>\n$xml</project>"
+      }
+    }
+  }
+
 }

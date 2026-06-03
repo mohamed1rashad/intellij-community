@@ -4,12 +4,16 @@ package org.jetbrains.plugins.gitlab.ui.comment
 import com.intellij.collaboration.async.collectScoped
 import com.intellij.collaboration.async.launchNow
 import com.intellij.collaboration.messages.CollaborationToolsBundle
-import com.intellij.collaboration.ui.*
+import com.intellij.collaboration.ui.CollaborationToolsUIUtil
+import com.intellij.collaboration.ui.HorizontalListPanel
+import com.intellij.collaboration.ui.SimpleHtmlPane
+import com.intellij.collaboration.ui.VerticalListPanel
 import com.intellij.collaboration.ui.codereview.CodeReviewChatItemUIUtil
 import com.intellij.collaboration.ui.codereview.CodeReviewChatItemUIUtil.ComponentType
 import com.intellij.collaboration.ui.codereview.CodeReviewTimelineUIUtil
 import com.intellij.collaboration.ui.codereview.comment.CodeReviewCommentUIUtil
 import com.intellij.collaboration.ui.codereview.timeline.thread.CodeReviewTrackableItemViewModel
+import com.intellij.collaboration.ui.html.AsyncHtmlImageLoader
 import com.intellij.collaboration.ui.icon.IconsProvider
 import com.intellij.collaboration.ui.util.bindChildIn
 import com.intellij.collaboration.ui.util.bindDisabledIn
@@ -27,6 +31,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.Nls
 import org.jetbrains.plugins.gitlab.api.dto.GitLabUserDTO
+import org.jetbrains.plugins.gitlab.data.GitLabImageLoader
 import org.jetbrains.plugins.gitlab.mergerequest.ui.emoji.GitLabReactionsComponentFactory
 import org.jetbrains.plugins.gitlab.mergerequest.ui.emoji.GitLabReactionsPickerComponentFactory
 import org.jetbrains.plugins.gitlab.mergerequest.ui.emoji.GitLabReactionsViewModel
@@ -37,17 +42,19 @@ import java.net.URL
 import javax.swing.JComponent
 
 internal object GitLabNoteComponentFactory {
+
   fun create(
     componentType: ComponentType,
     project: Project,
     cs: CoroutineScope,
     avatarIconsProvider: IconsProvider<GitLabUserDTO>,
+    imageLoader: GitLabImageLoader,
     vm: GitLabNoteViewModel,
     place: GitLabStatistics.MergeRequestNoteActionPlace,
   ): JComponent {
-    val textPanel = createTextPanel(project, cs, vm.bodyHtml, vm.serverUrl).let { panel ->
+    val textPanel = createTextPanel(project, cs, vm.bodyHtml, vm.serverUrl, imageLoader).let { panel ->
       val actionsVm = vm.actionsVm ?: return@let panel
-      EditableComponentFactory.wrapTextComponent(cs, panel, actionsVm.editVm) {
+      GitLabEditableComponentFactory.wrapTextComponent(cs, panel, actionsVm.editVm) {
         GitLabStatistics.logMrActionExecuted(project, GitLabStatistics.MergeRequestAction.UPDATE_NOTE, place)
       }
     }
@@ -173,8 +180,11 @@ internal object GitLabNoteComponentFactory {
     return button
   }
 
-  fun createTextPanel(project: Project, cs: CoroutineScope, textFlow: Flow<@Nls String>, baseUrl: URL): JComponent =
-    SimpleHtmlPane(baseUrl = baseUrl, addBrowserListener = false).apply {
+  fun createTextPanel(
+    project: Project, cs: CoroutineScope, textFlow: Flow<@Nls String>, baseUrl: URL,
+    imageLoader: AsyncHtmlImageLoader
+  ): JComponent =
+    SimpleHtmlPane(baseUrl = baseUrl, addBrowserListener = false, customImageLoader = imageLoader).apply {
       bindTextIn(cs, textFlow)
       addGitLabHyperlinkListener(project)
     }

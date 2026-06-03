@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.util.ThrowableRunnable;
 import kotlin.reflect.KFunction;
@@ -11,19 +12,17 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Method;
 
 public interface BenchmarkTestInfo {
-  // to warn about not calling .start() in the end
-  @Contract(pure = true)
+  Logger LOG = Logger.getInstance(BenchmarkTestInfo.class);
+  @Contract(pure = true) // to warn about not calling .start() in the end
   BenchmarkTestInfo setup(@NotNull ThrowableRunnable<?> setup);
 
-  // to warn about not calling .start() in the end
-  @Contract(pure = true)
+  @Contract(pure = true) // to warn about not calling .start() in the end
   BenchmarkTestInfo attempts(int attempts);
 
   /**
    * Runs the perf test {@code iterations} times before starting the final measuring.
    */
-  // to warn about not calling .start() in the end
-  @Contract(pure = true)
+  @Contract(pure = true) // to warn about not calling .start() in the end
   BenchmarkTestInfo warmupIterations(int iterations);
 
   /**
@@ -32,8 +31,7 @@ public interface BenchmarkTestInfo {
    * inStressTest disables many debug-level checks, and rises logLevel from DEBUG to INFO, which makes benchmark run much
    * closer to production run, thus making benchmark results more representative.
    */
-  // to warn about not calling .start() in the end
-  @Contract(pure = true)
+  @Contract(pure = true) // to warn about not calling .start() in the end
   BenchmarkTestInfo runAsStressTest();
 
   String getUniqueTestName();
@@ -49,7 +47,7 @@ public interface BenchmarkTestInfo {
    * </ul>
    * <br/>
    * By default only OpenTelemetry spans will be published. (from the {@code ./system/test/log/opentelemtry.json} file).<br/>
-   * To enable publishing of meters (from the {@code ./system/test/log/open-telemetry-metrics.*.csv}) use {@link #withTelemetryMeters(OpenTelemetryMeterCollector)}. <br/>
+   * To enable publishing of meters (from the {@code ./system/test/log/open-telemetry-metrics.*.csv}) use {@link #BenchmarkTestInfoImpl#withMetricsCollector(com.intellij.tools.ide.metrics.collector.MetricsCollector)}. <br/>
    * <p/>
    * Considering metrics: better to have a test that produces metrics in seconds, rather milliseconds.<br/>
    * This way degradation will be easier to detect and metric deviation from the baseline will be easier to notice.

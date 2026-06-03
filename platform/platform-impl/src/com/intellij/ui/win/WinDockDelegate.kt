@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui.win
 
 import com.intellij.ide.RecentProjectListActionProvider
@@ -11,11 +11,10 @@ import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.registry.RegistryManager
-import com.intellij.ui.win.WinShellIntegration.VoidShellTask
+import com.intellij.ui.win.WinShellIntegration.ShellTask
 import com.intellij.util.PathUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.nio.file.Path
 
 private val LOG = logger<WinDockDelegate>()
 
@@ -23,8 +22,8 @@ internal suspend fun createWinDockDelegate(): SystemDock? {
   val stackTraceHolder = Throwable("Asynchronously launched from here")
 
   try {
-    @Suppress("SpellCheckingInspection")
-    if (RegistryManager.getInstanceAsync().`is`("windows.jumplist")) {
+    val recentProjectsInDockSupported = serviceAsync<RecentProjectListActionProvider>().recentProjectsInDocSupported()
+    if (RegistryManager.getInstanceAsync().`is`("windows.jumplist") && recentProjectsInDockSupported) {
       return WinDockDelegate(WinShellIntegration.getInstance() ?: return null)
     }
     else {
@@ -44,7 +43,7 @@ private class WinDockDelegate(private val wsi: WinShellIntegration) : SystemDock
     val jumpTasks = convertToJumpTasks(recentProjectActions)
     // todo WinShellIntegration should use coroutines
     withContext(Dispatchers.IO) {
-      wsi.postShellTask(VoidShellTask {
+      wsi.postShellTask(ShellTask {
         it.clearRecentTasksList()
         it.setRecentTasksList(jumpTasks.toTypedArray())
       }).get()
@@ -54,7 +53,7 @@ private class WinDockDelegate(private val wsi: WinShellIntegration) : SystemDock
 
 private fun convertToJumpTasks(actions: List<AnAction>): List<JumpTask> {
   val launcherFileName = ApplicationNamesInfo.getInstance().scriptName + "64.exe"
-  val launcherPath = Path.of(PathManager.getBinPath(), launcherFileName).toString()
+  val launcherPath = PathManager.getBinDir().resolve(launcherFileName).toString()
 
   val result = ArrayList<JumpTask>(actions.size)
   for (action in actions) {
@@ -73,7 +72,7 @@ private fun convertToJumpTasks(actions: List<AnAction>): List<JumpTask> {
     val taskTitle: String
     val taskTooltip: String
     val presentationText = action.projectDisplayName
-    if (!presentationText.isNullOrBlank()) {
+    if (presentationText.isNotBlank()) {
       taskTitle = presentationText
       taskTooltip = "$presentationText ($projectPathSystem)"
     }

@@ -1,26 +1,34 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.externalSystem.impl.dependencySubstitution.impl
 
 import com.intellij.platform.externalSystem.impl.dependencySubstitution.DependencySubstitutionEntity
-import com.intellij.platform.externalSystem.impl.dependencySubstitution.ModifiableDependencySubstitutionEntity
+import com.intellij.platform.externalSystem.impl.dependencySubstitution.DependencySubstitutionEntityBuilder
 import com.intellij.platform.workspace.jps.entities.DependencyScope
 import com.intellij.platform.workspace.jps.entities.LibraryId
-import com.intellij.platform.workspace.jps.entities.ModifiableModuleEntity
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
 import com.intellij.platform.workspace.jps.entities.ModuleId
-import com.intellij.platform.workspace.storage.*
-import com.intellij.platform.workspace.storage.annotations.Parent
+import com.intellij.platform.workspace.storage.ConnectionId
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
+import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.SymbolicEntityId
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
+import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.SoftLinkable
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.extractOneToManyParent
 import com.intellij.platform.workspace.storage.impl.indices.WorkspaceMutableIndex
-import com.intellij.platform.workspace.storage.impl.updateOneToManyParentOfChild
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import org.jetbrains.annotations.ApiStatus.Internal
 
@@ -28,34 +36,31 @@ import org.jetbrains.annotations.ApiStatus.Internal
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class DependencySubstitutionEntityImpl(private val dataSource: DependencySubstitutionEntityData) : DependencySubstitutionEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class DependencySubstitutionEntityImpl(private val dataSource: DependencySubstitutionEntityData) : DependencySubstitutionEntity,
+                                                                                                            WorkspaceEntityBase(dataSource) {
 
   private companion object {
-    internal val OWNER_CONNECTION_ID: ConnectionId = ConnectionId.create(ModuleEntity::class.java, DependencySubstitutionEntity::class.java,
-                                                                         ConnectionId.ConnectionType.ONE_TO_MANY, false)
-
-    private val connections = listOf<ConnectionId>(
-      OWNER_CONNECTION_ID,
-    )
+    internal val OWNER_CONNECTION_ID: ConnectionId = ConnectionId.create(ModuleEntity::class.java,
+                                                                         DependencySubstitutionEntity::class.java,
+                                                                         ConnectionId.ConnectionType.ONE_TO_MANY,
+                                                                         false)
+    private val connections = listOf<ConnectionId>(OWNER_CONNECTION_ID)
 
   }
 
   override val owner: ModuleEntity
-    get() = snapshot.extractOneToManyParent(OWNER_CONNECTION_ID, this)!!
-
+    get() = snapshot.instrumentation.getParent(OWNER_CONNECTION_ID, this) as? ModuleEntity
+            ?: error("Parent owner not found for DependencySubstitutionEntity")
   override val library: LibraryId
     get() {
       readField("library")
       return dataSource.library
     }
-
   override val module: ModuleId
     get() {
       readField("module")
       return dataSource.module
     }
-
   override val scope: DependencyScope
     get() {
       readField("scope")
@@ -73,8 +78,9 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
   }
 
 
-  internal class Builder(result: DependencySubstitutionEntityData?) : ModifiableWorkspaceEntityBase<DependencySubstitutionEntity, DependencySubstitutionEntityData>(
-    result), ModifiableDependencySubstitutionEntity {
+  internal class Builder(result: DependencySubstitutionEntityData?) :
+    ModifiableWorkspaceEntityBase<DependencySubstitutionEntity, DependencySubstitutionEntityData>(result),
+    DependencySubstitutionEntityBuilder {
     internal constructor() : this(DependencySubstitutionEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -87,15 +93,13 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
           error("Entity DependencySubstitutionEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -106,7 +110,7 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
         error("Field WorkspaceEntity#entitySource should be initialized")
       }
       if (_diff != null) {
-        if (_diff.extractOneToManyParent<WorkspaceEntityBase>(OWNER_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(OWNER_CONNECTION_ID, this) == null) {
           error("Field DependencySubstitutionEntity#owner should be initialized")
         }
       }
@@ -149,42 +153,41 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
         changedProperty.add("entitySource")
 
       }
-
-    override var owner: ModifiableModuleEntity
+    override var owner: ModuleEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(OWNER_CONNECTION_ID, this) as? ModifiableModuleEntity)
-          ?: (this.entityLinks[EntityLink(false, OWNER_CONNECTION_ID)]!! as ModifiableModuleEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(OWNER_CONNECTION_ID, this) as? ModuleEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, OWNER_CONNECTION_ID)] as? ModuleEntityBuilder)
+          ?: error("owner is null for DependencySubstitutionEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, OWNER_CONNECTION_ID)]!! as ModifiableModuleEntity
+          (this.entityLinks[EntityLink(false, OWNER_CONNECTION_ID)] as? ModuleEntityBuilder)
+          ?: error("owner is null for DependencySubstitutionEntity")
         }
       }
       set(value) {
         checkModificationAllowed()
         val _diff = diff
         if (_diff != null && value is ModifiableWorkspaceEntityBase<*, *> && value.diff == null) {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, OWNER_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, OWNER_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToManyParentOfChild(OWNER_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(OWNER_CONNECTION_ID, value, this)
         }
         else {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, OWNER_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, OWNER_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, OWNER_CONNECTION_ID)] = value
         }
         changedProperty.add("owner")
@@ -198,7 +201,6 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
         changedProperty.add("library")
 
       }
-
     override var module: ModuleId
       get() = getEntityData().module
       set(value) {
@@ -207,7 +209,6 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
         changedProperty.add("module")
 
       }
-
     override var scope: DependencyScope
       get() = getEntityData().scope
       set(value) {
@@ -219,6 +220,7 @@ internal class DependencySubstitutionEntityImpl(private val dataSource: Dependen
 
     override fun getEntityClass(): Class<DependencySubstitutionEntity> = DependencySubstitutionEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -244,7 +246,7 @@ internal class DependencySubstitutionEntityData : WorkspaceEntityData<Dependency
   }
 
   override fun updateLinksIndex(prev: Set<SymbolicEntityId<*>>, index: WorkspaceMutableIndex<SymbolicEntityId<*>>) {
-    // TODO verify logic
+// TODO verify logic
     val mutablePreviousSet = HashSet(prev)
     val removedItem_library = mutablePreviousSet.remove(library)
     if (!removedItem_library) {
@@ -284,14 +286,13 @@ internal class DependencySubstitutionEntityData : WorkspaceEntityData<Dependency
     return changed
   }
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<DependencySubstitutionEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<DependencySubstitutionEntity> {
     val modifiable = DependencySubstitutionEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): DependencySubstitutionEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -303,17 +304,16 @@ internal class DependencySubstitutionEntityData : WorkspaceEntityData<Dependency
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.externalSystem.impl.dependencySubstitution.DependencySubstitutionEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.externalSystem.impl.dependencySubstitution.DependencySubstitutionEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return DependencySubstitutionEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return DependencySubstitutionEntity(library, module, scope, entitySource) {
-      parents.filterIsInstance<ModifiableModuleEntity>().singleOrNull()?.let { this.owner = it }
+      parents.filterIsInstance<ModuleEntityBuilder>().singleOrNull()?.let { this.owner = it }
     }
   }
 
@@ -326,9 +326,7 @@ internal class DependencySubstitutionEntityData : WorkspaceEntityData<Dependency
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as DependencySubstitutionEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.library != other.library) return false
     if (this.module != other.module) return false
@@ -339,9 +337,7 @@ internal class DependencySubstitutionEntityData : WorkspaceEntityData<Dependency
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as DependencySubstitutionEntityData
-
     if (this.library != other.library) return false
     if (this.module != other.module) return false
     if (this.scope != other.scope) return false

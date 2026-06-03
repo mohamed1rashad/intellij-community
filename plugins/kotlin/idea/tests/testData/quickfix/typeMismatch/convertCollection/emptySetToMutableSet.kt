@@ -1,0 +1,11 @@
+// "Replace 'emptySet()' with 'mutableSetOf()'" "true"
+// PRIORITY: HIGH
+// K2_ERROR: Cannot infer type for type parameter 'T'. Specify it explicitly.
+// K2_ERROR: Return type mismatch: expected 'MutableSet<String>', actual 'Set<uninferred ??? (Unknown type for type parameter T)>'.
+
+fun foo(): MutableSet<String> {
+    return emptySet<caret>()
+}
+
+// IGNORE_K1
+// FUS_K2_QUICKFIX_NAME: org.jetbrains.kotlin.idea.k2.codeinsight.fixes.ReplaceWithMutableCollectionFactoryFix

@@ -17,6 +17,7 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.Messages
@@ -26,11 +27,25 @@ import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.io.FileUtilRt.extensionEquals
 import com.intellij.openapi.util.io.FileUtilRt.getExtension
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.openapi.util.text.StringUtil
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtilCore
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileEvent
+import com.intellij.openapi.vfs.VirtualFileListener
+import com.intellij.openapi.vfs.VirtualFileMoveEvent
+import com.intellij.openapi.vfs.VirtualFilePropertyEvent
+import com.intellij.openapi.vfs.VirtualFileVisitor
 import com.intellij.project.stateStore
 import com.intellij.spellchecker.SpellCheckerManager.Companion.restartInspections
-import com.intellij.spellchecker.dictionary.*
+import com.intellij.spellchecker.dictionary.CustomDictionaryProvider
+import com.intellij.spellchecker.dictionary.Dictionary
+import com.intellij.spellchecker.dictionary.DictionaryChecker
+import com.intellij.spellchecker.dictionary.EditableDictionary
+import com.intellij.spellchecker.dictionary.Loader
+import com.intellij.spellchecker.dictionary.ProjectDictionary
+import com.intellij.spellchecker.dictionary.RuntimeDictionaryProvider
+import com.intellij.spellchecker.dictionary.UserDictionary
+import com.intellij.spellchecker.engine.DictionaryModificationTracker
 import com.intellij.spellchecker.engine.SpellCheckerEngine
 import com.intellij.spellchecker.engine.SuggestionProvider
 import com.intellij.spellchecker.grazie.GrazieSuggestionProvider
@@ -40,11 +55,15 @@ import com.intellij.spellchecker.state.DictionaryStateListener
 import com.intellij.spellchecker.state.ProjectDictionaryState
 import com.intellij.spellchecker.util.SpellCheckerBundle
 import com.intellij.util.EventDispatcher
-import kotlinx.coroutines.CancellationException
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
+import com.intellij.util.concurrency.annotations.RequiresEdt
+import com.intellij.util.io.computeDetached
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.io.File
 import java.util.function.Consumer
+import kotlin.coroutines.cancellation.CancellationException
 
 private val LOG = logger<SpellCheckerManager>()
 private val BUNDLED_EP_NAME = ExtensionPointName<BundledDictionaryProvider>("com.intellij.spellchecker.bundledDictionaryProvider")
@@ -64,7 +83,7 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
 
   @get:Internal
   val appDictionaryPath: String by lazy {
-    PathManager.getOptionsPath() + File.separator + CACHED_DICTIONARY_FILE
+    PathManager.getOptionsPath() + '/' + CACHED_DICTIONARY_FILE
   }
 
   private val userDictionaryListenerEventDispatcher = EventDispatcher.create(DictionaryStateListener::class.java)
@@ -74,15 +93,17 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
     private set
 
   private var suggestionProvider: SuggestionProvider? = null
+  private val settings by lazy { SpellCheckerSettings.getInstance(project) }
 
   init {
     fullConfigurationReload()
 
     LocalFileSystem.getInstance().addVirtualFileListener(CustomDictFileListener(project = project, manager = this), this)
     LocalFileSystem.getInstance().addVirtualFileListener(ProjectDictFileListener(this), this)
-    BUNDLED_EP_NAME.addChangeListener(coroutineScope) { fillEngineDictionary(spellChecker!!) }
-    RuntimeDictionaryProvider.EP_NAME.addChangeListener(coroutineScope) { fillEngineDictionary(spellChecker!!) }
-    CustomDictionaryProvider.EP_NAME.addChangeListener(coroutineScope) { fillEngineDictionary(spellChecker!!) }
+    BUNDLED_EP_NAME.addChangeListener(coroutineScope) { fillEngineDictionary(spellChecker) }
+    RuntimeDictionaryProvider.EP_NAME.addChangeListener(coroutineScope) { fillEngineDictionary(spellChecker) }
+    CustomDictionaryProvider.EP_NAME.addChangeListener(coroutineScope) { fillEngineDictionary(spellChecker) }
+    addUserDictionaryChangedListener({ DictionaryModificationTracker.getInstance(project).incModificationCount() }, this)
   }
 
   companion object {
@@ -118,51 +139,55 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
   }
 
   fun fullConfigurationReload() {
-    val spellChecker = project.service<SpellCheckerEngine>()
+    val spellChecker = SpellCheckerEngine.getInstance(project)
+    if (spellChecker == null) return
     this.spellChecker = spellChecker
     suggestionProvider = GrazieSuggestionProvider(spellChecker)
     fillEngineDictionary(spellChecker)
   }
 
-  fun updateBundledDictionaries(removedDictionaries: List<String?>) {
-    val spellChecker = spellChecker!!
-    for (provider in BUNDLED_EP_NAME.extensionList) {
-      for (dictionary in provider.bundledDictionaries) {
-        if (!spellChecker.isDictionaryLoad(dictionary)) {
-          loadBundledDictionary(provider = provider, dictionary = dictionary, spellChecker = spellChecker)
+  @RequiresEdt
+  fun removeDictionaries(removedDictionaries: List<String>) {
+    if (removedDictionaries.isEmpty()) return
+    val spellChecker = spellChecker ?: return
+    for (name in removedDictionaries) {
+      spellChecker.removeDictionary(name)
+    }
+    restartInspections("SpellCheckerManager.removeDictionaries")
+  }
+
+  private val lock = Any()
+
+  @RequiresBackgroundThread
+  fun updateBundledDictionaries() {
+    val spellChecker = spellChecker ?: return
+
+    // if all custom dictionaries are loaded, then there is nothing to update
+    val customDictionariesPaths = settings.customDictionariesPaths
+    if (customDictionariesPaths.all { spellChecker.isDictionaryLoad(it) }) return
+
+    synchronized(lock) {
+      if (customDictionariesPaths.all { spellChecker.isDictionaryLoad(it) }) return
+      loadBundledDictionaries(spellChecker)
+      for (provider in RuntimeDictionaryProvider.EP_NAME.extensionList) {
+        for (dictionary in provider.dictionaries) {
+          val shouldDictionaryBeLoaded = !settings.runtimeDisabledDictionariesNames.contains(dictionary.name)
+          val isDictionaryLoaded = spellChecker.isDictionaryLoad(dictionary.name)
+          if (isDictionaryLoaded && !shouldDictionaryBeLoaded) {
+            spellChecker.removeDictionary(dictionary.name)
+          }
+          else if (!isDictionaryLoaded && shouldDictionaryBeLoaded) {
+            spellChecker.addDictionary(dictionary)
+          }
         }
       }
-    }
 
-    val settings = SpellCheckerSettings.getInstance(project)
-    for (provider in RuntimeDictionaryProvider.EP_NAME.extensionList) {
-      for (dictionary in provider.dictionaries) {
-        val dictionaryShouldBeLoad = !settings.runtimeDisabledDictionariesNames.contains(dictionary.name)
-        val dictionaryIsLoad = spellChecker.isDictionaryLoad(dictionary.name)
-        if (dictionaryIsLoad && !dictionaryShouldBeLoad) {
-          spellChecker.removeDictionary(dictionary.name)
-        }
-        else if (!dictionaryIsLoad && dictionaryShouldBeLoad) {
-          spellChecker.addDictionary(dictionary)
-        }
-      }
-    }
-
-    if (settings.customDictionariesPaths != null) {
-      for (dictionary in settings.customDictionariesPaths) {
+      for (dictionary in customDictionariesPaths) {
         if (!spellChecker.isDictionaryLoad(dictionary)) {
           loadDictionary(dictionary)
         }
       }
     }
-
-    if (!removedDictionaries.isEmpty()) {
-      for (name in removedDictionaries) {
-        spellChecker.removeDictionary(name!!)
-      }
-    }
-
-    restartInspections("SpellCheckerManager.updateBundledDictionaries")
   }
 
   val userDictionaryWords: Set<String>
@@ -171,7 +196,8 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
   val userCamelCaseWords: Set<String>
     get() = projectDictionary.camelCaseWords + appDictionary.camelCaseWords
 
-  private fun fillEngineDictionary(spellChecker: SpellCheckerEngine) {
+  private fun fillEngineDictionary(spellChecker: SpellCheckerEngine?) {
+    if (spellChecker == null) return
     spellChecker.reset()
     val settings = SpellCheckerSettings.getInstance(project)
     loadBundledDictionaries(spellChecker)
@@ -205,22 +231,29 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
     spellChecker.addModifiableDictionary(projectDictionary)
   }
 
+  @OptIn(DelicateCoroutinesApi::class)
   fun loadDictionary(path: String) {
+    val spellChecker = spellChecker ?: return
     val dictionaryProvider = findApplicable(path)
     if (dictionaryProvider == null) {
-      spellChecker!!.loadDictionary(FileLoader(path))
+      spellChecker.loadDictionary(FileLoader(path))
       return
     }
-    val dictionary = dictionaryProvider.get(path)
+    val dictionary = runBlockingCancellable {
+      computeDetached {
+        dictionaryProvider.get(path)
+      }
+    }
     if (dictionary != null) {
-      spellChecker!!.addDictionary(dictionary)
+      spellChecker.addDictionary(dictionary)
     }
   }
 
-  fun removeDictionary(path: String): Unit = spellChecker!!.removeDictionary(path)
+  fun removeDictionary(path: String): Unit? = spellChecker?.removeDictionary(path)
 
   fun hasProblem(word: String): Boolean {
-    return !spellChecker!!.isCorrect(word) && !isCorrectExtensionWord(word)
+    val spellChecker = spellChecker ?: return false
+    return !spellChecker.isCorrect(word) && !isCorrectExtensionWord(word)
   }
 
   private fun isCorrectExtensionWord(word: String): Boolean {
@@ -236,34 +269,29 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
       return
     }
 
-    val transformed = transform(word) ?: return
     val dictionary = dictionaryLayer.dictionary
     if (file != null) {
       WriteCommandAction.writeCommandAction(project)
         .run<RuntimeException> {
           UndoManager.getInstance(project).undoableActionPerformed(object : BasicUndoableAction(file) {
             override fun undo() {
-              removeWordFromDictionary(dictionary, transformed)
+              removeWordFromDictionary(dictionary, word)
             }
 
             override fun redo() {
-              addWordToDictionary(dictionary, transformed)
+              addWordToDictionary(dictionary, word)
             }
           })
         }
     }
-    addWordToDictionary(dictionary = dictionary, word = transformed)
-  }
-  
-  private fun transform(word: String): String? {
-    if (StringUtil.isLowerCase(StringUtil.decapitalize(word))) return word
-    return spellChecker!!.transformation.transform(word)
+    addWordToDictionary(dictionary, word)
   }
 
   private fun addWordToDictionary(dictionary: EditableDictionary, word: String) {
+    val spellChecker = spellChecker ?: return
     dictionary.addToDictionary(word)
-    if (!spellChecker!!.isDictionaryLoad(dictionary.name)) {
-      spellChecker!!.addModifiableDictionary(dictionary)
+    if (!spellChecker.isDictionaryLoad(dictionary.name)) {
+      spellChecker.addModifiableDictionary(dictionary)
     }
     fireDictionaryChanged(dictionary)
   }
@@ -310,16 +338,16 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
   }
 
   fun getSuggestions(text: String): List<String> {
+    val suggestionProvider = suggestionProvider ?: return emptyList()
     val correctionLimit = Registry.intValue("spellchecker.corrections.limit", 5)
-    return suggestionProvider!!.getSuggestions(text, correctionLimit, MAX_METRICS)
+    return suggestionProvider.getSuggestions(text, correctionLimit, MAX_METRICS)
   }
 
   override fun dispose() {
   }
 
   fun openDictionaryInEditor(dictPath: String) {
-    val file = if (dictPath.isEmpty()) null
-    else LocalFileSystem.getInstance().refreshAndFindFileByPath(dictPath)
+    val file = if (dictPath.isEmpty()) null else LocalFileSystem.getInstance().refreshAndFindFileByPath(dictPath)
     if (file == null) {
       val title = SpellCheckerBundle.message("dictionary.not.found.title")
       val message = SpellCheckerBundle.message("dictionary.not.found", dictPath)
@@ -338,8 +366,9 @@ class SpellCheckerManager @Internal constructor(@Internal val project: Project, 
 
 private class ProjectDictFileListener(private val manager: SpellCheckerManager) : VirtualFileListener {
   override fun fileDeleted(event: VirtualFileEvent) {
+    val spellChecker = manager.spellChecker ?: return
     if (event.file.path.endsWith(getProjectDictionaryPath())) {
-      manager.spellChecker!!.removeDictionary(getProjectDictionaryName())
+      spellChecker.removeDictionary(getProjectDictionaryName())
       restartInspections("SpellCheckerManager.removeProjectDictionary")
     }
   }
@@ -368,12 +397,13 @@ private class CustomDictFileListener(private val project: Project, private val m
   }
 
   override fun contentsChanged(event: VirtualFileEvent) {
+    val spellChecker = manager.spellChecker ?: return
     val path = FileUtilRt.toSystemDependentName(event.path)
-    if (!manager.spellChecker!!.isDictionaryLoad(path)) {
+    if (!spellChecker.isDictionaryLoad(path)) {
       return
     }
 
-    manager.spellChecker!!.removeDictionary(path)
+    spellChecker.removeDictionary(path)
     manager.loadDictionary(path)
     restartInspections("SpellCheckerManager.contentsChanged")
   }
@@ -396,9 +426,10 @@ private class CustomDictFileListener(private val project: Project, private val m
   }
 
   private fun removeCustomDictionaries(path: String) {
+    val spellChecker = manager.spellChecker ?: return
     val systemDependentPath = FileUtilRt.toSystemDependentName(path)
     if (affectCustomDictionaries(path, project)) {
-      manager.spellChecker!!.removeDictionariesRecursively(systemDependentPath)
+      spellChecker.removeDictionariesRecursively(systemDependentPath)
       SpellCheckerSettings.getInstance(project).customDictionariesPaths.removeIf { dict: String? ->
         FileUtil.isAncestor(systemDependentPath, dict!!, false)
       }
@@ -474,7 +505,7 @@ private class StreamLoader(private val name: String, private val loaderClass: Cl
 }
 
 private fun getProjectDictionaryPath(): String {
-  return "dictionaries${File.separator}${getProjectDictionaryName().replace('.', '_')}.xml"
+  return "dictionaries/${getProjectDictionaryName().replace('.', '_')}.xml"
 }
 
 internal fun getProjectDictionaryName(): String {

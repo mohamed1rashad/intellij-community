@@ -18,16 +18,26 @@ import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.containers.ContainerUtil;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.MutableTreeNode;
 import javax.swing.tree.TreeNode;
-import java.awt.*;
-import java.util.*;
+import java.awt.Color;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.List;
+import java.util.Set;
 
 public class GroupNode extends Node implements Navigatable, Comparable<GroupNode> {
   private static final NodeComparator COMPARATOR = new NodeComparator();
@@ -149,47 +159,68 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
     return null;
   }
 
-
   int removeUsagesBulk(@NotNull Set<UsageNode> usages, @NotNull DefaultTreeModel treeModel) {
     ThreadingAssertions.assertEventDispatchThread();
     int removed = 0;
     List<MutableTreeNode> removedNodes = new SmartList<>();
     synchronized (this) {
-      int o = 0;
+      int newIdx = 0;
       List<Node> children = myChildren;
-      for (int i = 0; i < children.size(); i++) {
-        Node child = children.get(i);
+      // We are trying to change the children in-place just shrinking them to the new size.
+      // The new size is always <= the old size, because we are removing elements here.
+      // The construct
+      // ```
+      // if (idx != newIdx) {
+      //   children.set(newIdx, child);
+      // }
+      // newIdx++;
+      // ```
+      // just accepts the current node. Can't abstract it in away in a passable way because it needs
+      // either byref-passing to be a method or a mutable capture to be a capture, and this is java code
+      // The perf characteristics of this algorithm depend on the shape of input.
+      // When it gets a single-node input, it succeeds in O(depth+nr of siblings of every traversed level).
+      // When it gets a multi-node input, it traverses more nodes but still skips most of them (doesn't visit every leaf).
+      // It will visit all nodes only when we get at least one leaf from every possible leaf parent.
+      for (int idx = 0; idx < children.size(); idx++) {
+        Node child = children.get(idx);
+        // If removable, remove and register remove
         if (usages.remove(child)) {
           removedNodes.add(child);
           removed++;
         }
         else if (child instanceof GroupNode groupNode) {
-          int delta = groupNode.removeUsagesBulk(usages, treeModel);
-          if (delta > 0) {
-            if (groupNode.getRecursiveUsageCount() == 0) {
-              removedNodes.add(groupNode);
-              if (i != o) {
-                children.set(o, child);
+          // Go deeper in search of the node to remove
+          // if there is still something to remove
+          if (!usages.isEmpty()) {
+            int delta = groupNode.removeUsagesBulk(usages, treeModel);
+            // Removed SOMETHING
+            if (delta > 0) {
+              removed += delta;
+              // If we removed everything, remove the group node and go collecting the nodes further
+              if (groupNode.getChildren().isEmpty()) {
+                removedNodes.add(groupNode);
+                continue;
               }
-              o++;
-            }
-            removed += delta;
-            if (removed == usages.size()) {
-              break;
             }
           }
+          // We either
+          // (a) removed all we wanted to remove from this group node, and it is left in a non-empty state
+          // or (b) we didn't touch its contents and it also needs to remain
+          if (idx != newIdx) {
+            children.set(newIdx, child);
+          }
+          newIdx++;
         }
+        // Not removed, not group node, just keep it
         else {
-          if (i != o) {
-            children.set(o, child);
+          if (idx != newIdx) {
+            children.set(newIdx, child);
           }
-          o++;
+          newIdx++;
         }
       }
-      children.subList(o, children.size()).clear();
-      if (!children.isEmpty()) {
-        removeNodesFromParent(treeModel, this, removedNodes);
-      }
+      children.subList(newIdx, children.size()).clear();
+      removeNodesFromParent(treeModel, this, removedNodes);
     }
 
     if (removed > 0 && (myRecursiveUsageCount -= removed) != 0) {
@@ -342,7 +373,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
   }
 
   @Override
-  public boolean canNavigate() {
+  protected boolean canDataNavigate() {
     return getGroup() != null && getGroup().canNavigate();
   }
 

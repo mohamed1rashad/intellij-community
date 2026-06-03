@@ -1,17 +1,12 @@
 <!-- Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file. -->
-<idea-plugin xmlns:xi="http://www.w3.org/2001/XInclude">
+<idea-plugin>
   <!-- Components and extensions declared in this file work ONLY in PyCharm, not in Python plugin.
-       Both Community and Professional editions. -->
-  <module value="com.intellij.modules.pycharm"/>
+       Both Community and Professional editions.
 
-  <xi:include href="/META-INF/PlatformLangXmlPlugin.xml"/>
-  <xi:include href="intellij.platform.remoteServers.impl.xml"/>
+       Note: Module alias, PlatformLangPlugin.xml, and remoteServers includes are provided by
+       CommunityProductFragments.pycharmCoreFragment() in product definitions. -->
 
   <extensions defaultExtensionNs="com.intellij">
-    <applicationActivity implementation="com.intellij.internal.statistic.updater.StatisticsJobsScheduler"/>
-    <applicationActivity implementation="com.intellij.internal.statistic.updater.StatisticsStateCollectorsScheduler"/>
-    <postStartupActivity implementation="com.intellij.internal.statistic.updater.StatisticsStateCollectorsScheduler$MyStartupActivity"/>
-
     <projectViewPane implementation="com.intellij.ide.projectView.impl.ProjectViewPane"/>
 
     <projectAttachProcessor implementation="com.intellij.platform.ModuleAttachProcessor"/>
@@ -40,8 +35,6 @@
       <add-to-group group-id="ProjectWidget.Actions" anchor="after" relative-to-action="OpenFile"/>
     </action>
 
-    <action id="RerunFailedTests" class="com.intellij.execution.testframework.actions.RerunFailedTestsAction"
-            icon="AllIcons.RunConfigurations.RerunFailedTests"/>
 
     <group id="PyCharm.MarkRootGroup">
       <action id="MarkSourceRoot" class="com.intellij.ide.projectView.actions.MarkJavaSourceRootAction"/>

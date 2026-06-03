@@ -12,14 +12,22 @@ import com.intellij.testFramework.DumbModeTestUtils.EternalTaskShutdownToken;
 import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.UnindexedFilesScanner;
 import com.intellij.util.indexing.UnindexedFilesScannerExecutorImpl;
-import junit.framework.*;
+import junit.framework.Protectable;
+import junit.framework.Test;
+import junit.framework.TestCase;
+import junit.framework.TestResult;
+import junit.framework.TestSuite;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.internal.MethodSorter;
 import org.junit.runner.Describable;
 import org.junit.runner.Description;
 
-import java.lang.reflect.*;
+import java.lang.reflect.AnnotatedElement;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
 import static com.intellij.testFramework.TestIndexingModeSupporter.IndexingMode.DUMB_EMPTY_INDEX;
 import static junit.framework.TestSuite.warning;
@@ -27,8 +35,9 @@ import static junit.framework.TestSuite.warning;
 /**
  * To run a test with needed {@link IndexingMode}, it's enough to make getIndexingMode return it and run the test with IDE's gutter action.
  * To run all dumb mode completion tests, check JavaDoc of
- * {@link com.intellij.java.codeInsight.completion.JavaCompletionTestSuite} or
- * {@link com.jetbrains.php.PhpDumbCompletionTest}
+ * {@link com.intellij.java.codeInsight.completion.JavaCompletionTestSuite}
+ *
+ * Please add indexing mode test cases to the same test suite to ensure they run in the same bucket on TC, for ex. {@link com.jetbrains.php.completion.PhpCompletionTest}.
  */
 public interface TestIndexingModeSupporter {
   enum IndexingMode {
@@ -167,7 +176,7 @@ public interface TestIndexingModeSupporter {
         if (!Modifier.isPublic(declaredMethod.getModifiers())) continue;
         String methodName = declaredMethod.getName();
         if (!methodName.startsWith("test")) continue;
-        if (TestFrameworkUtil.isPerformanceTest(methodName, aClass.getName())) continue;
+        if (TestFrameworkUtil.isPerformanceTest(methodName, aClass)) continue;
         if (handler.shouldIgnore(declaredMethod)) continue;
         TestIndexingModeSupporter aCase = constructor.newInstance();
         aCase.setIndexingMode(handler.getIndexingMode());

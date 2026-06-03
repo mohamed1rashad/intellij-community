@@ -2,14 +2,18 @@
 package com.intellij.internal.statistic
 
 import com.intellij.internal.statistic.eventLog.EventLogGroup
-import com.intellij.internal.statistic.eventLog.events.*
+import com.intellij.internal.statistic.eventLog.events.EventField
+import com.intellij.internal.statistic.eventLog.events.EventFields
+import com.intellij.internal.statistic.eventLog.events.EventPair
+import com.intellij.internal.statistic.eventLog.events.IntEventField
+import com.intellij.internal.statistic.eventLog.events.VarargEventId
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.util.TimeoutUtil
 import com.intellij.util.containers.SmartHashSet
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.concurrency.Promise
-import java.util.*
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
 private val LOG = logger<StructuredIdeActivity>()
@@ -31,10 +35,10 @@ class StructuredIdeActivity internal constructor(
   private val projectOrNullForApplication: Project?,
   internal val ideActivityDefinition: IdeActivityDefinition,
   private val parentActivity: StructuredIdeActivity? = null,
-) {
-  val id: Int = parentActivity?.id ?: counter.incrementAndGet()
+): IdeActivity {
+  override val id: Int = parentActivity?.id ?: counter.incrementAndGet()
   private val stepsCounter: AtomicInteger by lazy { AtomicInteger(0) }
-  val stepId: Int by lazy {
+  override val stepId: Int by lazy {
     if (parentActivity == null) return@lazy -1 // fail safe
     var rootParentActivity: StructuredIdeActivity = parentActivity
     while (rootParentActivity.parentActivity != null) {
@@ -44,13 +48,16 @@ class StructuredIdeActivity internal constructor(
   }
 
   private var state = IdeActivityState.NOT_STARTED
-  var startedTimestamp: Long = 0L
+  override var startedTimestamp: Long = 0L
     private set
 
   private val innerActivities: MutableSet<StructuredIdeActivity> = Collections.synchronizedSet(SmartHashSet())
 
-  @JvmOverloads
-  fun started(dataSupplier: (() -> List<EventPair<*>>)? = null): StructuredIdeActivity {
+  override fun isFinished(): Boolean = state == IdeActivityState.FINISHED
+
+  override fun started(): StructuredIdeActivity = started(null)
+
+  override fun started(dataSupplier: (() -> List<EventPair<*>>)?): StructuredIdeActivity {
     if (parentNotStarted(parentActivity)) return this
     if (!LOG.assertTrue(state == IdeActivityState.NOT_STARTED, state.name)) return this
 
@@ -67,7 +74,7 @@ class StructuredIdeActivity internal constructor(
     return this
   }
 
-  fun startedAsync(dataSupplier: () -> Promise<List<EventPair<*>>>): StructuredIdeActivity {
+  override fun startedAsync(dataSupplier: () -> Promise<List<EventPair<*>>>): StructuredIdeActivity {
     if (parentNotStarted(parentActivity)) return this
     if (!LOG.assertTrue(state == IdeActivityState.NOT_STARTED, state.name)) return this
 
@@ -85,8 +92,9 @@ class StructuredIdeActivity internal constructor(
     return this
   }
 
-  @JvmOverloads
-  fun stageStarted(stage: VarargEventId, dataSupplier: (() -> List<EventPair<*>>)? = null): StructuredIdeActivity {
+  override fun stageStarted(stage: VarargEventId): IdeActivity = stageStarted(stage, null)
+
+  override fun stageStarted(stage: VarargEventId, dataSupplier: (() -> List<EventPair<*>>)?): StructuredIdeActivity {
     if (parentNotStarted(parentActivity)) return this
     if (!LOG.assertTrue(state == IdeActivityState.STARTED, state.name)) return this
 
@@ -99,8 +107,9 @@ class StructuredIdeActivity internal constructor(
     return this
   }
 
-  @JvmOverloads
-  fun finished(dataSupplier: (() -> List<EventPair<*>>)? = null): StructuredIdeActivity {
+  override fun finished(): StructuredIdeActivity = finished(null)
+
+  override fun finished(dataSupplier: (() -> List<EventPair<*>>)?): StructuredIdeActivity {
     if (parentNotStarted(parentActivity)) return this
     if (!LOG.assertTrue(state == IdeActivityState.STARTED, state.name)) return this
 

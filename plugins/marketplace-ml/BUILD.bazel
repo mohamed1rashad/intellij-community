@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.marketplaceMl` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "marketplace-ml_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "marketplace-ml",
   module_name = "intellij.marketplaceMl",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":marketplace-ml_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "@lib//:kotlin-stdlib",
     "//platform/core-api:core",
@@ -24,4 +19,30 @@ jvm_library(
     "//platform/ml-impl",
   ]
 )
+
+jvm_library(
+  name = "marketplace-ml_test_lib",
+  testonly = True,
+  module_name = "intellij.marketplaceMl",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":marketplace-ml",
+    "//platform/core-api:core_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//platform/testFramework",
+    "//platform/testFramework:testFramework_test_lib",
+    "//platform/platform-impl:ide-impl_test_lib",
+    "//platform/statistics:statistics_test_lib",
+    "//platform/platform-impl/internal:internal_test_lib",
+    "//libraries/caffeine:caffeine_test_lib",
+    "//platform/ml-impl:ml-impl_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.marketplaceMl` end
+
+### auto-generated section `iml intellij.marketplaceMl` start
+exports_files([
+  "intellij.marketplaceMl.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.marketplaceMl` end

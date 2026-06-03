@@ -13,17 +13,28 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.io.IoTestUtil
 import com.intellij.terminal.TerminalTitle
 import com.intellij.terminal.tests.block.testApps.SimpleTextRepeater
 import com.intellij.terminal.tests.block.util.TerminalSessionTestUtil
 import com.intellij.terminal.tests.block.util.TerminalSessionTestUtil.toCommandLine
-import com.intellij.testFramework.*
+import com.intellij.testFramework.DisposableRule
+import com.intellij.testFramework.EdtRule
+import com.intellij.testFramework.ExtensionTestUtil
+import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.ProjectRule
+import com.intellij.testFramework.RuleChain
+import com.intellij.testFramework.RunsInEdt
 import com.jediterm.core.util.TermSize
 import com.jediterm.terminal.TerminalCustomCommandListener
 import junit.framework.TestCase.failNotEquals
 import org.jetbrains.plugins.terminal.JBTerminalSystemSettingsProvider
 import org.jetbrains.plugins.terminal.block.BlockTerminalView
-import org.jetbrains.plugins.terminal.block.output.*
+import org.jetbrains.plugins.terminal.block.output.CommandBlock
+import org.jetbrains.plugins.terminal.block.output.TerminalOutputModel
+import org.jetbrains.plugins.terminal.block.output.TerminalOutputModelListener
+import org.jetbrains.plugins.terminal.block.output.withCommand
+import org.jetbrains.plugins.terminal.block.output.withOutput
 import org.jetbrains.plugins.terminal.block.prompt.ShellEditorBufferReportShellCommandListener
 import org.jetbrains.plugins.terminal.block.session.BlockTerminalSession
 import org.jetbrains.plugins.terminal.util.ShellType
@@ -36,7 +47,7 @@ import org.junit.jupiter.api.fail
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 import java.nio.file.Path
-import java.util.*
+import java.util.Objects
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit.MILLISECONDS
@@ -57,7 +68,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
 
   @Test
   fun `commands are executed in order`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     val (session, view) = startSessionAndCreateView()
     val count = 50
@@ -76,7 +87,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
   @TestFor(issues = ["IJPL-156363"])
   @Test
   fun `multiline commands with bracketed mode`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     val (session, view) = startSessionAndCreateView()
     assumeTrue(session.model.isBracketedPasteMode)
@@ -94,7 +105,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
   @TestFor(issues = ["IJPL-156274"])
   @Test
   fun `multiline commands without bracketed mode`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     val (session, view) = startSessionAndCreateView()
     Assume.assumeFalse(session.model.isBracketedPasteMode)
@@ -119,7 +130,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
 
   @Test
   fun `shell integration sends correct events`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     val actual = mutableListOf<String?>()
     val session = startBlockTerminalSession(disableSavingHistory = false) {
@@ -151,7 +162,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
   @TestFor(issues = ["IJPL-101408", "IJPL-165429"], classes = [ShellEditorBufferReportShellCommandListener::class])
   @Test
   fun `shell shell editor buffer reporting`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     val actual = mutableListOf<String?>()
     val session = startBlockTerminalSession(disableSavingHistory = false) {
@@ -180,7 +191,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
 
   @Test
   fun `basic hyperlinks are found`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     ExtensionTestUtil.maskExtensions<ConsoleFilterProvider>(
       ConsoleFilterProvider.FILTER_PROVIDERS,
@@ -206,7 +217,7 @@ internal class BlockTerminalCommandExecutionTest(private val shellPath: Path) {
 
   @Test
   fun `command with empty output`() {
-    Assume.assumeFalse(SystemInfo.isWindows)
+    IoTestUtil.assumeUnix()
 
     val (session, view) = startSessionAndCreateView()
     val commandLine = listOf("cd", ".").toCommandLine(session)

@@ -22,8 +22,9 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.util.Comparator;
 import java.util.Optional;
 
@@ -46,7 +47,7 @@ public abstract class DeployToServerSettingsEditor<S extends ServerConfiguration
     myDeploymentConfigurator = deploymentConfigurator;
     myProject = project;
 
-    myServerCombo = new RemoteServerComboWithAutoDetect<>(type);
+    myServerCombo = new RemoteServerComboWithAutoDetect<>(type, project);
     Disposer.register(this, myServerCombo);
     myServerCombo.addChangeListener(e -> updateDeploymentSettingsEditor());
 

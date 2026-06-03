@@ -1,18 +1,26 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.editor.impl;
 
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Caret;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorCustomElementRenderer;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.Inlay;
+import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.colors.FontPreferences;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.util.CheckedDisposable;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.testFramework.EditorTestUtil;
 import com.intellij.util.DocumentUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.*;
+import java.awt.Point;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -350,11 +358,11 @@ public class EditorInlayTest extends AbstractEditorTest {
 
   /**
    * Utility function for line-height block inlays testing.
-   *
+   * <p>
    * Converts geometric position of editor line that accounts block inlays to visual position that is applicable to text lines only.
-   *
+   * <p>
    * Consider the following example:
-   *
+   * <p>
    * abc <- geometric line 0, visual line 0
    * <block inlay with height being equal to line height> <- geometric line 1, visual line NA
    * cde <- geometric line 2, visual line 1
@@ -458,7 +466,7 @@ public class EditorInlayTest extends AbstractEditorTest {
     getEditor().getSettings().setAdditionalColumnsCount(0);
     getEditor().getInlayModel().addBlockElement(0, false, false, 0, new EditorCustomElementRenderer() {
       @Override
-      public int calcWidthInPixels(@NotNull Inlay inlay) { return 123;}
+      public int calcWidthInPixels(@NotNull Inlay inlay) { return 123; }
     });
     assertEquals(123, getEditor().getContentComponent().getPreferredSize().width);
   }
@@ -509,6 +517,107 @@ public class EditorInlayTest extends AbstractEditorTest {
     assertTrue(inlay.isValid());
     EditorFactory.getInstance().releaseEditor(editor);
     assertFalse(inlay.isValid());
+  }
+
+  public void testInlayForDisposedEditor2() {
+    Editor editor = EditorFactory.getInstance().createEditor(new DocumentImpl(""));
+    EditorFactory.getInstance().releaseEditor(editor);
+
+    Inlay<?> inlay1 = EditorTestUtil.addInlay(editor, 0);
+    Inlay<?> inlay2 = EditorTestUtil.addBlockInlay(editor, 0, false, false, 10, 10);
+    Inlay<?> inlay3 = EditorTestUtil.addAfterLineEndInlay(editor, 0, 10);
+
+    // inlays can be registered after Editor disposal, as many existing calls do not handle nullable result
+    assertNotNull(inlay1);
+    assertNotNull(inlay2);
+    assertNotNull(inlay3);
+
+    assertFalse(inlay1.isValid());
+    assertFalse(inlay2.isValid());
+    assertFalse(inlay3.isValid());
+
+    Disposable disposable = Disposer.newDisposable();
+    assertFalse(Disposer.tryRegister(inlay1, disposable));
+    assertFalse(Disposer.tryRegister(inlay2, disposable));
+    assertFalse(Disposer.tryRegister(inlay3, disposable));
+
+    assertThrows(RuntimeException.class, () -> {
+      Disposer.register(inlay1, disposable);
+    });
+    assertThrows(RuntimeException.class, () -> {
+      Disposer.register(inlay2, disposable);
+    });
+    assertThrows(RuntimeException.class, () -> {
+      Disposer.register(inlay3, disposable);
+    });
+  }
+
+  public void testInlayAreDisposables1() {
+    CheckedDisposable disposable1 = Disposer.newCheckedDisposable();
+    CheckedDisposable disposable2 = Disposer.newCheckedDisposable();
+    CheckedDisposable disposable3 = Disposer.newCheckedDisposable();
+
+    Editor editor = EditorFactory.getInstance().createEditor(new DocumentImpl(""));
+
+    Inlay<?> inlay1 = EditorTestUtil.addInlay(editor, 0);
+    Inlay<?> inlay2 = EditorTestUtil.addBlockInlay(editor, 0, false, false, 10, 10);
+    Inlay<?> inlay3 = EditorTestUtil.addAfterLineEndInlay(editor, 0, 10);
+
+    try {
+      try {
+        Disposer.register(inlay1, disposable1);
+        Disposer.register(inlay2, disposable2);
+        Disposer.register(inlay3, disposable3);
+      }
+      finally {
+        EditorFactory.getInstance().releaseEditor(editor);
+      }
+
+      assertTrue(disposable1.isDisposed());
+      assertTrue(disposable2.isDisposed());
+      assertTrue(disposable3.isDisposed());
+    }
+    finally {
+      Disposer.dispose(disposable1);
+      Disposer.dispose(disposable2);
+      Disposer.dispose(disposable3);
+    }
+  }
+
+  public void testInlayAreDisposables2() {
+    CheckedDisposable disposable1 = Disposer.newCheckedDisposable();
+    CheckedDisposable disposable2 = Disposer.newCheckedDisposable();
+    CheckedDisposable disposable3 = Disposer.newCheckedDisposable();
+
+    Editor editor = EditorFactory.getInstance().createEditor(new DocumentImpl("some\nmultiline\ntext"));
+
+    Inlay<?> inlay1 = EditorTestUtil.addInlay(editor, 10);
+    Inlay<?> inlay2 = EditorTestUtil.addBlockInlay(editor, 10, false, false, 10, 10);
+    Inlay<?> inlay3 = EditorTestUtil.addAfterLineEndInlay(editor, 10, 10);
+    try {
+      Disposer.register(inlay1, disposable1);
+      Disposer.register(inlay2, disposable2);
+      Disposer.register(inlay3, disposable3);
+
+      WriteCommandAction.runWriteCommandAction(getProject(), () -> {
+        editor.getDocument().setText("qwerty");
+      });
+
+      assertFalse(inlay1.isValid());
+      assertFalse(inlay2.isValid());
+      assertFalse(inlay3.isValid());
+
+      assertTrue(disposable1.isDisposed());
+      assertTrue(disposable2.isDisposed());
+      assertTrue(disposable3.isDisposed());
+    }
+    finally {
+      EditorFactory.getInstance().releaseEditor(editor);
+
+      Disposer.dispose(disposable1);
+      Disposer.dispose(disposable2);
+      Disposer.dispose(disposable3);
+    }
   }
 
   private void checkCaretPositionAndSelection(int offset, int logicalColumn, int visualColumn,

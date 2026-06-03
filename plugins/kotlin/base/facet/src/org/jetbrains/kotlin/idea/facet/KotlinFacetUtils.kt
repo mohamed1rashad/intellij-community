@@ -12,12 +12,28 @@ import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.roots.ModuleRootModel
 import com.intellij.openapi.roots.ProjectRootManager
-import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.StringUtil
-import org.jetbrains.kotlin.cli.common.arguments.*
+import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.K2JSCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.K2NativeCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.KotlinWasmCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.ManualLanguageFeatureSetting
+import org.jetbrains.kotlin.cli.common.arguments.copyBeanTo
+import org.jetbrains.kotlin.cli.common.arguments.copyCommonCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.copyFieldsSatisfying
+import org.jetbrains.kotlin.cli.common.arguments.copyK2JSCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.copyK2JVMCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.copyKotlinWasmCompilerArguments
+import org.jetbrains.kotlin.cli.common.arguments.parseCommandLineArguments
 import org.jetbrains.kotlin.compilerRunner.toArgumentStrings
-import org.jetbrains.kotlin.config.*
+import org.jetbrains.kotlin.config.CompilerSettings
+import org.jetbrains.kotlin.config.IKotlinFacetSettings
+import org.jetbrains.kotlin.config.JvmTarget
+import org.jetbrains.kotlin.config.LanguageVersion
+import org.jetbrains.kotlin.config.convertPathsToSystemIndependent
+import org.jetbrains.kotlin.config.createArguments
 import org.jetbrains.kotlin.idea.base.platforms.IdePlatformKindProjectStructure
 import org.jetbrains.kotlin.idea.base.util.isAndroidModule
 import org.jetbrains.kotlin.idea.compiler.configuration.IdeKotlinVersion
@@ -32,10 +48,7 @@ import org.jetbrains.kotlin.platform.TargetPlatform
 import org.jetbrains.kotlin.platform.idePlatformKind
 import org.jetbrains.kotlin.platform.impl.JvmIdePlatformKind
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
-import org.jetbrains.kotlin.psi.NotNullableUserDataProperty
 import kotlin.reflect.KProperty1
-
-var Module.hasExternalSdkConfiguration: Boolean by NotNullableUserDataProperty(Key.create("HAS_EXTERNAL_SDK_CONFIGURATION"), false)
 
 fun IKotlinFacetSettings.initializeIfNeeded(
     module: Module,
@@ -62,13 +75,10 @@ fun IKotlinFacetSettings.initializeIfNeeded(
 
         compilerArguments = targetPlatform.createArguments {
             if (argumentsForPlatform != null) {
-                when {
-                    argumentsForPlatform is K2JVMCompilerArguments &&
-                            this is K2JVMCompilerArguments -> copyK2JVMCompilerArguments(argumentsForPlatform, this)
-
-                    argumentsForPlatform is K2JSCompilerArguments &&
-                            this is K2JSCompilerArguments -> copyK2JSCompilerArguments(argumentsForPlatform, this)
-
+                when (argumentsForPlatform) {
+                    is K2JVMCompilerArguments if this is K2JVMCompilerArguments -> copyK2JVMCompilerArguments(argumentsForPlatform, this)
+                    is K2JSCompilerArguments if this is K2JSCompilerArguments -> copyK2JSCompilerArguments(argumentsForPlatform, this)
+                    is KotlinWasmCompilerArguments if this is KotlinWasmCompilerArguments -> copyKotlinWasmCompilerArguments(argumentsForPlatform, this)
                     else -> error("Unsupported copy arguments combination: ${argumentsForPlatform.javaClass.name} and ${javaClass.name}")
                 }
             }
@@ -179,7 +189,7 @@ fun applyCompilerArgumentsToFacetSettings(
             if (arguments.javaClass == this.javaClass) {
                 copyBeanTo(arguments, this) { property, value -> value != property.get(emptyArgs) }
             }
-            this.pluginOptions = joinPluginOptions(oldPluginOptions, arguments.pluginOptions)
+            this.pluginOptions = joinPluginOptions(oldPluginOptions, arguments.pluginOptions) ?: emptyArray()
 
             this.convertPathsToSystemIndependent()
 
@@ -258,7 +268,7 @@ fun applyCompilerArgumentsToFacetSettings(
 
 private fun Module.configureSdkIfPossible(compilerArguments: CommonCompilerArguments, modelsProvider: IdeModifiableModelsProvider) {
     // SDK for Android module is already configured by Android plugin at this point
-    if (isAndroidModule(modelsProvider) || hasNonOverriddenExternalSdkConfiguration(compilerArguments)) return
+    if (isAndroidModule(modelsProvider) || shouldSkipSdkConfiguration(compilerArguments)) return
 
     val projectSdk = ProjectRootManager.getInstance(project).projectSdk
     KotlinSdkType.setUpIfNeeded()
@@ -288,8 +298,8 @@ private fun Module.configureSdkIfPossible(compilerArguments: CommonCompilerArgum
     }
 }
 
-private fun Module.hasNonOverriddenExternalSdkConfiguration(compilerArguments: CommonCompilerArguments): Boolean =
-    hasExternalSdkConfiguration && (compilerArguments !is K2JVMCompilerArguments || compilerArguments.jdkHome == null)
+private fun shouldSkipSdkConfiguration(compilerArguments: CommonCompilerArguments): Boolean =
+    compilerArguments is K2JVMCompilerArguments && compilerArguments.jdkHome == null
 
 private fun substituteDefaults(args: List<String>, compilerArguments: CommonCompilerArguments): List<String> {
     val substitutedCompilerArguments = defaultSubstitutors[compilerArguments::class]

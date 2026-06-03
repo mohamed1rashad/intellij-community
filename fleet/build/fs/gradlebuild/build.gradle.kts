@@ -10,7 +10,6 @@ plugins {
   id("fleet.toolchain-conventions")
   alias(libs.plugins.dokka)
   id("fleet.module-publishing-conventions")
-  id("fleet.sdk-repositories-publishing-conventions")
   // GRADLE_PLUGINS__MARKER_START
   id("fleet-module")
   // GRADLE_PLUGINS__MARKER_END
@@ -20,7 +19,6 @@ fleetModule {
   module {
     name = "fleet.build.fs"
     importedFromJps {}
-    test {}
   }
 }
 
@@ -32,9 +30,12 @@ kotlin {
     "-opt-in=kotlin.ExperimentalStdlibApi",
     "-Xlambdas=class",
     "-Xconsistent-data-class-copy-visibility",
+    "-Xcontext-parameters",
     "-XXLanguage:+AllowEagerSupertypeAccessibilityChecks",
+    "-progressive",
   )
   jvm {}
+  sourceSets.jvmMain.configure { resources.srcDir(layout.projectDirectory.dir("../resources")) }
   sourceSets.commonMain.configure { kotlin.srcDir(layout.projectDirectory.dir("../srcCommonMain")) }
   sourceSets.commonMain.configure { resources.srcDir(layout.projectDirectory.dir("../resourcesCommonMain")) }
   sourceSets.commonTest.configure { kotlin.srcDir(layout.projectDirectory.dir("../srcCommonTest")) }
@@ -60,18 +61,13 @@ kotlin {
       exclude(group = "commons-io", module = "commons-io")
       exclude(group = "org.apache.commons", module = "commons-lang3")
     }
-    implementation(jps.commons.io.commons.io645698317.get())
     implementation(jps.org.apache.commons.commons.lang3579297339.get().let { "${it.group}:${it.name}:${it.version}" }) {
       isTransitive = false
     }
+    implementation(jps.commons.io.commons.io645698317.get())
   }
   sourceSets.commonTest.dependencies {
-    implementation(jps.org.jetbrains.kotlin.kotlin.test542871666.get().let { "${it.group}:${it.name}:${it.version}" }) {
-      exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
-    }
-  }
-  sourceSets.jvmTest.dependencies {
-    implementation(project(":fleet.junit4"))
+    implementation(project(":fleet.test.runtime"))
   }
   // KOTLIN__MARKER_END
 }

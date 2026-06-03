@@ -10,13 +10,20 @@ import com.intellij.vcsUtil.VcsUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import org.jdom.Element;
 import org.jdom.Verifier;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
-final class ChangeListManagerSerialization {
+@ApiStatus.Internal
+public final class ChangeListManagerSerialization {
   private static final int DISABLED_CHANGES_THRESHOLD = 100;
 
   private static final @NonNls String ATT_ID = "id";
@@ -147,14 +154,16 @@ final class ChangeListManagerSerialization {
       .build();
   }
 
-  private static @NotNull Element writeChange(@NotNull Change change) {
+  @ApiStatus.Internal
+  public static @NotNull Element writeChange(@NotNull Change change) {
     Element changeNode = new Element(NODE_CHANGE);
     writeContentRevision(changeNode, change.getBeforeRevision(), RevisionSide.BEFORE);
     writeContentRevision(changeNode, change.getAfterRevision(), RevisionSide.AFTER);
     return changeNode;
   }
 
-  private static @NotNull Change readChange(@NotNull Element changeNode, @NotNull Project project) {
+  @ApiStatus.Internal
+  public static @NotNull Change readChange(@NotNull Element changeNode, @NotNull Project project) {
     FakeRevision bRev = readContentRevision(changeNode, project, RevisionSide.BEFORE);
     FakeRevision aRev = readContentRevision(changeNode, project, RevisionSide.AFTER);
     return new Change(bRev, aRev);

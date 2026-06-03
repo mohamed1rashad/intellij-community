@@ -2,11 +2,15 @@
 package com.intellij.platform.workspace.jps.serialization.impl
 
 import com.intellij.java.workspace.entities.JavaModuleSettingsEntity
-import com.intellij.java.workspace.entities.ModifiableJavaModuleSettingsEntity
+import com.intellij.java.workspace.entities.JavaModuleSettingsEntityBuilder
 import com.intellij.platform.workspace.jps.serialization.SerializationContext
 import com.intellij.platform.workspace.storage.EntitySource
 import org.jdom.Element
-import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.*
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.EXCLUDE_OUTPUT_TAG
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.INHERIT_COMPILER_OUTPUT_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.MODULE_LANGUAGE_LEVEL_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.OUTPUT_TAG
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.TEST_OUTPUT_TAG
 
 internal object JavaSettingsSerializer {
   fun saveJavaSettings(javaSettings: JavaModuleSettingsEntity?, rootManagerElement: Element, context: SerializationContext) {
@@ -42,7 +46,7 @@ internal object JavaSettingsSerializer {
 
   fun loadJavaModuleSettings(rootManagerElement: Element,
                              context: SerializationContext,
-                             contentRootEntitySource: EntitySource ): ModifiableJavaModuleSettingsEntity? {
+                             contentRootEntitySource: EntitySource ): JavaModuleSettingsEntityBuilder? {
     val inheritedCompilerOutput = rootManagerElement.getAttributeAndDetach(INHERIT_COMPILER_OUTPUT_ATTRIBUTE)
     val languageLevel = rootManagerElement.getAttributeAndDetach(MODULE_LANGUAGE_LEVEL_ATTRIBUTE)
     val excludeOutput = rootManagerElement.getChildAndDetach(EXCLUDE_OUTPUT_TAG)

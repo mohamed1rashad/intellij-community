@@ -31,6 +31,7 @@ import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.ExperimentalUI;
 import com.intellij.ui.JBColor;
+import com.intellij.util.MathUtil;
 import com.intellij.util.SlowOperations;
 import com.intellij.util.ThreeState;
 import com.intellij.util.concurrency.ThreadingAssertions;
@@ -64,8 +65,8 @@ public final class ShowAutoImportPass extends TextEditorHighlightingPass {
   ShowAutoImportPass(@NotNull PsiFile psiFile, @NotNull Editor editor, @NotNull ProperTextRange visibleRange, boolean canChangeFileSilently) {
     super(psiFile.getProject(), editor.getDocument(), false);
     myCanChangeFileSilently = canChangeFileSilently;
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
-    ApplicationManager.getApplication().assertReadAccessAllowed();
+    ThreadingAssertions.assertBackgroundThread();
+    ThreadingAssertions.assertReadAccess();
 
     myEditor = editor;
     myVisibleRange = visibleRange;
@@ -88,9 +89,10 @@ public final class ShowAutoImportPass extends TextEditorHighlightingPass {
       });
 
       for (HighlightInfo info : infos) {
+        int insideOffset = MathUtil.clamp(info.getActualStartOffset(), 0, document.getTextLength());
         for (ReferenceImporter importer : ReferenceImporter.EP_NAME.getExtensionList()) {
           if (importer.isAddUnambiguousImportsOnTheFlyEnabled(myPsiFile)) {
-            BooleanSupplier action = importer.computeAutoImportAtOffset(myEditor, myPsiFile, info.getActualStartOffset(), false);
+            BooleanSupplier action = importer.computeAutoImportAtOffset(myEditor, myPsiFile, insideOffset, false);
             ContainerUtil.addIfNotNull(result, action);
           }
         }
@@ -223,7 +225,7 @@ public final class ShowAutoImportPass extends TextEditorHighlightingPass {
 
   public static @NotNull @NlsContexts.HintText String getMessage(@NotNull String kind, @NotNull String name) {
     String action = KeymapUtil.getFirstKeyboardShortcutText(ActionManager.getInstance().getAction(IdeActions.ACTION_SHOW_INTENTION_ACTIONS));
-    String actionColor = ColorUtil.toHex(JBColor.namedColor("shortcutForeground", 0x818594, 0x6F737A));
+    String actionColor = ColorUtil.toHex(com.intellij.codeInsight.hint.HintUtil.SHORTCUT_FOREGROUND_COLOR);
     return DaemonBundle.message("import.popup.hint.text", kind, name, action, actionColor);
   }
 

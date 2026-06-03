@@ -1,12 +1,13 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.lookup;
 
+import com.intellij.codeInsight.completion.CompletionItemLookupElement;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * What to do if there's only one element in completion lookup? Should the IDE show lookup or just insert this element? Call
  * {@link #applyPolicy(LookupElement)} to decorate {@link LookupElement} with correct policy.
- *
+ * <p>
  * Use this only in simple cases, use {@link com.intellij.codeInsight.completion.CompletionContributor#handleAutoCompletionPossibility(com.intellij.codeInsight.completion.AutoCompletionContext)}
  * for finer tuning.
  */
@@ -36,6 +37,9 @@ public enum AutoCompletionPolicy {
   ALWAYS_AUTOCOMPLETE;
 
   public @NotNull LookupElement applyPolicy(@NotNull LookupElement element) {
+    if (element instanceof CompletionItemLookupElement itemLookupElement) {
+      return itemLookupElement.withAutoCompletionPolicy(this);
+    }
     return new PolicyDecorator(element, this);
   }
 

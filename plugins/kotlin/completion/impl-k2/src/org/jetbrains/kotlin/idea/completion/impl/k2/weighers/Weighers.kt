@@ -1,18 +1,28 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
-package org.jetbrains.kotlin.idea.completion.weighers
+package org.jetbrains.kotlin.idea.completion.impl.k2.weighers
 
 import com.intellij.codeInsight.completion.CompletionSorter
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.parentsOfType
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
-import org.jetbrains.kotlin.analysis.api.components.*
+import org.jetbrains.kotlin.analysis.api.components.KaImplicitReceiver
+import org.jetbrains.kotlin.analysis.api.components.KaScopeContext
+import org.jetbrains.kotlin.analysis.api.components.allOverriddenSymbols
+import org.jetbrains.kotlin.analysis.api.components.arrayElementType
+import org.jetbrains.kotlin.analysis.api.components.expectedType
+import org.jetbrains.kotlin.analysis.api.components.expressionType
+import org.jetbrains.kotlin.analysis.api.components.fakeOverrideOriginal
+import org.jetbrains.kotlin.analysis.api.components.importingScopeContext
+import org.jetbrains.kotlin.analysis.api.components.resolveToSymbol
+import org.jetbrains.kotlin.analysis.api.components.scopeContext
+import org.jetbrains.kotlin.analysis.api.components.typeCreator
+import org.jetbrains.kotlin.analysis.api.components.withNullability
 import org.jetbrains.kotlin.analysis.api.lifetime.KaLifetimeOwner
 import org.jetbrains.kotlin.analysis.api.lifetime.KaLifetimeToken
 import org.jetbrains.kotlin.analysis.api.lifetime.withValidityAssertion
-import org.jetbrains.kotlin.analysis.api.resolution.KaAnnotationCall
-import org.jetbrains.kotlin.analysis.api.resolution.successfulCallOrNull
 import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
@@ -21,28 +31,40 @@ import org.jetbrains.kotlin.analysis.api.symbols.symbol
 import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.analysis.api.types.KaErrorType
 import org.jetbrains.kotlin.analysis.api.types.KaType
-import org.jetbrains.kotlin.analysis.utils.printer.parentOfType
 import org.jetbrains.kotlin.config.LanguageVersionSettings
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.getDefaultImportPaths
 import org.jetbrains.kotlin.idea.base.util.ImportableFqNameClassifier
-import org.jetbrains.kotlin.idea.completion.KotlinFirCompletionParameters
-import org.jetbrains.kotlin.idea.completion.KotlinFirCompletionParameters.Companion.languageVersionSettings
-import org.jetbrains.kotlin.idea.completion.KotlinFirCompletionParameters.Companion.useSiteModule
-import org.jetbrains.kotlin.idea.completion.contributors.helpers.CallableMetadataProvider
-import org.jetbrains.kotlin.idea.completion.contributors.helpers.KtSymbolWithOrigin
 import org.jetbrains.kotlin.idea.completion.impl.k2.K2CompletionSectionContext
+import org.jetbrains.kotlin.idea.completion.impl.k2.KotlinFirCompletionParameters
+import org.jetbrains.kotlin.idea.completion.impl.k2.KotlinFirCompletionParameters.Companion.languageVersionSettings
+import org.jetbrains.kotlin.idea.completion.impl.k2.KotlinFirCompletionParameters.Companion.useSiteModule
 import org.jetbrains.kotlin.idea.completion.impl.k2.context.getOriginalDeclarationOrSelf
-import org.jetbrains.kotlin.idea.completion.impl.k2.weighers.*
+import org.jetbrains.kotlin.idea.completion.impl.k2.contributors.helpers.CallableMetadataProvider
+import org.jetbrains.kotlin.idea.completion.impl.k2.contributors.helpers.KtSymbolWithOrigin
 import org.jetbrains.kotlin.idea.completion.implCommon.weighers.PreferKotlinClassesWeigher
 import org.jetbrains.kotlin.idea.completion.isPositionInsideImportOrPackageDirective
 import org.jetbrains.kotlin.idea.completion.isPositionSuitableForNull
 import org.jetbrains.kotlin.idea.references.mainReference
-import org.jetbrains.kotlin.idea.util.positionContext.*
+import org.jetbrains.kotlin.idea.util.positionContext.KotlinNameReferencePositionContext
+import org.jetbrains.kotlin.idea.util.positionContext.KotlinRawPositionContext
+import org.jetbrains.kotlin.idea.util.positionContext.KotlinSuperReceiverNameReferencePositionContext
+import org.jetbrains.kotlin.idea.util.positionContext.KotlinTypeNameReferencePositionContext
+import org.jetbrains.kotlin.idea.util.positionContext.KotlinWithSubjectEntryPositionContext
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtBinaryExpressionWithTypeRHS
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtCatchClause
+import org.jetbrains.kotlin.psi.KtCollectionLiteralExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtIsExpression
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
 import org.jetbrains.kotlin.resolve.ImportPath
 
 internal class WeighingContext private constructor(
@@ -167,7 +189,8 @@ internal class WeighingContext private constructor(
                     val typeReferenceOwner = positionContext.typeReference?.parent
                     if (typeReferenceOwner?.parent?.parent is KtCatchClause) {
                         // Prefer Throwables in catch clauses
-                        buildClassType(StandardClassIds.Throwable) as? KaClassType
+                        @OptIn(KaExperimentalApi::class)
+                        typeCreator.classType(StandardClassIds.Throwable) as? KaClassType
                     } else {
                         val leftHandExpression = when (typeReferenceOwner) {
                             is KtIsExpression -> typeReferenceOwner.leftHandSide
@@ -213,21 +236,17 @@ internal class WeighingContext private constructor(
         }
 
         /**
-         * Returns the expected type for elements within the collection literal
-         * if [nameExpression] is within a collection literal.
+         * Returns the expected type for elements within the [collectionLiteralExpression]
          *
-         * TODO: It seems like a bug in the analysis API that this is required: KT-76480
+         * TODO: It seems like a bug in the analysis API that this is required: KT-76480, KT-83737
          */
         context(_: KaSession)
         internal fun getAnnotationLiteralExpectedType(
-            nameExpression: KtElement,
+            collectionLiteralExpression: KtCollectionLiteralExpression,
         ): KaType? {
-            val collectionLiteralEntry = nameExpression.parent as? KtCollectionLiteralExpression ?: return null
-            val annotationArgument = collectionLiteralEntry.parent as? KtValueArgument ?: return null
-            val annotationEntry = annotationArgument.parentOfType<KtAnnotationEntry>() ?: return null
-            val annotationCall = annotationEntry.resolveToCall()?.successfulCallOrNull<KaAnnotationCall>() ?: return null
-            val callArgument = annotationCall.argumentMapping[collectionLiteralEntry] ?: return null
-            return callArgument.symbol.returnType
+            // If the literal has an expected type, then the expected type inside the literal is the
+            // array element type.
+            return collectionLiteralExpression.expectedType?.arrayElementType
         }
 
         context(_: KaSession)
@@ -294,6 +313,7 @@ internal object Weighers {
         @Suppress("DEPRECATION")
         applyWeighs(sectionContext.weighingContext, symbolWithOrigin)
         PreferMatchingArgumentNameWeigher.addWeight(lookupElement)
+        PreferNamedArgumentCompletionWeigher.addWeight(lookupElement)
     }
 
     @Deprecated("This method only exists for compatibility for the old Fir contributors and will be removed soon")
@@ -318,6 +338,8 @@ internal object Weighers {
         ClassifierWeigher.addWeight(lookupElement, symbol, symbolWithOrigin.scopeKind)
         VariableOrFunctionWeigher.addWeight(lookupElement, symbol)
         PreferredSubtypeWeigher.addWeight(context, lookupElement, symbol)
+        // Prefer Duration-based overloads for specific time-related APIs
+        DurationPreferringWeigher.addWeight(lookupElement, symbol)
 
         if (symbol !is KaCallableSymbol) return@also
 
@@ -332,6 +354,7 @@ internal object Weighers {
             PlatformWeighersIds.STATS,
             TrailingLambdaParameterNameWeigher,
             CompletionContributorGroupWeigher.Weigher,
+            PreferNamedArgumentCompletionWeigher.Weigher,
             ExpectedTypeWeigher.Weigher,
             DeprecatedWeigher.Weigher,
             PriorityWeigher.Weigher,
@@ -354,6 +377,8 @@ internal object Weighers {
             PlatformWeighersIds.PROXIMITY,
             ByNameAlphabeticalWeigher.Weigher,
             PreferKotlinClassesWeigher.Weigher,
+            // Prefer Duration-based overloads over Long-based ones for known time-related APIs
+            DurationPreferringWeigher.Weigher,
             PreferFewerParametersWeigher.Weigher,
             TrailingLambdaWeigher,
         ).weighBefore(

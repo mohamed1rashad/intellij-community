@@ -4,16 +4,34 @@ package com.intellij.openapi.options.ex;
 import com.intellij.diagnostic.PluginException;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.extensions.*;
-import com.intellij.openapi.options.*;
+import com.intellij.openapi.extensions.ExtensionPoint;
+import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.extensions.ExtensionsArea;
+import com.intellij.openapi.extensions.PluginDescriptor;
+import com.intellij.openapi.extensions.PluginId;
+import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.options.ConfigurableEP;
+import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.NonDefaultProjectConfigurable;
+import com.intellij.openapi.options.SearchableConfigurable;
+import com.intellij.openapi.options.UnnamedConfigurable;
 import com.intellij.openapi.options.newEditor.ConfigurableMarkerProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.JComponent;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.function.Predicate;
 
@@ -291,6 +309,17 @@ public class ConfigurableWrapper implements SearchableConfigurable, Weighted, Hi
              : getClass();
   }
 
+  @ApiStatus.Experimental
+  @Override
+  public boolean isSearchableInActions() {
+    UnnamedConfigurable configurable = myConfigurable;
+    if (configurable instanceof SearchableConfigurable searchableConfigurable) {
+      return searchableConfigurable.isSearchableInActions();
+    }
+
+    return myEp.searchableInActions;
+  }
+
   private @Nls @Nullable String markerText = null;
 
   @Override
@@ -393,13 +422,51 @@ public class ConfigurableWrapper implements SearchableConfigurable, Weighted, Hi
     public ConfigurableWrapper addChild(Configurable configurable) {
       if (myComparator != null) {
         int index = Arrays.binarySearch(myKids, configurable, myComparator);
-        LOG.assertTrue(index < 0, "similar configurable is already exist");
+        if (index >= 0) {
+          logColliding(configurable, index);
+        }
         myKids = ArrayUtil.insert(myKids, -1 - index, configurable);
       }
       else {
         myKids = ArrayUtil.append(myKids, configurable);
       }
       return this;
+    }
+
+    private void logColliding(@Nullable Configurable incoming, int existingIndex) {
+      String parentId = safeId(this);
+      String parentName = safeDisplayName(this);
+      String incomingName = safeDisplayName(incoming);
+      String incomingClass = incoming == null ? "null" : incoming.getClass().getName();
+      Configurable existing = (myKids != null && existingIndex >= 0 && existingIndex < myKids.length)
+                              ? myKids[existingIndex]
+                              : null;
+      String existingName = safeDisplayName(existing);
+      String existingClass = existing == null ? "null" : existing.getClass().getName();
+      LOG.error("Similar configurable already exists. Configurable display-name collision under parent id='" + parentId
+               + "' name='" + parentName + "': incoming displayName='" + incomingName
+               + "' class=" + incomingClass + "; existing displayName='" + existingName
+               + "' class=" + existingClass);
+    }
+
+    private static String safeDisplayName(@Nullable Configurable configurable) {
+      if (configurable == null) return "null";
+      try {
+        return String.valueOf(configurable.getDisplayName());
+      }
+      catch (Throwable t) {
+        return "<getDisplayName threw " + t.getClass().getSimpleName() + ">";
+      }
+    }
+
+    private static String safeId(@Nullable SearchableConfigurable configurable) {
+      if (configurable == null) return "null";
+      try {
+        return configurable.getId();
+      }
+      catch (Throwable t) {
+        return "<getId threw " + t.getClass().getSimpleName() + ">";
+      }
     }
 
     public void setFilter(Predicate<? super Configurable> filter) {

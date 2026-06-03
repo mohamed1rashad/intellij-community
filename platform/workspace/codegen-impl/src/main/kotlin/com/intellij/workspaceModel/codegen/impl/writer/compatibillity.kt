@@ -1,9 +1,22 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.workspaceModel.codegen.impl.writer
 
-import com.intellij.workspaceModel.codegen.deft.meta.*
-import com.intellij.workspaceModel.codegen.impl.CodeGeneratorVersionCalculator
-import com.intellij.workspaceModel.codegen.impl.writer.extensions.*
+import com.intellij.workspaceModel.codegen.deft.meta.ExtProperty
+import com.intellij.workspaceModel.codegen.deft.meta.ObjClass
+import com.intellij.workspaceModel.codegen.deft.meta.ObjProperty
+import com.intellij.workspaceModel.codegen.deft.meta.ValueType
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.additionalAnnotations
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.allFields
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.allRefsFields
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.allSuperClasses
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.builderWithTypeParameter
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.compatibleJavaBuilderName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.defaultJavaBuilderName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.getRefType
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.isRefType
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.javaFullName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.kotlinClassName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.requiresCompatibility
 import com.intellij.workspaceModel.codegen.impl.writer.fields.additionalAnnotations
 import com.intellij.workspaceModel.codegen.impl.writer.fields.javaType
 import java.util.Locale.getDefault
@@ -53,13 +66,13 @@ fun ObjClass<*>.generateCompatibilityCompanion(): String =
       if (mandatoryFields.isNotEmpty()) {
         line("operator fun invoke(")
         mandatoryFields.forEach { field ->
-          line(" ".repeat(this.indentSize) + "${field.name}: ${field.valueType.javaType},")
+          line("${field.name}: ${field.valueType.javaType},")
         }
-        line(" ".repeat(this.indentSize) + "init: (Builder$builderGeneric.() -> Unit)? = null,")
+        line("init: (Builder$builderGeneric.() -> Unit)? = null,")
         line("): Builder$builderGeneric = ${javaFullName}Type.compatibilityInvoke(${mandatoryFields.joinToString(", ") { it.name }}, init)")
       }
       else {
-        line("$generatedCodeVisibilityModifier operator fun invoke(init: (Builder$builderGeneric.() -> Unit)? = null): Builder$builderGeneric = = ${javaFullName}Type.compatibilityInvoke(init)")
+        line("${generatedCodeVisibilityModifier}operator fun invoke(init: (Builder$builderGeneric.() -> Unit)? = null): Builder$builderGeneric = = ${javaFullName}Type.compatibilityInvoke(init)")
       }
     }
   }
@@ -74,9 +87,9 @@ fun LinesBuilder.compatibilityInvoke(
   if (mandatoryFields.isNotEmpty()) {
     line("fun compatibilityInvoke(")
     mandatoryFields.forEach { field ->
-      line(" ".repeat(this.indentSize) + "${field.name}: ${field.valueType.javaType},")
+      line("${field.name}: ${field.valueType.javaType},")
     }
-    line(" ".repeat(this.indentSize) + "init: ($builderSymbol.() -> Unit)? = null,")
+    line("init: ($builderSymbol.() -> Unit)? = null,")
     section("): $builderSymbol") {
       line("val builder = builder() as $builderSymbol")
       list(mandatoryFields) {
@@ -95,7 +108,7 @@ fun LinesBuilder.compatibilityInvoke(
     }
   }
   else {
-    section("$generatedCodeVisibilityModifier fun compatibilityInvoke(init: ($builderSymbol.() -> Unit)? = null): $builderSymbol") {
+    section("${generatedCodeVisibilityModifier}fun compatibilityInvoke(init: ($builderSymbol.() -> Unit)? = null): $builderSymbol") {
       line("val builder = builder() as $builderSymbol")
       line("init?.invoke(builder)")
       line("return builder")
@@ -107,9 +120,9 @@ fun ObjClass<*>.compatibilityModifyCode(linesBuilder: LinesBuilder) {
   with(linesBuilder) {
     line(DEPRECATION)
     if (additionalAnnotations.isNotEmpty()) {
-      line(additionalAnnotations)
+      list(additionalAnnotations)
     }
-    line("$generatedCodeVisibilityModifier fun ${MutableEntityStorage}.modify$name(")
+    line("${generatedCodeVisibilityModifier}fun ${MutableEntityStorage}.modify$name(")
     line("  entity: $name,")
     line("  modification: $compatibleJavaBuilderName.() -> Unit,")
     line("): $name {")
@@ -127,7 +140,7 @@ fun ExtProperty<*, *>.compatibilityExtensionWsCode(linesBuilder: LinesBuilder) {
   }
   linesBuilder.line(DEPRECATION)
   val propertyType = valueType.compatibilityJavaBuilderTypeWithGeneric
-  linesBuilder.sectionNoBrackets("$parentAnnotation$generatedCodeVisibilityModifier var ${receiver.compatibleJavaBuilderName}$generic.$name: $propertyType") {
+  linesBuilder.sectionNoBrackets("$parentAnnotation${generatedCodeVisibilityModifier}var ${receiver.compatibleJavaBuilderName}$generic.$name: $propertyType") {
     line("get() = (this as ${receiver.defaultJavaBuilderName}$generic).$name as $propertyType")
     section("set(value)") {
       line("(this as ${receiver.defaultJavaBuilderName}$generic).$name = value")
@@ -143,6 +156,16 @@ private val ValueType<*>.compatibilityJavaBuilderTypeWithGeneric: QualifiedName
     ValueType.Boolean -> "Boolean".toQualifiedName()
     ValueType.Int -> "Int".toQualifiedName()
     ValueType.String -> "String".toQualifiedName()
+    ValueType.Char -> "Char".toQualifiedName()
+    ValueType.Long -> "Long".toQualifiedName()
+    ValueType.Float -> "Float".toQualifiedName()
+    ValueType.Double -> "Double".toQualifiedName()
+    ValueType.Short -> "Short".toQualifiedName()
+    ValueType.Byte -> "Byte".toQualifiedName()
+    ValueType.UByte -> "UByte".toQualifiedName()
+    ValueType.UShort -> "UShort".toQualifiedName()
+    ValueType.UInt -> "UInt".toQualifiedName()
+    ValueType.ULong -> "ULong".toQualifiedName()
     is ValueType.List<*> -> "List".toQualifiedName().appendSuffix("<${elementType.compatibilityJavaBuilderTypeWithGeneric}>")
     is ValueType.Set<*> -> "Set".toQualifiedName().appendSuffix("<${elementType.compatibilityJavaBuilderTypeWithGeneric}>")
     is ValueType.Map<*, *> -> "Map".toQualifiedName().appendSuffix("<${keyType.compatibilityJavaBuilderTypeWithGeneric}, ${valueType.compatibilityJavaBuilderTypeWithGeneric}>")

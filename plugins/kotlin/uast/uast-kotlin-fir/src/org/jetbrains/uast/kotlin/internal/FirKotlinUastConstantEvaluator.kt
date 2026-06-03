@@ -37,8 +37,8 @@ internal object FirKotlinUastConstantEvaluator {
         }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun KtExpression.unwrapKotlinValPropertyReference(): KtExpression? {
         if (this !is KtNameReferenceExpression) return this
         val variableSymbol = resolveToCall()?.successfulVariableAccessCall()?.symbol ?: return this
@@ -48,6 +48,7 @@ internal object FirKotlinUastConstantEvaluator {
         }
         return (variableSymbol as? KaPropertySymbol)?.initializer?.initializerPsi
             ?: variableSymbol.psiSafe<KtVariableDeclaration>()?.initializer
+            ?: this
     }
 
     private fun evaluateConstLike(uExpression: UExpression): Any? {

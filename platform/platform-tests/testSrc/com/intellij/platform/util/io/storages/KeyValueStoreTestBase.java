@@ -5,7 +5,11 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.io.CleanableStorage;
 import com.intellij.util.io.KeyValueStore;
 import org.jetbrains.annotations.NotNull;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
@@ -15,11 +19,13 @@ import java.util.Map.Entry;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.IntFunction;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * The issue with property-based tests of durable Maps is: because Map is durable, small and large worksets
- * may trigger different code paths. So to really stress most of branches in the code one need to generate
+ * may trigger different code paths. So to really stress most branches in the code, one needs to generate
  * quite a lot of key-values -- ideally, more than fit into a heap. But so many key-values trigger OutOfMemory
  * quite quickly -- especially because we have not very big -Xmx in TeamCity runs.
  * <p>

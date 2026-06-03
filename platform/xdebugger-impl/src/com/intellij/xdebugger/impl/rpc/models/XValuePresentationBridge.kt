@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl.rpc.models
 
+import com.intellij.ide.ui.icons.IconId
 import com.intellij.ide.ui.icons.rpcId
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.diagnostic.fileLogger
@@ -8,6 +9,7 @@ import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.debugger.impl.rpc.XValueAdvancedPresentationPart
 import com.intellij.platform.debugger.impl.rpc.XValueSerializedPresentation
+import com.intellij.xdebugger.frame.XDebuggerTreeNodeHyperlink
 import com.intellij.xdebugger.frame.XFullValueEvaluator
 import com.intellij.xdebugger.frame.XValue
 import com.intellij.xdebugger.frame.XValuePlace
@@ -15,7 +17,11 @@ import com.intellij.xdebugger.frame.presentation.XValuePresentation
 import com.intellij.xdebugger.frame.presentation.XValuePresentation.XValueTextRenderer
 import com.intellij.xdebugger.impl.ui.tree.XValueExtendedPresentation
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeEx
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.NonNls
 import javax.swing.Icon
 
@@ -24,18 +30,24 @@ internal fun XValue.computePresentation(
   place: XValuePlace,
   presentationHandler: (XValueSerializedPresentation) -> Unit,
   fullValueEvaluatorHandler: (XFullValueEvaluator?) -> Unit,
+  hyperlinkHandler: (XDebuggerTreeNodeHyperlink?) -> Unit,
 ) {
   val xValue = this
   cs.launch {
     var isObsolete = false
 
     val valueNode = object : XValueNodeEx {
+      private var _inlayIcon: Icon? = null
+      private var lastPresentation: XValueSerializedPresentation? = null
+
       override fun isObsolete(): Boolean {
         return isObsolete
       }
 
       override fun setPresentation(icon: Icon?, type: @NonNls String?, value: @NonNls String, hasChildren: Boolean) {
-        presentationHandler(XValueSerializedPresentation.SimplePresentation(icon?.rpcId(), type, value, hasChildren))
+        val presentation = XValueSerializedPresentation.SimplePresentation(icon?.rpcId(), _inlayIcon?.rpcId(), type, value, hasChildren)
+        lastPresentation = presentation
+        presentationHandler(presentation)
       }
 
       override fun setPresentation(icon: Icon?, presentation: XValuePresentation, hasChildren: Boolean) {
@@ -48,7 +60,7 @@ internal fun XValue.computePresentation(
         }
 
         val advancedPresentation = XValueSerializedPresentation.AdvancedPresentation(
-          icon?.rpcId(), hasChildren,
+          icon?.rpcId(), _inlayIcon?.rpcId(), hasChildren,
           presentation.separator, presentation.isShowName, presentation.type, presentation.isAsync,
           partsCollector.parts
         )
@@ -58,6 +70,7 @@ internal fun XValue.computePresentation(
         else {
           advancedPresentation
         }
+        lastPresentation = serializedPresentation
         presentationHandler(serializedPresentation)
       }
 
@@ -65,6 +78,14 @@ internal fun XValue.computePresentation(
         fullValueEvaluatorHandler(fullValueEvaluator)
       }
 
+      override fun setInlayIcon(icon: Icon?) {
+        if (icon === _inlayIcon) return
+        _inlayIcon = icon
+        val previousPresentation = lastPresentation ?: return
+        val presentation = previousPresentation.withInlayIcon(icon?.rpcId())
+        lastPresentation = presentation
+        presentationHandler(presentation)
+      }
 
       override fun getXValue(): XValue {
         return xValue
@@ -72,6 +93,14 @@ internal fun XValue.computePresentation(
 
       override fun clearFullValueEvaluator() {
         fullValueEvaluatorHandler(null)
+      }
+
+      override fun addAdditionalHyperlink(link: XDebuggerTreeNodeHyperlink) {
+        hyperlinkHandler(link)
+      }
+
+      override fun clearAdditionalHyperlinks() {
+        hyperlinkHandler(null)
       }
     }
     withContext(Dispatchers.EDT) {
@@ -88,6 +117,13 @@ internal fun XValue.computePresentation(
     }
   }
 }
+
+private fun XValueSerializedPresentation.withInlayIcon(icon: IconId?): XValueSerializedPresentation =
+  when (this) {
+    is XValueSerializedPresentation.AdvancedPresentation -> copy(inlayIcon = icon)
+    is XValueSerializedPresentation.ExtendedPresentation -> copy(presentation = presentation.copy(inlayIcon = icon))
+    is XValueSerializedPresentation.SimplePresentation -> copy(inlayIcon = icon)
+  }
 
 
 private class XValueTextRendererPartsCollector : XValueTextRenderer {

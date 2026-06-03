@@ -8,11 +8,22 @@ import com.intellij.openapi.vcs.changes.patch.CreatePatchCommitExecutor.ShelfPat
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.project.stateStore
-import com.intellij.testFramework.*
+import com.intellij.testFramework.ApplicationRule
+import com.intellij.testFramework.EdtRule
+import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.RunsInEdt
+import com.intellij.testFramework.TemporaryDirectory
+import com.intellij.testFramework.createTestOpenProjectOptions
+import com.intellij.testFramework.runInEdtAndWait
 import com.intellij.util.io.createDirectories
 import junit.framework.TestCase
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.*
+import org.junit.After
+import org.junit.Before
+import org.junit.ClassRule
+import org.junit.Rule
+import org.junit.Test
 import java.nio.file.Paths
 
 @RunsInEdt
@@ -50,6 +61,10 @@ class ShelveChangesManagerTest {
 
     project = ProjectManagerEx.getInstanceEx().openProject(projectFile, createTestOpenProjectOptions())!!
     shelvedChangesManager = ShelveChangesManager.getInstance(project)
+    runBlocking {
+      shelvedChangesManager.scheduleShelvesLoading().await()
+    }
+    assertThat(shelvedChangesManager.shelvedChangeLists).isNotEmpty
   }
 
   @After

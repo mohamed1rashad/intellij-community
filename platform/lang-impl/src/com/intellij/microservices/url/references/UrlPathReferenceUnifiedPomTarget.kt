@@ -3,7 +3,12 @@ package com.intellij.microservices.url.references
 
 import com.intellij.ide.presentation.Presentation
 import com.intellij.microservices.MicroservicesBundle
-import com.intellij.microservices.url.*
+import com.intellij.microservices.url.UrlPath
+import com.intellij.microservices.url.UrlResolveRequest
+import com.intellij.microservices.url.UrlResolverManager
+import com.intellij.microservices.url.UrlTargetInfo
+import com.intellij.microservices.url.compatibleSchemes
+import com.intellij.microservices.url.filterBestUrlPathMatches
 import com.intellij.microservices.utils.lazySynchronousResolve
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
@@ -46,7 +51,7 @@ class UrlPathReferenceUnifiedPomTarget internal constructor(
     get() {
       return resolvedTargets
         .mapNotNullTo(HashSet()) { it.resolveToPsiElement() }
-        .singleOrNull()?.navigationElement
+        .singleOrNull()
         ?.let { nav ->
           nav as? NavigatablePsiElement ?: run {
             if (ApplicationManager.getApplication().run { isInternal || isUnitTestMode }) {

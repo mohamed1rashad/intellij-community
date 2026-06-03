@@ -3,6 +3,7 @@ package com.intellij.ide.plugins
 
 import com.intellij.diagnostic.LoadingState
 import com.intellij.ide.plugins.marketplace.statistics.PluginManagerUsageCollector
+import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.PluginId
@@ -12,6 +13,7 @@ import com.intellij.openapi.util.IntellijInternalApi
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JComponent
 
 private val LOG = logger<DynamicPluginEnabler>()
@@ -62,17 +64,28 @@ class DynamicPluginEnabler : PluginEnabler {
       PluginManagerUsageCollector.pluginsStateChanged(descriptors, enable = true, project)
     }
 
-    PluginEnabler.HEADLESS.enable(descriptors)
+    val disabledStateChanged = PluginEnabler.HEADLESS.enable(descriptors)
     val installedDescriptors = findInstalledPlugins(descriptors) ?: return false
-    val pluginsLoaded = if (progressTitle == null) {
-      DynamicPlugins.loadPlugins(installedDescriptors, project)
-    } else {
+
+    val pluginsLoaded: Boolean
+    if (!disabledStateChanged && installedDescriptors.all { PluginManagerCore.isLoaded(it) }) {
+      // nothing to do
+      pluginsLoaded = true
+    }
+    else if (progressTitle == null) {
+      val loaded = AtomicBoolean(false)
+      runInEdt {
+        loaded.set(DynamicPlugins.loadPlugins(installedDescriptors, project))
+      }
+      pluginsLoaded = loaded.get()
+    }
+    else {
       val progress = PotemkinProgress(progressTitle, project, null, null)
       var result = false
       progress.runInSwingThread {
         result = DynamicPlugins.loadPlugins(installedDescriptors, project)
       }
-      result
+      pluginsLoaded = result
     }
 
     for (listener in pluginEnableStateChangedListeners) {
@@ -108,20 +121,22 @@ class DynamicPluginEnabler : PluginEnabler {
   }
 }
 
-private fun findInstalledPlugins(descriptors: Collection<IdeaPluginDescriptor>): List<IdeaPluginDescriptorImpl>? {
+private fun findInstalledPlugins(descriptors: Collection<IdeaPluginDescriptor>): List<PluginMainDescriptor>? {
   val result = descriptors.mapNotNull {
     runCatching { findInstalledPlugin(it) }
       .getOrLogException(LOG)
   }
-  return if (result.size == descriptors.size) result else null
+  if (result.size != descriptors.size) {
+    return null
+  }
+  return result.distinct() // drop duplicates just in case
 }
 
-private fun findInstalledPlugin(descriptor: IdeaPluginDescriptor): IdeaPluginDescriptorImpl {
+private fun findInstalledPlugin(descriptor: IdeaPluginDescriptor): PluginMainDescriptor {
   return when (descriptor) {
-    is IdeaPluginDescriptorImpl -> descriptor
+    is IdeaPluginDescriptorImpl -> descriptor.getMainDescriptor()
     is PluginNode -> {
       val pluginId = descriptor.pluginId
-
       PluginManagerCore.getPluginSet().findInstalledPlugin(pluginId)
       ?: throw IllegalStateException("Plugin '$pluginId' is not installed")
     }

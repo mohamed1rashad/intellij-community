@@ -239,13 +239,11 @@ class PolySymbolsCompletionQueryTest : PolySymbolsMockQueryExecutorTestBase() {
           params: PolySymbolCodeCompletionQueryParams,
           stack: PolySymbolQueryStack,
         ): List<PolySymbolCodeCompletionItem> {
-          return if (qualifiedName.qualifiedKind == HTML_ATTRIBUTES) {
+          return if (qualifiedName.kind == HTML_ATTRIBUTES) {
             listOf(PolySymbolCodeCompletionItem.create("bar"))
           }
           else emptyList()
         }
-
-        override fun getModificationCount(): Long = 0
       }, null, testRootDisposable)
     doTest("html/elements/", 0, "vue", "nested-pattern")
   }

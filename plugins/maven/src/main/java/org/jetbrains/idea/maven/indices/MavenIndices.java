@@ -14,13 +14,17 @@ import org.jetbrains.idea.maven.model.MavenRepositoryInfo;
 import org.jetbrains.idea.maven.model.RepositoryKind;
 import org.jetbrains.idea.maven.server.MavenIndexerWrapper;
 import org.jetbrains.idea.maven.utils.MavenLog;
-import org.jetbrains.idea.reposearch.DependencySearchService;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -194,16 +198,6 @@ public class MavenIndices implements Disposable {
 
     return new RepositoryDiff<>(newMavenIndices, oldIndices);
   }
-
-
-  private static void clearDependencySearchCache(@NotNull Project project) {
-    try {
-      DependencySearchService.getInstance(project).clearCache();
-    }
-    catch (AlreadyDisposedException ignored) {
-    }
-  }
-
 
   private static @NotNull MavenIndex createMavenIndex(@NotNull String id, @NotNull String repositoryPathOrUrl, RepositoryKind repositoryKind) {
     throw new UnsupportedOperationException();

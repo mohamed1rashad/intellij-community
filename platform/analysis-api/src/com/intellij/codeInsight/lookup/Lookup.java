@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.codeInsight.lookup;
 
@@ -12,7 +12,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.awt.*;
+import java.awt.Rectangle;
 import java.util.List;
 
 /**
@@ -28,6 +28,8 @@ public interface Lookup {
   /**
    * @return the offset in {@link #getTopLevelEditor()} which this lookup's left side should be aligned with. Note that if the lookup doesn't fit
    * the screen due to its dimensions, the actual position might differ from this editor offset.
+   *
+   * @implNote this method does not play well with {@link #getPsiFile()} and {@link #getPsiElement()} if completion is called in injected editor.
    */
   int getLookupStart();
 
@@ -73,6 +75,7 @@ public interface Lookup {
   /**
    * @return PSI file, possibly injected, associated with this lookup's editor
    * @see #getEditor()
+   * @implNote this method does not play well with {@link #getLookupStart()} if completion is called in injected editor.
    */
   @Nullable
   PsiFile getPsiFile();
@@ -85,7 +88,7 @@ public interface Lookup {
   boolean isCompletion();
 
   @Unmodifiable
-  @NotNull List<LookupElement> getItems();
+  @NotNull List<@NotNull LookupElement> getItems();
 
   boolean isFocused();
 
@@ -98,5 +101,5 @@ public interface Lookup {
   boolean isSelectionTouched();
 
   @Unmodifiable
-  List<String> getAdvertisements();
+  @NotNull List<@NotNull String> getAdvertisements();
 }

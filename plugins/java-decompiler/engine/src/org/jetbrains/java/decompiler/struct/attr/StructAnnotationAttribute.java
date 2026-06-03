@@ -1,9 +1,14 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.java.decompiler.struct.attr;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.java.decompiler.code.CodeConstants;
-import org.jetbrains.java.decompiler.modules.decompiler.exps.*;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.AnnotationExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.ConstExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.FieldExprent;
+import org.jetbrains.java.decompiler.modules.decompiler.exps.NewExprent;
 import org.jetbrains.java.decompiler.struct.consts.ConstantPool;
 import org.jetbrains.java.decompiler.struct.consts.PrimitiveConstant;
 import org.jetbrains.java.decompiler.struct.gen.FieldDescriptor;
@@ -29,7 +34,10 @@ public class StructAnnotationAttribute extends StructGeneralAttribute {
     if (len > 0) {
       List<AnnotationExprent> annotations = new ArrayList<>(len);
       for (int i = 0; i < len; i++) {
-        annotations.add(parseAnnotation(data, pool));
+        AnnotationExprent annotation = parseAnnotation(data, pool);
+        if (isSupportedAnnotationName(annotation.getClassName())) {
+          annotations.add(annotation);
+        }
       }
       return annotations;
     }
@@ -58,6 +66,14 @@ public class StructAnnotationAttribute extends StructGeneralAttribute {
     }
 
     return new AnnotationExprent(new VarType(className).getValue(), names, values);
+  }
+
+  /**
+   * Synthetic JDK markers like {@code jdk/Profile+Annotation} are legal in the classfile
+   * format but not a valid Java reference. Skip them at parse time.
+   */
+  private static boolean isSupportedAnnotationName(@Nullable String className) {
+    return className == null || (className.indexOf('+') < 0 && className.indexOf('-') < 0);
   }
 
   public static Exprent parseAnnotationElement(DataInputStream data, ConstantPool pool) throws IOException {
@@ -104,7 +120,7 @@ public class StructAnnotationAttribute extends StructGeneralAttribute {
           newType = new VarType(CodeConstants.TYPE_OBJECT, 1, "java/lang/Object");
         }
         else {
-          VarType elementType = elements.get(0).getExprType();
+          VarType elementType = elements.getFirst().getExprType();
           newType = new VarType(elementType.getType(), 1, elementType.getValue());
         }
 

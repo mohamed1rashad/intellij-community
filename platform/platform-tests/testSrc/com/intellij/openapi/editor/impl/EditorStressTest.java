@@ -2,7 +2,14 @@
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.CustomFoldRegion;
+import com.intellij.openapi.editor.CustomFoldRegionRenderer;
+import com.intellij.openapi.editor.CustomWrap;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.EditorCustomElementRenderer;
+import com.intellij.openapi.editor.FoldRegion;
+import com.intellij.openapi.editor.FoldingModel;
+import com.intellij.openapi.editor.Inlay;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.FoldingModelEx;
@@ -12,8 +19,9 @@ import com.intellij.openapi.util.Key;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JViewport;
+import java.awt.Dimension;
+import java.awt.Graphics2D;
 import java.awt.geom.Rectangle2D;
 import java.util.Arrays;
 import java.util.List;
@@ -37,6 +45,18 @@ public class EditorStressTest extends AbstractEditorTest {
   private static final int MAX_INLAY_OPERATIONS_IN_BATCH = 3;
   private static final int MAX_CUSTOM_FOLD_REGION_WIDTH = 50;
 
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    setUpCustomWrapSupport();
+  }
+
+  private static final List<? extends Action> CUSTOM_WRAP_ACTIONS = Arrays.asList(
+    new AddCustomWrap(),
+    new RemoveCustomWrap(),
+    new ToggleSoftWrapping()
+  );
+
   private static final List<? extends Action> INLAY_PRIMITIVE_ACTIONS = Arrays.asList(
     new AddInlay(),
     new RemoveInlay(),
@@ -56,7 +76,7 @@ public class EditorStressTest extends AbstractEditorTest {
     new ChangeEditorVisibility(),
     new BatchInlayOperation(),
     new MoveCaret()
-  ), INLAY_PRIMITIVE_ACTIONS);
+  ), INLAY_PRIMITIVE_ACTIONS, CUSTOM_WRAP_ACTIONS);
 
   public void testRandomActions() {
     LOG.debug("Seed is " + mySeed);
@@ -282,6 +302,36 @@ public class EditorStressTest extends AbstractEditorTest {
       DocumentEx document = editor.getDocument();
       if (document.isInBulkUpdate()) return;
       editor.getCaretModel().moveToOffset(random.nextInt(document.getTextLength() + 1));
+    }
+  }
+
+  private static class AddCustomWrap implements Action {
+    @Override
+    public void perform(EditorEx editor, Random random) {
+      int offset = random.nextInt(editor.getDocument().getTextLength() + 1);
+      int indentInColumns = random.nextInt(5);
+      int priority = random.nextInt(5);
+      editor.getCustomWrapModel().runBatchMutation(mutator -> mutator.addWrap(offset, indentInColumns, priority));
+    }
+  }
+
+  private static class RemoveCustomWrap implements Action {
+    @Override
+    public void perform(EditorEx editor, Random random) {
+      List<CustomWrap> wraps = editor.getCustomWrapModel().getWraps();
+      if (wraps.isEmpty()) return;
+      editor.getCustomWrapModel().runBatchMutation(mutator -> mutator.removeWrap(wraps.get(random.nextInt(wraps.size()))));
+    }
+  }
+
+  private static class ToggleSoftWrapping implements Action {
+    @Override
+    public void perform(EditorEx editor, Random random) {
+      if (editor.getDocument().isInBulkUpdate()) return;
+      boolean shouldToggle = random.nextBoolean();
+      if (!shouldToggle) return;
+      boolean newIsUseSoftWraps = !editor.getSettings().isUseSoftWraps();
+      editor.getSettings().setUseSoftWraps(newIsUseSoftWraps);
     }
   }
 

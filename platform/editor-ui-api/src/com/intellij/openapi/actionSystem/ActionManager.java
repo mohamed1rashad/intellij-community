@@ -1,14 +1,16 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.actionSystem;
 
-import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.ex.AnActionListener;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.util.ActionCallback;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.awt.*;
+import java.awt.Component;
 import java.awt.event.InputEvent;
 import java.util.List;
 
@@ -135,14 +137,6 @@ public abstract class ActionManager {
                                                        @Nullable Component contextComponent,
                                                        @Nullable String place,
                                                        boolean now);
-
-  /**
-   * @deprecated Use {@link AnActionListener#TOPIC}
-   */
-  @Deprecated(forRemoval = true)
-  public void addAnActionListener(AnActionListener listener, Disposable parentDisposable) {
-    ApplicationManager.getApplication().getMessageBus().connect(parentDisposable).subscribe(AnActionListener.TOPIC, listener);
-  }
 
   public abstract @Nullable KeyboardShortcut getKeyboardShortcut(@NonNls @NotNull String actionId);
 

@@ -2,22 +2,29 @@
 package com.intellij.openapi.application.ex;
 
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.*;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ReadActionListener;
+import com.intellij.openapi.application.ThreadingSupport;
+import com.intellij.openapi.application.WriteActionListener;
+import com.intellij.openapi.application.WriteIntentReadActionListener;
+import com.intellij.openapi.application.WriteLockReacquisitionListener;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Conditions;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
-import com.intellij.openapi.util.ThrowableComputable;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public interface ApplicationEx extends Application {
   String LOCATOR_FILE_NAME = ".home";
@@ -187,17 +194,6 @@ public interface ApplicationEx extends Application {
   }
 
   /**
-   * Runs the specified action, releasing the write-intent lock if it is acquired at the moment of the call.
-   * <p>
-   * This method is used to implement higher-level API. Please do not use it directly.
-   */
-  @ApiStatus.Internal
-  @SuppressWarnings("UnusedReturnValue")
-  default <T, E extends Throwable> T runUnlockingIntendedWrite(@NotNull ThrowableComputable<T, E> action) throws E {
-    return action.compute();
-  }
-
-  /**
    * Runs the specified action under the write-intent lock. Can be called from any thread. The action is executed immediately
    * if no write-intent action is currently running or blocked until the currently running write-intent action completes.
    * <p>
@@ -231,21 +227,39 @@ public interface ApplicationEx extends Application {
   }
 
   @ApiStatus.Internal
-  default void addReadActionListener(@NotNull ReadActionListener listener, @NotNull Disposable parentDisposable) { }
+  default void addReadActionListener(@NotNull ReadActionListener listener, @NotNull Disposable parentDisposable) {
+    ThreadingSupport threadingSupport = getThreadingSupport();
+    if (threadingSupport != null) {
+      threadingSupport.addReadActionListener(listener);
+      Disposer.register(parentDisposable, () -> threadingSupport.removeReadActionListener(listener));
+    }
+  }
 
   @ApiStatus.Experimental
-  default void addWriteActionListener(@NotNull WriteActionListener listener, @NotNull Disposable parentDisposable) { }
+  default void addWriteActionListener(@NotNull WriteActionListener listener, @NotNull Disposable parentDisposable) {
+    ThreadingSupport threadingSupport = getThreadingSupport();
+    if (threadingSupport != null) {
+      threadingSupport.addWriteActionListener(listener);
+      Disposer.register(parentDisposable, () -> threadingSupport.removeWriteActionListener(listener));
+    }
+  }
 
   @ApiStatus.Internal
-  default void addWriteIntentReadActionListener(@NotNull WriteIntentReadActionListener listener, @NotNull Disposable parentDisposable) { }
+  default void addWriteIntentReadActionListener(@NotNull WriteIntentReadActionListener listener, @NotNull Disposable parentDisposable) {
+    ThreadingSupport threadingSupport = getThreadingSupport();
+    if (threadingSupport != null) {
+      threadingSupport.addWriteIntentReadActionListener(listener);
+      Disposer.register(parentDisposable, () -> threadingSupport.removeWriteIntentReadActionListener(listener));
+    }
+  }
 
   @ApiStatus.Internal
   @ApiStatus.Obsolete
-  default void addSuspendingWriteActionListener(@NotNull WriteLockReacquisitionListener listener, @NotNull Disposable parentDisposable) { }
+  default void addSuspendingWriteActionListener(@NotNull WriteLockReacquisitionListener<?> listener, @NotNull Disposable parentDisposable) { }
 
   @ApiStatus.Internal
-  default void prohibitTakingLocksInsideAndRun(@NotNull Runnable runnable, boolean failSoftly, @NlsSafe String advice) {
-    runnable.run();
+  default <T> T withLocksProhibited(@NotNull @NlsSafe String advice, @NotNull Supplier<T> action) {
+    return action.get();
   }
 
   /**

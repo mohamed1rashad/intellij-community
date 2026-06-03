@@ -17,10 +17,14 @@ import git4idea.history.GitHistoryUtils
 import git4idea.history.GitLogUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.jetbrains.plugins.github.api.*
+import org.jetbrains.plugins.github.api.GHGQLRequests
+import org.jetbrains.plugins.github.api.GHRepositoryPath
+import org.jetbrains.plugins.github.api.GithubApiRequestExecutor
+import org.jetbrains.plugins.github.api.GithubApiRequests
 import org.jetbrains.plugins.github.api.data.GithubIssueState
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestShort
 import org.jetbrains.plugins.github.api.data.pullrequest.toPRIdentifier
+import org.jetbrains.plugins.github.api.executeSuspend
 import org.jetbrains.plugins.github.pullrequest.data.GHPRIdentifier
 import org.jetbrains.plugins.github.util.GHGitRepositoryMapping
 
@@ -83,7 +87,7 @@ internal class GHPRCreationServiceImpl(private val requestExecutor: GithubApiReq
         val mergeBase = GitHistoryUtils.getMergeBase(baseRepo.gitRepository.project, baseRepo.gitRepository.root,
                                                      baseBranch.name, headBranch.name)
                         ?: error("Unrelated branches ${baseBranch.name} ${headBranch.name}")
-        val headRef = baseRepo.gitRepository.branches.getHash(headBranch) ?: error("Branch ${headBranch.name} has bo revision")
+        val headRef = baseRepo.gitRepository.branches.getHash(headBranch) ?: error("Branch ${headBranch.name} has no revision")
         GitChangeUtils.getThreeDotDiffOrThrow(baseRepo.gitRepository, baseBranch.name, headBranch.name).map {
           it.toComparisonChange(mergeBase.rev, headRef.asString())
         }

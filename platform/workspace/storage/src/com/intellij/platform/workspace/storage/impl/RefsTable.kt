@@ -7,11 +7,26 @@ import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.ConnectionId.ConnectionType
 import com.intellij.platform.workspace.storage.WorkspaceEntity
-import com.intellij.platform.workspace.storage.impl.containers.*
-import com.intellij.platform.workspace.storage.impl.references.*
+import com.intellij.platform.workspace.storage.impl.containers.ImmutableIntIntUniqueBiMap
+import com.intellij.platform.workspace.storage.impl.containers.ImmutableNonNegativeIntIntBiMap
+import com.intellij.platform.workspace.storage.impl.containers.IntIntUniqueBiMap
+import com.intellij.platform.workspace.storage.impl.containers.LinkedBidirectionalMap
+import com.intellij.platform.workspace.storage.impl.containers.MutableIntIntUniqueBiMap
+import com.intellij.platform.workspace.storage.impl.containers.MutableNonNegativeIntIntBiMap
+import com.intellij.platform.workspace.storage.impl.containers.NonNegativeIntIntBiMap
+import com.intellij.platform.workspace.storage.impl.containers.NonNegativeIntIntMultiMap
+import com.intellij.platform.workspace.storage.impl.references.ImmutableAbstractOneToOneContainer
+import com.intellij.platform.workspace.storage.impl.references.ImmutableOneToAbstractManyContainer
+import com.intellij.platform.workspace.storage.impl.references.ImmutableOneToManyContainer
+import com.intellij.platform.workspace.storage.impl.references.ImmutableOneToOneContainer
+import com.intellij.platform.workspace.storage.impl.references.MutableAbstractOneToOneContainer
+import com.intellij.platform.workspace.storage.impl.references.MutableOneToAbstractManyContainer
+import com.intellij.platform.workspace.storage.impl.references.MutableOneToManyContainer
+import com.intellij.platform.workspace.storage.impl.references.MutableOneToOneContainer
+import com.intellij.platform.workspace.storage.impl.references.ReferenceContainer
 import com.intellij.platform.workspace.storage.instrumentation.Modification
 import it.unimi.dsi.fastutil.ints.IntArrayList
-import java.util.function.BiConsumer
+import it.unimi.dsi.fastutil.ints.IntIntBiConsumer
 import java.util.function.IntConsumer
 import java.util.function.IntFunction
 
@@ -233,7 +248,7 @@ internal class MutableRefsTable(
         add(Modification.Remove(parentId, createEntityId(it, connectionId.childClass)))
       })
       val previousParents = copiedMap.addAll(newChildren, parentId.arrayId)
-      previousParents.forEach(BiConsumer { child, parent ->
+      previousParents.forEach(IntIntBiConsumer { child, parent ->
         add(Modification.Remove(createEntityId(parent, connectionId.parentClass), createEntityId(child, connectionId.childClass)))
       })
       newChildren.forEach { child ->
@@ -377,7 +392,7 @@ internal class MutableRefsTable(
       val removedParent = copiedMap.removeKey(childId.arrayId)
       val removedChildren = copiedMap.addAll(intArrayOf(childId.arrayId), parentId.id.arrayId)
       if (removedParent != null) add(Modification.Remove(createEntityId(removedParent, connectionId.parentClass), childId))
-      removedChildren.forEach { (child, parent) ->
+      removedChildren.forEach { child, parent ->
         add(Modification.Remove(createEntityId(parent, connectionId.parentClass), createEntityId(child, connectionId.childClass)))
       }
       add(Modification.Add(parentId.id, childId))

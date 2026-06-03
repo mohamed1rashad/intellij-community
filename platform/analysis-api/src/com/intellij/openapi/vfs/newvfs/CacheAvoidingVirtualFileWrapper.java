@@ -4,20 +4,25 @@ package com.intellij.openapi.vfs.newvfs;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VFileProperty;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileSystem;
 import com.intellij.openapi.vfs.VirtualFileWithId;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.UnknownNullability;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.function.Supplier;
+import java.util.stream.StreamSupport;
 
 /**
  * A wrapper for {@link NewVirtualFile} to avoid caching any _new_ entries in VFS during file-tree walking via this class's
@@ -29,7 +34,7 @@ import java.util.function.Supplier;
  *   <li>Children access: those go through {@link NewVirtualFileSystem#findCachedOrTransientFileByPath(NewVirtualFileSystem, String)}
  *   methods. I.e., all the children that are got from this file are either {@link CacheAvoidingVirtualFileWrapper},
  *   or {@link TransientVirtualFileImpl}.</li>
- *   <li>{@link com.intellij.openapi.util.UserDataHolder} trait methods: their behavior are made consistent with the behavior
+ *   <li>{@link UserDataHolder} trait methods: their behavior are made consistent with the behavior
  *   of apt methods of {@link TransientVirtualFileImpl}, so see it's javadoc for more details</li>
  * </ol>
  */
@@ -72,9 +77,12 @@ public final class CacheAvoidingVirtualFileWrapper extends VirtualFile implement
 
   @Override
   public VirtualFile[] getChildren() {
-    if (wrappedFile.allChildrenLoaded()) {//fast-track:
-      Collection<VirtualFile> cachedChildren = wrappedFile.getCachedChildren();
-      return cachedChildren.stream()
+    if( !wrappedFile.isDirectory() ){
+      return VirtualFile.EMPTY_ARRAY;
+    }
+
+    if (wrappedFile.allChildrenCached()) {//fast-track:
+      return StreamSupport.stream(wrappedFile.iterInDbChildren().spliterator(), /*parallel: */false)
         .map(child -> ((NewVirtualFile)child).asCacheAvoiding())
         .toArray(VirtualFile[]::new);
     }
@@ -97,7 +105,13 @@ public final class CacheAvoidingVirtualFileWrapper extends VirtualFile implement
     if (child != null) {
       return new CacheAvoidingVirtualFileWrapper(child);
     }
-    return new TransientVirtualFileImpl(childName, getPath() + '/' + childName, fileSystem, this);
+    TransientVirtualFileImpl file = new TransientVirtualFileImpl(childName, getPath() + '/' + childName, fileSystem, this);
+    if (file.exists()) {
+      return file;
+    }
+    else {
+      return null;
+    }
   }
 
   @Override
@@ -110,8 +124,24 @@ public final class CacheAvoidingVirtualFileWrapper extends VirtualFile implement
 
   @Override
   public @NotNull VirtualFile findOrCreateChildData(Object requestor,
-                                                    @NotNull String name) throws IOException {
-    return findChild(name);
+                                                    @NotNull String childName) throws IOException {
+    NewVirtualFileSystem fileSystem = wrappedFile.getFileSystem();
+    NewVirtualFile child = wrappedFile.findChildIfCached(childName);
+    if (child != null) {
+      return new CacheAvoidingVirtualFileWrapper(child);
+    }
+    TransientVirtualFileImpl file = new TransientVirtualFileImpl(childName, getPath() + '/' + childName, fileSystem, this);
+    if (file.exists()) {
+      return file;
+    }
+    else {
+      fileSystem.createChildFile(requestor, this, childName);
+      VirtualFile newChild = findChild(childName);
+      if (newChild == null) {
+        throw new AssertionError("[" + file.getPath() + "] was just created, must be found and !null");
+      }
+      return newChild;
+    }
   }
 
   //<editor-fold desc="VirtualFile trivial delegates"> =====================================================================================

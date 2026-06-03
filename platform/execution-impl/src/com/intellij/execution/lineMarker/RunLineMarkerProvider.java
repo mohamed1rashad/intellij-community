@@ -26,6 +26,8 @@ import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.ui.ColorUtil;
 import com.intellij.util.Function;
 import com.intellij.util.SmartList;
@@ -38,11 +40,12 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * @author Dmitry Avdeev
@@ -195,8 +198,16 @@ public class RunLineMarkerProvider extends LineMarkerProviderDescriptor implemen
 
     RunLineMarkerInfo(PsiElement element, Icon icon, Function<? super PsiElement, @Nls String> tooltipProvider, DefaultActionGroup actionGroup) {
       super(element, element.getTextRange(), icon, tooltipProvider, null, GutterIconRenderer.Alignment.CENTER,
-            () -> tooltipProvider.fun(element));
+            createSupplier(element, tooltipProvider));
       myActionGroup = actionGroup;
+    }
+
+    private static @NotNull Supplier<@Nls String> createSupplier(PsiElement element, Function<? super PsiElement, @Nls String> tooltipProvider) {
+      SmartPsiElementPointer<PsiElement> pointer = SmartPointerManager.createPointer(element);
+      return () -> {
+        PsiElement pointerElement = pointer.getElement();
+        return pointerElement != null ? tooltipProvider.fun(pointerElement) : "";
+      };
     }
 
     @Override

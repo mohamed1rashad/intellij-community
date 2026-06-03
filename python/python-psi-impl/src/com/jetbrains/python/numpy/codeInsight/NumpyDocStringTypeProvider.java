@@ -31,15 +31,35 @@ import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.documentation.docstrings.DocStringUtil;
 import com.jetbrains.python.documentation.docstrings.NumpyDocString;
 import com.jetbrains.python.documentation.docstrings.SectionBasedDocString.SectionField;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCallSiteExpression;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyNamedParameter;
+import com.jetbrains.python.psi.PyNumericLiteralExpression;
+import com.jetbrains.python.psi.PyPsiFacade;
+import com.jetbrains.python.psi.PyStringLiteralExpression;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.resolve.PyResolveImportUtil;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyClassTypeImpl;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeProviderBase;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.toolbox.Substring;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -96,7 +116,9 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
     NUMPY_ALIAS_TO_REAL_TYPE.put("non-zero int", "int");
   }
 
-  private static @Nullable NumpyDocString forFunction(@NotNull PyFunction function, @Nullable PsiElement reference, @Nullable String knownSignature) {
+  private static @Nullable NumpyDocString forFunction(@NotNull PyFunction function,
+                                                      @Nullable PsiElement reference,
+                                                      @Nullable String knownSignature) {
     String docString = function.getDocStringValue();
     if (docString == null) {
       // Docstring for constructor can be found in the docstring of class
@@ -177,7 +199,47 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
     if (index >= 0) {
       return typeString.substring(0, index);
     }
+
+    // Match ", default None" with various separators and spacings:
+    //   ", default None", ", default=None", ", default:None",
+    //   ", default: None", ", default = None", etc.
+    int defaultIndex = findDefaultSuffixStart(typeString);
+    if (defaultIndex >= 0 && isDefaultValueNone(typeString, defaultIndex)) {
+      return typeString.substring(0, defaultIndex);
+    }
+
     return null;
+  }
+
+  /**
+   * Strips ", default <value>" from the type string regardless of the default value.
+   * Returns the original string when no such suffix is present.
+   * Unlike {@link #cleanupOptional}, this does not imply the parameter is Optional.
+   */
+  public static @NotNull String stripDefaultValue(@NotNull String typeString) {
+    int index = findDefaultSuffixStart(typeString);
+    return index >= 0 ? typeString.substring(0, index) : typeString;
+  }
+
+  private static int findDefaultSuffixStart(@NotNull String typeString) {
+    int index = typeString.indexOf(", default");
+    if (index < 0) return -1;
+    int after = index + ", default".length();
+    if (after >= typeString.length()) return -1;
+    char nextChar = typeString.charAt(after);
+    return (nextChar == ' ' || nextChar == '=' || nextChar == ':') ? index : -1;
+  }
+
+  private static boolean isDefaultValueNone(@NotNull String typeString, int defaultStart) {
+    int pos = defaultStart + ", default".length();
+    while (pos < typeString.length() && Character.isWhitespace(typeString.charAt(pos))) pos++;
+    if (pos < typeString.length() && (typeString.charAt(pos) == '=' || typeString.charAt(pos) == ':')) {
+      pos++;
+      while (pos < typeString.length() && Character.isWhitespace(typeString.charAt(pos))) pos++;
+    }
+    if (!typeString.startsWith("None", pos)) return false;
+    if (pos + 4 == typeString.length()) return true;
+    return !Character.isJavaIdentifierPart(typeString.charAt(pos + 4));
   }
 
   public static @NotNull List<String> getNumpyUnionType(@NotNull String typeString) {
@@ -193,7 +255,9 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
   }
 
   @Override
-  public @Nullable Ref<PyType> getCallType(@NotNull PyFunction function, @NotNull PyCallSiteExpression callSite, @NotNull TypeEvalContext context) {
+  public @Nullable Ref<PyType> getCallType(@NotNull PyFunction function,
+                                           @NotNull PyCallSiteExpression callSite,
+                                           @NotNull TypeEvalContext context) {
     if (isApplicable(function)) {
       final PyExpression callee = callSite instanceof PyCallExpression ? ((PyCallExpression)callSite).getCallee() : null;
       final NumpyDocString docString = forFunction(function, callee);
@@ -250,7 +314,9 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
   }
 
   @Override
-  public @Nullable Ref<PyType> getParameterType(@NotNull PyNamedParameter parameter, @NotNull PyFunction function, @NotNull TypeEvalContext context) {
+  public @Nullable Ref<PyType> getParameterType(@NotNull PyNamedParameter parameter,
+                                                @NotNull PyFunction function,
+                                                @NotNull TypeEvalContext context) {
     if (isApplicable(function)) {
       final String name = parameter.getName();
       if (name != null) {
@@ -279,7 +345,7 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
 
   private static boolean isApplicable(@NotNull PsiElement element) {
     final Module module = ModuleUtilCore.findModuleForPsiElement(element);
-    if (module != null){
+    if (module != null) {
       if (PyDocumentationSettings.getInstance(module).isNumpyFormat(element.getContainingFile())) {
         return true;
       }
@@ -345,6 +411,9 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
     if (withoutOptional != null) {
       typeString = withoutOptional;
     }
+    else {
+      typeString = stripDefaultValue(typeString);
+    }
     for (String typeName : getNumpyUnionType(typeString)) {
       PyType parsedType = parseSingleNumpyDocType(anchor, typeName);
       if (parsedType != null) {
@@ -382,7 +451,8 @@ public final class NumpyDocStringTypeProvider extends PyTypeProviderBase {
       }
       if (paramType != null) {
         if (isUfuncType(function, paramType)) {
-          return getPsiFacade(function).parseTypeAnnotation("numbers.Number or numpy.core.multiarray.ndarray or collections.abc.Iterable", function);
+          return getPsiFacade(function).parseTypeAnnotation("numbers.Number or numpy.core.multiarray.ndarray or collections.abc.Iterable",
+                                                            function);
         }
         final PyType numpyDocType = parseNumpyDocType(function, paramType);
         if ("size".equals(parameterName)) {

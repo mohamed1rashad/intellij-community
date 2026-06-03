@@ -11,15 +11,22 @@ interface Notification {
   fun getContent(): String
   fun getGroupId(): String
   fun getActions(): List<AnAction>
+  fun getType(): NotificationType
+  fun hideBalloon()
 }
+
+@Remote("com.intellij.notification.NotificationType")
+interface NotificationType {
+}
+
 
 @Remote("com.intellij.notification.ActionCenter")
 interface ActionCenter {
-  fun getNotifications(project: Project): List<Notification>
+  fun getNotifications(project: Project?): List<Notification>
 }
 
-fun Driver.getNotifications(project: Project? = null): Collection<Notification> {
+fun Driver.getNotifications(project: Project? = singleProject()): Collection<Notification> {
   return withContext(OnDispatcher.EDT) {
-    utility<ActionCenter>().getNotifications(project ?: singleProject())
+    utility<ActionCenter>().getNotifications(project)
   }
 }

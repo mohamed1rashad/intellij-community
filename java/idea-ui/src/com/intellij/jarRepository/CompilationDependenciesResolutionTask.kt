@@ -2,7 +2,7 @@
 package com.intellij.jarRepository
 
 import com.intellij.ide.JavaUiBundle
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.compiler.CompileContext
 import com.intellij.openapi.compiler.CompileTask
 import com.intellij.openapi.compiler.CompilerMessageCategory
@@ -19,7 +19,6 @@ import com.intellij.workspaceModel.ide.impl.legacyBridge.library.LibraryBridge
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.concurrency.Promise
 import org.jetbrains.idea.maven.utils.library.RepositoryUtils
-import kotlin.sequences.any
 
 /**
  * Compilation dependencies should be resolved before launching the build process not to have:
@@ -53,8 +52,7 @@ internal class CompilationDependenciesResolutionTask : CompileTask {
 
     val queue = LibraryIdSynchronizationQueue.getInstance(context.project)
     val missingLibrariesResolutionTasks = mutableMapOf<LibraryEx, ResolutionTask>()
-    val application = ApplicationManager.getApplication()
-    val affectedModules = application.runReadAction<Array<Module>> {
+    val affectedModules = runReadActionBlocking {
       context.compileScope.affectedModules
     }
     for (module in affectedModules) {

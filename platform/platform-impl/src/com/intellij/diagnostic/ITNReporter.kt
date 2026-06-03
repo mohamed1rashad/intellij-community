@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diagnostic
 
 import com.intellij.diagnostic.ITNProxy.ErrorBean
@@ -22,12 +22,16 @@ import com.intellij.openapi.ui.MessageDialogBuilder
 import com.intellij.openapi.ui.Messages
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.util.Consumer
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.awt.Component
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal val NOTIFY_SUCCESS_EACH_REPORT = AtomicBoolean(true) // dirty hack, reporter API does not support any optional args
+internal val SHOW_NEW_BUILD_DIALOG = AtomicBoolean(true) // ensures the "New Build Available" dialog is shown at most once per user action
 
 /**
  * This is an internal implementation of [ErrorReportSubmitter] which is used to report exceptions in IntelliJ platform
@@ -37,9 +41,9 @@ internal val NOTIFY_SUCCESS_EACH_REPORT = AtomicBoolean(true) // dirty hack, rep
  * Third-party plugins need to provide their own implementations of [ErrorReportSubmitter].
  */
 @InternalIgnoreDependencyViolation
-open class ITNReporter internal constructor(private val postUrl: String) : ErrorReportSubmitter() {
+open class ITNReporter internal constructor(private val postUrl: String?) : ErrorReportSubmitter() {
   @ApiStatus.Internal
-  constructor() : this("https://ea-report.jetbrains.com/trackerRpc/idea/createScr")
+  constructor() : this(postUrl = null)
 
   override fun getReportActionText(): String = DiagnosticBundle.message("error.report.to.jetbrains.action")
 
@@ -53,23 +57,22 @@ open class ITNReporter internal constructor(private val postUrl: String) : Error
     parentComponent: Component,
     consumer: Consumer<in SubmittedReportInfo>
   ): Boolean {
-    val errorBean = createReportBean(events[0], additionalInfo)
+    val errorBean = createReportBean(events[0], additionalInfo, autoReported = false)
     val project = CommonDataKeys.PROJECT.getData(DataManager.getInstance().getDataContext(parentComponent))
     return submit(project, errorBean, parentComponent, consumer::consume)
   }
 
   @ApiStatus.Internal
   suspend fun submitAutomated(event: IdeaLoggingEvent): SubmittedReportInfo {
-    val errorBean = createReportBean(event, comment = "Automatically reported exception")
-    return service<ITNProxyCoroutineScopeHolder>().coroutineScope.async {
-      try {
-        val reportId = ITNProxy.sendError(errorBean, postUrl)
-        SubmittedReportInfo(ITNProxy.getBrowseUrl(reportId), reportId.toString(), SubmittedReportInfo.SubmissionStatus.NEW_ISSUE)
-      }
-      catch (_: Exception) {
-        SubmittedReportInfo(SubmittedReportInfo.SubmissionStatus.FAILED)
-      }
-    }.await()
+    val errorBean = createReportBean(event, comment = "Automatically reported exception", autoReported = true)
+    return try {
+      val reportId = ITNProxy.sendError(errorBean, postUrl)
+      SubmittedReportInfo(ITNProxy.getBrowseUrl(reportId), reportId.toString(), SubmittedReportInfo.SubmissionStatus.NEW_ISSUE)
+    }
+    catch (e: Exception) {
+      LOG.warn("Failed to submit exception automatically", e)
+      SubmittedReportInfo(SubmittedReportInfo.SubmissionStatus.FAILED)
+    }
   }
 
   /**
@@ -77,11 +80,10 @@ open class ITNReporter internal constructor(private val postUrl: String) : Error
    */
   open fun showErrorInRelease(event: IdeaLoggingEvent): Boolean = false
 
-  @ApiStatus.Internal
-  fun hostId(): String = ITNProxy.DEVICE_ID
-
-  private fun createReportBean(event: IdeaLoggingEvent, comment: String?): ErrorBean =
-    ErrorBean(event, comment, event.plugin?.pluginId?.idString, event.plugin?.name, event.plugin?.version, IdeaLogger.ourLastActionId)
+  private fun createReportBean(event: IdeaLoggingEvent, comment: String?, autoReported: Boolean) = ErrorBean(
+    event, comment, event.problematicPluginInfo?.pluginId?.idString, event.problematicPluginInfo?.name, event.problematicPluginInfo?.version,
+    IdeaLogger.ourLastActionId, autoReported
+  )
 
   private fun submit(
     project: Project?,
@@ -130,16 +132,17 @@ open class ITNReporter internal constructor(private val postUrl: String) : Error
     parentComponent: Component,
     callback: (SubmittedReportInfo) -> Unit
   ) {
-    val logger = Logger.getInstance(ITNReporter::class.java)
-    logger.info("reporting failed: ${e}")
-    logger.debug(e)
+    LOG.info("reporting failed: ${e}")
+    LOG.debug(e)
     withContext(Dispatchers.EDT) {
       if (e is UpdateAvailableException) {
-        val message = DiagnosticBundle.message("error.report.new.build.message", e.message)
-        val title = DiagnosticBundle.message("error.report.new.build.title")
-        val icon = Messages.getWarningIcon()
-        if (parentComponent.isShowing) Messages.showMessageDialog(parentComponent, message, title, icon)
-        else Messages.showMessageDialog(project, message, title, icon)
+        if (SHOW_NEW_BUILD_DIALOG.compareAndSet(true, false)) {
+          val message = DiagnosticBundle.message("error.report.new.build.message", e.message)
+          val title = DiagnosticBundle.message("error.report.new.build.title")
+          val icon = Messages.getWarningIcon()
+          if (parentComponent.isShowing) Messages.showMessageDialog(parentComponent, message, title, icon)
+          else Messages.showMessageDialog(project, message, title, icon)
+        }
         callback(SubmittedReportInfo(SubmittedReportInfo.SubmissionStatus.FAILED))
       }
       else if (e is CancellationException) {
@@ -154,5 +157,10 @@ open class ITNReporter internal constructor(private val postUrl: String) : Error
         }
       }
     }
+  }
+  
+  @ApiStatus.Internal
+  companion object {
+    private val LOG = Logger.getInstance(ITNReporter::class.java)
   }
 }

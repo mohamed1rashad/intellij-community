@@ -18,18 +18,32 @@ import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.CharsetToolkit;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLiteralValue;
+import com.intellij.psi.PsiNameIdentifierOwner;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.impl.source.tree.ForeignLeafPsiElement;
 import com.intellij.psi.impl.source.tree.LeafElement;
 import com.intellij.usages.ChunkExtractor;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.Charset;
+import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static com.intellij.codeInspection.options.OptPane.*;
+import static com.intellij.codeInspection.options.OptPane.checkbox;
+import static com.intellij.codeInspection.options.OptPane.group;
+import static com.intellij.codeInspection.options.OptPane.pane;
 
 @ApiStatus.Internal
 public final class NonAsciiCharactersInspection extends LocalInspectionTool {
@@ -56,9 +70,11 @@ public final class NonAsciiCharactersInspection extends LocalInspectionTool {
 
   @Override
   public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly, @NotNull LocalInspectionToolSession session) {
-    PsiFile file = session.getFile();
-    if (!isFileWorthIt(file)) return PsiElementVisitor.EMPTY_VISITOR;
-    SyntaxHighlighter syntaxHighlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(file.getFileType(), file.getProject(), file.getVirtualFile());
+    PsiFile psiFile = session.getFile();
+    if (!isFileWorthIt(psiFile)) {
+      return PsiElementVisitor.EMPTY_VISITOR;
+    }
+    SyntaxHighlighter syntaxHighlighter = SyntaxHighlighterFactory.getSyntaxHighlighter(psiFile.getFileType(), psiFile.getProject(), psiFile.getVirtualFile());
     return new PsiElementVisitor() {
       @Override
       public void visitElement(@NotNull PsiElement element) {
@@ -203,7 +219,13 @@ public final class NonAsciiCharactersInspection extends LocalInspectionTool {
   }
 
   private static boolean isFileWorthIt(@NotNull PsiFile file) {
-    if (InjectedLanguageManager.getInstance(file.getProject()).isInjectedFragment(file)) return false;
+    if (InjectedLanguageManager.getInstance(file.getProject()).isInjectedFragment(file)) {
+      Language language = file.getLanguage();
+      language = Objects.requireNonNullElse(language.getBaseLanguage(), language);
+      if (!language.getID().equals("RegExp")) {
+        return false;
+      }
+    }
     VirtualFile virtualFile = file.getVirtualFile();
     if (virtualFile == null) return false;
     CharSequence text = file.getViewProvider().getContents();

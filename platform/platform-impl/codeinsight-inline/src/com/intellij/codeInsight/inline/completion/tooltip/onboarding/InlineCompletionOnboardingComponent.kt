@@ -1,7 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.inline.completion.tooltip.onboarding
 
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
 import com.intellij.util.application
 import com.intellij.util.xmlb.XmlSerializerUtil
 import com.intellij.util.xmlb.annotations.Property
@@ -42,7 +46,7 @@ class InlineCompletionOnboardingComponent : PersistentStateComponent<InlineCompl
   }
 
   companion object {
-    private const val MAX_SHOWN_TIME_MS = 10_000L
+    private const val MAX_SHOWN_TIME_MS = 3000L
 
     fun getInstance(): InlineCompletionOnboardingComponent = service()
   }

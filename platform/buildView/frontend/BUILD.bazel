@@ -1,30 +1,70 @@
 ### auto-generated section `build intellij.platform.buildView.frontend` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "frontend_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "frontend",
   module_name = "intellij.platform.buildView.frontend",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":frontend_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "@lib//:kotlin-stdlib",
     "//platform/kernel/shared:kernel",
     "//platform/buildView",
     "//platform/core-api:core",
     "//platform/platform-impl:ide-impl",
+    "//platform/lang-api:lang",
     "//platform/lang-impl",
     "//platform/core-ui",
     "//platform/editor-ui-api:editor-ui",
     "//platform/util/coroutines",
     "//platform/platform-impl/rpc",
     "//platform/ide-core-impl",
+    "//platform/ide-core",
+    "//platform/project/shared:project",
+    "//platform/platform-util-io:ide-util-io",
+    "//platform/execution",
+    "//platform/execution-impl",
+    "//platform/util:util-ui",
+    "//fleet/rhizomedb",
+    "//platform/execution-impl/frontend",
+  ]
+)
+
+jvm_library(
+  name = "frontend_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.buildView.frontend",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":frontend",
+    "//platform/kernel/shared:kernel_test_lib",
+    "//platform/buildView:buildView_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//platform/platform-impl:ide-impl_test_lib",
+    "//platform/lang-api:lang_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//platform/core-ui:core-ui_test_lib",
+    "//platform/editor-ui-api:editor-ui_test_lib",
+    "//platform/util/coroutines:coroutines_test_lib",
+    "//platform/platform-impl/rpc:rpc_test_lib",
+    "//platform/ide-core-impl:ide-core-impl_test_lib",
+    "//platform/ide-core:ide-core_test_lib",
+    "//platform/project/shared:project_test_lib",
+    "//platform/platform-util-io:ide-util-io_test_lib",
+    "//platform/execution:execution_test_lib",
+    "//platform/execution-impl:execution-impl_test_lib",
+    "//platform/util:util-ui_test_lib",
+    "//fleet/rhizomedb:rhizomedb_test_lib",
+    "//platform/execution-impl/frontend:frontend_test_lib",
   ]
 )
 ### auto-generated section `build intellij.platform.buildView.frontend` end
+
+### auto-generated section `iml intellij.platform.buildView.frontend` start
+exports_files([
+  "intellij.platform.buildView.frontend.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.buildView.frontend` end

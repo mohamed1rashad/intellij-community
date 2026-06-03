@@ -1,22 +1,47 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.quickfix
 
 import com.intellij.codeInsight.intention.PriorityAction
 import com.intellij.modcommand.ModCommandAction
 import com.intellij.psi.PsiElement
+import com.intellij.psi.util.findParentOfType
 import org.jetbrains.kotlin.descriptors.annotations.KotlinTarget
+import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.idea.util.findAnnotation
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtAnnotated
+import org.jetbrains.kotlin.psi.KtAnnotatedExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassBody
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtDestructuringDeclaration
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtScriptInitializer
+import org.jetbrains.kotlin.psi.KtTypeAlias
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypesAndPredicate
 import org.jetbrains.kotlin.resolve.checkers.OptInNames
 
 // TODO: migrate from FqName to ClassId fully when the K1 plugin is dropped.
 abstract class OptInGeneralUtilsBase {
-    data class CandidateData(val element: KtElement, val kind: AddAnnotationFix.Kind)
+    data class CandidateData(val element: KtElement, val kind: AddAnnotationFix.Kind) {
+        fun addTo(destination: MutableList<CandidateData>) {
+            if (destination.any { this.element == it.element }) return
+            destination.add(this)
+        }
+    }
 
     abstract fun KtDeclaration.isSubclassOptPropagateApplicable(annotationFqName: FqName): Boolean
 
@@ -69,7 +94,33 @@ abstract class OptInGeneralUtilsBase {
         }
     }
 
-    fun collectCandidates(element: PsiElement): List<CandidateData> {
+    fun collectScriptCandidates(element: KtElement): List<CandidateData> {
+        val result = mutableListOf<CandidateData>()
+        var current: PsiElement? = element
+
+        val closestDeclaration = element.findParentOfType<KtDeclaration>(strict = false)
+
+        while (current != null) {
+            when (current) {
+                is KtClassOrObject if closestDeclaration != current -> findContainingClassOrObjectCandidate(current)?.addTo(result)
+
+                is KtCallExpression -> findSamConstructorCallCandidate(current)?.addTo(result)
+
+                is KtDeclaration
+                    if (current is KtDeclarationWithBody && current !is KtLambdaExpression && current !is KtFunctionLiteral
+                        || current is KtTypeAlias
+                        || current is KtProperty
+                        || current is KtClassOrObject) ->
+                    findContainingDeclarationCandidate(current).addTo(result)
+            }
+            current = current.parent
+        }
+
+        findStatementCandidate(element)?.addTo(result)
+        return result.sortedBy { it.kind == AddAnnotationFix.Kind.Self }
+    }
+
+    fun collectCandidates(element: KtElement): List<CandidateData> {
         val result = mutableListOf<CandidateData>()
 
         val containingDeclaration: KtDeclaration = element.getParentOfTypesAndPredicate(
@@ -85,8 +136,10 @@ abstract class OptInGeneralUtilsBase {
         val containingDeclarationCandidate = findContainingDeclarationCandidate(containingDeclaration)
         result.add(containingDeclarationCandidate)
         if (containingDeclaration is KtCallableDeclaration) {
-            findContainingClassOrObjectCandidate(containingDeclaration)?.let(result::add)
+            findContainingClassOrObjectCandidate(containingDeclaration)?.addTo(result)
         }
+
+        findStatementCandidate(element)?.addTo(result)
 
         return result
     }
@@ -102,5 +155,28 @@ abstract class OptInGeneralUtilsBase {
     fun findContainingClassOrObjectCandidate(element: KtDeclaration): CandidateData? {
         val containingClassOrObject = element as? KtClassOrObject ?: (element.containingClassOrObject ?: return null)
         return CandidateData(containingClassOrObject, AddAnnotationFix.Kind.ContainingClass(containingClassOrObject.name))
+    }
+
+    fun findStatementCandidate(element: KtElement): CandidateData? {
+        var statementElement: KtElement = element
+        while (statementElement.parent !is KtBlockExpression && statementElement.parent !is KtClassBody) statementElement =
+            statementElement.parent as? KtElement ?: return null
+        if (statementElement is KtDestructuringDeclaration) return null
+        return CandidateData(statementElement, AddAnnotationFix.Kind.Self)
+    }
+
+    private fun findSamConstructorCallCandidate(callExpression: KtCallExpression): CandidateData? {
+        if (callExpression.parent !is KtBlockExpression && callExpression.parent !is KtScriptInitializer && callExpression.parent !is KtAnnotatedExpression) return null
+
+        val resolve = callExpression.calleeExpression?.mainReference?.resolve() ?: return null
+        // Only match SAM constructor calls: the callee must resolve to a fun interface (KtClass), not to a regular function (KtNamedFunction)
+        if (resolve !is KtClass) return null
+        val element = when (callExpression.parent) {
+            is KtScriptInitializer -> callExpression.parent
+            is KtAnnotatedExpression if callExpression.parent.parent is KtScriptInitializer -> callExpression.parent.parent
+            else -> callExpression
+        }
+        val name = resolve.name ?: return null
+        return CandidateData(element as KtElement, AddAnnotationFix.Kind.Declaration(name))
     }
 }

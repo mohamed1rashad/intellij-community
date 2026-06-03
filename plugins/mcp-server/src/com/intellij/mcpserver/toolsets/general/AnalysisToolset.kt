@@ -1,16 +1,28 @@
-@file:Suppress("FunctionName", "unused")
+@file:Suppress("FunctionName", "unused", "ReplaceGetOrSet")
 @file:OptIn(ExperimentalSerializationApi::class)
 
 package com.intellij.mcpserver.toolsets.general
 
-import com.intellij.analysis.problemsView.ProblemsCollector
-import com.intellij.build.BuildViewProblemsService
-import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx
-import com.intellij.codeInsight.daemon.impl.HighlightInfo
+import com.intellij.build.BuildProgressListener
+import com.intellij.build.BuildViewManager
+import com.intellij.build.events.BuildIssueEvent
+import com.intellij.build.events.FailureResult
+import com.intellij.build.events.FileMessageEvent
+import com.intellij.build.events.FinishBuildEvent
+import com.intellij.build.events.MessageEvent
+import com.intellij.build.events.StartBuildEvent
 import com.intellij.lang.annotation.HighlightSeverity
-import com.intellij.mcpserver.*
+import com.intellij.mcpserver.McpServerBundle
+import com.intellij.mcpserver.McpToolset
 import com.intellij.mcpserver.annotations.McpDescription
 import com.intellij.mcpserver.annotations.McpTool
+import com.intellij.mcpserver.annotations.McpToolHintValue.FALSE
+import com.intellij.mcpserver.annotations.McpToolHintValue.TRUE
+import com.intellij.mcpserver.annotations.McpToolHints
+import com.intellij.mcpserver.mcpCallInfo
+import com.intellij.mcpserver.mcpFail
+import com.intellij.mcpserver.project
+import com.intellij.mcpserver.reportToolActivity
 import com.intellij.mcpserver.toolsets.Constants
 import com.intellij.mcpserver.util.projectDirectory
 import com.intellij.mcpserver.util.relativizeIfPossible
@@ -18,32 +30,65 @@ import com.intellij.mcpserver.util.resolveInProject
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.editor.Document
-import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.roots.OrderEnumerator
-import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.NlsContexts.ProgressTitle
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.task.ProjectTaskContext
 import com.intellij.task.ProjectTaskManager
+import com.intellij.task.impl.ProjectTaskManagerImpl
+import com.intellij.util.asDisposable
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.concurrency.await
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.io.path.exists
-import kotlin.io.path.isRegularFile
-import kotlin.io.path.pathString
 import kotlin.time.Duration.Companion.milliseconds
 
 private val logger = logger<AnalysisToolset>()
 
 class AnalysisToolset : McpToolset {
+  @McpToolHints(readOnlyHint = TRUE, openWorldHint = FALSE)
+  @McpTool
+  @McpDescription("""
+        |Analyzes the specified files for errors and warnings using IntelliJ's inspections.
+        |Use this tool to lint several files after editing them.
+        |Returns per-file problems with severity, description, and location information.
+        |Batch responses may include file entries with `timedOut: true` and empty `problems` when individual files exceed the available budget.
+        |File entries with a `notAnalyzedReason` indicate files that could not be analyzed (e.g., outside project content roots, excluded, or unsupported file type).
+        |Top-level `more: true` means the batch is incomplete.
+        |`min_severity` must be `warning` or `error`; defaults to `warning`.
+        |Note: Only analyzes files within the project directory.
+        |Note: Lines and Columns are 1-based.
+    """)
+  suspend fun lint_files(
+    @McpDescription("List of project-relative files to analyze. Duplicate paths are ignored after normalization.")
+    files: List<String>,
+    @McpDescription("Minimum severity to include: `warning` or `error`. Defaults to `warning`.")
+    min_severity: String = LintMinSeverity.WARNING.apiValue,
+    @McpDescription(Constants.TIMEOUT_MILLISECONDS_DESCRIPTION)
+    timeout: Int = LINT_FILES_DEFAULT_TIMEOUT_MILLISECONDS_VALUE,
+  ): LintFilesResult {
+    currentCoroutineContext().reportToolActivity(McpServerBundle.message("tool.activity.collecting.file.problems.batch", files.size))
+    return collectLintFiles(
+      filePaths = files,
+      minSeverityValue = min_severity,
+      timeout = timeout,
+      progressTitle = McpServerBundle.message("progress.title.analyzing.files", files.size),
+      useBatchTimeouts = true,
+    )
+  }
+
+  @McpToolHints(readOnlyHint = TRUE, openWorldHint = FALSE)
   @McpTool
   @McpDescription("""
         |Analyzes the specified file for errors and warnings using IntelliJ's inspections.
@@ -61,60 +106,85 @@ class AnalysisToolset : McpToolset {
     timeout: Int = Constants.MEDIUM_TIMEOUT_MILLISECONDS_VALUE,
   ): FileProblemsResult {
     currentCoroutineContext().reportToolActivity(McpServerBundle.message("tool.activity.collecting.file.problems", filePath))
-    val project = currentCoroutineContext().project
-    val projectDir = project.projectDirectory
+    val lintResult = collectLintFiles(
+      filePaths = listOf(filePath),
+      minSeverityValue = if (errorsOnly) LintMinSeverity.ERROR.apiValue else LintMinSeverity.WARNING.apiValue,
+      timeout = timeout,
+      progressTitle = McpServerBundle.message("progress.title.analyzing.file", filePath.substringAfterLast('/').substringAfterLast('\\')),
+    )
+    val item = lintResult.items.firstOrNull()
+    if (item?.notAnalyzedReason != null) {
+      mcpFail("File cannot be analyzed: ${item.notAnalyzedReason}")
+    }
+    val result = FileProblemsResult(
+      filePath = item?.filePath ?: filePath,
+      errors = item?.problems?.map { it.toLegacyFileProblem() }.orEmpty(),
+      timedOut = item?.timedOut ?: lintResult.more,
+    )
+    logger.trace { "get_file_problems completed: timedOut=${result.timedOut}, errorsCount=${result.errors.size}" }
+    return result
+  }
 
-    val resolvedPath = project.resolveInProject(filePath)
-    if (!resolvedPath.exists()) mcpFail("File not found: $filePath")
-    if (!resolvedPath.isRegularFile()) mcpFail("Not a file: $filePath")
-
-    val errors = CopyOnWriteArrayList<FileProblem>()
-    val timedOut = withTimeoutOrNull(timeout.milliseconds) {
-      withBackgroundProgress(
-        project,
-        McpServerBundle.message("progress.title.analyzing.file", resolvedPath.fileName),
-        cancellable = true
-      ) {
-        val file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(resolvedPath)
-                   ?: mcpFail("Cannot access file: $filePath")
-        readAction {
-          val document = FileDocumentManager.getInstance().getDocument(file)
-                         ?: mcpFail("Cannot read file: $filePath")
-
-          DaemonCodeAnalyzerEx.processHighlights(
-            document,
-            project,
-            if (errorsOnly) HighlightSeverity.ERROR else HighlightSeverity.WEAK_WARNING,
-            0,
-            document.textLength
-          ) { highlightInfo ->
-            errors.add(createFileProblem(document, highlightInfo))
-            true
-          }
-        }
-      }
-    } == null
-
-    return FileProblemsResult(
-      filePath = projectDir.relativize(resolvedPath).pathString,
-      errors = errors,
-      timedOut = timedOut
+  @McpToolHints(readOnlyHint = TRUE, openWorldHint = FALSE)
+  @McpTool
+  @McpDescription("""
+        |Builds the IDE Call Hierarchy tree for a method, function, constructor, or supported type target.
+        |Use it to see who calls a symbol (`INCOMING_CALLS`) or what the symbol calls (`OUTGOING_CALLS`).
+        |Strongly prefer this tool over usage search, text search, or regex search when evaluating dependencies by actual calls.
+        |It uses IDE call hierarchy data, so it provides more precise call relationships with less noise and fewer follow-up calls than primitive searches.
+        |
+        |Pass `symbolFqn` as a fully qualified name, for example `com.example.Service.run`.
+        |If the name is ambiguous, the tool returns exact signatures; pass one of them back as `symbolFqn`.
+        |If you only know a short name or fragment, use `search_symbol` first to find the target.
+        |
+        |The result is an expandable text tree. Each node includes `filePath` and `treePath`; `filePath` is project-relative when possible.
+        |Pass `treePath` back to render the subtree.
+        |Use `childOffset` to continue after a truncated `… and n more` line.
+        |`depth`, `maxChildren`, and `maxNodes` bound the rendered tree.
+        |Symbols can come from project sources, source jars, or decompiled binary jar dependencies when the IDE can resolve them.
+    """)
+  suspend fun analyze_calls(
+    @McpDescription("Plain fully qualified symbol name, or an exact signature returned by an ambiguity error or copied from a rendered child node. If you only know a short name or fragment, use `search_symbol` first and pass the best fully qualified callable name here. Examples: `com.example.Service.run`, `com.example.Service.run(String)`, or `org.assertj.core.api.Assertions.assertThat(String)`. Do not pass file path, line, column, or a separate target signature.")
+    symbolFqn: String,
+    @McpDescription("Call analysis direction. Use `INCOMING_CALLS` to show callers of `symbolFqn`, or `OUTGOING_CALLS` to show symbols called from `symbolFqn`.")
+    analysisKind: AnalysisKind,
+    @McpDescription("Maximum number of call levels to render below the requested subtree root. Default: 5. Use 0 to render only the subtree root.")
+    depth: Int = 5,
+    @McpDescription("Maximum number of direct children rendered for each node. Default: 50.")
+    maxChildren: Int = 50,
+    @McpDescription("Maximum total number of rendered call nodes. Default: 1000.")
+    maxNodes: Int = 1000,
+    @McpDescription("Optional path to a subtree root, copied exactly from a previous `analyze_calls` result. Null or omitted means the root path `[]`. Each component is an exact signature, not a display name.")
+    treePath: List<String>? = null,
+    @McpDescription("Offset for paging direct children of the node addressed by `treePath`. Default: 0.")
+    childOffset: Int = 0,
+    @McpDescription(Constants.TIMEOUT_MILLISECONDS_DESCRIPTION)
+    timeout: Int = Constants.MEDIUM_TIMEOUT_MILLISECONDS_VALUE,
+  ): String {
+    currentCoroutineContext().reportToolActivity(McpServerBundle.message("tool.activity.analyzing.calls", symbolFqn))
+    return analyzeCalls(
+      symbolFqn = symbolFqn,
+      analysisKind = analysisKind,
+      depth = depth,
+      maxChildren = maxChildren,
+      maxNodes = maxNodes,
+      treePath = treePath,
+      childOffset = childOffset,
+      timeout = timeout,
     )
   }
 
-  // IJPL-200264 Sometimes `build_project` tool reports as success=true and no errors, while Build toolwindow contains errors
-  //@McpTool
+  @McpTool
   @McpDescription("""
-      |Triggers building of the project, waits for completion, and returns build errors.
-      |Use this tool to build the project and get detailed information about compilation errors and warnings.
-      |The build will compile all modules in the project and return structured error information.
+      |Triggers building of the project or specified files, waits for completion, and returns build errors.
+      |Use this tool to build the project or compile files and get detailed information about compilation errors and warnings.
       |You have to use this tool after performing edits to validate if the edits are valid.
-      |
-      |If you see any unexpected errors after build you may try to call this tool again with `rebuild=true` parameter to perform full rebuild.
     """)
   suspend fun build_project(
-    @McpDescription("Whether to perform full rebuild the project")
+    @McpDescription("Whether to perform full rebuild the project. Defaults to false. Effective only when `filesToRebuild` is not specified.")
     rebuild: Boolean = false,
+    @McpDescription("If specified, only compile files with the specified paths. Paths are relative to the project root.")
+    filesToRebuild: List<String>? = null,
     @McpDescription(Constants.TIMEOUT_MILLISECONDS_DESCRIPTION)
     timeout: Int = Constants.LONG_TIMEOUT_MILLISECONDS_VALUE,
   ): BuildProjectResult {
@@ -126,57 +196,160 @@ class AnalysisToolset : McpToolset {
     val callId = currentCoroutineContext().mcpCallInfo.callId
 
     val problems = CopyOnWriteArrayList<ProjectProblem>()
+    val buildFinished = CompletableDeferred<Unit>()
 
+    logger.trace { "Starting build task with timeout ${timeout}ms" }
+    var buildStarted = false
     val buildResult = withTimeoutOrNull(timeout.milliseconds) {
-      return@withTimeoutOrNull coroutineScope {
-        val task = ProjectTaskManager.getInstance(project).createAllModulesBuildTask(!rebuild, project)
+      coroutineScope {
+        val buildViewManager = project.serviceAsync<BuildViewManager>()
+        // Listen to build events to collect problems directly
+        buildViewManager.addListener(BuildProgressListener { buildId, event ->
+          logger.trace { "Received build event: ${event.javaClass.simpleName}, buildId=$buildId" }
+
+          when (event) {
+            is StartBuildEvent -> {
+              logger.trace { "Build started: ${event.buildDescriptor.title}" }
+              buildStarted = true
+            }
+
+            is FileMessageEvent -> {
+              // Collect file-based error/warning messages directly from build events
+              if (event.kind == MessageEvent.Kind.ERROR || event.kind == MessageEvent.Kind.WARNING) {
+                val filePosition = event.filePosition
+                val virtualFile = filePosition.file?.let {
+                  @Suppress("IO_FILE_USAGE")
+                  VirtualFileManager.getInstance().findFileByNioPath(it.toPath())
+                }
+
+                val problem = ProjectProblem(
+                  message = event.message,
+                  kind = event.kind.name,
+                  group = event.group,
+                  description = event.description,
+                  file = virtualFile?.let { projectDirectory.relativizeIfPossible(it) },
+                  line = filePosition.startLine,
+                  column = filePosition.startColumn,
+                )
+
+                logger.trace { "Collected problem from event: $problem" }
+                problems.add(problem)
+              }
+            }
+
+            is BuildIssueEvent -> {
+              // Collect build issues (e.g., configuration problems, dependency issues)
+              // BuildIssueEvent extends MessageEvent, so it has kind, group, etc.
+              if (event.kind == MessageEvent.Kind.ERROR || event.kind == MessageEvent.Kind.WARNING) {
+                val issue = event.issue
+                val problem = ProjectProblem(
+                  message = event.message,
+                  kind = event.kind.name,
+                  group = event.group,
+                  description = event.description ?: issue.description,
+                )
+
+                logger.trace { "Collected build issue from event: $problem" }
+                problems.add(problem)
+              }
+            }
+
+            is FinishBuildEvent -> {
+              val eventResult = event.result
+              logger.trace { "Build finished: result=$eventResult" }
+              // Extract failures from FinishBuildEvent result.
+              // Some build systems (e.g., Bazel) report errors only through FailureResult
+              // without emitting individual FileMessageEvent/BuildIssueEvent.
+              if (eventResult is FailureResult) {
+                for (failure in eventResult.failures) {
+                  val message = failure.message ?: failure.description ?: "Build failure"
+                  problems.add(ProjectProblem(
+                    message = message,
+                    kind = Kind.ERROR.name,
+                    description = failure.description,
+                  ))
+                  logger.trace { "Collected failure from FinishBuildEvent: $message" }
+                }
+              }
+              buildFinished.complete(Unit)
+            }
+
+            is MessageEvent -> {
+              // Catch-all for MessageEvent subtypes not handled above (custom build system messages)
+              if (event.kind == MessageEvent.Kind.ERROR || event.kind == MessageEvent.Kind.WARNING) {
+                val problem = ProjectProblem(
+                  message = event.message,
+                  kind = event.kind.name,
+                  group = event.group,
+                  description = event.description,
+                )
+                logger.trace { "Collected generic message event: $problem" }
+                problems.add(problem)
+              }
+            }
+          }
+        }, this.asDisposable())
+
+        val task = if (!filesToRebuild.isNullOrEmpty()) {
+          val filePaths = filesToRebuild.map { file -> project.resolveInProject(file) }
+          logger.trace { "Refreshing files: $filePaths..." }
+          LocalFileSystem.getInstance().refreshNioFiles(filePaths)
+          val virtualFiles =
+            filePaths.map { file -> LocalFileSystem.getInstance().findFileByNioFile(file) ?: mcpFail("File not found: $file") }
+          logger.trace { "Creating build task for files: ${virtualFiles.joinToString { it.path }}" }
+          readAction {
+            (ProjectTaskManager.getInstance(project) as ProjectTaskManagerImpl).createModulesFilesTask(virtualFiles.toTypedArray())
+          }
+        }
+        else {
+          logger.trace { "Creating all modules build task, isIncrementalBuild=${!rebuild}" }
+          readAction {
+            ProjectTaskManager.getInstance(project).createAllModulesBuildTask(!rebuild, project)
+          }
+        }
+
         val context = ProjectTaskContext(callId)
-        return@coroutineScope ProjectTaskManager.getInstance(project).run(context, task).await()
+        logger.trace { "Running build task with context" }
+
+        // Run build and wait for FinishBuildEvent
+        val result = ProjectTaskManager.getInstance(project).run(context, task).await()
+
+        logger.trace { "Build task completed, waiting for FinishBuildEvent..." }
+        if (buildStarted) {
+          logger.trace { "Build was started, waiting for FinishBuildEvent" }
+          buildFinished.await()
+        }
+        else {
+          logger.trace { "Build was not started, skipping waiting for FinishBuildEvent" }
+        }
+
+        logger.trace { "FinishBuildEvent received" }
+        result
       }
     }
+    logger.trace { "Build completed: result=$buildResult, hasErrors=${buildResult?.hasErrors()}, problemsCount=${problems.size}" }
 
-    val problemsCollectionTimedOut = withTimeoutOrNull(timeout.milliseconds / 2) {
-      withBackgroundProgress(
-        project,
-        McpServerBundle.message("progress.title.collecting.project.problems"),
-        cancellable = true
-      ) {
-        val collector = project.serviceAsync<ProblemsCollector>()
-        val allProblems = collector.getProblemFiles().asSequence()
-                            .flatMap {
-                              collector.getFileProblems(it)
-                            } + collector.getOtherProblems()
-        for (problem in allProblems) {
-          if (!coroutineContext.isActive) break
-          val problem = if (problem is com.intellij.analysis.problemsView.FileProblem) {
-            val kind = (problem as? BuildViewProblemsService.FileBuildProblem)?.event?.kind
-            ProjectProblem(
-              message = problem.text,
-              group = problem.group,
-              description = problem.description,
-              kind = kind?.name,
-              file = projectDirectory.relativizeIfPossible(problem.file),
-              line = problem.line,
-              column = problem.column,
-            )
-          }
-          else {
-            ProjectProblem(
-              message = problem.text,
-              group = problem.group,
-              description = problem.description,
-            )
-          }
-          problems.add(problem)
-        }
-      }
-    } == null
-
-    return BuildProjectResult(timedOut = buildResult == null || problemsCollectionTimedOut,
-                              isSuccess = (buildResult != null && !buildResult.hasErrors()),
-                              problems = problems)
+    logger.trace { "build_project completed: buildTimedOut=${buildResult == null}, problemsCount=${problems.size}" }
+    // for the cases when the build doesn't report messages via BuildViewManager
+    if (!buildStarted) {
+      problems.add(ProjectProblem(message = "The project has limited build diagnostics functionality. Build messages cannot be collected."))
+    }
+    // Fallback: buildResult reports errors but no ERROR-level problems were captured through events
+    val hasTaskErrors = buildResult?.hasErrors() == true
+    if (hasTaskErrors && problems.none { it.kind == Kind.ERROR.name }) {
+      problems.add(ProjectProblem(
+        message = "Build reported errors, but detailed error messages were not captured through build events.",
+        kind = Kind.ERROR.name,
+      ))
+    }
+    return BuildProjectResult(
+      timedOut = buildResult == null,
+      isSuccess = buildResult != null && !hasTaskErrors && problems.none { it.kind == Kind.ERROR.name },
+      problems = problems
+    )
   }
 
+  @McpToolHints(readOnlyHint = TRUE, openWorldHint = FALSE)
   @McpTool
   @McpDescription("""
     |Get a list of all modules in the project with their types.
@@ -199,6 +372,7 @@ class AnalysisToolset : McpToolset {
     return ProjectModulesResult(modules)
   }
 
+  @McpToolHints(readOnlyHint = TRUE, openWorldHint = FALSE)
   @McpTool
   @McpDescription("""
     |Get a list of all dependencies defined in the project.
@@ -226,34 +400,98 @@ class AnalysisToolset : McpToolset {
     return ProjectDependenciesResult(dependencies)
   }
 
-  private fun createFileProblem(
-    document: Document,
-    info: HighlightInfo,
-  ): FileProblem {
-    val startLine = document.getLineNumber(info.startOffset)
-    val lineStartOffset = document.getLineStartOffset(startLine)
-    val lineEndOffset = document.getLineEndOffset(startLine)
-    val lineContent = document.getText(TextRange(lineStartOffset, lineEndOffset))
-    val column = info.startOffset - lineStartOffset
+  private suspend fun collectLintFiles(
+    filePaths: List<String>,
+    minSeverityValue: String,
+    timeout: Int,
+    progressTitle: @ProgressTitle String,
+    useBatchTimeouts: Boolean = false,
+  ): LintFilesResult {
+    val project = currentCoroutineContext().project
+    val requestedFiles = prepareRequestedLintFiles(project, filePaths)
+    val minSeverity = LintMinSeverity.parse(minSeverityValue)
+    val batchTimeouts = if (useBatchTimeouts) createLintFilesBatchTimeouts(timeout) else null
+    val request = LintFilesCollectorRequest(
+      requestedFiles = requestedFiles,
+      filePaths = requestedFiles.map { it.relativePath },
+      minSeverity = minSeverity.highlightSeverity,
+    )
+    val completedResults = ConcurrentHashMap<String, LintFileResult>(requestedFiles.size)
+    val completedFilePaths = ConcurrentHashMap.newKeySet<String>(requestedFiles.size)
+    val onFileResult: (LintFileResult) -> Unit = { result ->
+      completedFilePaths.add(result.filePath)
+      if (result.problems.isNotEmpty() || result.timedOut == true || result.notAnalyzedReason != null) {
+        completedResults.putIfAbsent(result.filePath, result)
+      }
+    }
 
+    val completedInTime = withTimeoutOrNull((batchTimeouts?.analysisTimeoutMs ?: timeout).milliseconds) {
+      withBackgroundProgress(project, progressTitle, cancellable = true) {
+        collectLintFiles(project, request, onFileResult, batchTimeouts?.timeoutContext)
+      }
+    } != null
+
+    val items = requestedFiles.mapNotNull { requestedFile ->
+      completedResults.get(requestedFile.relativePath)
+    }
+    val more = !completedInTime || completedFilePaths.size < requestedFiles.size
+
+    logger.trace {
+      "lint_files completed: more=$more, finishedInTime=$completedInTime, filesCount=${items.size}, completedCount=${completedFilePaths.size}, requestedCount=${requestedFiles.size}"
+    }
+    return LintFilesResult(items = items, more = more)
+  }
+
+  private fun LintProblem.toLegacyFileProblem(): FileProblem {
     return FileProblem(
-      severity = info.severity.name,
-      description = info.description,
-      lineContent = lineContent,
-      line = startLine + 1, // Convert to 1-based
-      column = column + 1 // Convert to 1-based
+      severity = severity,
+      description = description,
+      lineContent = lineText,
+      line = line,
+      column = column,
     )
   }
 
   @Serializable
-  data class FileProblem(
-    val severity: String,
-    val description: String,
-    val lineContent: String,
-    val line: Int,
-    val column: Int,
+  data class LintProblem(
+    @JvmField val severity: String,
+    @JvmField val description: String,
+    @JvmField val lineText: String,
+    @JvmField val line: Int,
+    @JvmField val column: Int,
   )
 
+  @Serializable
+  data class LintFileResult(
+    val filePath: String,
+    @EncodeDefault(mode = EncodeDefault.Mode.NEVER)
+    val notAnalyzedReason: String? = null,
+    @EncodeDefault(mode = EncodeDefault.Mode.ALWAYS)
+    val problems: List<LintProblem> = emptyList(),
+    @property:McpDescription(Constants.TIMED_OUT_DESCRIPTION)
+    @EncodeDefault(mode = EncodeDefault.Mode.NEVER)
+    val timedOut: Boolean? = false,
+  )
+
+  @Serializable
+  data class LintFilesResult(
+    @EncodeDefault(mode = EncodeDefault.Mode.ALWAYS)
+    val items: List<LintFileResult> = emptyList(),
+    @EncodeDefault(mode = EncodeDefault.Mode.NEVER)
+    val more: Boolean = false,
+  )
+
+  @ApiStatus.Internal
+  @Serializable
+  data class FileProblem(
+    @JvmField val severity: String,
+    @JvmField val description: String,
+    @JvmField val lineContent: String,
+    @JvmField val line: Int,
+    @JvmField val column: Int,
+  )
+
+  @ApiStatus.Internal
   @Serializable
   data class FileProblemsResult(
     val filePath: String,
@@ -262,6 +500,12 @@ class AnalysisToolset : McpToolset {
     @EncodeDefault(mode = EncodeDefault.Mode.NEVER)
     val timedOut: Boolean? = false,
   )
+
+  @Serializable
+  enum class AnalysisKind {
+    INCOMING_CALLS,
+    OUTGOING_CALLS,
+  }
 
   @Serializable
   enum class Kind {
@@ -298,23 +542,38 @@ class AnalysisToolset : McpToolset {
 
   @Serializable
   data class ModuleInfo(
-    val name: String,
+    @JvmField val name: String,
     @EncodeDefault(mode = EncodeDefault.Mode.NEVER)
-    val type: String? = null,
+    @JvmField val type: String? = null,
   )
 
   @Serializable
   data class ProjectModulesResult(
-    val modules: List<ModuleInfo>,
+    @JvmField val modules: List<ModuleInfo>,
   )
 
   @Serializable
   data class DependencyInfo(
-    val name: String
+    @JvmField val name: String,
   )
 
   @Serializable
   data class ProjectDependenciesResult(
-    val dependencies: List<DependencyInfo>,
+    @JvmField val dependencies: List<DependencyInfo>,
   )
+}
+
+private enum class LintMinSeverity(
+  @JvmField val apiValue: String,
+  @JvmField val highlightSeverity: HighlightSeverity,
+) {
+  WARNING("warning", HighlightSeverity.WEAK_WARNING),
+  ERROR("error", HighlightSeverity.ERROR);
+
+  companion object {
+    fun parse(value: String): LintMinSeverity {
+      val normalized = value.trim().lowercase()
+      return entries.firstOrNull { it.apiValue == normalized } ?: mcpFail("min_severity must be one of: warning, error")
+    }
+  }
 }

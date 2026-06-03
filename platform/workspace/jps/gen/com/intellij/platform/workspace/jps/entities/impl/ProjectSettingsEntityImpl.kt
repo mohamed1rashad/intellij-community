@@ -1,19 +1,18 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.jps.entities.impl
 
-import com.intellij.java.workspace.entities.JavaProjectSettingsEntity
-import com.intellij.platform.workspace.jps.entities.ModifiableProjectSettingsEntity
 import com.intellij.platform.workspace.jps.entities.ProjectSettingsEntity
 import com.intellij.platform.workspace.jps.entities.SdkId
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.SymbolicEntityId
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.SoftLinkable
@@ -27,14 +26,12 @@ import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ProjectSettingsEntityImpl(private val dataSource: ProjectSettingsEntityData) : ProjectSettingsEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ProjectSettingsEntityImpl(private val dataSource: ProjectSettingsEntityData) : ProjectSettingsEntity,
+                                                                                              WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -55,8 +52,8 @@ internal class ProjectSettingsEntityImpl(private val dataSource: ProjectSettings
   }
 
 
-  internal class Builder(result: ProjectSettingsEntityData?) : ModifiableWorkspaceEntityBase<ProjectSettingsEntity, ProjectSettingsEntityData>(
-    result), ProjectSettingsEntity.Builder {
+  internal class Builder(result: ProjectSettingsEntityData?) :
+    ModifiableWorkspaceEntityBase<ProjectSettingsEntity, ProjectSettingsEntityData>(result), ProjectSettingsEntity.Builder {
     internal constructor() : this(ProjectSettingsEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -69,15 +66,13 @@ internal class ProjectSettingsEntityImpl(private val dataSource: ProjectSettings
           error("Entity ProjectSettingsEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -110,7 +105,6 @@ internal class ProjectSettingsEntityImpl(private val dataSource: ProjectSettings
         changedProperty.add("entitySource")
 
       }
-
     override var projectSdk: SdkId?
       get() = getEntityData().projectSdk
       set(value) {
@@ -122,6 +116,7 @@ internal class ProjectSettingsEntityImpl(private val dataSource: ProjectSettings
 
     override fun getEntityClass(): Class<ProjectSettingsEntity> = ProjectSettingsEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -146,7 +141,7 @@ internal class ProjectSettingsEntityData : WorkspaceEntityData<ProjectSettingsEn
   }
 
   override fun updateLinksIndex(prev: Set<SymbolicEntityId<*>>, index: WorkspaceMutableIndex<SymbolicEntityId<*>>) {
-    // TODO verify logic
+// TODO verify logic
     val mutablePreviousSet = HashSet(prev)
     val optionalLink_projectSdk = projectSdk
     if (optionalLink_projectSdk != null) {
@@ -181,14 +176,13 @@ internal class ProjectSettingsEntityData : WorkspaceEntityData<ProjectSettingsEn
     return changed
   }
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ProjectSettingsEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ProjectSettingsEntity> {
     val modifiable = ProjectSettingsEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ProjectSettingsEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -207,7 +201,7 @@ internal class ProjectSettingsEntityData : WorkspaceEntityData<ProjectSettingsEn
     return ProjectSettingsEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return ProjectSettingsEntity(entitySource) {
       this.projectSdk = this@ProjectSettingsEntityData.projectSdk
     }
@@ -221,9 +215,7 @@ internal class ProjectSettingsEntityData : WorkspaceEntityData<ProjectSettingsEn
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ProjectSettingsEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.projectSdk != other.projectSdk) return false
     return true
@@ -232,9 +224,7 @@ internal class ProjectSettingsEntityData : WorkspaceEntityData<ProjectSettingsEn
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ProjectSettingsEntityData
-
     if (this.projectSdk != other.projectSdk) return false
     return true
   }

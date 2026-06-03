@@ -1,17 +1,35 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.lang;
 
-import com.intellij.ide.highlighter.HtmlFileType;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.FileTypeRegistry;
 import com.intellij.openapi.fileTypes.LanguageFileType;
-import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.SimpleModificationTracker;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileEvent;
+import com.intellij.openapi.vfs.VirtualFileListener;
+import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.VirtualFileMoveEvent;
+import com.intellij.openapi.vfs.VirtualFilePropertyEvent;
 import com.intellij.openapi.vfs.impl.BulkVirtualFileListenerAdapter;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassOwner;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiImportList;
+import com.intellij.psi.PsiInvalidElementAccessException;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiPackageStatement;
+import com.intellij.psi.PsiTreeChangeAdapter;
+import com.intellij.psi.PsiTreeChangeEvent;
 import com.intellij.psi.impl.PsiTreeChangeEventImpl;
 import com.intellij.psi.impl.source.tree.LazyParseablePsiElement;
 import com.intellij.psi.util.CachedValue;
@@ -21,16 +39,25 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.spi.psi.SPIFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
+import com.intellij.xml.util.JspFileTypeUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.uast.*;
+import org.jetbrains.uast.UAnnotated;
+import org.jetbrains.uast.UAnnotation;
+import org.jetbrains.uast.UClass;
+import org.jetbrains.uast.UImportStatement;
+import org.jetbrains.uast.UMethod;
+import org.jetbrains.uast.UVariable;
+import org.jetbrains.uast.UastLanguagePlugin;
 import org.jetbrains.uast.util.ClassSet;
 
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.jetbrains.uast.util.ClassSetKt.*;
+import static org.jetbrains.uast.util.ClassSetKt.classSetOf;
+import static org.jetbrains.uast.util.ClassSetKt.classSetsUnion;
+import static org.jetbrains.uast.util.ClassSetKt.isInstanceOf;
 
 /**
  * This ModificationTracker is incremented if changes in file (class) of VFS could change the number of stereotype components scanned
@@ -114,20 +141,21 @@ public class OuterModelsModificationTracker extends SimpleModificationTracker {
         return;
       }
 
-      if (!file.isDirectory() &&
-          isIgnoredFileType(file.getFileType())) {
-        return;
+      if (!file.isDirectory()) {
+        // avoid reading file content, file name -> file type should be enough for a short circuit
+        var fileTypeByName = FileTypeRegistry.getInstance().getFileTypeByFileName(file.getNameSequence());
+        if (isIgnoredFileType(fileTypeByName)) {
+          return;
+        }
       }
 
       incModificationCount();
     }
 
-    @SuppressWarnings({"removal", "deprecation"})
     private static boolean isIgnoredFileType(@NotNull FileType type) {
-      return type.equals(HtmlFileType.INSTANCE) ||
+      return type.equals(FileTypeManager.getInstance().getFileTypeByExtension("html")) ||
              type instanceof LanguageFileType && "JavaScript".equals(((LanguageFileType)type).getLanguage().getID()) ||
-             type.equals(StdFileTypes.JSP) ||
-             type.equals(StdFileTypes.JSPX);
+             JspFileTypeUtil.isJspOrJspX(type);
     }
   }
 
@@ -282,11 +310,15 @@ public class OuterModelsModificationTracker extends SimpleModificationTracker {
       }
 
       final var newChild = event.getNewChild();
+      final var oldChild = event.getOldChild();
+
       final var grandParent = parent == null ? null : parent.getParent();
       final var firstSibling = parent != null && parent.isValid() ? parent.getFirstChild() : null;
       PsiElement unsafeGrandChild = getUnsafeGrandChild(child);
 
-      if (isRelevantAnnotation(child, possiblePsiTypes)                                              // removed annotation
+      if (isInstanceOf(child, possiblePsiTypes.forClasses)                                           // added / removed class declaration
+          || isInstanceOf(oldChild, possiblePsiTypes.forClasses)
+          || isRelevantAnnotation(child, possiblePsiTypes)                                           // removed annotation
           || isRelevantAnnotation(unsafeGrandChild, possiblePsiTypes)                                // removed annotation
           || isRelevantAnnotation(newChild, possiblePsiTypes)                                        // added annotation
           || (isInstanceOf(grandParent, possiblePsiTypes.forClasses)                                 // modifier changed (static, public)
@@ -294,8 +326,8 @@ public class OuterModelsModificationTracker extends SimpleModificationTracker {
           || ((isInstanceOf(parent, possiblePsiTypes.forClasses)                                     // added/removed inner class
                || isInstanceOf(grandParent, possiblePsiTypes.forClasses))
               && (isInstanceOf(child, possiblePsiTypes.forClasses)
-                  || isInstanceOf(event.getNewChild(), possiblePsiTypes.forClasses)
-                  || isInstanceOf(event.getOldChild(), possiblePsiTypes.forClasses)))
+                  || isInstanceOf(newChild, possiblePsiTypes.forClasses)
+                  || isInstanceOf(oldChild, possiblePsiTypes.forClasses)))
           || isInstanceOf(firstSibling, possiblePsiTypes.forImports)                                 // added import
           || isInstanceOf(unsafeGrandChild, possiblePsiTypes.forImports)                             // removed import
           || isInstanceOf(child, possiblePsiTypes.forImports)                                        // removed import
@@ -356,7 +388,7 @@ public class OuterModelsModificationTracker extends SimpleModificationTracker {
     }
 
     private @Nullable MyPsiPossibleTypes getPossiblePsiTypesFor(@NotNull String languageId) {
-      return myPsiPossibleTypes.computeIfAbsent(languageId, (_key) ->
+      return myPsiPossibleTypes.computeIfAbsent(languageId, (_) ->
         CachedValuesManager.getManager(myProject).createCachedValue(() -> {
           final var uastLanguagePlugin =
             ContainerUtil.find(UastLanguagePlugin.Companion.getInstances(), it -> languageId.equals(it.getLanguage().getID()));

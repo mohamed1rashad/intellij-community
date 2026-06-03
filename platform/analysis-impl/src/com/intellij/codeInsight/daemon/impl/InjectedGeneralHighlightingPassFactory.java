@@ -1,7 +1,11 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl;
 
-import com.intellij.codeHighlighting.*;
+import com.intellij.codeHighlighting.MainHighlightingPassFactory;
+import com.intellij.codeHighlighting.Pass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassFactoryRegistrar;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassRegistrar;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.DumbAware;
@@ -35,18 +39,19 @@ final class InjectedGeneralHighlightingPassFactory implements MainHighlightingPa
   @Override
   public @NotNull TextEditorHighlightingPass createHighlightingPass(@NotNull PsiFile psiFile, @NotNull Editor editor) {
     TextRange fileRange = FileStatusMap.getDirtyTextRange(editor.getDocument(), psiFile, Pass.INJECTED_GENERAL);
-    if (fileRange == null) return new ProgressableTextEditorHighlightingPass.EmptyPass(psiFile.getProject(), editor.getDocument());
+    Project project = psiFile.getProject();
+    if (fileRange == null) return new ProgressableTextEditorHighlightingPass.EmptyPass(project, editor.getDocument());
     List<TextRange> adjustedRanges = computeReducedRanges(psiFile, editor);
     TextRange restrictRange = computeRestrictRange(adjustedRanges, fileRange);
     boolean updateAll = isUpdatingWholeFile(fileRange, adjustedRanges);
-    ProperTextRange visibleRange = HighlightingSessionImpl.getFromCurrentIndicator(psiFile).getVisibleRange();
+    ProperTextRange visibleRange = DaemonCodeAnalyzerEx.getInstanceEx(project).getHighlightSessionFromCurrentIndicator(psiFile).getVisibleRange();
 
     return new InjectedGeneralHighlightingPass(psiFile, editor.getDocument(),
                                                // makes sense if more than one
                                                (adjustedRanges != null && adjustedRanges.size() == 1) ? null : adjustedRanges,
                                                restrictRange.getStartOffset(), restrictRange.getEndOffset(),
                                                updateAll, visibleRange, editor,
-                                               true, true, true, HighlightInfoUpdater.getInstance(psiFile.getProject()));
+                                               true, true, true, HighlightInfoUpdater.getInstance(project));
   }
 
   private static boolean isUpdatingWholeFile(@NotNull TextRange fileRange, @Nullable List<? extends @NotNull TextRange> ranges) {

@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.ui;
 
 import com.intellij.codeInsight.hint.HintManager;
@@ -27,11 +27,23 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.JComponent;
+import java.awt.AWTEvent;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.awt.event.AWTEventListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
-import java.util.*;
+import java.util.Set;
 
 public class FragmentHintManager {
   private final List<SettingsEditorFragment<?, ?>> myFragments = new ArrayList<>();
@@ -116,6 +128,8 @@ public class FragmentHintManager {
       }
     }
     if (fragment != null) {
+      if (!fragment.isAvailable()) return;
+
       String text = getShortcutText(fragment);
       if (text != null) {
         hint = hint == null ? text : StringUtil.trimEnd(hint, ".") + ". " + text;
@@ -141,7 +155,8 @@ public class FragmentHintManager {
         if (window == null || !window.isFocused()) {
           return;
         }
-        if (fragment.isSelected() &&
+        if (fragment.isAvailable() &&
+            fragment.isSelected() &&
             fragment.getName() != null &&
             component.getRootPane() != null &&
             !myHints.contains(fragment.toString())) {

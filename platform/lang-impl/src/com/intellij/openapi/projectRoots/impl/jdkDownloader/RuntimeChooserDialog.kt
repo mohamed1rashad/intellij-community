@@ -21,7 +21,13 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleColoredComponent
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.AlignY
+import com.intellij.ui.dsl.builder.DEFAULT_COMMENT_WIDTH
+import com.intellij.ui.dsl.builder.DslComponentProperty
+import com.intellij.ui.dsl.builder.IntelliJSpacingConfiguration
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.ui.dsl.gridLayout.toJBEmptyBorder
 import com.intellij.util.asSafely
@@ -38,7 +44,7 @@ import kotlin.io.path.isDirectory
 
 internal sealed class RuntimeChooserDialogResult {
   object Cancel : RuntimeChooserDialogResult()
-  object UseDefault: RuntimeChooserDialogResult()
+  object UseDefault : RuntimeChooserDialogResult()
   data class DownloadAndUse(val item: JdkItem, val path: Path) : RuntimeChooserDialogResult()
   data class UseCustomJdk(val name: String, val path: Path) : RuntimeChooserDialogResult()
 }
@@ -72,7 +78,7 @@ internal class RuntimeChooserDialog(
       }
     }
 
-    val windowListener = object: WindowAdapter() {
+    val windowListener = object : WindowAdapter() {
       override fun windowActivated(e: WindowEvent?) {
         invokeLater(ModalityState.any()) {
           clipboardUpdateAction()
@@ -104,7 +110,7 @@ internal class RuntimeChooserDialog(
     }
   }
 
-  fun showDialogAndGetResult() : RuntimeChooserDialogResult {
+  fun showDialogAndGetResult(): RuntimeChooserDialogResult {
     show()
 
     if (exitCode == USE_DEFAULT_RUNTIME_CODE) {
@@ -153,7 +159,7 @@ internal class RuntimeChooserDialog(
     jdkCombobox = object : ComboBox<RuntimeChooserItem>(model.mainComboBoxModel) {
       init {
         isSwingPopup = false
-        setRenderer(object: RuntimeChooserPresenter() {
+        setRenderer(object : RuntimeChooserPresenter() {
           override fun separatorFor(value: RuntimeChooserItem?): ListSeparator? {
             val customJdks = this@RuntimeChooserDialog.model.customJdks
             val advancedItems = this@RuntimeChooserDialog.model.advancedDownloadItems
@@ -206,14 +212,15 @@ internal class RuntimeChooserDialog(
       //download row
       row(LangBundle.message("dialog.label.choose.ide.runtime.location")) {
         jdkInstallDirSelector = textFieldWithBrowseButton(
-          FileChooserDescriptorFactory.createSingleFolderDescriptor().withTitle(LangBundle.message("dialog.title.choose.ide.runtime.select.path.to.install.jdk")),
+          FileChooserDescriptorFactory.createSingleFolderDescriptor()
+            .withTitle(LangBundle.message("dialog.title.choose.ide.runtime.select.path.to.install.jdk")),
           project
         ).align(AlignX.FILL)
           .comment(LangBundle.message("dialog.message.choose.ide.runtime.select.path.to.install.jdk"))
           .component
 
         val updateLocation = {
-          when(val item = jdkCombobox.selectedItem){
+          when (val item = jdkCombobox.selectedItem) {
             is RuntimeChooserDownloadableItem -> {
               jdkInstallDirSelector.text = model.getDefaultInstallPathFor(item.item)
               jdkInstallDirSelector.setButtonEnabled(true)

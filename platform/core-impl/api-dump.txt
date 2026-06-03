@@ -5,11 +5,22 @@ com.intellij.codeInsight.controlflow.ControlFlowProvider
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - a:getAdditionalInfo(com.intellij.codeInsight.controlflow.Instruction):java.lang.String
 - a:getControlFlow(com.intellij.psi.PsiElement):com.intellij.codeInsight.controlflow.ControlFlow
+c:com.intellij.extapi.psi.StubBasedPsiElementBase
+- <init>(com.intellij.psi.stubs.StubElement,com.intellij.psi.tree.IElementType):V
+- pf:getElementTypeImpl():com.intellij.psi.tree.IElementType
+- f:getRequiredStubOrPsiChild(com.intellij.psi.tree.IElementType):com.intellij.psi.PsiElement
+- f:getRequiredStubOrPsiChild(com.intellij.psi.tree.IElementType,java.lang.Class):com.intellij.psi.PsiElement
+- f:getStubOrPsiChild(com.intellij.psi.tree.IElementType):com.intellij.psi.PsiElement
+- f:getStubOrPsiChild(com.intellij.psi.tree.IElementType,java.lang.Class):com.intellij.psi.PsiElement
+f:com.intellij.ide.plugins.PluginManagerCore
+- sf:getLoadedPluginIds():java.util.Collection
 com.intellij.lang.DefaultASTFactory
 - a:createComment(com.intellij.psi.tree.IElementType,java.lang.CharSequence):com.intellij.psi.impl.source.tree.LeafElement
 c:com.intellij.lang.impl.PsiBuilderAdapter
+- advanceToEOF():V
 - remapCurrentTokenAndRestoreOnRollback(com.intellij.psi.tree.IElementType):V
 c:com.intellij.lang.impl.PsiBuilderImpl
+- advanceToEOF():V
 - remapCurrentTokenAndRestoreOnRollback(com.intellij.psi.tree.IElementType):V
 com.intellij.lexer.FilterLexer$Filter
 - a:reject(com.intellij.psi.tree.IElementType):Z
@@ -23,6 +34,12 @@ com.intellij.lexer.FlexLexer
 - a:reset(java.lang.CharSequence,I,I,I):V
 - a:yybegin(I):V
 - a:yystate():I
+f:com.intellij.lexer.FuseMergingLexer
+- com.intellij.lexer.MergingLexerAdapterBase
+- <init>(com.intellij.lexer.Lexer,com.intellij.psi.tree.IElementType,com.intellij.psi.tree.TokenSet):V
+- getMergeFunction():com.intellij.lexer.MergeFunction
+c:com.intellij.mock.MockComponentManager
+- com.intellij.openapi.components.ComponentManagerEx
 com.intellij.openapi.application.ex.ApplicationEx
 - com.intellij.openapi.application.Application
 - sf:ELEVATE:I
@@ -134,6 +151,14 @@ com.intellij.openapi.wm.ex.ProgressIndicatorEx
 - a:isFinished(com.intellij.openapi.progress.TaskInfo):Z
 - a:processFinish():V
 - a:wasStarted():Z
+e:com.intellij.pom.tree.events.ChangeInfoKind
+- java.lang.Enum
+- sf:Added:com.intellij.pom.tree.events.ChangeInfoKind
+- sf:ContentsChanged:com.intellij.pom.tree.events.ChangeInfoKind
+- sf:Removed:com.intellij.pom.tree.events.ChangeInfoKind
+- sf:Replaced:com.intellij.pom.tree.events.ChangeInfoKind
+- s:valueOf(java.lang.String):com.intellij.pom.tree.events.ChangeInfoKind
+- s:values():com.intellij.pom.tree.events.ChangeInfoKind[]
 com.intellij.psi.CustomHighlighterTokenType
 - sf:CHARACTER:com.intellij.psi.tree.IElementType
 - sf:CUSTOM_CONTENT:com.intellij.psi.tree.IElementType
@@ -165,9 +190,21 @@ f:com.intellij.psi.ExternalChangeActionUtil
 - sf:externalDocumentChangeAction(java.lang.Runnable):java.lang.Runnable
 - sf:isExternalChangeInProgress():Z
 - sf:isExternalDocumentChangeInProgress():Z
+Fa:com.intellij.psi.PsiAnchor
+- com.intellij.model.Pointer
+- <init>():V
+- s:create(com.intellij.psi.PsiElement):com.intellij.psi.PsiAnchor
+- dereference():com.intellij.psi.PsiElement
+- a:getEndOffset():I
+- a:getFile():com.intellij.psi.PsiFile
+- a:getStartOffset():I
+- a:retrieve():com.intellij.psi.PsiElement
+- retrieveOrThrow():com.intellij.psi.PsiElement
 com.intellij.psi.impl.AnyPsiChangeListener
 - afterPsiChanged(Z):V
 - beforePsiChanged(Z):V
+f:com.intellij.psi.impl.DebugUtil
+- s:lightTreeAsElementTypeToString(com.intellij.util.diff.FlyweightCapableTreeStructure,Z):java.lang.String
 com.intellij.psi.impl.PsiDocumentTransactionListener
 - sf:TOPIC:com.intellij.util.messages.Topic
 - transactionCompleted(com.intellij.openapi.editor.Document,com.intellij.psi.PsiFile):V
@@ -182,6 +219,8 @@ com.intellij.psi.impl.PsiFileEx
 com.intellij.psi.impl.PsiTreeChangePreprocessor
 - sf:EP:com.intellij.openapi.extensions.ProjectExtensionPointName
 - a:treeChanged(com.intellij.psi.impl.PsiTreeChangeEventImpl):V
+c:com.intellij.psi.impl.file.PsiDirectoryImpl
+- findFile(java.lang.String,com.intellij.psi.search.GlobalSearchScope):com.intellij.psi.PsiFile
 com.intellij.psi.impl.file.impl.FileManager
 - a:cleanupForNextTest():V
 - a:createFileViewProvider(com.intellij.openapi.vfs.VirtualFile,Z):com.intellij.psi.FileViewProvider
@@ -193,9 +232,6 @@ com.intellij.psi.impl.file.impl.FileManager
 - a:getCachedPsiFile(com.intellij.openapi.vfs.VirtualFile):com.intellij.psi.PsiFile
 - a:reloadFromDisk(com.intellij.psi.PsiFile):V
 - a:setViewProvider(com.intellij.openapi.vfs.VirtualFile,com.intellij.psi.FileViewProvider):V
-com.intellij.psi.impl.smartPointers.SmartPointerEx
-- com.intellij.psi.SmartPsiElementPointer
-- a:getCachedElement():com.intellij.psi.PsiElement
 com.intellij.psi.impl.source.HolderFactory
 - a:createHolder(com.intellij.psi.PsiManager,com.intellij.lang.Language,com.intellij.psi.PsiElement):com.intellij.psi.impl.source.DummyHolder
 - a:createHolder(com.intellij.psi.PsiManager,com.intellij.psi.PsiElement):com.intellij.psi.impl.source.DummyHolder
@@ -204,6 +240,8 @@ com.intellij.psi.impl.source.HolderFactory
 - a:createHolder(com.intellij.psi.PsiManager,com.intellij.psi.impl.source.tree.TreeElement,com.intellij.psi.PsiElement,com.intellij.util.CharTable):com.intellij.psi.impl.source.DummyHolder
 - a:createHolder(com.intellij.psi.PsiManager,com.intellij.util.CharTable,com.intellij.lang.Language):com.intellij.psi.impl.source.DummyHolder
 - a:createHolder(com.intellij.psi.PsiManager,com.intellij.util.CharTable,Z):com.intellij.psi.impl.source.DummyHolder
+a:com.intellij.psi.impl.source.PsiFileImpl
+- getStubDescriptor():com.intellij.psi.stubs.LanguageStubDescriptor
 com.intellij.psi.impl.source.PsiFileWithStubSupport
 - com.intellij.psi.PsiFile
 - a:getStubTree():com.intellij.psi.stubs.StubTree
@@ -228,10 +266,16 @@ com.intellij.psi.impl.source.resolve.reference.impl.providers.FileReferenceOwner
 - a:getLastFileReference():com.intellij.psi.impl.source.resolve.reference.impl.providers.PsiFileReference
 com.intellij.psi.impl.source.resolve.reference.impl.providers.PsiFileReference
 - com.intellij.psi.PsiPolyVariantReference
+c:com.intellij.psi.impl.source.tree.ForeignLeafPsiElement
+- getTextRange():com.intellij.openapi.util.TextRange
+c:com.intellij.psi.impl.source.tree.LazyParseableElement
+- clone():com.intellij.psi.impl.source.tree.CompositeElement
 com.intellij.psi.impl.source.tree.TreeCopyHandler
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - a:decodeInformation(com.intellij.psi.impl.source.tree.TreeElement,java.util.Map):com.intellij.psi.impl.source.tree.TreeElement
 - a:encodeInformation(com.intellij.psi.impl.source.tree.TreeElement,com.intellij.lang.ASTNode,java.util.Map):V
+a:com.intellij.psi.impl.source.tree.TreeElement
+- getUserData(com.intellij.openapi.util.Key):java.lang.Object
 com.intellij.psi.impl.source.tree.TreeGenerator
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - a:generateTreeFor(com.intellij.psi.PsiElement,com.intellij.util.CharTable,com.intellij.psi.PsiManager):com.intellij.psi.impl.source.tree.TreeElement
@@ -247,6 +291,13 @@ f:com.intellij.psi.stubs.DefaultFileStubSerializer
 - getExternalId():java.lang.String
 - indexStub(com.intellij.psi.stubs.PsiFileStub,com.intellij.psi.stubs.IndexSink):V
 - serialize(com.intellij.psi.stubs.PsiFileStub,com.intellij.psi.stubs.StubOutputStream):V
+c:com.intellij.psi.stubs.PsiFileStubImpl
+- getElementType():com.intellij.psi.tree.IElementType
+- getStubSerializer():com.intellij.psi.stubs.ObjectStubSerializer
+f:com.intellij.psi.stubs.StubElementUtil
+- sf:shouldCreateStubForPsi(com.intellij.psi.stubs.StubElementFactory,com.intellij.psi.PsiElement):Z
+f:com.intellij.psi.stubs.StubTreeBuilder
+- s:getStubbedRootDescriptors(com.intellij.psi.FileViewProvider):java.util.List
 com.intellij.psi.tree.RoleFinder
 - a:findChild(com.intellij.lang.ASTNode):com.intellij.lang.ASTNode
 com.intellij.psi.util.PsiAwareObject
@@ -259,6 +310,10 @@ com.intellij.util.SequentialTask
 - iteration(com.intellij.openapi.progress.ProgressIndicator):Z
 - prepare():V
 - stop():V
+f:com.intellij.util.concurrency.CancellableClearableLazy
+- <init>(kotlin.jvm.functions.Function0):V
+- f:clear():V
+- f:getValue():java.lang.Object
 org.picocontainer.MutablePicoContainer
 - a:getComponentAdapter(java.lang.Object):org.picocontainer.ComponentAdapter
 - registerComponentImplementation(java.lang.Class):org.picocontainer.ComponentAdapter

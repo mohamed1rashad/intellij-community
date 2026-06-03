@@ -23,7 +23,9 @@ import org.jetbrains.intellij.build.OsFamily
 import org.jetbrains.intellij.build.SignNativeFileMode
 import org.jetbrains.intellij.build.SignTool
 import org.jetbrains.intellij.build.ZipSource
-import org.jetbrains.intellij.build.impl.NativeFileArchitecture.*
+import org.jetbrains.intellij.build.impl.NativeFileArchitecture.AARCH_64
+import org.jetbrains.intellij.build.impl.NativeFileArchitecture.UNIVERSAL
+import org.jetbrains.intellij.build.impl.NativeFileArchitecture.X_64
 import org.jetbrains.intellij.build.io.W_CREATE_NEW
 import org.jetbrains.intellij.build.isWindows
 import java.nio.channels.FileChannel
@@ -33,6 +35,7 @@ import java.nio.file.attribute.PosixFilePermission
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.EnumSet
 import java.util.TreeMap
+import kotlin.io.path.name
 
 /**
  * Set of native files that shouldn't be signed.
@@ -46,7 +49,7 @@ private val nonSignFiles = java.util.Set.of(
 
 @VisibleForTesting
 object OsFamilyDetector {
-  private val macosRegex = "(darwin|mac|macos)".toRegex(RegexOption.IGNORE_CASE)
+  private val macosRegex = "(darwin|mac|macos|osx)".toRegex(RegexOption.IGNORE_CASE)
   private val windowsRegex = "(windows|win32-|win)".toRegex(RegexOption.IGNORE_CASE)
   private val linuxRegex = "linux".toRegex(RegexOption.IGNORE_CASE)
 
@@ -58,7 +61,7 @@ object OsFamilyDetector {
       return when {
         macosRegex.containsMatchIn(path) -> OsFamily.MACOS to ""
         windowsRegex.containsMatchIn(path) -> OsFamily.WINDOWS to ""
-        linuxRegex.containsMatchIn(path) -> OsFamily.LINUX to ""
+        linuxRegex.containsMatchIn(path) -> if (path.contains("musl")) null else OsFamily.LINUX to ""
         path == "icudtl.dat" -> OsFamily.WINDOWS to ""
         else -> null
       }
@@ -161,11 +164,16 @@ private suspend fun unpackNativeLibraries(
   context: BuildContext,
   toRelativePath: (String, String) -> String,
 ) {
-  val libVersion = sourceFile.getName(sourceFile.nameCount - 2).toString()
   val signTool = context.proprietaryBuildTools.signTool
   val unsignedFiles = TreeMap<OsFamily, MutableList<Path>>()
 
+  // Assumes that 'sourceFile' is in maven-like format: $name-$version$packaging (e.g. '.jar')
+  // For now this is true for both Bazel and JPS-based builds
   val libName = getLibNameBySourceFile(sourceFile)
+  val sourceFileName = sourceFile.name
+  check(sourceFileName.startsWith("$libName-")) { "Unexpected source file name (should start with '$libName-'): $sourceFileName" }
+  val libVersion = sourceFileName.removePrefix("$libName-").substringBeforeLast('.')
+
   // we need to keep async-profiler agents for all platforms to support remote target profiling,
   // as a suitable agent is copied to a remote machine
   val allPlatformsRequired = libName == "async-profiler"
@@ -293,7 +301,7 @@ private fun determineArch(os: OsFamily, path: CharSequence): NativeFileArchitect
   // detect architecture from subfolders e.g. "linux-aarch64/libsqliteij.so"
   if (!path.contains("/")) {
     return when {
-      path.contains("x64") -> X_64
+      path.contains("x64") || path.contains("x86_64") || path.contains("win64") -> X_64
       path.contains("aarch64") || path.contains("arm64") -> AARCH_64
       path == "icudtl.dat" -> UNIVERSAL
       else -> null
@@ -325,7 +333,7 @@ private fun getRelativePath(libName: String, arch: JvmArchitecture?, fileName: S
   }
 }
 
-private fun getLibNameBySourceFile(sourceFile: Path): String {
+internal fun getLibNameBySourceFile(sourceFile: Path): String {
   val fileName = sourceFile.fileName.toString()
   return fileName.split('-').takeWhile { !it.contains('.') }.joinToString(separator = "-")
 }

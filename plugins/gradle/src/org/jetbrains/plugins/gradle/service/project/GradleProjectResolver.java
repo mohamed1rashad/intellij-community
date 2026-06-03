@@ -13,7 +13,12 @@ import com.intellij.openapi.externalSystem.importing.ProjectResolverPolicy;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.ExternalSystemException;
 import com.intellij.openapi.externalSystem.model.ProjectKeys;
-import com.intellij.openapi.externalSystem.model.project.*;
+import com.intellij.openapi.externalSystem.model.project.ContentRootData;
+import com.intellij.openapi.externalSystem.model.project.ExternalSystemSourceType;
+import com.intellij.openapi.externalSystem.model.project.LibraryData;
+import com.intellij.openapi.externalSystem.model.project.LibraryDependencyData;
+import com.intellij.openapi.externalSystem.model.project.ModuleData;
+import com.intellij.openapi.externalSystem.model.project.ProjectData;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListener;
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemExecutionAware;
@@ -46,8 +51,22 @@ import org.gradle.tooling.model.ProjectModel;
 import org.gradle.tooling.model.build.BuildEnvironment;
 import org.gradle.tooling.model.idea.IdeaModule;
 import org.gradle.tooling.model.idea.IdeaProject;
-import org.jetbrains.annotations.*;
-import org.jetbrains.plugins.gradle.model.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.VisibleForTesting;
+import org.jetbrains.plugins.gradle.model.DefaultExternalProject;
+import org.jetbrains.plugins.gradle.model.DefaultExternalTask;
+import org.jetbrains.plugins.gradle.model.DefaultGradleLightBuild;
+import org.jetbrains.plugins.gradle.model.ExternalProject;
+import org.jetbrains.plugins.gradle.model.ExternalSourceSet;
+import org.jetbrains.plugins.gradle.model.GradleBuildScriptClasspathModel;
+import org.jetbrains.plugins.gradle.model.GradleLightBuild;
+import org.jetbrains.plugins.gradle.model.GradleLightProject;
+import org.jetbrains.plugins.gradle.model.GradleSourceSetDependencyModel;
+import org.jetbrains.plugins.gradle.model.GradleSourceSetModel;
+import org.jetbrains.plugins.gradle.model.GradleTaskModel;
 import org.jetbrains.plugins.gradle.model.data.BuildParticipant;
 import org.jetbrains.plugins.gradle.model.data.BuildScriptClasspathData;
 import org.jetbrains.plugins.gradle.model.data.CompositeBuildData;
@@ -66,14 +85,29 @@ import org.jetbrains.plugins.gradle.util.GradleModuleDataKt;
 
 import java.io.File;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.*;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.find;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.findAll;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.findAllRecursively;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.findChild;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.getChildren;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.toCanonicalPath;
 import static org.jetbrains.plugins.gradle.service.project.ArtifactMappingServiceKt.OWNER_BASE_GRADLE;
 import static org.jetbrains.plugins.gradle.service.project.GradleProjectResolverUtil.getModuleId;
 
@@ -441,7 +475,7 @@ public final class GradleProjectResolver implements ExternalSystemProjectResolve
     }
     resolverContext.putUserData(GRADLE_HOME_DIR, gradleHomeDir);
 
-    ExternalSystemTelemetryUtil.runWithSpan(GradleConstants.SYSTEM_ID, "PopulateModules", __ -> {
+    ExternalSystemTelemetryUtil.runWithSpan(GradleConstants.SYSTEM_ID, "PopulateModules", _ -> {
       for (final Pair<DataNode<ModuleData>, IdeaModule> pair : moduleMap.values()) {
         final DataNode<ModuleData> moduleDataNode = pair.first;
         final IdeaModule ideaModule = pair.second;
@@ -557,7 +591,11 @@ public final class GradleProjectResolver implements ExternalSystemProjectResolve
     if (resolverContext.isResolveModulePerSourceSet()) {
       executionSettings.withArgument("-Didea.resolveSourceSetDependencies=true");
     }
-    if (executionSettings.isParallelModelFetch()) {
+    boolean parallelModelFetch = executionSettings.isParallelModelFetch();
+    if (!parallelModelFetch) {
+      executionSettings.withArgument("-Dorg.gradle.tooling.parallel.ignore-legacy-default=true");
+    }
+    if (parallelModelFetch || GradleVersionUtil.isGradleAtLeast(resolverContext.getGradleVersion(), "9.4")) {
       executionSettings.withArgument("-Didea.parallelModelFetch.enabled=true");
     }
     if (!resolverContext.isBuildSrcProject()) {
@@ -895,8 +933,8 @@ public final class GradleProjectResolver implements ExternalSystemProjectResolve
     @Nullable DefaultProjectResolverContext resolverContext
   ) {
     Predicate<GradleProjectResolverExtension> extensionsFilter =
-      resolverContext == null ? __ -> true :
-      resolverContext.getPolicy() == null ? __ -> true :
+      resolverContext == null ? _ -> true :
+      resolverContext.getPolicy() == null ? _ -> true :
       resolverContext.getPolicy().getExtensionsFilter();
     Stream<GradleProjectResolverExtension> extensions = GradleProjectResolverUtil.createProjectResolvers(resolverContext)
       .filter(extensionsFilter.or(BaseResolverExtension.class::isInstance));

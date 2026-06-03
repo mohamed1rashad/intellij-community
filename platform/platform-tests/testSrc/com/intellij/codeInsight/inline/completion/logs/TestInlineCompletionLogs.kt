@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.inline.completion.logs
 
 import com.intellij.codeInsight.inline.completion.InlineCompletionLifecycleTestDSL
@@ -7,7 +7,7 @@ import com.intellij.codeInsight.inline.completion.logs.TestInlineCompletionLogs.
 import com.intellij.internal.statistic.FUCollectorTestCase
 import com.intellij.openapi.util.Disposer
 import com.jetbrains.fus.reporting.model.lion3.LogEvent
-import io.kotest.common.runBlocking
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.annotations.ApiStatus
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -19,8 +19,7 @@ import kotlin.test.assertTrue
 @ApiStatus.Internal
 object TestInlineCompletionLogs {
   private fun getSessionLogs(events: List<LogEvent>): List<LogEvent> = events.filter {
-    it.group.id == InlineCompletionLogs.GROUP.id
-    it.event.id == InlineCompletionLogs.Session.SESSION_EVENT.eventId
+    it.group.id == InlineCompletionLogs.GROUP.id && it.event.id == InlineCompletionLogs.Session.SESSION_EVENT.eventId
   }
 
   /**
@@ -28,7 +27,7 @@ object TestInlineCompletionLogs {
    * Also see [singleSessionLog].
    */
   fun InlineCompletionLifecycleTestDSL.noSessionLogs(block: suspend InlineCompletionLifecycleTestDSL.() -> Unit) {
-    val events = FUCollectorTestCase.collectLogEvents("ML", fixture.testRootDisposable) {
+    val events = FUCollectorTestCase.collectLogEvents(recorder = "ML", parentDisposable = fixture.testRootDisposable, escapeChars = true) {
       runBlocking {
         block()
       }
@@ -59,7 +58,7 @@ object TestInlineCompletionLogs {
   ): List<SingleSessionLog> {
     val disposable = Disposer.newDisposable()
     val events = try {
-      FUCollectorTestCase.collectLogEvents("ML", disposable) {
+      FUCollectorTestCase.collectLogEvents(recorder = "ML", parentDisposable = disposable, escapeChars = true) {
         runBlocking {
           block()
         }

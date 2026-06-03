@@ -12,27 +12,50 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.SystemInfo
-import com.intellij.platform.eel.*
+import com.intellij.platform.eel.EelDescriptor
+import com.intellij.platform.eel.EelExecApi
+import com.intellij.platform.eel.EelExecApi.EnvironmentVariablesDeferred
+import com.intellij.platform.eel.EelExecPosixApi
+import com.intellij.platform.eel.EelExecWindowsApi
+import com.intellij.platform.eel.EelPlatform
+import com.intellij.platform.eel.EelPosixProcess
+import com.intellij.platform.eel.EelUserPosixInfo
+import com.intellij.platform.eel.EelWindowsProcess
+import com.intellij.platform.eel.ExecuteProcessException
+import com.intellij.platform.eel.LocalEelExecApi
 import com.intellij.platform.eel.channels.EelDelicateApi
+import com.intellij.platform.eel.impl.base.EelExecApiEnvironmentVariableCache
+import com.intellij.platform.eel.impl.base.bindProcessToScopeIfSet
+import com.intellij.platform.eel.impl.base.commandLineForDebug
 import com.intellij.platform.eel.path.EelPath
 import com.intellij.platform.eel.provider.LocalEelDescriptor
 import com.intellij.platform.eel.provider.utils.awaitProcessResult
-import com.intellij.platform.eel.provider.utils.bindToScope
 import com.intellij.platform.eel.provider.utils.stdoutString
+import com.intellij.platform.eel.spawnProcess
 import com.intellij.util.EnvironmentUtil
 import com.intellij.util.ShellEnvironmentReader
 import com.intellij.util.fastutil.skip
 import com.pty4j.PtyProcess
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.TestOnly
 import org.jetbrains.annotations.VisibleForTesting
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
-import java.util.concurrent.atomic.AtomicReference
-import kotlin.io.path.*
+import kotlin.io.path.Path
+import kotlin.io.path.absolutePathString
+import kotlin.io.path.isDirectory
 
 @OptIn(EelDelicateApi::class)
 @ApiStatus.Internal
@@ -45,51 +68,68 @@ class EelLocalExecPosixApi(
   ): EelPosixProcess {
     val process = executeImpl(generatedBuilder)
     val r = if (process is PtyProcess)
-      LocalEelPosixProcess.create(process, process::setWinSize)
+      LocalEelPosixProcess.create(process, process::setWinSize, platform)
     else
-      LocalEelPosixProcess.create(process, null)
-    generatedBuilder.scope?.let { r.bindToScope(it) }
+      LocalEelPosixProcess.create(process, null, platform)
+    generatedBuilder.bindProcessToScopeIfSet(r)
     return r
   }
 
   override val descriptor: EelDescriptor = LocalEelDescriptor
 
-  private val loginNonInteractiveCache = AtomicReference<Deferred<Map<String, String>>?>()
-  private val loginInteractiveCache = AtomicReference<Deferred<Map<String, String>>?>()
+  private val environmentVariablesCache = EelExecApiEnvironmentVariableCache(::makeEnvironmentVariablesDeferred)
 
-  override fun environmentVariables(opts: EelExecApi.EnvironmentVariablesOptions): Deferred<Map<String, String>> {
+  @TestOnly
+  fun clearCaches() {
+    environmentVariablesCache.clear()
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  override fun environmentVariables(opts: EelExecApi.EnvironmentVariablesOptions): EnvironmentVariablesDeferred {
     val opts =
       opts as? EelExecPosixApi.PosixEnvironmentVariablesOptions
       ?: object : EelExecPosixApi.PosixEnvironmentVariablesOptions, EelExecApi.EnvironmentVariablesOptions by opts {}
 
-    val (cache, interactive) = when (opts.mode) {
-      EelExecPosixApi.PosixEnvironmentVariablesOptions.Mode.MINIMAL -> {
-        return CompletableDeferred(EnvironmentUtil.getSystemEnv())
+    return when (val mode = opts.mode) {
+      EelExecApi.EnvironmentVariablesOptions.Mode.DEFAULT -> {
+        EnvironmentVariablesDeferred(CompletableDeferred(EnvironmentUtil.getEnvironmentMap()))
       }
 
-      EelExecPosixApi.PosixEnvironmentVariablesOptions.Mode.LOGIN_NON_INTERACTIVE -> {
-        loginNonInteractiveCache to false
+      EelExecApi.EnvironmentVariablesOptions.Mode.MINIMAL -> {
+        EnvironmentVariablesDeferred(CompletableDeferred(EnvironmentUtil.getSystemEnv()))
       }
 
-      EelExecPosixApi.PosixEnvironmentVariablesOptions.Mode.LOGIN_INTERACTIVE -> {
-        loginInteractiveCache to true
+      EelExecApi.EnvironmentVariablesOptions.Mode.LOGIN_NON_INTERACTIVE,
+      EelExecApi.EnvironmentVariablesOptions.Mode.LOGIN_INTERACTIVE -> {
+        environmentVariablesCache.getDeferred(mode, opts)
       }
     }
+  }
 
-    val result = cache.updateAndGet { old ->
-      if (old != null && !opts.onlyActual && !old.isActive) {
-        old
+  private fun makeEnvironmentVariablesDeferred(mode: EelExecApi.EnvironmentVariablesOptions.Mode?): Deferred<Map<String, String>> {
+    val interactive = when (mode) {
+      EelExecApi.EnvironmentVariablesOptions.Mode.LOGIN_NON_INTERACTIVE -> false
+      EelExecApi.EnvironmentVariablesOptions.Mode.LOGIN_INTERACTIVE -> true
+
+      EelExecApi.EnvironmentVariablesOptions.Mode.DEFAULT,
+      EelExecApi.EnvironmentVariablesOptions.Mode.MINIMAL,
+      null
+        -> error("unreachable")
+    }
+
+    return service<CoroutineScopeService>().coroutineScope.async(Dispatchers.IO, start = CoroutineStart.LAZY) {
+      try {
+        val shell = getUserShell()
+        // Timeout is chosen at random.
+        ShellEnvironmentReader.readEnvironment(ShellEnvironmentReader.shellCommand(shell, null, interactive, null), 30_000).first
       }
-      else {
-        service<CoroutineScopeService>().coroutineScope.async(Dispatchers.IO, start = CoroutineStart.LAZY) {
-          val shell = getUserShell()
-          // Timeout is chosen at random.
-          ShellEnvironmentReader.readEnvironment(ShellEnvironmentReader.shellCommand(shell, null, interactive, null), 30_000).first
-        }
+      catch (err: CancellationException) {
+        throw err
       }
-    }!!
-    result.start()
-    return result
+      catch (err: Exception) {
+        throw EelExecApi.EnvironmentVariablesException(err.message.orEmpty(), err)
+      }
+    }
   }
 
   private suspend fun getUserShell(): String {
@@ -186,19 +226,19 @@ class EelLocalExecWindowsApi : EelExecWindowsApi, LocalEelExecApi {
     generatedBuilder: EelExecApi.ExecuteProcessOptions,
   ): EelWindowsProcess {
     val process = executeImpl(generatedBuilder)
-    val commandLineForDebug = (listOf(generatedBuilder.exe) + generatedBuilder.args).joinToString(" ")
+    val commandLineForDebug = generatedBuilder.commandLineForDebug
     val r = if (process is PtyProcess)
       LocalEelWindowsProcess.create(process, process::setWinSize, commandLineForDebug)
     else
       LocalEelWindowsProcess.create(process, null, commandLineForDebug)
-    generatedBuilder.scope?.let { r.bindToScope(it) }
+    generatedBuilder.bindProcessToScopeIfSet(r)
     return r
   }
 
   override val descriptor: EelDescriptor = LocalEelDescriptor
 
-  override fun environmentVariables(opts: EelExecApi.EnvironmentVariablesOptions): Deferred<Map<String, String>> =
-    CompletableDeferred(EnvironmentUtil.getEnvironmentMap())
+  override fun environmentVariables(opts: EelExecApi.EnvironmentVariablesOptions): EnvironmentVariablesDeferred =
+    EnvironmentVariablesDeferred(CompletableDeferred(EnvironmentUtil.getEnvironmentMap()))
 
   override suspend fun findExeFilesInPath(binaryName: String): List<EelPath> =
     findExeFilesInPath(binaryName, LOG)
@@ -215,7 +255,56 @@ class EelLocalExecWindowsApi : EelExecWindowsApi, LocalEelExecApi {
 /**
  * JVM on all OSes report IO error as `error=(code), (text)`. See `ProcessImpl_md.c` for Unix and Windows.
  */
-private val errorPattern = Regex(".*error=(-?[0-9]{1,9}),.*")
+// Year 2025 comes to the end. We keep parsing error messages.
+//
+// Error message in Java 21: "java.io.IOException: Cannot run program "sdfgfdhsdfdgdf": error=2, No such file or directory"
+//
+//  src/java.base/unix/native/libjava/ProcessImpl_md.c:
+//
+//    #define IOE_FORMAT "error=%d, %s"
+//
+//    snprintf(errmsg, fmtsize, IOE_FORMAT, errnum, detail);
+//    s = JNU_NewStringPlatform(env, errmsg);
+//    if (s != NULL) {
+//        jobject x = JNU_NewObjectByName(env, "java/io/IOException",
+//                                       "(Ljava/lang/String;)V", s);
+//
+//  src/java.base/windows/native/libjava/ProcessImpl_md.c
+//    size_t n = os_error_message(errnum, utf16_OSErrorMsg, ARRAY_SIZE(utf16_OSErrorMsg));
+//    n = (n > 0)
+//        ? swprintf(utf16_javaMessage, MESSAGE_LENGTH, L"%s error=%d, %s", functionName, errnum, utf16_OSErrorMsg)
+//        : swprintf(utf16_javaMessage, MESSAGE_LENGTH, L"%s failed, error=%d", functionName, errnum);
+//
+//
+// Error message in Java 25: "java.io.IOException: Cannot run program "sdfgfdhsdfdgdf": Exec failed, error: 2 (No such file or directory)"
+//
+//  src/java.base/unix/native/libjava/ProcessImpl_md.c changed in https://github.com/JetBrains/JetBrainsRuntime/commit/5c73dfc28cbd6801ac85c6685fb8c77aad3ab0b7
+//
+//    #define IOE_FORMAT "%s, error: %d (%s) %s"
+//
+//  src/java.base/windows/native/libjava/ProcessImpl_md.c remained unchanged:
+//
+//    size_t n = os_error_message(errnum, utf16_OSErrorMsg, ARRAY_SIZE(utf16_OSErrorMsg));
+//    n = (n > 0)
+//        ? swprintf(utf16_javaMessage, MESSAGE_LENGTH, L"%s error=%d, %s", functionName, errnum, utf16_OSErrorMsg)
+//        : swprintf(utf16_javaMessage, MESSAGE_LENGTH, L"%s failed, error=%d", functionName, errnum);
+@Suppress("RegExpRepeatedSpace", "RegExpSimplifiable", "RegExpRedundantEscape")  // This inspection doesn't understand the verbose regex format.
+private val errorPattern = Regex("""
+  .*
+error
+(?:
+  =  # Java 21 on any os, Java 25 on Windows
+  |
+  :\   # Java 25 on Unix
+)
+(-?[0-9]{1,9})
+(?:
+  ,  # Java 21 on any os, Java 25 on Windows
+  |
+  \  # Java 25 on Unix
+)
+.*
+""", RegexOption.COMMENTS)
 
 private fun executeImpl(builder: EelExecApi.ExecuteProcessOptions): Process {
   val pty = builder.run {
@@ -227,10 +316,11 @@ private fun executeImpl(builder: EelExecApi.ExecuteProcessOptions): Process {
     // Inherit env vars because lack of `PATH` might break things
     val environment = System.getenv().toMutableMap()
     environment.putAll(builder.env)
-    val escapedCommandLine = CommandLineUtil.toCommandLine(builder.exe, builder.args, Platform.current())
+    val platform = Platform.current()
+    val escapedCommandLine = CommandLineUtil.toCommandLine(builder.exe, builder.args, platform)
     return when (val p = pty) {
       is EelExecApi.Pty -> {
-        if ("TERM" !in environment) {
+        if (platform == Platform.UNIX && "TERM" !in environment) {
           environment.getOrPut("TERM") { "xterm" }
         }
         LocalProcessService.getInstance().startPtyProcess(
@@ -295,7 +385,7 @@ private suspend fun findExeFilesInPath(binaryName: String, logger: Logger): List
       if (SystemInfo.isWindows) {
         pathsToProbe.addAll(PathEnvironmentVariableUtil.getWindowsExecutableFileExtensions().map { ext -> Path(binaryName + ext) })
       }
-      pathsToProbe.filter { exeFile -> exeFile.isRegularFile() && exeFile.isExecutable() }
+      pathsToProbe.filter { exeFile -> exeFile.canBeExecuted() }
     }
   }
   else {
@@ -310,7 +400,7 @@ private suspend fun findExeFilesInPath(binaryName: String, logger: Logger): List
         if (dir.isAbsolute && dir.isDirectory()) {
           for (name in names) {
             val exeFile = dir.resolve(name)
-            if (exeFile.isRegularFile() && exeFile.isExecutable()) {
+            if (exeFile.canBeExecuted()) {
               collector.add(exeFile)
             }
           }
@@ -319,6 +409,16 @@ private suspend fun findExeFilesInPath(binaryName: String, logger: Logger): List
     }
   }
   return@withContext result.map { EelPath.parse(it.absolutePathString(), LocalEelDescriptor) }
+}
+
+/**
+ * @return true if this file can be specified as executable when spawning a process
+ */
+private fun Path.canBeExecuted(): Boolean {
+  if (!Files.isExecutable(this)) return false
+  // On Windows and Unix, directories pass the isExecutable check.
+  // Files.isRegularFile is not used because it returns false for Windows reparse points.
+  return !Files.isDirectory(this)
 }
 
 private fun toPath(pathStr: String, log: Logger): Path? =

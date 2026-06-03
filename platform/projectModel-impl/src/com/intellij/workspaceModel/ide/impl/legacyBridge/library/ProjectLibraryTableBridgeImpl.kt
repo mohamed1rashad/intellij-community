@@ -3,7 +3,7 @@ package com.intellij.workspaceModel.ide.impl.legacyBridge.library
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.edtWriteAction
+import com.intellij.openapi.application.backgroundWriteAction
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
@@ -20,7 +20,15 @@ import com.intellij.platform.workspace.jps.entities.LibraryEntity
 import com.intellij.platform.workspace.jps.entities.LibraryId
 import com.intellij.platform.workspace.jps.entities.LibraryTableId
 import com.intellij.platform.workspace.jps.serialization.impl.LibraryNameGenerator
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.CachedValue
+import com.intellij.platform.workspace.storage.EntityChange
+import com.intellij.platform.workspace.storage.EntityStorage
+import com.intellij.platform.workspace.storage.ExternalEntityMapping
+import com.intellij.platform.workspace.storage.ExternalMappingKey
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.MutableExternalEntityMapping
+import com.intellij.platform.workspace.storage.VersionedEntityStorage
+import com.intellij.platform.workspace.storage.VersionedStorageChange
 import com.intellij.projectModel.ProjectModelBundle
 import com.intellij.util.EventDispatcher
 import com.intellij.workspaceModel.ide.impl.WorkspaceModelImpl
@@ -30,7 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 
-private class ProjectLibraryTableBridgeInitializer : BridgeInitializer {
+internal class ProjectLibraryTableBridgeInitializer : BridgeInitializer {
   override fun isEnabled(): Boolean = true
 
   override fun initializeBridges(project: Project, changes: Map<Class<*>, List<EntityChange<*>>>, builder: MutableEntityStorage) {
@@ -152,19 +160,20 @@ open class ProjectLibraryTableBridgeImpl(
         ))
       }
       .toList()
-    LOG.debug("Initial load of project-level libraries")
+    LOG.info("Initial load of project-level (project=${project.name}) libraries. There are ${libraries.size} libraries to load.")
     if (libraries.isEmpty()) {
       return
     }
 
     if (targetBuilder == null) {
+      LOG.info("Applying project-level (project=${project.name}) libraries directly to project WSM.")
       withContext(Dispatchers.EDT) {
         workspaceModel.updateProjectModelSilent("Add project library mapping") {
           for ((entity, library) in libraries) {
             it.mutableLibraryMap.addIfAbsent(entity, library)
           }
         }
-        edtWriteAction {
+        backgroundWriteAction {
           for ((_, library) in libraries) {
             dispatcher.multicaster.afterLibraryAdded(library)
           }
@@ -172,6 +181,7 @@ open class ProjectLibraryTableBridgeImpl(
       }
     }
     else {
+      LOG.info("Applying project-level (project=${project.name}) libraries to the provided builder.")
       for ((entity, library) in libraries) {
         targetBuilder.mutableLibraryMap.addIfAbsent(entity, library)
       }
@@ -188,7 +198,7 @@ open class ProjectLibraryTableBridgeImpl(
     if (name == null) error("Creating unnamed project libraries is unsupported")
 
     if (getLibraryByName(name) != null) {
-      error("Project library named $name already exists")
+      error("Project library named `$name` already exists")
     }
 
     val modifiableModel = modifiableModel
@@ -197,7 +207,7 @@ open class ProjectLibraryTableBridgeImpl(
 
     val newLibrary = getLibraryByName(name)
     if (newLibrary == null) {
-      error("Library $name was not created")
+      error("Library `$name` was not created")
     }
 
     return newLibrary

@@ -1,10 +1,11 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.net
 
 import com.intellij.openapi.util.Ref
 import com.intellij.openapi.util.io.StreamUtil
 import com.intellij.testFramework.junit5.fixture.TestFixture
 import com.intellij.testFramework.junit5.fixture.TestFixtures
+import com.intellij.testFramework.junit5.fixture.testFixture
 import com.intellij.testFramework.junit5.http.localhostHttpServer
 import com.intellij.testFramework.junit5.http.url
 import com.intellij.util.io.HttpRequests
@@ -17,12 +18,13 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.GZIPOutputStream
@@ -34,24 +36,28 @@ class PlatformHttpClientTest {
   private val serverFixture: TestFixture<HttpServer> = localhostHttpServer()
   private val server: HttpServer get() = serverFixture.get()
   private val serverRequest: HttpRequest get() = PlatformHttpClient.request(URI(server.url))
-  private val client = PlatformHttpClient.client()
+  private val clientFixture = testFixture {
+    val client = PlatformHttpClient.client()
+    initialized(client, tearDown = client::close)
+  }
+  private val client: HttpClient get() = clientFixture.get()
 
   @Test fun fileUrl(@TempDir tempDir: Path) {
     val data = "data"
     val tempFile = Files.createTempFile(tempDir, "test.", ".txt").apply { writeText(data) }
     val request = PlatformHttpClient.request(tempFile.toUri())
-    val response = PlatformHttpClient.checkResponse(client.send(request, HttpResponse.BodyHandlers.ofString()))
-    assertThat(response.body()).isEqualTo(data)
+    val response = PlatformHttpClient.send(client, request, HttpResponse.BodyHandlers.ofString())
+    assertThat(response).isEqualTo(data)
   }
 
   @Test fun missingFileResponse(@TempDir tempDir: Path) {
     val missingFile = tempDir.resolve("no_such_file")
     assertThat(missingFile).doesNotExist()
     val request = PlatformHttpClient.request(missingFile.toUri())
-    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-    assertThat(response.statusCode()).isEqualTo(HttpURLConnection.HTTP_NOT_FOUND)
-    assertThat(response.body()).isEmpty()
-    assertThatThrownBy { PlatformHttpClient.checkResponse(response) }.isInstanceOf(HttpRequests.HttpStatusException::class.java)
+    assertThatThrownBy { PlatformHttpClient.send(client, request, HttpResponse.BodyHandlers.ofString()) }
+      .isInstanceOf(HttpRequests.HttpStatusException::class.java)
+      .extracting { (it as HttpRequests.HttpStatusException).statusCode }
+      .isEqualTo(HttpURLConnection.HTTP_NOT_FOUND)
   }
 
   @Test fun redirectLimit() {
@@ -78,7 +84,7 @@ class PlatformHttpClientTest {
       ex.sendResponseHeaders(HttpURLConnection.HTTP_OK, 0)
       ex.close()
     }
-    val response = PlatformHttpClient.checkResponse(client.send(serverRequest, HttpResponse.BodyHandlers.ofString()))
+    val response = client.send(serverRequest, HttpResponse.BodyHandlers.ofString())
     assertThat(response.statusCode()).isEqualTo(HttpURLConnection.HTTP_OK)
     assertThat(response.body()).isEmpty()
     assertThat(requested.get()).isEqualTo(2)
@@ -93,8 +99,8 @@ class PlatformHttpClientTest {
       ex.responseBody.write(text.toByteArray(charset("koi8-r")))
       ex.close()
     }
-    val response = PlatformHttpClient.checkResponse(client.send(serverRequest, HttpResponse.BodyHandlers.ofString()))
-    assertThat(response.body()).isEqualTo(text)
+    val response = PlatformHttpClient.send(client, serverRequest, HttpResponse.BodyHandlers.ofString())
+    assertThat(response).isEqualTo(text)
   }
 
   @Suppress("NonAsciiCharacters")
@@ -112,10 +118,10 @@ class PlatformHttpClientTest {
     val request = PlatformHttpClient.requestBuilder(URI(server.url))
       .header("Accept-Encoding", "gzip")
       .build()
-    val rawResponse = PlatformHttpClient.checkResponse(client.send(request, HttpResponse.BodyHandlers.ofByteArray()))
-    assertThat(rawResponse.body()).startsWith(0x1f, 0x8b) // GZIP magic
-    val decodedResponse = PlatformHttpClient.checkResponse(client.send(request, PlatformHttpClient.gzipStringBodyHandler()))
-    assertThat(decodedResponse.body()).isEqualTo(text)
+    val rawResponse = PlatformHttpClient.send(client, request, HttpResponse.BodyHandlers.ofByteArray())
+    assertThat(rawResponse).startsWith(0x1f, 0x8b) // GZIP magic
+    val decodedResponse = PlatformHttpClient.send(client, request, PlatformHttpClient.gzipStringBodyHandler())
+    assertThat(decodedResponse).isEqualTo(text)
   }
 
   @Test fun tuning() {
@@ -141,7 +147,7 @@ class PlatformHttpClientTest {
     val request = PlatformHttpClient.requestBuilder(URI(server.url))
       .POST(HttpRequest.BodyPublishers.ofString(text))
       .build()
-    PlatformHttpClient.checkResponse(client.send(request, HttpResponse.BodyHandlers.ofString()))
+    PlatformHttpClient.send(client, request, HttpResponse.BodyHandlers.discarding())
     assertThat(receivedData.get()).isEqualTo(text)
   }
 
@@ -171,16 +177,15 @@ class PlatformHttpClientTest {
     assertThat(response.body()).isEmpty()
   }
 
-  @Test fun permissionDenied() {
+  @Test fun accessDenied() {
     server.createContext("/") { ex ->
-      ex.sendResponseHeaders(HttpURLConnection.HTTP_UNAUTHORIZED, -1)
+      ex.sendResponseHeaders(HttpURLConnection.HTTP_FORBIDDEN, -1)
       ex.close()
     }
-    val response = client.send(serverRequest, HttpResponse.BodyHandlers.ofString())
-    assertThatThrownBy { PlatformHttpClient.checkResponse(response) }
+    assertThatThrownBy { PlatformHttpClient.send(client, serverRequest, HttpResponse.BodyHandlers.ofString()) }
       .isInstanceOf(HttpRequests.HttpStatusException::class.java)
       .extracting { (it as? HttpRequests.HttpStatusException)?.statusCode }
-      .isEqualTo(HttpURLConnection.HTTP_UNAUTHORIZED)
+      .isEqualTo(HttpURLConnection.HTTP_FORBIDDEN)
   }
 
   @Test
@@ -194,8 +199,7 @@ class PlatformHttpClientTest {
       exchange.sendResponseHeaders(HttpURLConnection.HTTP_NOT_FOUND, 0)
       exchange.close()
     }
-    val response = client.send(serverRequest, HttpResponse.BodyHandlers.ofString())
-    assertThatThrownBy { PlatformHttpClient.checkResponse(response) }
+    assertThatThrownBy { PlatformHttpClient.send(client, serverRequest, HttpResponse.BodyHandlers.ofString()) }
       .isInstanceOf(HttpRequests.HttpStatusException::class.java)
       .extracting { (it as? HttpRequests.HttpStatusException)?.statusCode }
       .isEqualTo(HttpURLConnection.HTTP_NOT_FOUND)
@@ -208,8 +212,7 @@ class PlatformHttpClientTest {
       ex.sendResponseHeaders(HttpRequests.CUSTOM_ERROR_CODE, 0)
       ex.close()
     }
-    val response = client.send(serverRequest, HttpResponse.BodyHandlers.ofString())
-    assertThatThrownBy { PlatformHttpClient.checkResponse(response) }
+    assertThatThrownBy { PlatformHttpClient.send(client, serverRequest, HttpResponse.BodyHandlers.ofString()) }
       .isInstanceOf(HttpRequests.HttpStatusException::class.java)
       .hasMessageContaining(message)
   }

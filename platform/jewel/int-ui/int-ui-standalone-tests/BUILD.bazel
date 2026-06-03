@@ -15,19 +15,41 @@ create_kotlinc_options(
 )
 
 jvm_library(
+  name = "jewel-intUi-standalone-tests",
+  module_name = "intellij.platform.jewel.intUi.standalone.tests",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    "@lib//:kotlin-stdlib",
+    "//platform/jewel/int-ui/int-ui-standalone:jewel-intUi-standalone",
+  ]
+)
+
+jvm_library(
   name = "jewel-intUi-standalone-tests_test_lib",
+  testonly = True,
   module_name = "intellij.platform.jewel.intUi.standalone.tests",
   visibility = ["//visibility:public"],
   srcs = glob(["src/test/kotlin/**/*.kt", "src/test/kotlin/**/*.java", "src/test/kotlin/**/*.form"], allow_empty = True),
+  resources = glob(["src/test/resources/**/*"]),
+  resource_strip_prefix = "src/test/resources",
   kotlinc_opts = ":custom_jewel-intUi-standalone-tests",
   deps = [
     "@lib//:kotlin-stdlib",
     "@lib//:kotlin-test",
     "@lib//:junit5",
     "//platform/jewel/int-ui/int-ui-standalone:jewel-intUi-standalone",
-  ]
+    "//platform/jewel/int-ui/int-ui-standalone:jewel-intUi-standalone_test_lib",
+  ],
+  runtime_deps = [":jewel-intUi-standalone-tests"]
 )
 ### auto-generated section `build intellij.platform.jewel.intUi.standalone.tests` end
+
+### auto-generated section `iml intellij.platform.jewel.intUi.standalone.tests` start
+exports_files([
+  "intellij.platform.jewel.intUi.standalone.tests.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.jewel.intUi.standalone.tests` end
 
 ### auto-generated section `test intellij.platform.jewel.intUi.standalone.tests` start
 load("@community//build:tests-options.bzl", "jps_test")

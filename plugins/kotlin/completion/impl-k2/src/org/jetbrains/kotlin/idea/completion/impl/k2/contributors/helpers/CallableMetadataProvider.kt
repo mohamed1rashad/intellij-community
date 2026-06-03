@@ -1,6 +1,6 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
-package org.jetbrains.kotlin.idea.completion.contributors.helpers
+package org.jetbrains.kotlin.idea.completion.impl.k2.contributors.helpers
 
 import com.intellij.util.applyIf
 import kotlinx.serialization.Serializable
@@ -24,11 +24,28 @@ import org.jetbrains.kotlin.analysis.api.components.isUnitType
 import org.jetbrains.kotlin.analysis.api.components.semanticallyEquals
 import org.jetbrains.kotlin.analysis.api.components.withNullability
 import org.jetbrains.kotlin.analysis.api.signatures.KaCallableSignature
-import org.jetbrains.kotlin.analysis.api.symbols.*
-import org.jetbrains.kotlin.analysis.api.types.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassifierSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSyntheticJavaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaTypeAliasSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.isLocal
+import org.jetbrains.kotlin.analysis.api.symbols.receiverType
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaErrorType
+import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
+import org.jetbrains.kotlin.analysis.api.types.KaIntersectionType
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.buildClassTypeWithStarProjections
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.resolveToExpandedSymbol
-import org.jetbrains.kotlin.idea.completion.lookups.isExtensionCall
+import org.jetbrains.kotlin.idea.completion.impl.k2.lookups.isExtensionCall
 import org.jetbrains.kotlin.idea.completion.reference
 import org.jetbrains.kotlin.kdoc.psi.impl.KDocName
 import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
@@ -91,8 +108,8 @@ internal object CallableMetadataProvider {
             else -> this
         }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     fun getCallableMetadata(
         signature: KaCallableSignature<*>,
         scopeKind: KaScopeKind?,
@@ -155,8 +172,8 @@ internal object CallableMetadataProvider {
             .applyIf(hasOverriddenSymbols) { CallableMetadata(kind.correspondingBaseForThisOrSelf, scopeIndex) }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun extensionWeight(
         signature: KaCallableSignature<*>,
         actualReceiverTypes: List<List<KaType>>,
@@ -182,7 +199,17 @@ internal object CallableMetadataProvider {
 
     context(_: KaSession)
     private fun getExpectedNonExtensionReceiver(symbol: KaCallableSymbol): KaClassSymbol? {
-        val containingClass = symbol.fakeOverrideOriginal.containingSymbol as? KaClassSymbol
+        val containingSymbol = symbol.fakeOverrideOriginal.containingSymbol
+
+        // Because of KT-85856, the `containingSymbol` for properties contained within
+        // constructors of local classes return the constructor rather than the containing class.
+        // This is a temporary workaround until KT-85856 is fixed.
+        val containingClass = if (symbol is KaPropertySymbol && containingSymbol is KaConstructorSymbol) {
+            (containingSymbol.containingSymbol as? KaClassSymbol)?.takeIf { it.isLocal }
+        } else {
+            containingSymbol as? KaClassSymbol
+        }
+
         return if (symbol is KaConstructorSymbol && (containingClass as? KaNamedClassSymbol)?.isInner == true) {
             containingClass.containingDeclaration as? KaClassSymbol
         } else {

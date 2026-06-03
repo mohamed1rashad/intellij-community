@@ -3,16 +3,55 @@ package com.intellij.database.run.ui;
 import com.intellij.database.DataGridBundle;
 import com.intellij.database.DatabaseDataKeys;
 import com.intellij.database.connection.throwable.info.ErrorInfo;
-import com.intellij.database.datagrid.*;
+import com.intellij.database.datagrid.DataGrid;
+import com.intellij.database.datagrid.DataGridAppearance;
+import com.intellij.database.datagrid.DataGridListener;
+import com.intellij.database.datagrid.DataGridStartupActivity;
+import com.intellij.database.datagrid.GridColumn;
+import com.intellij.database.datagrid.GridDataHookUp;
 import com.intellij.database.datagrid.GridDataRequest.GridDataRequestOwner;
+import com.intellij.database.datagrid.GridEditorPanel;
+import com.intellij.database.datagrid.GridFilterAndSortingComponent;
+import com.intellij.database.datagrid.GridHelper;
+import com.intellij.database.datagrid.GridLoader;
+import com.intellij.database.datagrid.GridModel;
+import com.intellij.database.datagrid.GridMutator;
+import com.intellij.database.datagrid.GridPagingModel;
+import com.intellij.database.datagrid.GridPresentationMode;
+import com.intellij.database.datagrid.GridRequestSource;
+import com.intellij.database.datagrid.GridRow;
+import com.intellij.database.datagrid.GridSelection;
+import com.intellij.database.datagrid.GridSortingModel;
+import com.intellij.database.datagrid.GridUtilCore;
+import com.intellij.database.datagrid.ModelIndex;
+import com.intellij.database.datagrid.ModelIndexSet;
+import com.intellij.database.datagrid.RawIndexConverter;
+import com.intellij.database.datagrid.ResultView;
+import com.intellij.database.datagrid.RowSortOrder;
+import com.intellij.database.datagrid.SelectionModel;
+import com.intellij.database.datagrid.SelectionModelUtil;
+import com.intellij.database.datagrid.ViewIndex;
+import com.intellij.database.datagrid.mutating.CellMutation;
 import com.intellij.database.datagrid.color.GridColorModel;
 import com.intellij.database.datagrid.color.GridColorModelImpl;
 import com.intellij.database.editor.DataGridColors;
-import com.intellij.database.extractors.*;
+import com.intellij.database.extractors.BinaryDisplayType;
 import com.intellij.database.extractors.DatabaseObjectFormatterConfig.DatabaseDisplayObjectFormatterConfig;
+import com.intellij.database.extractors.DisplayType;
+import com.intellij.database.extractors.NumberDisplayType;
+import com.intellij.database.extractors.ObjectFormatter;
+import com.intellij.database.extractors.ObjectFormatterUtil;
+import com.intellij.database.extractors.TextInfo;
 import com.intellij.database.remote.jdbc.LobInfo;
-import com.intellij.database.run.actions.DeleteRowsAction;
-import com.intellij.database.run.ui.grid.*;
+import com.intellij.database.run.ui.grid.GridColorsScheme;
+import com.intellij.database.run.ui.grid.GridDataSupportImpl;
+import com.intellij.database.run.ui.grid.GridFilterAndSortingComponentImpl;
+import com.intellij.database.run.ui.grid.GridFilterPanel;
+import com.intellij.database.run.ui.grid.GridMainPanel;
+import com.intellij.database.run.ui.grid.GridMarkupModel;
+import com.intellij.database.run.ui.grid.GridMarkupModelImpl;
+import com.intellij.database.run.ui.grid.GridRowComparator;
+import com.intellij.database.run.ui.grid.GridRowHeader;
 import com.intellij.database.run.ui.table.FormatterConfigCache;
 import com.intellij.database.run.ui.table.LocalFilterState;
 import com.intellij.database.run.ui.table.TableResultRowHeader;
@@ -26,8 +65,15 @@ import com.intellij.ide.ActivityTracker;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.lang.Language;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.editor.colors.ColorKey;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
@@ -35,7 +81,16 @@ import com.intellij.openapi.editor.colors.impl.AbstractColorsScheme;
 import com.intellij.openapi.fileEditor.impl.EditorEmptyTextPainter;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Couple;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.ModificationTracker;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.SimpleModificationTracker;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
@@ -65,18 +120,55 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.util.*;
+import javax.swing.AbstractAction;
+import javax.swing.JComponent;
+import javax.swing.JLayeredPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JViewport;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 import static com.intellij.database.datagrid.GridPresentationMode.TABLE;
-import static com.intellij.database.datagrid.GridUtil.*;
+import static com.intellij.database.datagrid.GridUtil.activeGridChanged;
+import static com.intellij.database.datagrid.GridUtil.activeGridListener;
+import static com.intellij.database.datagrid.GridUtil.areOnlySortedColumns;
+import static com.intellij.database.datagrid.GridUtil.getDatabaseMutator;
+import static com.intellij.database.datagrid.GridUtil.getGridColumnHeaderPopupActions;
+import static com.intellij.database.datagrid.GridUtil.getPsiElementForSelection;
+import static com.intellij.database.datagrid.GridUtil.getSettings;
+import static com.intellij.database.datagrid.GridUtil.getVirtualFile;
+import static com.intellij.database.datagrid.GridUtil.globalSchemeChange;
+import static com.intellij.database.datagrid.GridUtil.isDetectTextInBinaryColumns;
+import static com.intellij.database.datagrid.GridUtil.isDetectUUIDInBinaryColumns;
+import static com.intellij.database.datagrid.GridUtil.saveAndRestoreSelection;
+import static com.intellij.database.datagrid.GridUtil.scrollToLocally;
+import static com.intellij.database.datagrid.GridUtil.showIgnoreUnsubmittedChangesYesNoDialog;
 import static com.intellij.database.datagrid.mutating.ColumnDescriptor.Attribute;
-import static com.intellij.database.editor.TableFileEditorState.*;
+import static com.intellij.database.editor.TableFileEditorState.DEFAULT_OR_HIDDEN_COLUMN_POSITION;
+import static com.intellij.database.editor.TableFileEditorState.UNKNOWN_COLUMN_POSITION;
+import static com.intellij.database.editor.TableFileEditorState.fromSerializedPosition;
 import static com.intellij.database.extractors.ObjectFormatterUtil.isValidUUIDWithKnownVersion;
 import static com.intellij.database.run.actions.ChangeColumnDisplayTypeAction.isBinary;
 import static com.intellij.database.run.actions.ChangeColumnDisplayTypeAction.isIntegerOrBigInt;
@@ -429,6 +521,11 @@ public class TableResultPanel extends UserDataHolderBase
       }
 
       @Override
+      public void dropModelDependentCache(@NotNull GridRequestSource source) {
+        TableResultPanel.this.dropModelDependentCache();
+      }
+
+      @Override
       public void requestFinished(@NotNull GridRequestSource source, boolean success) {
         doRepaint(source);
         GridRequestSource.GridRequestPlace<?, ?> gridRequestPlace = ObjectUtils.tryCast(source.place, GridRequestSource.GridRequestPlace.class);
@@ -566,9 +663,10 @@ public class TableResultPanel extends UserDataHolderBase
     if (sortingModel == null) return;
 
     boolean reload = updateDataOrdering(false) || sortingModel.isSortingEnabled() != sortViaOrderBy;
+    boolean shouldClearPendingChanges = hasPendingMutations();
     sortingModel.setSortingEnabled(sortViaOrderBy);
     if (reload && isSafeToReload()) {
-      myDataHookUp.getLoader().loadFirstPage(new GridRequestSource(new DataGridRequestPlace(this)));
+      myDataHookUp.getLoader().loadFirstPage(createReloadRequestSource(shouldClearPendingChanges));
     }
   }
 
@@ -795,6 +893,13 @@ public class TableResultPanel extends UserDataHolderBase
   }
 
   @Override
+  public void editSelectedCellWithValue(@Nullable Object value) {
+    if (myResultView instanceof ResultViewWithCells) {
+      ((ResultViewWithCells)myResultView).editSelectedCellWithValue(value);
+    }
+  }
+
+  @Override
   public @NotNull String getUnambiguousColumnName(@NotNull ModelIndex<GridColumn> column) {
     GridColumn c = getDataModel(DATA_WITH_MUTATIONS).getColumn(column);
     return c == null ? "" : myColumnAttributes.getName(c).trim();
@@ -875,9 +980,6 @@ public class TableResultPanel extends UserDataHolderBase
   protected void uiDataSnapshot(@NotNull DataSink sink) {
     sink.set(CommonDataKeys.PROJECT, myProject);
     sink.setNull(CommonDataKeys.EDITOR);
-    sink.set(PlatformDataKeys.COPY_PROVIDER, new GridCopyProvider(this));
-    sink.set(PlatformDataKeys.PASTE_PROVIDER, new GridPasteProvider(this, GridUtil::retrieveDataFromText));
-    sink.set(PlatformDataKeys.DELETE_ELEMENT_PROVIDER, new DeleteRowsAction());
     sink.set(DatabaseDataKeys.DATA_GRID_KEY, this);
     sink.set(LangDataKeys.NO_NEW_ACTION, Boolean.TRUE);
 
@@ -1247,6 +1349,16 @@ public class TableResultPanel extends UserDataHolderBase
     return myFormatterConfigCached.getValue().get(columnIdx);
   }
 
+  private void dropModelDependentCache() {
+    if (!(myResultView instanceof ResultViewWithColumns resultViewWithColumns)) return;
+    for (var columnIdx : getDataModel(DATA_WITH_MUTATIONS).getColumnIndices().asIterable()) {
+      var layoutColumn = resultViewWithColumns.getLayoutColumn(columnIdx);
+      if (layoutColumn != null) {
+        layoutColumn.dropModelDependentCache();
+      }
+    }
+  }
+
   public static class ColumnAttributes {
     private String myAnonymousColumnName = "<anonymous>";
 
@@ -1448,6 +1560,17 @@ public class TableResultPanel extends UserDataHolderBase
                          boolean allowImmediateUpdate,
                          @Nullable Runnable moveToNextCellRunnable,
                          @NotNull GridRequestSource source) {
+    setValueAt(viewRows, viewColumns, value, allowImmediateUpdate, moveToNextCellRunnable, source, null);
+  }
+
+  @Override
+  public void setValueAt(@NotNull ModelIndexSet<GridRow> viewRows,
+                         @NotNull ModelIndexSet<GridColumn> viewColumns,
+                         @Nullable Object value,
+                         boolean allowImmediateUpdate,
+                         @Nullable Runnable moveToNextCellRunnable,
+                         @NotNull GridRequestSource source,
+                         @Nullable Object metadata) {
     final GridMutator<GridRow, GridColumn> mutator = getDataHookup().getMutator();
 
     int[] validRows = valid(viewRows);
@@ -1455,14 +1578,23 @@ public class TableResultPanel extends UserDataHolderBase
     ModelIndexSet<GridRow> rows = validRows.length > 0 ? ModelIndexSet.forRows(this, validRows) : null;
     ModelIndexSet<GridColumn> columns = validRows.length > 0 ? ModelIndexSet.forColumns(this, validColumns) : null;
 
-    if (mutator == null || rows == null || getDataModel(DATA_WITH_MUTATIONS).allValuesEqualTo(rows, columns, value)) {
+    if (mutator == null || rows == null ||
+        (metadata == null && getDataModel(DATA_WITH_MUTATIONS).allValuesEqualTo(rows, columns, value))) {
       if (moveToNextCellRunnable != null) ApplicationManager.getApplication().invokeLater(moveToNextCellRunnable);
       return;
     }
 
     ApplicationManager.getApplication().invokeLater(() -> {
       if (moveToNextCellRunnable != null) source.getActionCallback().doWhenDone(moveToNextCellRunnable);
-      mutator.mutate(source, rows, columns, value, allowImmediateUpdate);
+      List<CellMutation> mutations = GridUtilCore.createMutations(rows, columns, value);
+      if (metadata != null) {
+        // Metadata-aware callers currently edit a single logical cell.
+        // Multi-cell updates would need per-cell metadata instead of reusing one shared instance.
+        for (CellMutation mutation : mutations) {
+          mutation.withMetadata(metadata);
+        }
+      }
+      mutator.mutate(source, mutations, allowImmediateUpdate);
     });
   }
 
@@ -1524,9 +1656,10 @@ public class TableResultPanel extends UserDataHolderBase
 
     sortingModel.setOrdering(newOrdering);
     if (reloadIfUpdated) {
+      boolean shouldClearPendingChanges = hasPendingMutations();
       alarm.cancelAllRequests();
       alarm.addRequest(() -> {
-        myDataHookUp.getLoader().loadFirstPage(new GridRequestSource(new DataGridRequestPlace(this)));
+        myDataHookUp.getLoader().loadFirstPage(createReloadRequestSource(shouldClearPendingChanges));
       }, 300); // wait for double click
     }
     return true;
@@ -1667,8 +1800,7 @@ public class TableResultPanel extends UserDataHolderBase
 
   @Override
   public boolean isSafeToReload() {
-    GridMutator<GridRow, GridColumn> mutator = myDataHookUp.getMutator();
-    return mutator == null || !mutator.hasPendingChanges() || showIgnoreUnsubmittedChangesYesNoDialog(this);
+    return !hasPendingMutations() || showIgnoreUnsubmittedChangesYesNoDialog(this);
   }
 
   @Override
@@ -1690,6 +1822,7 @@ public class TableResultPanel extends UserDataHolderBase
 
   @Override
   public void resetView() {
+    boolean shouldClearPendingChanges = hasPendingMutations();
     if (isSortViaOrderBy() && !isSafeToReload()) {
       return;
     }
@@ -1706,8 +1839,19 @@ public class TableResultPanel extends UserDataHolderBase
     getSelectionModel().restore(selection);
 
     if (isSortViaOrderBy()) {
-      myDataHookUp.getLoader().reloadCurrentPage(new GridRequestSource(new DataGridRequestPlace(this)));
+      myDataHookUp.getLoader().reloadCurrentPage(createReloadRequestSource(shouldClearPendingChanges));
     }
+  }
+
+  private boolean hasPendingMutations() {
+    GridMutator<GridRow, GridColumn> mutator = myDataHookUp.getMutator();
+    return mutator != null && mutator.hasPendingChanges();
+  }
+
+  private @NotNull GridRequestSource createReloadRequestSource(boolean clearPendingChanges) {
+    GridRequestSource source = GridRequestSource.create(new DataGridRequestPlace(this));
+    source.setMutatedDataLocally(clearPendingChanges);
+    return source;
   }
 
   @Override
@@ -1831,7 +1975,9 @@ public class TableResultPanel extends UserDataHolderBase
     @Override
     public void mouseClicked(MouseEvent e) {
       if (DataGridStartupActivity.DataEditorConfigurator.isLoadingDelayed(myGrid)) {
-        myGrid.getDataHookup().getLoader().reloadCurrentPage(new GridRequestSource(new DataGridRequestPlace(myGrid)));
+        WriteIntentReadAction.run(() -> {
+          myGrid.getDataHookup().getLoader().reloadCurrentPage(new GridRequestSource(new DataGridRequestPlace(myGrid)));
+        });
       }
     }
 

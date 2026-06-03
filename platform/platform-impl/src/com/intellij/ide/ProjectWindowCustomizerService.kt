@@ -8,10 +8,19 @@ import com.intellij.ide.ui.LafManagerListener
 import com.intellij.ide.ui.UISettings
 import com.intellij.ide.ui.UISettingsListener
 import com.intellij.ide.util.PropertiesComponent
+import com.intellij.internal.statistic.beans.MetricEvent
+import com.intellij.internal.statistic.eventLog.EventLogGroup
+import com.intellij.internal.statistic.eventLog.events.EventFields
+import com.intellij.internal.statistic.eventLog.validator.ValidationResultType
+import com.intellij.internal.statistic.eventLog.validator.rules.EventContext
+import com.intellij.internal.statistic.eventLog.validator.rules.impl.CustomValidationRule
+import com.intellij.internal.statistic.service.fus.collectors.ProjectUsagesCollector
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.CoroutineSupport.UiDispatcherKind
+import com.intellij.openapi.application.UI
 import com.intellij.openapi.application.impl.InternalUICustomization
+import com.intellij.openapi.application.impl.islands.isColorIslandGradientAvailable
 import com.intellij.openapi.application.ui
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -30,6 +39,7 @@ import com.intellij.openapi.wm.impl.headertoolbar.MainToolbar
 import com.intellij.ui.ColorHexUtil
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.ComponentUtil
+import com.intellij.ui.DeferredIconImpl
 import com.intellij.ui.JBColor
 import com.intellij.ui.paint.PaintUtil
 import com.intellij.ui.paint.PaintUtil.alignIntToInt
@@ -37,22 +47,32 @@ import com.intellij.ui.paint.PaintUtil.alignTxToInt
 import com.intellij.ui.scale.ScaleContext
 import com.intellij.util.IconUtil
 import com.intellij.util.PlatformUtils
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.concurrency.SynchronizedClearableLazy
 import com.intellij.util.concurrency.ThreadingAssertions
+import com.intellij.util.messages.Topic
 import com.intellij.util.ui.AvatarIcon
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.launchOnShow
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
+import org.jetbrains.annotations.SystemIndependent
 import java.awt.Color
 import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.Window
 import java.nio.file.Path
-import java.util.*
+import java.util.Random
 import javax.swing.Icon
 import javax.swing.JComponent
 import kotlin.io.path.invariantSeparatorsPathString
@@ -98,6 +118,59 @@ private data class ProjectColors(val gradient: Color,
                                  val iconColorEnd: Color,
                                  val index: Int? = null)
 
+/**
+ * Shared visual palette for UI surfaces that identify projects by already stored recent-project color metadata.
+ * This intentionally does not expose path-based lookup: those helpers may generate and persist a missing color index.
+ */
+@Internal
+object RecentProjectColorPalette {
+  const val COLOR_COUNT: Int = 9
+
+  private const val CUSTOM_COLOR_BALANCE = 0.18
+
+  @Suppress("UnregisteredNamedColor")
+  private val mainToolbarGradientStartColors: Array<Color>
+    get() = arrayOf(
+      JBColor.namedColor("RecentProject.Color1.MainToolbarGradientStart", JBColor(0xDB3D3C, 0xCE443C)),
+      JBColor.namedColor("RecentProject.Color2.MainToolbarGradientStart", JBColor(0xF57236, 0xE27237)),
+      JBColor.namedColor("RecentProject.Color3.MainToolbarGradientStart", JBColor(0x2BC8BB, 0x2DBCAD)),
+      JBColor.namedColor("RecentProject.Color4.MainToolbarGradientStart", JBColor(0x359AF2, 0x3895E1)),
+      JBColor.namedColor("RecentProject.Color5.MainToolbarGradientStart", JBColor(0x8379FB, 0x7B75E8)),
+      JBColor.namedColor("RecentProject.Color6.MainToolbarGradientStart", JBColor(0x7E54B5, 0x7854AD)),
+      JBColor.namedColor("RecentProject.Color7.MainToolbarGradientStart", JBColor(0xD63CC8, 0x8F4593)),
+      JBColor.namedColor("RecentProject.Color8.MainToolbarGradientStart", JBColor(0x954294, 0xC840B9)),
+      JBColor.namedColor("RecentProject.Color9.MainToolbarGradientStart", JBColor(0xE75371, 0xD75370))
+    )
+
+  fun mainToolbarGradientStart(index: Int): Color? {
+    return mainToolbarGradientStartColors.getOrNull(index)
+  }
+
+  fun softBackground(index: Int): Color? {
+    return mainToolbarGradientStart(index)
+  }
+
+  fun softBackground(customColor: Color): Color {
+    return ColorUtil.mix(JBColor.PanelBackground, customColor, CUSTOM_COLOR_BALANCE)
+  }
+
+  fun softBackground(colorInfo: RecentProjectColorInfo): Color? {
+    colorInfo.customColor
+      ?.takeIf { it.isNotBlank() }
+      ?.let { customColor ->
+        return softBackground(ColorHexUtil.fromHex(customColor, null) ?: return null)
+      }
+
+    return softBackground(colorInfo.associatedIndex)
+  }
+}
+
+@Internal
+interface ProjectColorChangeListener {
+  @RequiresEdt
+  fun projectColorChanged(projectPath: @SystemIndependent String)
+}
+
 internal class ProjectGradients(val index: Int) {
   val diagonalColor1 = JBColor.namedColor("ProjectGradients.Group${index}.DiagonalGradient.Color1")
   val diagonalColor2 = JBColor.namedColor("ProjectGradients.Group${index}.DiagonalGradient.Color2")
@@ -128,12 +201,16 @@ internal class ProjectGradients(val index: Int) {
 }
 
 @Service
-class ProjectWindowCustomizerService : Disposable {
+class ProjectWindowCustomizerService internal constructor(private val coroutineScope: CoroutineScope) : Disposable {
   companion object {
     private var instance: ProjectWindowCustomizerService? = null
     private var leftGradientCache: GradientTextureCache = GradientTextureCache()
     private var rightGradientCache: GradientTextureCache = GradientTextureCache()
     private val LOG = logger<ProjectWindowCustomizerService>()
+
+    @Topic.AppLevel
+    val PROJECT_COLOR_CHANGE_TOPIC: Topic<ProjectColorChangeListener> =
+      Topic(ProjectColorChangeListener::class.java, Topic.BroadcastDirection.NONE)
 
     init {
       ApplicationManager.registerCleaner { instance = null }
@@ -157,24 +234,10 @@ class ProjectWindowCustomizerService : Disposable {
   private var ourSettingsValue = UISettings.getInstance().differentiateProjects
   private val colorCache = HashMap<Path, ProjectColors>()
   private val listeners = mutableListOf<(Boolean) -> Unit>()
-  private val defaultColors = ProjectColors(gradient = gradientColors[0],
+  private val defaultColors = ProjectColors(gradient = RecentProjectColorPalette.mainToolbarGradientStart(0) ?: JBColor.PanelBackground,
                                             iconColorStart = ProjectIconPalette.gradients[0].first,
                                             iconColorEnd = ProjectIconPalette.gradients[0].second,
                                             index = 0)
-
-  @Suppress("UnregisteredNamedColor")
-  private val gradientColors: Array<Color>
-    get() = arrayOf(
-      JBColor.namedColor("RecentProject.Color1.MainToolbarGradientStart", JBColor(0xDB3D3C, 0xCE443C)),
-      JBColor.namedColor("RecentProject.Color2.MainToolbarGradientStart", JBColor(0xF57236, 0xE27237)),
-      JBColor.namedColor("RecentProject.Color3.MainToolbarGradientStart", JBColor(0x2BC8BB, 0x2DBCAD)),
-      JBColor.namedColor("RecentProject.Color4.MainToolbarGradientStart", JBColor(0x359AF2, 0x3895E1)),
-      JBColor.namedColor("RecentProject.Color5.MainToolbarGradientStart", JBColor(0x8379FB, 0x7B75E8)),
-      JBColor.namedColor("RecentProject.Color6.MainToolbarGradientStart", JBColor(0x7E54B5, 0x7854AD)),
-      JBColor.namedColor("RecentProject.Color7.MainToolbarGradientStart", JBColor(0xD63CC8, 0x8F4593)),
-      JBColor.namedColor("RecentProject.Color8.MainToolbarGradientStart", JBColor(0x954294, 0xC840B9)),
-      JBColor.namedColor("RecentProject.Color9.MainToolbarGradientStart", JBColor(0xE75371, 0xD75370))
-    )
 
   private val gradientRepaintRoots = HashSet<JComponent>()
 
@@ -252,7 +315,7 @@ class ProjectWindowCustomizerService : Disposable {
       }
       else {
         val associatedIndex = getOrGenerateAssociatedColorIndex(colorStorage)
-        ProjectColors(gradient = gradientColors[associatedIndex],
+        ProjectColors(gradient = RecentProjectColorPalette.mainToolbarGradientStart(associatedIndex) ?: defaultColors.gradient,
                       iconColorStart = ProjectIconPalette.gradients[associatedIndex].first,
                       iconColorEnd = ProjectIconPalette.gradients[associatedIndex].second,
                       index = associatedIndex)
@@ -264,17 +327,17 @@ class ProjectWindowCustomizerService : Disposable {
     getAssociatedColorIndex(colorStorage)?.let { return it }
 
     // Calculate next colors by incrementing (and saving the new value) color index
-    val index = PropertiesComponent.getInstance().nextColorIndex(gradientColors.size)
+    val index = PropertiesComponent.getInstance().nextColorIndex(RecentProjectColorPalette.COLOR_COUNT)
 
     // Save calculated colors and clear customized colors for the project
-    setAssociatedColorsIndex(colorStorage, index)
+    setAssociatedColorsIndex(colorStorage, index, false)
 
     return index
   }
 
   private fun getAssociatedColorIndex(colorStorage: ProjectColorStorage): Int? {
     val index = colorStorage.associatedIndex ?: return null
-    if (index >= 0 && index < gradientColors.size) return index
+    if (index >= 0 && index < RecentProjectColorPalette.COLOR_COUNT) return index
     return null
   }
 
@@ -285,7 +348,7 @@ class ProjectWindowCustomizerService : Disposable {
 
   @Internal
   fun setIconMainColorAsProjectColor(project: Project): Boolean {
-    if (!RecentProjectsManagerBase.getInstanceEx().hasCustomIcon(project)) return false
+    if (!RecentProjectsManagerBase.getInstanceEx().hasCustomIcon(project) || isColorIslandGradientAvailable()) return false
 
     val icon = project.service<ProjectWindowCustomizerIconCache>().cachedIcon.get()
     if (icon is AvatarIcon) {
@@ -294,27 +357,45 @@ class ProjectWindowCustomizerService : Disposable {
       return false
     }
 
-    val iconMainColor = IconUtil.mainColor(icon)
-    setCustomProjectColor(project, iconMainColor)
+    if (icon is DeferredIconImpl<*>) {
+      coroutineScope.launch(Dispatchers.UI) {
+        icon.awaitEvaluation()
+        setCustomProjectColorWithIcon(project, icon, false)
+      }
+      return true
+    }
+
+    setCustomProjectColorWithIcon(project, icon, true)
 
     return true
+  }
+
+  private fun setCustomProjectColorWithIcon(project: Project, icon: Icon, evaluate: Boolean) {
+    val iconMainColor = IconUtil.mainColor(icon, evaluate)
+    setCustomProjectColor(project, iconMainColor, false)
   }
 
   @Internal
   fun setAssociatedColorsIndex(project: Project, index: Int) {
     val storage = storageFor(project) ?: return
-    setAssociatedColorsIndex(storage, index)
+    setAssociatedColorsIndex(storage, index, true)
   }
 
-  private fun setAssociatedColorsIndex(colorStorage: ProjectColorStorage, index: Int) {
+  private fun setAssociatedColorsIndex(colorStorage: ProjectColorStorage, index: Int, fromUser: Boolean) {
     colorStorage.associatedIndex = index
+    colorStorage.fromUser = fromUser
     if (index >= 0) colorStorage.customColor = null
   }
 
   @Internal
   fun setCustomProjectColor(project: Project, color: Color?) {
+    setCustomProjectColor(project, color, true)
+  }
+
+  private fun setCustomProjectColor(project: Project, color: Color?, fromUser: Boolean) {
     val storage = storageFor(project) ?: return
     setCustomProjectColor(storage, color)
+    storage.fromUser = fromUser
   }
 
   private fun setCustomProjectColor(colorStorage: ProjectColorStorage, color: Color?) {
@@ -376,6 +457,9 @@ class ProjectWindowCustomizerService : Disposable {
   private fun storageFor(projectPath: Path) = RecentProjectColorStorage(projectPath)
 
   private fun storageFor(project: Project) = if (project.isDisposed) null else WorkspaceProjectColorStorage(project)
+
+  @Internal
+  internal fun getStorageFor(project: Project): ProjectColorStorage = storageFor(project)!!
 
   internal fun update(newValue: Boolean) {
     if (newValue != ourSettingsValue) {
@@ -551,7 +635,7 @@ internal class ProjectWidgetGradientLocationService(private val project: Project
 
 private const val DEFAULT_GRADIENT_OFFSET = 150.0f
 
-private class ProjectWindowCustomizerListener : ProjectActivity, UISettingsListener {
+internal class ProjectWindowCustomizerListener : ProjectActivity, UISettingsListener {
   init {
     if (ApplicationManager.getApplication().isHeadlessEnvironment) {
       throw ExtensionNotApplicableException.create()
@@ -572,9 +656,11 @@ private class ProjectWindowCustomizerListener : ProjectActivity, UISettingsListe
   }
 }
 
-private interface ProjectColorStorage {
+@Internal
+internal interface ProjectColorStorage {
   var customColor: String?
   var associatedIndex: Int?
+  var fromUser: Boolean?
   val projectPath: Path?
 
   val isEmpty: Boolean
@@ -594,6 +680,12 @@ private class WorkspaceProjectColorStorage(val project: Project): ProjectColorSt
     set(value) {
       manager.associatedIndex = value
       if (!isMigrating) RecentProjectsManagerBase.getInstanceEx().updateProjectColor(project)
+    }
+
+  override var fromUser: Boolean?
+    get() = manager.fromUser
+    set(value) {
+      manager.fromUser = value
     }
 
   private var isMigrating = false
@@ -624,6 +716,8 @@ private class RecentProjectColorStorage(override val projectPath: Path): Project
       update { info -> info.associatedIndex = value ?: -1 }
     }
 
+  override var fromUser: Boolean? = null
+
   private fun update(block: (RecentProjectColorInfo) -> Unit) {
     val projectsManager = RecentProjectsManagerBase.getInstanceEx()
     val info = getInfo(projectsManager) ?: RecentProjectColorInfo()
@@ -633,5 +727,64 @@ private class RecentProjectColorStorage(override val projectPath: Path): Project
 
   private fun getInfo(recentProjectManager: RecentProjectsManagerBase): RecentProjectColorInfo? {
     return recentProjectManager.getProjectMetaInfo(projectPath)?.colorInfo
+  }
+}
+
+private val colorValues = listOf("amber", "rust", "olive", "sky", "cobalt", "plum", "violet", "ocean", "grass", "custom")
+
+internal class ColorValidationRule : CustomValidationRule() {
+  override fun getRuleId(): String = "project_color_id"
+
+  override fun doValidate(data: String, context: EventContext): ValidationResultType {
+    if (colorValues.contains(data)) {
+      return ValidationResultType.ACCEPTED
+    }
+    return ValidationResultType.REJECTED
+  }
+}
+
+internal class ProjectWindowCustomizerUsagesCollector : ProjectUsagesCollector() {
+  private val gradientOnField = EventFields.Boolean("useProjectColors")
+  private val colorField = EventFields.StringValidatedByCustomRule("color", ColorValidationRule::class.java)
+  private val userSelectedField = EventFields.String("userSelected", listOf("true", "false", "unknown"))
+  private val themeField = EventFields.String("theme", listOf("light", "dark"))
+  private val iconField = EventFields.Boolean("customIcon")
+
+  private val useGroup = EventLogGroup("project.window.customizer.state", 1)
+
+  private val iconAndGradient =
+    useGroup.registerVarargEvent("icon.and.gradient", gradientOnField, colorField, userSelectedField, themeField, iconField)
+
+  override fun getGroup(): EventLogGroup = useGroup
+
+  override fun getMetrics(project: Project): Set<MetricEvent> {
+    val storage = ProjectWindowCustomizerService.getInstance().getStorageFor(project)
+
+    val gradientOn = UISettings.getInstance().differentiateProjects
+
+    val colorValue = if (storage.customColor == null) {
+      val index = storage.associatedIndex
+      if (index != null && index >= 0 && index < colorValues.size) {
+        colorValues[index]
+      }
+      else {
+        return emptySet()
+      }
+    }
+    else {
+      "custom"
+    }
+
+    val userSelected = storage.fromUser?.toString() ?: "unknown"
+
+    val theme = if (JBColor.isBright()) "light" else "dark"
+
+    val hasCustomIcon = RecentProjectsManagerBase.getInstanceEx().hasCustomIcon(project)
+
+    return setOf(iconAndGradient.metric(gradientOnField.with(gradientOn),
+                                        colorField.with(colorValue),
+                                        userSelectedField.with(userSelected),
+                                        themeField.with(theme),
+                                        iconField.with(hasCustomIcon)))
   }
 }

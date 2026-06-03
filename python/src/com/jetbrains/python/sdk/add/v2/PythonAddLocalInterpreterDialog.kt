@@ -2,6 +2,7 @@
 package com.jetbrains.python.sdk.add.v2
 
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.UnhandledExceptionLoggingMode
 import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.observable.properties.AtomicProperty
 import com.intellij.openapi.ui.DialogWrapper
@@ -46,27 +47,29 @@ internal class PythonAddLocalInterpreterDialog(private val dialogPresenter: Pyth
   override fun doOKAction() {
     super.doOKAction()
     val addEnvironment = mainPanel.currentSdkManager
-    PyPackageCoroutine.launch(dialogPresenter.moduleOrProject.project, ModalityState.current().asContextElement()) {
+    PyPackageCoroutine.launch(dialogPresenter.moduleOrProject.project, ModalityState.stateForComponent(owner).asContextElement() +  UnhandledExceptionLoggingMode.Interactive(
+      PyBundle.message("python.sdk.configure"))) {
       dialogPresenter.okClicked(addEnvironment)
     }
   }
 
   override fun createCenterPanel(): JComponent {
-    val errorSink = ShowingMessageErrorSync
+    val errorSink = ShowingMessageErrorSync.withProject(dialogPresenter.moduleOrProject.project)
 
     val rootPanel = panel {
-      model = PythonLocalAddInterpreterModel(ProjectPathFlows.create(basePath), FileSystem.Eel(eelApi = localEel))
+      model = PythonLocalAddInterpreterModel(ProjectPathFlows.create(basePath), EelFileSystem(eelApi = localEel))
       model.navigator.selectionMode = AtomicProperty(PythonInterpreterSelectionMode.CUSTOM)
       mainPanel = PythonAddCustomInterpreter(
         model = model,
         module = dialogPresenter.moduleOrProject.moduleIfExists,
         errorSink = errorSink,
-        limitExistingEnvironments = false
+        limitExistingEnvironments = false,
+        bestGuessCreateSdkInfo = dialogPresenter.bestGuessCreateSdkInfo
       )
       mainPanel.setupUI(this, WHEN_PROPERTY_CHANGED(AtomicProperty(basePath)))
     }
 
-    rootPanel.launchOnShow("PythonAddLocalInterpreterDialog launchOnShow", TraceContext(PyBundle.message("tracecontext.add.local.python.sdk.dialog"), null)) {
+    rootPanel.launchOnShow("PythonAddLocalInterpreterDialog launchOnShow", TraceContext(PyBundle.message("trace.context.add.local.python.sdk.dialog"), null)) {
       supervisorScope {
         model.initialize(this@supervisorScope)
         mainPanel.onShown(this@supervisorScope)

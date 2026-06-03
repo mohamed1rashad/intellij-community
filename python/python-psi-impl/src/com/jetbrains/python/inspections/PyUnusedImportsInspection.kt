@@ -9,8 +9,13 @@ import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.Version
-import com.intellij.psi.*
+import com.intellij.psi.PsiComment
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiElementVisitor
+import com.intellij.psi.PsiFileSystemItem
+import com.intellij.psi.PsiLanguageInjectionHost
+import com.intellij.psi.PsiPolyVariantReference
+import com.intellij.psi.PsiReference
 import com.intellij.psi.util.QualifiedName
 import com.intellij.psi.util.isAncestor
 import com.intellij.psi.util.parentOfType
@@ -18,15 +23,30 @@ import com.jetbrains.python.PyPsiBundle
 import com.jetbrains.python.PythonRuntimeService
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings
 import com.jetbrains.python.codeInsight.controlflow.ControlFlowCache
+import com.jetbrains.python.codeInsight.controlflow.Reachability
 import com.jetbrains.python.codeInsight.controlflow.ReadWriteInstruction
+import com.jetbrains.python.codeInsight.controlflow.getReachabilityForInspection
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil
 import com.jetbrains.python.codeInsight.imports.OptimizeImportsQuickFix
-import com.jetbrains.python.getEffectiveLanguageLevel
 import com.jetbrains.python.inspections.PyInspectionVisitor.getContext
-import com.jetbrains.python.psi.*
+import com.jetbrains.python.psi.PsiReferenceEx
+import com.jetbrains.python.psi.PyElement
+import com.jetbrains.python.psi.PyExceptPart
+import com.jetbrains.python.psi.PyExpressionCodeFragment
+import com.jetbrains.python.psi.PyFile
+import com.jetbrains.python.psi.PyFromImportStatement
+import com.jetbrains.python.psi.PyIfStatement
+import com.jetbrains.python.psi.PyImportElement
+import com.jetbrains.python.psi.PyImportStatementBase
+import com.jetbrains.python.psi.PyImportedNameDefiner
+import com.jetbrains.python.psi.PyRecursiveElementVisitor
+import com.jetbrains.python.psi.PyReferenceOwner
+import com.jetbrains.python.psi.PyStarImportElement
+import com.jetbrains.python.psi.PyTryExceptStatement
+import com.jetbrains.python.psi.PyTryPart
+import com.jetbrains.python.psi.PyUtil
 import com.jetbrains.python.psi.impl.PyBuiltinCache
 import com.jetbrains.python.psi.impl.PyPsiUtils
-import com.jetbrains.python.psi.impl.stubs.evaluateVersionsForElement
 import com.jetbrains.python.psi.resolve.ImportedResolveResult
 import com.jetbrains.python.psi.resolve.PyResolveContext
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder
@@ -38,8 +58,7 @@ class PyUnusedImportsInspection : PyInspection() {
   override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean, session: LocalInspectionToolSession): PsiElementVisitor {
     val visitor = Visitor(holder = holder,
                           myInspection = this,
-                          typeEvalContext = getContext(session),
-                          languageLevel = getEffectiveLanguageLevel(session.file))
+                          typeEvalContext = getContext(session))
     session.putUserData(KEY, visitor)
     return visitor
   }
@@ -59,15 +78,12 @@ class PyUnusedImportsInspection : PyInspection() {
     holder: ProblemsHolder?,
     private val myInspection: PyInspection,
     typeEvalContext: TypeEvalContext,
-    languageLevel: LanguageLevel,
-  ) :
-    PyInspectionVisitor(holder, typeEvalContext) {
+  ) : PyInspectionVisitor(holder, typeEvalContext) {
 
     private val myAllImports = mutableSetOf<PyImportedNameDefiner>()
     private val myImportsInsideGuard = mutableSetOf<PyImportedNameDefiner>()
     private val myUsedImports = mutableSetOf<PyImportedNameDefiner>()
     private val myUnresolvedImports = mutableSetOf<PyImportedNameDefiner>()
-    private val myVersion: Version = Version(languageLevel.majorVersion, languageLevel.minorVersion, 0)
 
     override fun visitPyImportElement(node: PyImportElement) {
       super.visitPyImportElement(node)
@@ -136,7 +152,8 @@ class PyUnusedImportsInspection : PyInspection() {
         unresolved = (target == null)
       }
       if (unresolved) {
-        val ignoreUnresolved = ignoreUnresolved(node, reference) || !evaluateVersionsForElement(node).contains(myVersion)
+        val ignoreUnresolved = ignoreUnresolved(node, reference) ||
+                               node.getReachabilityForInspection(myTypeEvalContext) != Reachability.REACHABLE
         if (!ignoreUnresolved) {
           val severity = if (reference is PsiReferenceEx)
             reference.getUnresolvedHighlightSeverity(myTypeEvalContext)
@@ -250,7 +267,7 @@ class PyUnusedImportsInspection : PyInspection() {
         if (PyInspectionExtension.EP_NAME.extensionList.any { it.ignoreUnused(element, myTypeEvalContext) }) {
           continue
         }
-        if (!evaluateVersionsForElement(element).contains(myVersion)) {
+        if (element.getReachabilityForInspection(myTypeEvalContext) != Reachability.REACHABLE) {
           continue
         }
         if (element.getTextLength() > 0) {
@@ -398,7 +415,6 @@ class PyUnusedImportsInspection : PyInspection() {
     return "PyUnresolvedReferences"
   }
 
-  companion object {
-    private val KEY: Key<Visitor> = Key.create<Visitor>("PyUnusedImportsInspection.Visitor")
-  }
 }
+
+private val KEY: Key<PyUnusedImportsInspection.Visitor> = Key.create<PyUnusedImportsInspection.Visitor>("PyUnusedImportsInspection.Visitor")

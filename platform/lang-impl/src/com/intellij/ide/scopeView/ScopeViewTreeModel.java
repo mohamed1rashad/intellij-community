@@ -5,7 +5,14 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.CopyPasteUtil;
 import com.intellij.ide.bookmark.BookmarksListener;
 import com.intellij.ide.bookmark.FileBookmarksListener;
-import com.intellij.ide.projectView.*;
+import com.intellij.ide.projectView.NodeSortOrder;
+import com.intellij.ide.projectView.NodeSortSettings;
+import com.intellij.ide.projectView.PresentationData;
+import com.intellij.ide.projectView.ProjectViewNode;
+import com.intellij.ide.projectView.ProjectViewNodeDecorator;
+import com.intellij.ide.projectView.ProjectViewSettings;
+import com.intellij.ide.projectView.TreeStructureProvider;
+import com.intellij.ide.projectView.ViewSettings;
 import com.intellij.ide.projectView.impl.CompoundIconProvider;
 import com.intellij.ide.projectView.impl.nodes.AbstractPsiBasedNode;
 import com.intellij.ide.projectView.impl.nodes.PsiFileNode;
@@ -26,6 +33,7 @@ import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.ModuleType;
+import com.intellij.openapi.project.BaseProjectDirectories;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
@@ -75,14 +83,22 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import javax.swing.event.TreeModelEvent;
 import javax.swing.tree.TreePath;
-import java.awt.*;
-import java.util.*;
+import java.awt.Color;
+import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiFunction;
+
+import static java.util.Collections.emptySet;
 
 final class ScopeViewTreeModel extends BaseTreeModel<AbstractTreeNode<?>> implements InvokerSupplier {
   private static final Logger LOG = Logger.getInstance(ScopeViewTreeModel.class);
@@ -818,9 +834,12 @@ final class ScopeViewTreeModel extends BaseTreeModel<AbstractTreeNode<?>> implem
     }
 
     private @NotNull @NlsSafe String getLocation(boolean allowEmpty) {
-      VirtualFile dir = ProjectFileNode.findBaseDir(getProject());
-      String location = dir == null ? null : VfsUtilCore.getRelativePath(getVirtualFile(), dir);
-      if (location != null && (allowEmpty || !location.isEmpty())) return location;
+      Project project = getProject();
+      Set<VirtualFile> baseDirectories = project == null ? emptySet() : BaseProjectDirectories.getBaseDirectories(project);
+      for (VirtualFile baseDirectory : baseDirectories) {
+        String location = VfsUtilCore.getRelativePath(getVirtualFile(), baseDirectory);
+        if (location != null && (allowEmpty || !location.isEmpty())) return location;
+      }
       return FileUtil.getLocationRelativeToUserHome(getVirtualFile().getPresentableUrl());
     }
 

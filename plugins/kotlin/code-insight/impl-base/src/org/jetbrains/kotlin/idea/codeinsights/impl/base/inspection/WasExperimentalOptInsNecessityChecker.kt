@@ -2,7 +2,9 @@
 package org.jetbrains.kotlin.idea.codeinsights.impl.base.inspection
 
 import com.intellij.util.asSafely
-import org.jetbrains.kotlin.analysis.api.annotations.*
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotation
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationList
+import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotationValue
 import org.jetbrains.kotlin.analysis.api.base.KaConstantValue
 import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.config.ApiVersion
@@ -12,7 +14,7 @@ import org.jetbrains.kotlin.name.StandardClassIds
 import org.jetbrains.kotlin.resolve.checkers.OptInNames
 
 
-internal object WasExperimentalOptInsNecessityChecker {
+object WasExperimentalOptInsNecessityChecker {
     private val VERSION_ARGUMENT = Name.identifier("version")
 
     fun getNecessaryOptInsFromWasExperimental(

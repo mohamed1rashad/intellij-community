@@ -21,7 +21,7 @@ class override(ContextDecorator):
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        exc_tb: TracebackType | None,
+        traceback: TracebackType | None,
     ) -> None: ...
 
 def localtime(value: datetime | None = None, timezone: tzinfo | None = None) -> datetime: ...
@@ -39,19 +39,19 @@ def make_aware(value: datetime, timezone: tzinfo | None = None) -> datetime: ...
 def make_naive(value: datetime, timezone: tzinfo | None = None) -> datetime: ...
 
 __all__ = [
-    "get_fixed_timezone",
-    "get_default_timezone",
-    "get_default_timezone_name",
-    "get_current_timezone",
-    "get_current_timezone_name",
     "activate",
     "deactivate",
-    "override",
-    "localtime",
-    "localdate",
-    "now",
+    "get_current_timezone",
+    "get_current_timezone_name",
+    "get_default_timezone",
+    "get_default_timezone_name",
+    "get_fixed_timezone",
     "is_aware",
     "is_naive",
+    "localdate",
+    "localtime",
     "make_aware",
     "make_naive",
+    "now",
+    "override",
 ]

@@ -1,13 +1,15 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util;
 
 import com.intellij.execution.CommandLineUtil;
 import com.intellij.execution.configurations.PathEnvironmentVariableUtil;
+import com.intellij.execution.process.OSProcessUtil;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.ExceptionWithAttachments;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Pair;
+import com.intellij.util.system.LowLevelLocalMachineAccess;
 import com.intellij.util.system.OS;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -22,16 +24,25 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
-/**
- * A utility class for reading shell environment.
- * Use in two steps: first, call one of {@code *command} methods to prepare a command,
- * then run it with {@link #readEnvironment(ProcessBuilder, long)}.
- *
- * @since 2025.3
- */
+/// A utility class for reading shell environment.
+/// Use in two steps: first, call one of `*command` methods to prepare a command,
+/// then run it with [#readEnvironment(ProcessBuilder, long)].
+/// In most cases you do not need this method, see `EelShowCaseTest`.
+///  ```kotlin
+///   suspend fun getOs(p:Project) {
+///     val d = p.getEelDescriptor()
+///     d.osFamily
+///     d.toEelApi().exec.environmentVariables().eelIt().await()
+///   }
+///   fun getOs(p:Path) {
+///     p.getEelDescriptor().osFamily
+///   }
+///  ```
+///
+/// @since 2025.3
 @ApiStatus.Experimental
+@LowLevelLocalMachineAccess
 public final class ShellEnvironmentReader {
   private static final Logger LOG = Logger.getInstance(ShellEnvironmentReader.class);
 
@@ -42,19 +53,20 @@ public final class ShellEnvironmentReader {
 
   private ShellEnvironmentReader() { }
 
-  /**
-   * Prepares a command for reading the environment from the given shell (or from the user's shell if {@code null}).
-   * Optionally, runs the given script with given parameters before reading.
-   */
+  /// Prepares a command for reading the environment from the given shell (or from the user's shell if `null`).
+  /// Optionally, runs the given script with given parameters before reading.
   public static @NotNull ProcessBuilder shellCommand(@Nullable String shell, @Nullable Path shFile, @Nullable List<@NotNull String> args) {
     return shellCommand(shell, shFile, true, args);
   }
 
-  /**
-   * Prepares a command for reading the environment from the given shell (or from the user's shell if {@code null}).
-   * Optionally, runs the given script with given parameters before reading.
-   */
-  public static @NotNull ProcessBuilder shellCommand(@Nullable String shell, @Nullable Path shFile, boolean interactive, @Nullable List<@NotNull String> args) {
+  /// Prepares a command for reading the environment from the given shell (or from the user's shell if `null`).
+  /// Optionally, runs the given script with given parameters before reading.
+  public static @NotNull ProcessBuilder shellCommand(
+    @Nullable String shell,
+    @Nullable Path shFile,
+    boolean interactive,
+    @Nullable List<@NotNull String> args
+  ) {
     if (shell == null) {
       shell = System.getenv("SHELL");
       if (shell == null || shell.isBlank()) throw new IllegalStateException("'SHELL' environment variable is not set");
@@ -78,7 +90,7 @@ public final class ShellEnvironmentReader {
       command.add("-i");
     }
 
-    // macOS now supports the `-0` option, too (supposedly, from 12.3); we can drop `printenv` in ~3 years
+    // FTR, macOS now supports the `-0` option, too (supposedly, from 12.3)
     var reader = OS.CURRENT == OS.macOS ? "'" + PathManager.findBinFileWithException("printenv") + "'" : "/usr/bin/env -0";
     if (shFile != null) {
       if ("nu".equals(name) || "pwsh".equals(name) || "xonsh".equals(name))
@@ -98,11 +110,10 @@ public final class ShellEnvironmentReader {
     else {
       command.add(reader + " > '" + OUTPUT_PLACEHOLDER + "'");
     }
-    if (shFile != null) {
-      command.add(shFile.toString());
-      if (args != null) {
-        command.addAll(args);
-      }
+    // positional parameters for the '-c' script ($0, etc.)
+    if (shFile != null && args != null) {
+      command.add(shell);
+      command.addAll(args);
     }
 
     var processBuilder = new ProcessBuilder(command);
@@ -115,10 +126,8 @@ public final class ShellEnvironmentReader {
     return processBuilder;
   }
 
-  /**
-   * Prepares a command for reading the environment from the Windows shell.
-   * Optionally, runs the given script with given parameters before reading.
-   */
+  /// Prepares a command for reading the environment from the Windows shell.
+  /// Optionally, runs the given script with given parameters before reading.
   public static @NotNull ProcessBuilder winShellCommand(@Nullable Path batFile, @Nullable List<@NotNull String> args) {
     if (batFile != null && !Files.exists(batFile)) throw new IllegalArgumentException("Missing: " + batFile);
 
@@ -148,8 +157,8 @@ public final class ShellEnvironmentReader {
 
   private static String prepareCallArgs(List<String> callArgs) {
     var preparedCallArgs = CommandLineUtil.toCommandLine(callArgs);
-    var firstArg = preparedCallArgs.remove(0);
-    preparedCallArgs.add(0, CommandLineUtil.escapeParameterOnWindows(firstArg, false));
+    var firstArg = preparedCallArgs.removeFirst();
+    preparedCallArgs.addFirst(CommandLineUtil.escapeParameterOnWindows(firstArg, false));
     // for `cmd.exe`, we need to add extra double quotes for the actual command in call
     // to mitigate possible JVM issue when argument contains spaces and the first word
     // starts with double quote and the last ends with double quote and JVM does not
@@ -158,10 +167,8 @@ public final class ShellEnvironmentReader {
     return '\"' + String.join(" ", preparedCallArgs) + "\"";
   }
 
-  /**
-   * Prepares a command for reading the environment from PowerShell.
-   * Optionally, runs the given script with given parameters before reading.
-   */
+  /// Prepares a command for reading the environment from PowerShell.
+  /// Optionally, runs the given script with given parameters before reading.
   @SuppressWarnings("SpellCheckingInspection")
   public static @NotNull ProcessBuilder powerShellCommand(@Nullable Path psFile, @Nullable List<@NotNull String> args) {
     if (psFile != null && !Files.exists(psFile)) throw new IllegalArgumentException("Missing: " + psFile);
@@ -201,18 +208,18 @@ public final class ShellEnvironmentReader {
     return cp;
   }
 
-  /**
-   * Runs the given command.
-   * Returns loaded environment and the command output (stdout/stderr combined).
-   */
+  /// Runs the given command.
+  /// Returns the loaded environment and the command output (stdout/stderr combined).
   public static @NotNull Pair<@NotNull Map<String, String>, @NotNull String> readEnvironment(
     @NotNull ProcessBuilder command,
     long timeoutMillis
   ) throws IOException {
     if (timeoutMillis <= 0) timeoutMillis = DEFAULT_TIMEOUT_MILLIS;
 
-    var dataFile = Files.createTempFile("ij-shell-env-data.", ".tmp");
-    var logFile = Files.createTempFile("ij-shell-env-log.", ".tmp");
+    var tmpDir = Files.createDirectories(Path.of(System.getProperty("java.io.tmpdir")));
+    var mark = ProcessHandle.current().pid() + "." + System.nanoTime();
+    var dataFile = tmpDir.resolve("ij-shell-env-data." + mark + ".tmp");
+    var logFile = tmpDir.resolve("ij-shell-env-log." + mark + ".tmp");
 
     try {
       var args = command.command();
@@ -236,8 +243,8 @@ public final class ShellEnvironmentReader {
         .start();
       int exitCode = waitAndTerminateAfter(process, timeoutMillis);
 
-      var envData = Files.readString(dataFile, Charset.defaultCharset());
-      var log = Files.exists(logFile) ? Files.readString(logFile, Charset.defaultCharset()) : "(no log file)";
+      var envData = Files.exists(dataFile) ? Files.readString(dataFile) : "";
+      var log = Files.exists(logFile) ? readLogFile(logFile) : "(no log file)";
       if (exitCode != 0 || envData.isEmpty()) {
         if (!log.isEmpty()) {
           LOG.info("stdout/stderr: " + log);
@@ -247,10 +254,10 @@ public final class ShellEnvironmentReader {
 
       var env = EnvironmentUtil.parseEnv(envData.split("\0"));
       env.remove(INTELLIJ_ENVIRONMENT_READER);
-      if ("zsh".equals(Path.of(command.command().get(0)).getFileName().toString())) {
+      if ("zsh".equals(Path.of(command.command().getFirst()).getFileName().toString())) {
         env.remove(DISABLE_OMZ_AUTO_UPDATE);
       }
-      LOG.info("shell environment loaded (" + command.command().get(0) + ", " + env.size() + " vars)");
+      LOG.info("shell environment loaded (" + command.command().getFirst() + ", " + env.size() + " vars)");
       return new Pair<>(env, log);
     }
     finally {
@@ -259,23 +266,26 @@ public final class ShellEnvironmentReader {
     }
   }
 
+  @SuppressWarnings("ReadWriteStringCanBeUsed")
+  private static String readLogFile(Path path) {
+    try {
+      // `new String(...)` better survives malformed UTF-8 input that `Files.readString(...)`
+      return new String(Files.readAllBytes(path), Charset.defaultCharset());
+    }
+    catch (IOException e) {
+      return "(error: " + e.getClass().getName()+ ": " + e.getMessage() + ")";
+    }
+  }
+
   private static int waitAndTerminateAfter(Process process, long timeoutMillis) {
     var exitCode = waitFor(process, timeoutMillis);
     if (exitCode != null) return exitCode;
 
     LOG.warn("shell env loader is timed out");
-    var handles = Stream.concat(Stream.of(process.toHandle()), process.descendants()).toList();
-
-    for (var iterator = handles.listIterator(handles.size()); iterator.hasPrevious(); ) {
-      iterator.previous().destroy();
-    }
+    OSProcessUtil.terminateProcessGracefully(process);
     exitCode = waitFor(process, 1000L);
     if (exitCode != null) return exitCode;
-    LOG.warn("failed to terminate shell env loader process gracefully, terminating forcibly");
-
-    for (var iterator = handles.listIterator(handles.size()); iterator.hasPrevious(); ) {
-      iterator.previous().destroyForcibly();
-    }
+    OSProcessUtil.killProcessTree(process);
     exitCode = waitFor(process, 1000L);
     if (exitCode != null) return exitCode;
     LOG.warn("failed to kill shell env loader");

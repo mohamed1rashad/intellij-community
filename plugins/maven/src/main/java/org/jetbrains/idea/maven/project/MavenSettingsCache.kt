@@ -3,16 +3,24 @@ package org.jetbrains.idea.maven.project
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
-import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.platform.eel.fs.getPath
+import com.intellij.platform.eel.provider.asNioPath
+import com.intellij.platform.eel.provider.getEelDescriptor
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.idea.maven.utils.MavenEelUtil
 import java.nio.file.Path
 
-private data class SettingsHolder(val userSettingsFile: Path, val globalSettingsFile: Path?, val repositoryFile: Path)
+private data class SettingsHolder(
+  val userSettingsFile: Path,
+  val globalSettingsFile: Path?,
+  val repositoryFile: Path,
+  val toolchainsFile: Path,
+)
+
 
 @Service(Service.Level.PROJECT)
 class MavenSettingsCache(val project: Project) {
@@ -26,16 +34,22 @@ class MavenSettingsCache(val project: Project) {
   }
 
   suspend fun reloadAsync() {
-    val settings = MavenProjectsManager.getInstance(project).generalSettings
+    val settings = MavenWorkspaceSettingsComponent.getInstance(project)
+      .settings
+      .generalSettings
+      .also { it.setProject(project) }
+
     val userSettings = MavenEelUtil.getUserSettingsAsync(project, settings.userSettingsFile, settings.mavenConfig)
     val globalSettings = MavenEelUtil.getGlobalSettingsAsync(project, settings.mavenHomeType.staticOrBundled(), settings.mavenConfig)
-    val localRepo = MavenEelUtil.getLocalRepoAsync(project, settings.localRepository, settings.mavenHomeType.staticOrBundled(), settings.userSettingsFile,
-                                                   settings.mavenConfig)
-    holder = SettingsHolder(userSettings, globalSettings, localRepo)
+    val localRepo =
+      MavenEelUtil.getLocalRepoAsync(project, settings.localRepository, settings.mavenHomeType.staticOrBundled(), userSettings.toString(),
+                                     settings.mavenConfig)
+    val toolchainsFile = MavenEelUtil.getToolchainsFile(project, settings.getToolchainsPathString(), settings.mavenConfig)
+    holder = SettingsHolder(userSettings, globalSettings, localRepo, toolchainsFile)
   }
 
   private fun holder(): SettingsHolder {
-    return holder ?: runBlockingMaybeCancellable { 
+    return holder ?: runBlockingMaybeCancellable {
       reloadAsync()
       holder!!
     }
@@ -49,6 +63,9 @@ class MavenSettingsCache(val project: Project) {
     return holder().repositoryFile
   }
 
+  fun getEffectiveToolchainsFile(): Path {
+    return holder().toolchainsFile
+  }
 
   fun getEffectiveSettingsFiles(): List<Path> {
     return listOf(getEffectiveUserSettingsFile())
@@ -62,8 +79,16 @@ class MavenSettingsCache(val project: Project) {
     return holder().globalSettingsFile
   }
 
+
+  private fun String?.toPathOrDefault(default: Path): Path {
+    if (this == null) return default
+    return project.getEelDescriptor().getPath(this).asNioPath()
+  }
+
+
   companion object {
     @JvmStatic
     fun getInstance(project: Project): MavenSettingsCache = project.service()
   }
 }
+

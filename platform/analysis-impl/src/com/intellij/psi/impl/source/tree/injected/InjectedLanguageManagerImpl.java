@@ -23,18 +23,38 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
-import com.intellij.psi.impl.PsiDocumentManagerBase;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.InjectedLanguagePlaces;
+import com.intellij.psi.LanguageInjector;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
+import com.intellij.psi.impl.PsiDocumentManagerEx;
 import com.intellij.psi.impl.source.resolve.FileContextUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.Processor;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
+import static com.intellij.openapi.diagnostic.LoggerKt.rethrowControlFlowException;
 import static com.intellij.openapi.project.DumbService.getDumbAwareExtensions;
 import static java.util.Collections.singletonList;
 
@@ -49,6 +69,10 @@ public final class InjectedLanguageManagerImpl extends InjectedLanguageManager i
   private final DumbService myDumbService;
   private final PsiDocumentManager myDocManager;
 
+  /**
+   * @deprecated use {@link InjectedLanguageManager#getInstance(Project)} directly. {@link InjectedLanguageManagerImpl} shouldn't be exposed.
+   */
+  @Deprecated
   public static InjectedLanguageManagerImpl getInstanceImpl(Project project) {
     return (InjectedLanguageManagerImpl)getInstance(project);
   }
@@ -150,6 +174,7 @@ public final class InjectedLanguageManagerImpl extends InjectedLanguageManager i
   private final Set<MultiHostInjector> myManualInjectors = Collections.synchronizedSet(new LinkedHashSet<>());
   private volatile ClassMapCachingNulls<MultiHostInjector> cachedInjectors;
 
+  @Override
   public void processInjectableElements(@NotNull Collection<? extends PsiElement> in, @NotNull Processor<? super PsiElement> processor) {
     ClassMapCachingNulls<MultiHostInjector> map = getInjectorMap();
     for (PsiElement element : in) {
@@ -422,7 +447,7 @@ public final class InjectedLanguageManagerImpl extends InjectedLanguageManager i
   public @NotNull DocumentWindow freezeWindow(@NotNull DocumentWindow document) {
     Place shreds = ((DocumentWindowImpl)document).getShreds();
     Project project = shreds.getHostPointer().getProject();
-    DocumentEx delegate = ((PsiDocumentManagerBase)PsiDocumentManager.getInstance(project)).getLastCommittedDocument(document.getDelegate());
+    DocumentEx delegate = ((PsiDocumentManagerEx)PsiDocumentManager.getInstance(project)).getLastCommittedDocument(document.getDelegate());
     Place place = new Place(ContainerUtil.map(shreds, shred -> ((ShredImpl)shred).withPsiRange()));
     return new DocumentWindowImpl(delegate, place);
   }
@@ -514,9 +539,7 @@ public final class InjectedLanguageManagerImpl extends InjectedLanguageManager i
       catch (IndexNotReadyException ignore) {
       }
       catch (Throwable e) {
-        if (Logger.shouldRethrow(e)) {
-          throw e;
-        }
+        rethrowControlFlowException(e);
         LOG.error(e);
       }
     }

@@ -3,17 +3,16 @@
 set -e -u -o pipefail
 
 ultimate_root="$(cd "$(dirname "$0")/../../../../../.."; pwd)"
-community_root="$(cd "$(dirname "$0")/../../../../.."; pwd)"
 
-# Provide packages.jetbrains.team credentials for Bazel in .netrc
-# The script will be missing if run from community repository
-authorizer="$ultimate_root/build/private-packages-auth/authorizer.sh"
-if [ -f "$authorizer" ]; then
-  "$authorizer"
+if [ "${RUN_WITHOUT_ULTIMATE_ROOT-:}" != "true" ]; then
+  # Provide packages.jetbrains.team credentials for Bazel in .netrc
+  # The script will be missing if run from community repository
+  authorizer="$ultimate_root/build/private-packages-auth/authorizer.sh"
+  if [ -f "$authorizer" ]; then
+    "$authorizer"
+  fi
 fi
 
-. "$community_root/build/bazel-wrapper/common.sh"
-
-# shellcheck disable=SC2154
-# $output_user_root_opt is defined in common.sh
-exec "$BAZEL_REAL" "$output_user_root_opt" "$@"
+_bazel="$BAZEL_REAL"
+unset BAZEL_REAL BAZELISK_SKIP_WRAPPER
+exec "$_bazel" "$@"

@@ -1,11 +1,14 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.python.community.execService
 
+import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.AnsiEscapeDecoder
 import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.execution.target.FullPathOnTarget
 import com.intellij.execution.target.TargetEnvironmentConfiguration
 import com.intellij.execution.target.TargetedCommandLineBuilder
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.getShell
@@ -15,7 +18,7 @@ import com.intellij.platform.eel.provider.utils.stdoutString
 import com.intellij.platform.util.progress.reportRawProgress
 import com.intellij.python.community.execService.impl.Arg
 import com.intellij.python.community.execService.impl.ExecServiceImpl
-import com.intellij.python.community.execService.impl.PyExecBundle
+import com.intellij.python.community.execService.impl.PyExecBundle.message
 import com.intellij.python.community.execService.impl.transformerToHandler
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.jetbrains.python.PythonBinary
@@ -29,11 +32,17 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
+/**
+ * A relative path on the target filesystem.
+ * Unlike [FullPathOnTarget], this represents a path relative to a working directory.
+ */
+typealias RelativePathOnTarget = String
+
 
 /**
  * Default service implementation
  */
-fun ExecService(): ExecService = ExecServiceImpl
+fun ExecService(): ExecService = ApplicationManager.getApplication().service<ExecServiceImpl>()
 
 
 /**
@@ -52,8 +61,8 @@ data class BinOnEel(val path: Path, internal val workDir: Path? = null) : Binary
  * Legacy Targets-based approach. Do not use it, unless you know what you are doing
  * if [target] "local" target is used
  */
-data class BinOnTarget(internal val configureTargetCmdLine: (TargetedCommandLineBuilder) -> Unit, val target: TargetEnvironmentConfiguration) : BinaryToExec {
-  constructor(exePath: FullPathOnTarget, target: TargetEnvironmentConfiguration) : this({ it.setExePath(exePath) }, target)
+data class BinOnTarget(internal val configureTargetCmdLine: (TargetedCommandLineBuilder) -> Unit, val target: TargetEnvironmentConfiguration, val workingDir: Path? = null) : BinaryToExec {
+  constructor(exePath: FullPathOnTarget, target: TargetEnvironmentConfiguration, workingDir: Path? = null) : this({ it.setExePath(exePath) }, target, workingDir)
 
   @RequiresBackgroundThread
   fun getLocalExePath(): Lazy<FullPathOnTarget> = lazy {
@@ -104,7 +113,7 @@ suspend fun ExecService.execGetStdout(
   procListener: PyProcessListener? = null,
 ): PyResult<String> {
   val binary = eelApi.exec.findExeFilesInPath(binaryName).firstOrNull()?.asNioPath()
-               ?: return PyResult.localizedError(PyExecBundle.message("py.exec.fileNotFound", binaryName, eelApi.descriptor.machine.name))
+               ?: return PyResult.localizedError(message("py.exec.fileNotFound", binaryName, eelApi.descriptor.name))
   return execGetStdout(BinOnEel(binary), args, options, procListener)
 }
 
@@ -169,9 +178,40 @@ suspend fun <T> ExecService.execute(
  */
 typealias ProcessOutputTransformer<T> = (EelProcessExecutionResult) -> Result<T, @NlsSafe String?>
 
-object ZeroCodeStdoutTransformer : ProcessOutputTransformer<String> {
-  override fun invoke(processOutput: EelProcessExecutionResult): Result<String, String?> =
-    if (processOutput.exitCode == 0) Result.success(processOutput.stdoutString.trim()) else Result.failure(null)
+/**
+ * Return `stdout` if error code is `0`
+ */
+val ZeroCodeStdoutTransformer: ZeroCodeStdoutTransformerTyped<String> = ZeroCodeStdoutTransformerTyped { it }
+
+/**
+ * Parses `bool` out of `stdout` is error code is `0`
+ */
+val ZeroCodeStdoutTransformerBool: ZeroCodeStdoutTransformerTyped<Boolean> = ZeroCodeStdoutTransformerTyped {
+  when (it) {
+    "True" -> true
+    "False" -> false
+    else -> null
+  }
+}
+
+
+/**
+ * See also [ZeroCodeStdoutTransformer], [ZeroCodeStdoutTransformerBool]
+ */
+class ZeroCodeStdoutTransformerTyped<T : Any>(val strParser: (String) -> T?) : ProcessOutputTransformer<T> {
+  override fun invoke(processOutput: EelProcessExecutionResult): Result<T, String?> {
+    if (processOutput.exitCode != 0) {
+      return Result.failure(message("py.exec.error.not.zero"))
+    }
+    val output = processOutput.stdoutString.trim()
+    val result = strParser(output)
+    return if (result == null) {
+      Result.failure(message("py.exec.error.unexpected.output", output))
+    }
+    else {
+      Result.success(result)
+    }
+  }
 }
 
 /**
@@ -188,18 +228,42 @@ open class ZeroCodeStdoutParserTransformer<T>(val stdoutParser: (String) -> Resu
   }
 }
 
+/**
+ * Each process launched with [ExecOptions] belongs to one of these categories. The lighter proces is, the more processes system can run.
+ * Limits are set via Registry.
+ */
+enum class ConcurrentProcessWeight {
+  LIGHT,
+  MEDIUM,
+  HEAVY
+}
+
+/**
+ * Configuration for downloading files after command execution.
+ * Uses existing upload volume mappings (from web deployment).
+ *
+ * @param relativePaths Relative paths to download from the working directory.
+ *                      Empty list means download entire working directory.
+ */
+data class DownloadConfig(
+  val relativePaths: List<RelativePathOnTarget> = emptyList(),
+)
 
 /**
  * @property[env] Environment variables to be applied with the process run
  * @property[timeout] Process gets killed after this timeout
  * @property[processDescription] optional description to be displayed to user
  * @property[tty] Much like [com.intellij.platform.eel.EelExecApi.Pty]
+ * @property[weight] use it to limit the number of concurrent processes not to exhaust user resources, see [ConcurrentProcessWeight]
+ * @property[downloadAfterExecution] configuration for downloading files after command execution (Target-based execution only)
  */
 data class ExecOptions(
   override val env: Map<String, String> = emptyMap(),
   override val processDescription: @Nls String? = null,
   val timeout: Duration = 5.minutes,
   override val tty: TtySize? = null,
+  val weight: ConcurrentProcessWeight = ConcurrentProcessWeight.LIGHT,
+  val downloadAfterExecution: DownloadConfig? = null,
 ) : ExecOptionsBase
 
 
@@ -237,8 +301,10 @@ class Args(vararg initialArgs: String) {
     return this
   }
 
+  fun addArgs(args: List<String>): Args = addArgs(*args.toTypedArray())
+
   /**
-   * This file will be copied to remote machine and its remote name will be added to the list of arguments.
+   * This file will be copied to remote machine, and its remote name will be added to the list of arguments.
    * Use [argGenerator] to modify name
    */
   fun addLocalFile(localFile: Path, argGenerator: FileArgGenerator = FileArgGenerator { it }): Args {
@@ -268,4 +334,8 @@ class Args(vararg initialArgs: String) {
     }
 }
 
-fun Args.addArgs(args: List<String>): Args = addArgs(*args.toTypedArray())
+
+fun BinaryToExec.asGeneralCommandLine(): PyResult<GeneralCommandLine> = when (this) {
+  is BinOnEel -> PyResult.success(GeneralCommandLine(path.toString()).withWorkingDirectory(workDir))
+  is BinOnTarget -> PyResult.localizedError(message("py.exec.target.binaries.are.not.supported"))
+}

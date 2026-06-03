@@ -8,7 +8,11 @@ import com.intellij.openapi.fileTypes.ExtensionFileNameMatcher;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Iconable;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VFileProperty;
@@ -17,10 +21,21 @@ import com.intellij.ui.LayeredIcon;
 import com.intellij.util.IconUtil;
 import com.intellij.util.PlatformIcons;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.Icon;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -51,6 +66,7 @@ public class FileChooserDescriptor implements Cloneable {
   private @Nullable List<FileType> myFileTypeFilter = null;
   private @Nullable Predicate<? super VirtualFile> myFileFilter = null;
   private boolean myForcedToUseIdeaFileChooser = false;
+  private boolean myEnvironmentRestricted = false;
 
   private final Map<String, Object> myUserData = new HashMap<>();
 
@@ -100,6 +116,7 @@ public class FileChooserDescriptor implements Cloneable {
     myFileTypeFilter = d.myFileTypeFilter;
     myFileFilter = d.myFileFilter;
     myForcedToUseIdeaFileChooser = false;
+    myEnvironmentRestricted = d.myEnvironmentRestricted;
     myUserData.putAll(d.myUserData);
   }
 
@@ -383,6 +400,30 @@ public class FileChooserDescriptor implements Cloneable {
 
   public void setForcedToUseIdeaFileChooser(boolean forcedToUseIdeaFileChooser) {
     myForcedToUseIdeaFileChooser = forcedToUseIdeaFileChooser;
+  }
+
+  /**
+   * When {@code true}, the file chooser restricts selection to files reachable in the current execution environment
+   * (e.g., a container environment such as WSL or Docker). Works only with {@code UniversalFileChooser}
+   */
+  public boolean isEnvironmentRestricted() {
+    return myEnvironmentRestricted;
+  }
+
+  /**
+   * @param environmentRestricted Enforces choosing files only in a specific environment
+   * @see #isEnvironmentRestricted
+   */
+  public void setEnvironmentRestricted(boolean environmentRestricted) {
+    withEnvironmentRestricted(environmentRestricted);
+  }
+
+  /**
+   * @see #setEnvironmentRestricted(boolean)
+   */
+  public FileChooserDescriptor withEnvironmentRestricted(boolean environmentRestricted) {
+    myEnvironmentRestricted = environmentRestricted;
+    return this;
   }
 
   @ApiStatus.Internal

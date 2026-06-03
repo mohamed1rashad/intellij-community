@@ -16,6 +16,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.Set;
 
 public class KeywordCompletionTest extends LightCompletionTestCase {
   private static final String BASE_PATH = "/codeInsight/completion/keywords/";
@@ -125,6 +126,24 @@ public class KeywordCompletionTest extends LightCompletionTestCase {
   public void testInstanceOf3() { doTest(); }
   public void testCatchFinally() { doTest(2, "catch", "finally"); }
   public void testSecondCatch() { doTest(2, "catch", "finally"); }
+  public void testSuperParen() {
+    configureFromFileText("Test.java", """
+      class X {
+        X() {
+          s<caret>
+        }
+      }
+      """);
+    complete();
+    type('(');
+    checkResultByText("""
+      class X {
+        X() {
+          super();
+        }
+      }
+      """);
+  }
   public void testSuper1() { doTest(1, "super"); }
   public void testSuper2() { doTest(0, "super"); }
   public void testSuper3() { doTest(); }
@@ -171,6 +190,9 @@ public class KeywordCompletionTest extends LightCompletionTestCase {
     selectItem(myItems[0], '!');
     checkResultByTestName();
   }
+
+  @NeedsIndex.ForStandardLibrary
+  public void testNoExtraArrowMultiCaret() { doTest(); }
 
   public void testNoPrimitivesInBooleanAnnotationAttribute() { doTest(1, "true", "int", "boolean"); }
   public void testNoPrimitivesInIntAnnotationValueAttribute() { doTest(0, "true", "int", "boolean"); }
@@ -276,8 +298,7 @@ public class KeywordCompletionTest extends LightCompletionTestCase {
   @NeedsIndex.ForStandardLibrary
   public void testTryInExpression() {
     configureByTestName();
-    assertEquals("toString", myItems[0].getLookupString());
-    assertEquals("this", myItems[1].getLookupString());
+    assertEquals(Set.of("toString", "this"), Set.of(myItems[0].getLookupString(), myItems[1].getLookupString()));
   }
 
   public void testAfterPackageAnnotation() {
@@ -299,6 +320,54 @@ public class KeywordCompletionTest extends LightCompletionTestCase {
       class Main {}""");
     complete();
     assertContainsItems("import");
+  }
+
+  public void testNoInstanceOfAfterUnknownVariable() {
+    configureFromFileText("Test.java", """
+      class Main {
+        void test() {
+          FooBar ins<caret>
+        }
+      }""");
+    complete();
+    checkResultByText("""
+      class Main {
+        void test() {
+          FooBar ins
+        }
+      }""");
+  }
+
+  public void testInstanceOfAfterKnownVariable() {
+    configureFromFileText("Test.java", """
+      class Main {
+        void test(Object fooBar) {
+          fooBar ins<caret>
+        }
+      }""");
+    complete();
+    checkResultByText("""
+      class Main {
+        void test(Object fooBar) {
+          fooBar instanceof <caret>
+        }
+      }""");
+  }
+
+  public void testNoSecondSpaceAfterKeyword() {
+    configureFromFileText("Test.java", """
+      class X {
+        void test(f<caret>)
+      }
+      """);
+    complete();
+    assertNotNull(getLookup());
+    type(' ');
+    checkResultByText("""
+      class X {
+        void test(final <caret>)
+      }
+      """);
   }
 
   public void testPackageKeyword() {
@@ -350,11 +419,11 @@ public class KeywordCompletionTest extends LightCompletionTestCase {
     checkResultByTestName();
   }
 
-  private void configureByTestName() {
+  void configureByTestName() {
     configureByFile(BASE_PATH + getTestName(true) + ".java");
   }
 
-  private void checkResultByTestName() {
+  void checkResultByTestName() {
     checkResultByFile(BASE_PATH + getTestName(true) + "_after.java");
   }
 

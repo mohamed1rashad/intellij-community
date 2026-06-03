@@ -4,8 +4,6 @@ package com.intellij.java.codeInsight;
 import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.NullableNotNullManager;
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
-import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl;
 import com.intellij.codeInsight.hint.ParameterInfoComponent;
 import com.intellij.codeInsight.hint.api.impls.AnnotationParameterInfoHandler;
 import com.intellij.codeInsight.hint.api.impls.MethodParameterInfoHandler;
@@ -14,18 +12,36 @@ import com.intellij.codeInsight.lookup.LookupElementPresentation;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.java.codeInspection.DataFlowInspectionTestCase;
 import com.intellij.lang.annotation.HighlightSeverity;
-import com.intellij.lang.parameterInfo.*;
+import com.intellij.lang.parameterInfo.CreateParameterInfoContext;
+import com.intellij.lang.parameterInfo.LanguageParameterInfo;
+import com.intellij.lang.parameterInfo.ParameterInfoHandler;
+import com.intellij.lang.parameterInfo.ParameterInfoUIContext;
+import com.intellij.lang.parameterInfo.ParameterInfoUIContextEx;
+import com.intellij.lang.parameterInfo.UpdateParameterInfoContext;
 import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.fileTypes.PlainTextLanguage;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
-import com.intellij.psi.*;
+import com.intellij.pom.java.LanguageLevel;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.LambdaUtil;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMethod;
+import com.intellij.psi.PsiAnnotationParameterList;
+import com.intellij.psi.PsiCall;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.testFramework.LightProjectDescriptor;
 import com.intellij.testFramework.NeedsIndex;
+import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl;
 import com.intellij.testFramework.utils.parameterInfo.MockCreateParameterInfoContext;
 import com.intellij.testFramework.utils.parameterInfo.MockParameterInfoUIContext;
 import com.intellij.testFramework.utils.parameterInfo.MockUpdateParameterInfoContext;
@@ -463,7 +479,7 @@ public class ParameterInfoTest extends AbstractParameterInfoTestCase {
   }
 
   private String removeAnnotationsIfDumb(String s) {
-    return DumbService.isDumb(getProject()) ? s.replaceAll("@\\p{Alnum}* ", "") : s;
+    return DumbService.isDumb(getProject()) ? s.replaceAll("\\s*@\\p{Alnum}* ", "") : s;
   }
 
   @NeedsIndex.ForStandardLibrary
@@ -487,7 +503,7 @@ public class ParameterInfoTest extends AbstractParameterInfoTestCase {
         -
         <html><b>double v</b></html>
         -
-        <html><b>@NotNull char[] chars</b></html>
+        <html><b>char @NotNull [] chars</b></html>
         -
         <html><b>@Nullable String s</b></html>
         -
@@ -608,10 +624,41 @@ public class ParameterInfoTest extends AbstractParameterInfoTestCase {
     checkHintContents("<html><strike>&lt;ABC&gt;, <b>DEF</b></strike></html>");
   }
 
+  @NeedsIndex.SmartMode(reason = "Just to test with smart mode")
+  public void testConstructorCallInsideLambda() {
+    IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_21, ()->{
+      configureJava(
+        """
+          public class ModuleLauncher {
+              interface Func {
+                  void invoke();
+              }
+          
+              static void foo(Func f) {
+                  f.invoke();
+              }
+          
+              record Test(int x, int y) {
+              }
+          
+              static void main() {
+                  foo(() -> {
+                      new Test(1,<caret>);
+                  });
+              }
+          }""");
+
+      MethodParameterInfoHandler handler = new MethodParameterInfoHandler();
+      CreateParameterInfoContext context = new MockCreateParameterInfoContext(getEditor(), getFile());
+      PsiExpressionList list = handler.findElementForParameterInfo(context);
+      assertEquals("(1,)", list.getText());
+    });
+  }
+
   @Override
   protected void runTestRunnable(@NotNull ThrowableRunnable<Throwable> testRunnable) throws Throwable {
     if (getIndexingMode() != IndexingMode.SMART) {
-      ((DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(getProject())).mustWaitForSmartMode(false, getTestRootDisposable());
+      CodeInsightTestFixtureImpl.mustWaitForSmartMode(false, getTestRootDisposable());
       FileBasedIndex.getInstance().ignoreDumbMode(DumbModeAccessType.RELIABLE_DATA_ONLY, () -> {
         super.runTestRunnable(testRunnable);
         return null;

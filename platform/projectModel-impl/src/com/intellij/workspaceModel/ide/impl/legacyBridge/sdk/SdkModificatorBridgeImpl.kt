@@ -13,13 +13,20 @@ import com.intellij.platform.backend.workspace.virtualFile
 import com.intellij.platform.eel.EelMachine
 import com.intellij.platform.eel.provider.LocalEelMachine
 import com.intellij.platform.eel.provider.getEelDescriptor
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.eel.provider.getResolvedEelMachine
+import com.intellij.platform.workspace.jps.entities.SdkEntity
+import com.intellij.platform.workspace.jps.entities.SdkEntityBuilder
+import com.intellij.platform.workspace.jps.entities.SdkId
+import com.intellij.platform.workspace.jps.entities.SdkRoot
+import com.intellij.platform.workspace.jps.entities.SdkRootTypeId
+import com.intellij.platform.workspace.jps.entities.modifySdkEntity
 import com.intellij.platform.workspace.jps.serialization.impl.ELEMENT_ADDITIONAL
 import com.intellij.platform.workspace.storage.InternalEnvironmentName
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresWriteLock
 import com.intellij.util.containers.ConcurrentFactoryMap
 import com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModel
+import com.intellij.workspaceModel.ide.impl.getInternalEnvironmentName
 import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Companion.sdkMap
 import org.jdom.Element
 import java.nio.file.InvalidPathException
@@ -28,7 +35,7 @@ import java.nio.file.Path
 private val rootTypes = ConcurrentFactoryMap.createMap<String, SdkRootTypeId> { SdkRootTypeId(it) }
 
 internal class SdkModificatorBridgeImpl(
-  private val originalEntity: ModifiableSdkEntity,
+  private val originalEntity: SdkEntityBuilder,
   private val originalSdk: ProjectJdkImpl,
   private val originalSdkDelegate: SdkBridgeImpl,
   environmentName: InternalEnvironmentName
@@ -36,7 +43,7 @@ internal class SdkModificatorBridgeImpl(
 
   private var isCommitted = false
   private var additionalData: SdkAdditionalData? = null
-  private val modifiedSdkEntity: ModifiableSdkEntity = SdkBridgeImpl.createEmptySdkEntity("", "", environmentName = environmentName)
+  private val modifiedSdkEntity: SdkEntityBuilder = SdkBridgeImpl.createEmptySdkEntity("", "", environmentName = environmentName)
 
   init {
     modifiedSdkEntity.applyChangesFrom(originalEntity)
@@ -59,12 +66,14 @@ internal class SdkModificatorBridgeImpl(
   override fun getHomePath(): String? = modifiedSdkEntity.homePath?.url
 
   override fun setHomePath(path: String?) {
-    modifiedSdkEntity.homePath = if (path != null) {
+    if (path != null) {
       val descriptor = getMachine(path)
       val globalInstance = GlobalWorkspaceModel.getInstance(descriptor).getVirtualFileUrlManager()
-      globalInstance.getOrCreateFromUrl(path)
-    } else {
-      null
+      modifiedSdkEntity.homePath = globalInstance.getOrCreateFromUrl(path)
+      modifiedSdkEntity.entitySource = SdkBridgeImpl.createEntitySourceForSdk(descriptor.getInternalEnvironmentName())
+    }
+    else {
+      modifiedSdkEntity.homePath = null
     }
   }
 
@@ -180,7 +189,7 @@ internal class SdkModificatorBridgeImpl(
   private fun getMachine(path: String?): EelMachine {
     path ?: return LocalEelMachine
     return try {
-      Path.of(path).getEelDescriptor().machine
+      Path.of(path).getEelDescriptor().getResolvedEelMachine() ?: LocalEelMachine
     }
     catch (_: InvalidPathException) {
       // sometimes (in Ruby) the SDK home is set to 'temp:///root/nostubs'

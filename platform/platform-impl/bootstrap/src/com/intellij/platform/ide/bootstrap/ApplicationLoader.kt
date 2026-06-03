@@ -1,11 +1,28 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:JvmName("ApplicationLoader")
 @file:Internal
+@file:OptIn(LowLevelLocalMachineAccess::class)
 package com.intellij.platform.ide.bootstrap
 
-import com.intellij.diagnostic.*
+import com.intellij.diagnostic.COROUTINE_DUMP_HEADER
+import com.intellij.diagnostic.LoadingState
+import com.intellij.diagnostic.LocksActionsDumper
+import com.intellij.diagnostic.PluginException
+import com.intellij.diagnostic.ProgressIndicatorDumper
+import com.intellij.diagnostic.WriteLockMeasurer
+import com.intellij.diagnostic.dumpCoroutines
 import com.intellij.diagnostic.logs.LogLevelConfigurationManager
-import com.intellij.ide.*
+import com.intellij.ide.AppLifecycleListener
+import com.intellij.ide.ApplicationActivity
+import com.intellij.ide.ApplicationInitializedListener
+import com.intellij.ide.ApplicationLoadListener
+import com.intellij.ide.BootstrapBundle
+import com.intellij.ide.CliResult
+import com.intellij.ide.CommandLineProcessor
+import com.intellij.ide.CommandLineProcessorResult
+import com.intellij.ide.GeneralSettings
+import com.intellij.ide.IdeBundle
+import com.intellij.ide.ProtocolHandler
 import com.intellij.ide.bootstrap.InitAppContext
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.PluginSet
@@ -24,7 +41,14 @@ import com.intellij.idea.AppMode
 import com.intellij.idea.IdeStarter
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.impl.ActionConfigurationCustomizer
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.Application
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ApplicationStarter
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModernApplicationStarter
+import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.TransactionGuard
+import com.intellij.openapi.application.TransactionGuardImpl
 import com.intellij.openapi.application.ex.ApplicationEx
 import com.intellij.openapi.application.ex.ApplicationInfoEx
 import com.intellij.openapi.application.ex.ApplicationManagerEx
@@ -40,7 +64,6 @@ import com.intellij.openapi.extensions.impl.ExtensionsAreaImpl
 import com.intellij.openapi.extensions.useOrLogError
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.updateSettings.impl.UpdateSettings
-import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.SystemPropertyBean
 import com.intellij.openapi.util.io.OSAgnosticPathUtil
 import com.intellij.platform.diagnostic.telemetry.TelemetryManager
@@ -54,14 +77,26 @@ import com.intellij.ui.ExperimentalUI
 import com.intellij.util.PlatformUtils
 import com.intellij.util.io.URLUtil
 import com.intellij.util.io.createDirectories
+import com.intellij.util.system.LowLevelLocalMachineAccess
+import com.intellij.util.system.OS
 import com.jetbrains.JBR
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.VisibleForTesting
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.nio.file.Path
 import java.util.concurrent.CancellationException
 import kotlin.coroutines.jvm.internal.CoroutineDumpState
 import kotlin.system.exitProcess
@@ -98,7 +133,7 @@ internal suspend fun loadApp(
       }
 
       span("app component registration") {
-        app.registerComponents(pluginSet.getEnabledModules(), app)
+        app.registerComponents(pluginSet.sequenceResolvedSortedDescriptorsForRegistration(), app)
       }
       // ApplicationManager.getApplication may be used in ApplicationInitializedListener constructor
       ApplicationManager.setApplication(app)
@@ -107,34 +142,33 @@ internal suspend fun loadApp(
     val languageAndRegionTaskDeferred: Deferred<(suspend () -> Boolean)?>? = if (AppMode.isHeadless()) null else {
       async(CoroutineName("language and region")) {
         val euaDocumentStatus = euaDocumentDeferred.await()
-        if (euaDocumentStatus is EndUserAgreementStatus.Required ||
-            euaDocumentStatus is EndUserAgreementStatus.RemoteDev) {
+        if (euaDocumentStatus is EndUserAgreementStatus.Required || euaDocumentStatus is EndUserAgreementStatus.RemoteDev) {
           getLanguageAndRegionDialogIfNeeded()
         }
         else null
       }
     }
-    
+
     val euaTaskDeferred: Deferred<(suspend () -> Boolean)?>? = if (AppMode.isHeadless()) null else {
       async(CoroutineName("eua document")) {
-        prepareShowEuaIfNeededTask(euaDocumentDeferred.await(), appInfoDeferred, asyncScope)
+        prepareShowEuaIfNeededTask(documentStatus = euaDocumentDeferred.await(), appInfoDeferred, asyncScope)
       }
     }
 
     initServiceContainerJob.join()
 
-    val initTelemetryJob = launch(CoroutineName("opentelemetry configuration")) {
-      try {
-        TelemetryManager.setTelemetryManager(
-          TelemetryManagerImpl(app.getCoroutineScope(), app.isUnitTestMode))
+    TelemetryManager.setTelemetryManager(async(CoroutineName("opentelemetry configuration")) {
+      return@async try {
+        TelemetryManagerImpl(app.getCoroutineScope(), app.isUnitTestMode)
       }
       catch (e: CancellationException) {
         throw e
       }
       catch (e: Throwable) {
         logDeferred.await().error("Can't initialize OpenTelemetry: will use default (noop) SDK impl", e)
+        null
       }
-    }
+    })
 
     app.getCoroutineScope().launch {
       // precompute after plugin model loaded
@@ -157,10 +191,6 @@ internal suspend fun loadApp(
 
     launch(CoroutineName("app pre-initialization")) {
       initConfigurationStoreJob.join()
-
-      span("telemetry waiting") {
-        initTelemetryJob.join()
-      }
 
       val preloadJob = launch(CoroutineName("critical services preloading")) {
         preloadCriticalServices(app, preloadScope = this, asyncScope, appRegisteredJob, initAwtToolkitAndEventQueueJob)
@@ -203,12 +233,6 @@ internal suspend fun loadApp(
     }
 
     launch {
-      if (AppMode.isRemoteDevHost()) {
-        span("telemetry waiting") {
-          initTelemetryJob.join()
-        }
-      }
-
       val appInitializedListeners = appInitListeners.await()
       span("app initialized callback") {
         // An async scope here is intended for FLOW. FLOW!!! DO NOT USE the surrounding main scope.
@@ -252,7 +276,7 @@ internal suspend fun loadApp(
 @Suppress("ReplaceJavaStaticMethodWithKotlinAnalog", "CanConvertToMultiDollarString")
 private val asyncAppListenerAllowListForNonCorePlugin = java.util.Set.of(
   "com.jetbrains.rdserver.unattendedHost.logs.BackendMessagePoolExporter\$MyAppListener",
-  "com.intellij.settingsSync.SettingsSynchronizerApplicationInitializedListener",
+  "com.intellij.settingsSync.core.SettingsSynchronizerApplicationInitializedListener",
   "com.intellij.dataspell.ide.impl.jupyter.JupyterDSProjectLifecycleListener",
   "com.jetbrains.gateway.GatewayBuildDateExpirationListener",
   "com.intellij.ide.misc.PluginAgreementUpdateScheduler",
@@ -263,7 +287,7 @@ private val asyncAppListenerAllowListForNonCorePlugin = java.util.Set.of(
   "com.intellij.ide.AgreementUpdater",
   "com.intellij.internal.statistic.updater.StatisticsJobsScheduler",
   "com.intellij.internal.statistic.updater.StatisticsStateCollectorsScheduler",
-  "org.jetbrains.kotlin.idea.base.plugin.K2UnsupportedPluginsNotificationActivity",
+  "com.intellij.platform.daemon.client.DaemonApplicationActivity",
 )
 
 private fun executeAsyncAppInitListeners(scope: CoroutineScope) {
@@ -310,7 +334,7 @@ private suspend fun preloadNonHeadlessServices(app: ApplicationImpl, initLafJob:
     }
 
     // https://youtrack.jetbrains.com/issue/IDEA-341318
-    if (SystemInfoRt.isLinux && System.getProperty("idea.linux.scale.workaround", "false").toBoolean()) {
+    if (OS.CURRENT == OS.Linux && System.getProperty("idea.linux.scale.workaround", "false").toBoolean()) {
       // ActionManager can use UISettings (KeymapManager doesn't use it but just to be sure)
       initLafJob.join()
     }
@@ -348,16 +372,23 @@ private suspend fun enableCoroutineDumpAndJstack() {
   }
 }
 
+
 private suspend fun enableLockMonitoring(application: ApplicationImpl) {
   application.serviceAsync<WriteLockMeasurer>()
 }
 
 private suspend fun enableJstack() {
-  span("coroutine jstack configuration") {
+  span("jstack configuration") {
     JBR.getJstack()?.includeInfoFrom {
       """
 $COROUTINE_DUMP_HEADER
 ${dumpCoroutines(stripDump = false)}
+
+${ProgressIndicatorDumper.dumpProgressIndicatorState()}
+${LocksActionsDumper.dumpLocksAndActionsStateOrNull().let {
+  if (it == null) "" else "\n$it"
+}
+}
 """
     }
   }
@@ -391,7 +422,10 @@ private suspend fun initLafManagerAndCss(app: ApplicationImpl, asyncScope: Corou
       }
     }
 
-    if (app.isHeadlessEnvironment) null else {
+    if (app.isHeadlessEnvironment) {
+      null
+    }
+    else {
       asyncScope.launch {
         // preload EditorColorsManager only when LafManager is ready - that's why out of coroutineScope
         initGlobalStyleSheet()
@@ -467,11 +501,9 @@ private fun runPostAppInitTasks(scope: CoroutineScope) {
     createAppLocatorFile()
   }
 
-  if (!AppMode.isLightEdit()) {
-    // this functionality should be used only by plugin functionality used after start-up
-    scope.launch(CoroutineName("system properties setting")) {
-      SystemPropertyBean.initSystemProperties()
-    }
+  // this functionality should be used only by plugin functionality used after start-up
+  scope.launch(CoroutineName("system properties setting")) {
+    SystemPropertyBean.initSystemProperties()
   }
 }
 
@@ -512,10 +544,10 @@ private fun createDefaultAppStarter(): ApplicationStarter =
 
 @VisibleForTesting
 internal fun createAppLocatorFile() {
-  val locatorFile = Path.of(PathManager.getSystemPath(), ApplicationEx.LOCATOR_FILE_NAME)
+  val locatorFile = PathManager.getSystemDir().resolve(ApplicationEx.LOCATOR_FILE_NAME)
   try {
     locatorFile.parent?.createDirectories()
-    Files.writeString(locatorFile, PathManager.getHomePath(), StandardCharsets.UTF_8)
+    Files.writeString(locatorFile, PathManager.getHomeDir().toString(), StandardCharsets.UTF_8)
   }
   catch (e: IOException) {
     LOG.warn("Can't store a location in '$locatorFile'", e)
@@ -543,7 +575,7 @@ private fun setActivationListeners() {
 private suspend fun handleExternalCommand(args: List<String>, currentDirectory: String?): CommandLineProcessorResult {
   if (args.isNotEmpty() && args[0].contains(URLUtil.SCHEME_SEPARATOR)) {
     val cliResult = CommandLineProcessor.processProtocolCommand(args[0])
-    val result = CommandLineProcessorResult(project = null, result = cliResult)
+    val result = CommandLineProcessorResult(project = null, cliResult)
     withContext(Dispatchers.EDT) {
       if (result.hasError) {
         result.showError()

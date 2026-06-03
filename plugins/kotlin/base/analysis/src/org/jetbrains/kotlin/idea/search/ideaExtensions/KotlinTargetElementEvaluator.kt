@@ -2,24 +2,41 @@
 
 package org.jetbrains.kotlin.idea.search.ideaExtensions
 
-import com.intellij.codeInsight.*
+import com.intellij.codeInsight.JavaTargetElementEvaluator
+import com.intellij.codeInsight.TargetElementEvaluatorEx
+import com.intellij.codeInsight.TargetElementEvaluatorEx2
+import com.intellij.codeInsight.TargetElementUtil
+import com.intellij.codeInsight.TargetElementUtilExtender
 import com.intellij.openapi.editor.Editor
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiReference
+import com.intellij.psi.impl.source.resolve.reference.impl.PsiMultiReference
 import com.intellij.util.BitUtil
+import org.jetbrains.kotlin.idea.base.psi.isNameBased
 import org.jetbrains.kotlin.idea.references.KtDestructuringDeclarationReference
 import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
 import org.jetbrains.kotlin.idea.references.getCalleeByLambdaArgument
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.*
+import org.jetbrains.kotlin.psi.KtCallElement
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtLabelReferenceExpression
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtPrimaryConstructor
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
+import org.jetbrains.kotlin.psi.psiUtil.getLabeledParent
+import org.jetbrains.kotlin.psi.psiUtil.getNonStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypeAndBranch
+import org.jetbrains.kotlin.psi.psiUtil.hasBody
+import org.jetbrains.kotlin.psi.psiUtil.isAbstract
 
 abstract class KotlinTargetElementEvaluator : TargetElementEvaluatorEx2(), TargetElementEvaluatorEx, TargetElementUtilExtender {
-    companion object {
-        const val BYPASS_IMPORT_ALIAS = 0x200
-    }
 
     // Place caret after the open curly brace in lambda for generated 'it'
     abstract fun findLambdaOpenLBraceForGeneratedIt(ref: PsiReference): PsiElement?
@@ -29,7 +46,7 @@ abstract class KotlinTargetElementEvaluator : TargetElementEvaluatorEx2(), Targe
 
     override fun getAdditionalDefinitionSearchFlags() = 0
 
-    override fun getAdditionalReferenceSearchFlags() = BYPASS_IMPORT_ALIAS
+    override fun getAdditionalReferenceSearchFlags() = 0
 
     override fun getAllAdditionalFlags() = additionalDefinitionSearchFlags + additionalReferenceSearchFlags
 
@@ -70,13 +87,23 @@ abstract class KotlinTargetElementEvaluator : TargetElementEvaluatorEx2(), Targe
             return (refTarget as? KtFunction)?.getCalleeByLambdaArgument() ?: refTarget
         }
 
-        if (!BitUtil.isSet(flags, BYPASS_IMPORT_ALIAS)) {
-            (ref.element as? KtSimpleNameExpression)?.mainReference?.getImportAlias()?.let { return it }
-        }
+        (ref.element as? KtSimpleNameExpression)?.mainReference?.getImportAlias()?.let { return it }
 
         // prefer destructing declaration entry to its target if element name is accepted
         if (ref is KtDestructuringDeclarationReference && BitUtil.isSet(flags, TargetElementUtil.ELEMENT_NAME_ACCEPTED)) {
             return ref.element
+        }
+
+        if (ref is KtDestructuringDeclarationReference && ref.element.isNameBased()) {
+            ref.multiResolve(false).firstNotNullOfOrNull { it.element as? KtParameter }?.let { return it }
+        }
+
+        if (ref is PsiMultiReference) {
+            val targets = ref
+                .references
+                .filterIsInstance<KtDestructuringDeclarationReference>()
+                .firstOrNull { it.element.isNameBased() }?.multiResolve(false)
+            targets?.firstNotNullOfOrNull { it.element as? KtParameter }?.let { return it }
         }
 
         val refExpression = ref.element as? KtSimpleNameExpression

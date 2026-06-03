@@ -1,33 +1,129 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.workspace.jps.serialization.impl
 
-import com.intellij.java.workspace.entities.*
+import com.intellij.configurationStore.StorageManagerFileWriteRequestor
+import com.intellij.java.workspace.entities.JavaResourceRootPropertiesEntity
+import com.intellij.java.workspace.entities.JavaSourceRootPropertiesEntity
+import com.intellij.java.workspace.entities.asJavaResourceRoot
+import com.intellij.java.workspace.entities.asJavaSourceRoot
+import com.intellij.java.workspace.entities.javaSettings
+import com.intellij.openapi.application.backgroundWriteAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.platform.diagnostic.telemetry.helpers.MillisecondsMeasurer
-import com.intellij.platform.workspace.jps.*
+import com.intellij.platform.workspace.jps.CustomModuleEntitySource
+import com.intellij.platform.workspace.jps.JpsFileDependentEntitySource
+import com.intellij.platform.workspace.jps.JpsFileEntitySource
+import com.intellij.platform.workspace.jps.JpsImportedEntitySource
+import com.intellij.platform.workspace.jps.JpsMetrics
+import com.intellij.platform.workspace.jps.JpsProjectFileEntitySource
+import com.intellij.platform.workspace.jps.OrphanageWorkerEntitySource
 import com.intellij.platform.workspace.jps.bridge.impl.serialization.DefaultImlNormalizer
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.CustomImlComponentEntity
+import com.intellij.platform.workspace.jps.entities.CustomSourceRootPropertiesEntity
+import com.intellij.platform.workspace.jps.entities.DependencyScope
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntity
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlOrderEntity
+import com.intellij.platform.workspace.jps.entities.ExternalSystemModuleOptionsEntity
+import com.intellij.platform.workspace.jps.entities.InheritedSdkDependency
+import com.intellij.platform.workspace.jps.entities.LibraryDependency
+import com.intellij.platform.workspace.jps.entities.LibraryEntity
+import com.intellij.platform.workspace.jps.entities.LibraryEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryId
+import com.intellij.platform.workspace.jps.entities.LibraryTableId
+import com.intellij.platform.workspace.jps.entities.ModuleCustomImlDataEntity
+import com.intellij.platform.workspace.jps.entities.ModuleDependency
+import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ModuleGroupPathEntity
+import com.intellij.platform.workspace.jps.entities.ModuleId
+import com.intellij.platform.workspace.jps.entities.ModuleSourceDependency
+import com.intellij.platform.workspace.jps.entities.ModuleTypeId
+import com.intellij.platform.workspace.jps.entities.SdkDependency
+import com.intellij.platform.workspace.jps.entities.SdkId
+import com.intellij.platform.workspace.jps.entities.SourceRootEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.SourceRootOrderEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootOrderEntityBuilder
+import com.intellij.platform.workspace.jps.entities.SourceRootTypeId
+import com.intellij.platform.workspace.jps.entities.TestModulePropertiesEntity
+import com.intellij.platform.workspace.jps.entities.contentRoot
+import com.intellij.platform.workspace.jps.entities.customImlComponent
+import com.intellij.platform.workspace.jps.entities.customImlData
+import com.intellij.platform.workspace.jps.entities.customSourceRootProperties
+import com.intellij.platform.workspace.jps.entities.exModuleOptions
+import com.intellij.platform.workspace.jps.entities.excludeUrlOrder
+import com.intellij.platform.workspace.jps.entities.groupPath
+import com.intellij.platform.workspace.jps.entities.sourceRootOrder
+import com.intellij.platform.workspace.jps.entities.sourceRoots
+import com.intellij.platform.workspace.jps.entities.testProperties
 import com.intellij.platform.workspace.jps.serialization.SerializationContext
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.DummyParentEntitySource
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.EntityStorage
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
 import com.intellij.util.containers.ConcurrentFactoryMap
 import com.intellij.util.xmlb.Constants.NAME
 import io.opentelemetry.api.metrics.Meter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jdom.Attribute
 import org.jdom.Element
 import org.jdom.JDOMException
-import org.jetbrains.jps.model.serialization.*
+import org.jetbrains.jps.model.serialization.CannotLoadJpsModelException
+import org.jetbrains.jps.model.serialization.JDomSerializationUtil
+import org.jetbrains.jps.model.serialization.JpsComponentLoader
+import org.jetbrains.jps.model.serialization.JpsMacroExpander
+import org.jetbrains.jps.model.serialization.JpsProjectLoader
+import org.jetbrains.jps.model.serialization.SerializationConstants
 import org.jetbrains.jps.model.serialization.facet.JpsFacetSerializer
-import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.*
-import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.*
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.EXPORTED_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.INHERIT_COMPILER_OUTPUT_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.IS_GENERATED_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.JAVA_RESOURCE_ROOT_ID
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.JAVA_TEST_RESOURCE_ROOT_ID
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.MODULE_LANGUAGE_LEVEL_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.PRODUCTION_MODULE_NAME_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.RELATIVE_OUTPUT_PATH_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension.SCOPE_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.CONTENT_TAG
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.EXCLUDE_FOLDER_TAG
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.EXCLUDE_PATTERN_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.EXCLUDE_PATTERN_TAG
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.INHERITED_JDK_TYPE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.IS_TEST_SOURCE_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.JAVA_SOURCE_ROOT_TYPE_ID
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.JAVA_TEST_ROOT_TYPE_ID
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.JDK_NAME_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.JDK_TYPE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.JDK_TYPE_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.LEVEL_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.LIBRARY_TAG
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.LIBRARY_TYPE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.MODULE_LIBRARY_TYPE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.MODULE_NAME_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.MODULE_TYPE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.NAME_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.ORDER_ENTRY_TAG
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.PACKAGE_PREFIX_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.SOURCE_FOLDER_TAG
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.SOURCE_FOLDER_TYPE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.SOURCE_ROOT_TYPE_ATTRIBUTE
+import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer.TYPE_ATTRIBUTE
 import org.jetbrains.jps.util.JpsPathUtil
 import java.io.StringReader
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.*
+import java.util.TreeMap
 import kotlin.io.path.Path
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
@@ -46,6 +142,8 @@ private val MODULE_OPTIONS_TO_CHECK = setOf(
   "external.system.module.version", "external.linked.project.path", "external.linked.project.id",
   "external.root.project.path", "external.system.module.group", "external.system.module.type"
 )
+
+internal val LOG = logger<ModuleImlFileEntitiesSerializer>()
 
 internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: ModulePath,
                                                     override val fileUrl: VirtualFileUrl,
@@ -136,7 +234,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     errorReporter: ErrorReporter,
     virtualFileManager: VirtualFileUrlManager
   ): LoadingResult<Map<Class<out WorkspaceEntity>, Collection<WorkspaceEntity.Builder<out WorkspaceEntity>>>> = loadEntitiesTimeMs.addMeasuredTime {
-    val moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity> = HashMap()
+    val moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder> = HashMap()
     val exceptionsCollector = ArrayList<Throwable>()
 
     val externalSerializer = if (context.isExternalStorageEnabled) {
@@ -221,7 +319,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
   private fun loadAdditionalContents(
     content: JpsFileContent,
     virtualFileManager: VirtualFileUrlManager,
-    moduleEntity: ModifiableModuleEntity,
+    moduleEntity: ModuleEntityBuilder,
     exceptionCollector: MutableList<Throwable>,
   ) {
     val source = runCatchingXmlIssues(exceptionCollector) {
@@ -246,7 +344,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
   }
 
   private class ModuleLoadedInfo(
-    val moduleEntity: ModifiableModuleEntity,
+    val moduleEntity: ModuleEntityBuilder,
     val customRootsSerializer: CustomModuleRootsSerializer?,
     val customDir: String?,
   )
@@ -256,7 +354,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     readerForCustomRootsSerializerOnly: JpsFileContentReader,
     errorReporter: ErrorReporter,
     virtualFileManager: VirtualFileUrlManager,
-    moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>,
+    moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>,
     exceptionsCollector: MutableList<Throwable>,
   ): ModuleLoadedInfo? {
     if (content == null) {
@@ -342,6 +440,12 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
       }
     }
 
+    val customComponentsMap = loadCustomImlComponents(content)
+
+    if (customComponentsMap.isNotEmpty()) {
+      moduleEntity.customImlComponent = CustomImlComponentEntity(customComponentsMap, entitySource)
+    }
+
     runCatchingXmlIssues(exceptionsCollector) {
       // Don't forget to load external system options even if custom root serializer exist
       loadExternalSystemOptions(moduleEntity, content, externalSystemOptions, externalSystemId, entitySource)
@@ -360,7 +464,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
    */
   private fun loadContentRoots(
     customRootsSerializer: CustomModuleRootsSerializer?,
-    moduleEntity: ModifiableModuleEntity,
+    moduleEntity: ModuleEntityBuilder,
     content: JpsFileContent,
     readerForCustomRootsSerializerOnly: JpsFileContentReader,
     customDir: String?,
@@ -368,7 +472,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     virtualFileManager: VirtualFileUrlManager,
     contentRootEntitySource: EntitySource,
     loadingAdditionalRoots: Boolean,
-    moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>,
+    moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>,
   ) {
     if (customRootsSerializer != null) {
       customRootsSerializer.loadRoots(moduleEntity, readerForCustomRootsSerializerOnly, customDir, fileUrl, internalModuleListSerializer, errorReporter,
@@ -388,11 +492,11 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
   }
 
   private fun loadAdditionalContentRoots(
-    moduleEntity: ModifiableModuleEntity,
+    moduleEntity: ModuleEntityBuilder,
     content: JpsFileContent,
     virtualFileManager: VirtualFileUrlManager,
     contentRootEntitySource: EntitySource,
-  ): List<ModifiableContentRootEntity>? {
+  ): List<ContentRootEntityBuilder>? {
     val additionalElements = content.loadComponent(ADDITIONAL_MODULE_ELEMENTS_COMPONENT_NAME)?.clone()
                              ?: return null
     return loadContentRootEntities(moduleEntity, additionalElements, virtualFileManager, contentRootEntitySource)
@@ -423,7 +527,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
   }
 
   protected open fun loadExternalSystemOptions(
-    module: ModifiableModuleEntity,
+    module: ModuleEntityBuilder,
     content: JpsFileContent,
     externalSystemOptions: Map<String?, String?>,
     externalSystemId: String?,
@@ -450,11 +554,11 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
   }
 
   private fun loadRootManager(rootManagerElement: Element,
-                              moduleEntity: ModifiableModuleEntity,
+                              moduleEntity: ModuleEntityBuilder,
                               virtualFileManager: VirtualFileUrlManager,
                               contentRootEntitySource: EntitySource,
                               loadingAdditionalRoots: Boolean,
-                              moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>) {
+                              moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>) {
     val contentRoots = loadContentRootEntities(moduleEntity, rootManagerElement, virtualFileManager, contentRootEntitySource)
     moduleEntity.contentRoots += contentRoots
 
@@ -492,7 +596,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
                                      contentRootEntitySource: EntitySource,
                                      virtualFileManager: VirtualFileUrlManager,
                                      moduleId: ModuleId,
-                                     moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>): List<Result<ModuleDependencyItem>> {
+                                     moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>): List<Result<ModuleDependencyItem>> {
     fun Element.readScope(): DependencyScope {
       val attributeValue = getAttributeValue(SCOPE_ATTRIBUTE) ?: return DependencyScope.COMPILE
       return try {
@@ -553,10 +657,10 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     return dependencyItems
   }
 
-  private fun loadContentRootEntities(moduleEntity: ModifiableModuleEntity,
+  private fun loadContentRootEntities(moduleEntity: ModuleEntityBuilder,
                                       rootManagerElement: Element,
                                       virtualFileManager: VirtualFileUrlManager,
-                                      contentRootEntitySource: EntitySource): List<ModifiableContentRootEntity> {
+                                      contentRootEntitySource: EntitySource): List<ContentRootEntityBuilder> {
     val alreadyLoadedContentRoots = moduleEntity.contentRoots.associateBy { it.url.url }
     return rootManagerElement.getChildrenAndDetach(CONTENT_TAG).mapNotNull { contentElement ->
 
@@ -619,7 +723,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     contentElement: Element,
     virtualFileManager: VirtualFileUrlManager,
     entitySource: EntitySource,
-  ): List<ModifiableExcludeUrlEntity> {
+  ): List<ExcludeUrlEntityBuilder> {
     return contentElement
       .getChildren(EXCLUDE_FOLDER_TAG)
       .map { virtualFileManager.getOrCreateFromUrl(it.getAttributeValueStrict(URL_ATTRIBUTE)) }
@@ -632,7 +736,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     contentElement: Element,
     virtualFileManager: VirtualFileUrlManager,
     sourceRootSource: EntitySource,
-  ): List<ModifiableSourceRootEntity> {
+  ): List<SourceRootEntityBuilder> {
 
     return contentElement.getChildren(SOURCE_FOLDER_TAG).map { sourceRootElement ->
       val isTestSource = sourceRootElement.getAttributeValue(IS_TEST_SOURCE_ATTRIBUTE)?.toBoolean() == true
@@ -675,11 +779,22 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     }
   }
 
-  private fun loadTestModuleProperty(moduleEntity: ModifiableModuleEntity, content: JpsFileContent, entitySource: EntitySource) {
+  private fun loadTestModuleProperty(moduleEntity: ModuleEntityBuilder, content: JpsFileContent, entitySource: EntitySource) {
     val component = content.loadComponent(TEST_MODULE_PROPERTIES_COMPONENT_NAME) ?: return
     val productionModuleName = component.getAttribute(PRODUCTION_MODULE_NAME_ATTRIBUTE).value
     if (productionModuleName.isEmpty()) return
     moduleEntity.testProperties = TestModulePropertiesEntity(ModuleId(productionModuleName), entitySource)
+  }
+
+  private fun loadCustomImlComponents(content: JpsFileContent): Map<String, String> {
+    val result = HashMap<String, String>()
+    context.customImpComponentNameContributors.forEach {
+      val componentDom = content.loadComponent(it.componentName)
+      if (componentDom != null) {
+        result[it.componentName] = JDOMUtil.write(componentDom)
+      }
+    }
+    return result
   }
 
   private fun Element.getChildrenAndDetach(cname: String): List<Element> {
@@ -804,7 +919,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
   ) {
     val externalSystemOptions = module.exModuleOptions
     val customImlData = module.customImlData
-    saveModuleOptions(externalSystemOptions, module.type?.name, customImlData, content)
+    saveModuleOptions(externalSystemOptions, module.type?.name, module.entitySource, customImlData, content)
     val moduleOptions = customImlData?.customModuleOptions
     val customSerializerId = moduleOptions?.get(JpsProjectLoader.CLASSPATH_ATTRIBUTE)
     if (customSerializerId != null) {
@@ -827,6 +942,7 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
         content.saveComponent(it.componentName, componentTag)
       }
     }
+    saveCustomImlComponents(module, content)
     saveTestModuleProperty(module, content)
   }
 
@@ -957,9 +1073,15 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
 
   protected open fun saveModuleOptions(externalSystemOptions: ExternalSystemModuleOptionsEntity?,
                                        moduleType: String?,
+                                       moduleEntitySource: EntitySource,
                                        customImlData: ModuleCustomImlDataEntity?,
                                        content: WritableJpsFileContent) {
     val optionsMap = TreeMap<String, String?>()
+    if (moduleEntitySource is JpsImportedEntitySource && moduleEntitySource.externalSystemId != externalSystemOptions?.externalSystem) {
+      LOG.error("External system ID mismatch: ModuleEntity.entitySource (${moduleEntitySource.externalSystemId}) != ExternalSystemModuleOptionsEntity.externalSystem (${externalSystemOptions?.externalSystem}). " +
+                "Module is probably misconfigured. It'll get '${externalSystemOptions?.externalSystem}' system ID after deserialization.")
+    }
+
     if (externalSystemOptions != null) {
       if (externalSystemOptions.externalSystem == SerializationConstants.MAVEN_EXTERNAL_SOURCE_ID) {
         optionsMap[SerializationConstants.IS_MAVEN_MODULE_IML_ATTRIBUTE] = true.toString()
@@ -1053,14 +1175,20 @@ internal open class ModuleImlFileEntitiesSerializer(internal val modulePath: Mod
     content.saveComponent(TEST_MODULE_PROPERTIES_COMPONENT_NAME, testModulePropertyTag)
   }
 
+  private fun saveCustomImlComponents(module: ModuleEntity, content: WritableJpsFileContent) {
+    val component = module.customImlComponent ?: return
+    for ((componentName, rawContent) in component.components) {
+      val element = JDOMUtil.load(StringReader(rawContent))
+      content.saveComponent(componentName, element)
+    }
+  }
+
   override val additionalEntityTypes: List<Class<out WorkspaceEntity>>
     get() = listOf(SourceRootOrderEntity::class.java)
 
   override fun toString(): String = "ModuleImlFileEntitiesSerializer($fileUrl)"
 
   companion object {
-    private val LOG = logger<ModuleImlFileEntitiesSerializer>()
-
     // The comparator has reversed priority. So, the last entry of this list will be printed as a first attribute in the xml tag.
     private val orderOfKnownAttributes = listOf(
       INHERIT_COMPILER_OUTPUT_ATTRIBUTE,
@@ -1187,7 +1315,7 @@ internal open class ModuleListSerializerImpl(override val fileUrl: String,
     return entitySource as? JpsProjectFileEntitySource.FileInDirectory
   }
 
-  override fun deleteObsoleteFile(fileUrl: String, writer: JpsFileContentWriter) {
+  override suspend fun deleteObsoleteFile(fileUrl: String, writer: JpsFileContentWriter) {
     writer.saveComponent(fileUrl, JpsFacetSerializer.FACET_MANAGER_COMPONENT_NAME, null)
     writer.saveComponent(fileUrl, MODULE_ROOT_MANAGER_COMPONENT_NAME, null)
     writer.saveComponent(fileUrl, DEPRECATED_MODULE_MANAGER_COMPONENT_NAME, null)
@@ -1200,12 +1328,24 @@ internal open class ModuleListSerializerImpl(override val fileUrl: String,
   // We manually remove the `.iml` file as it's not removed by component store due to IJPL-926
   // Probably there is no need to set `null` to the components, but let's do it just in case.
   // If IJPL-926 is fixed, this manual removal should go away and only `saveComponent(..., null)` should remain.
-  private fun manuallyRemoveImlFile(fileUrl: String) {
+  private suspend fun manuallyRemoveImlFile(fileUrl: String) {
     val path = Path(JpsPathUtil.urlToPath(fileUrl))
-    // Check that `iml` with a correct case is removed on case-insensitive systems
-    // `path.exists()` check should be done as `toRealPath` will break if the file doesn't exist.
-    if (path.exists() && path.toString() == path.toRealPath().toString()) {
-      path.deleteIfExists()
+    withContext(Dispatchers.IO) {
+      // Check that `iml` with a correct case is removed on case-insensitive systems
+      // `path.exists()` check should be done as `toRealPath` will break if the file doesn't exist.
+      if (!path.exists() || path.toString() != path.toRealPath().toString()) {
+        return@withContext
+      }
+      val virtualFile = VirtualFileManager.getInstance().findFileByUrl(fileUrl)
+      if (virtualFile != null) {
+        // for the case when the file is under project dir and is visible
+        backgroundWriteAction {
+          virtualFile.delete(ModuleImlSerializerRequestor)
+        }
+      }
+      else {
+        path.deleteIfExists()
+      }
     }
   }
 
@@ -1215,7 +1355,7 @@ internal open class ModuleListSerializerImpl(override val fileUrl: String,
   override fun toString(): String = "ModuleListSerializerImpl($fileUrl)"
 }
 
-fun createSourceRootsOrder(orderOfItems: List<VirtualFileUrl>, entitySource: EntitySource): ModifiableSourceRootOrderEntity? {
+fun createSourceRootsOrder(orderOfItems: List<VirtualFileUrl>, entitySource: EntitySource): SourceRootOrderEntityBuilder? {
   if (orderOfItems.size <= 1) return null
 
   return SourceRootOrderEntity(orderOfItems, entitySource)
@@ -1225,3 +1365,5 @@ fun ContentRootEntity.getSourceRootsComparator(): Comparator<SourceRootEntity> {
   val order = (sourceRootOrder?.orderOfSourceRoots ?: emptyList()).withIndex().associateBy({ it.value }, { it.index })
   return compareBy<SourceRootEntity> { order[it.url] ?: order.size }.thenBy { it.url.url }
 }
+
+private object ModuleImlSerializerRequestor : StorageManagerFileWriteRequestor

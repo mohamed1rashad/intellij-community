@@ -5,8 +5,6 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.ide.util.TipAndTrickBean
 import com.intellij.ide.util.TipAndTrickManager
 import com.intellij.notification.Notification
-import com.intellij.notification.NotificationGroup
-import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
@@ -17,13 +15,19 @@ import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.project.Project
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import training.featuresSuggester.DocumentationSuggestion
 import training.featuresSuggester.FeatureSuggesterBundle
 import training.featuresSuggester.PopupSuggestion
 import training.featuresSuggester.TipSuggestion
 import training.featuresSuggester.settings.FeatureSuggesterSettings
 import training.featuresSuggester.statistics.FeatureSuggesterStatistics
+import kotlin.time.Duration.Companion.milliseconds
 
 internal interface SuggestionPresenter {
   fun showSuggestion(project: Project, suggestion: PopupSuggestion, coroutineScope: CoroutineScope)
@@ -31,19 +35,17 @@ internal interface SuggestionPresenter {
 
 @Suppress("DialogTitleCapitalization")
 internal class NotificationSuggestionPresenter : SuggestionPresenter {
-  private val notificationGroup: NotificationGroup = NotificationGroupManager.getInstance()
-    .getNotificationGroup("IDE Feature Suggester")
-
   override fun showSuggestion(project: Project, suggestion: PopupSuggestion, coroutineScope: CoroutineScope) {
-    val notification = notificationGroup.createNotification(
-      title = FeatureSuggesterBundle.message("notification.title"),
-      content = suggestion.message,
-      type = NotificationType.INFORMATION
+    val notification = Notification(
+      "IDE Feature Suggester",
+      FeatureSuggesterBundle.message("notification.title"),
+      suggestion.message,
+      NotificationType.INFORMATION
     )
 
     val expireJob = coroutineScope.launch(Dispatchers.EDT + ModalityState.any().asContextElement(), start = CoroutineStart.LAZY) {
       if (!notification.isExpired) {
-        delay(10_000)
+        delay(10_000.milliseconds)
         notification.expire()
       }
     }

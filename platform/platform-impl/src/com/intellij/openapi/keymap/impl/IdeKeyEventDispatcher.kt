@@ -1,16 +1,26 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplacePutWithAssignment", "ReplaceGetOrSet")
 
 package com.intellij.openapi.keymap.impl
 
 import com.intellij.diagnostic.EventWatcher
 import com.intellij.diagnostic.LoadingState
+import com.intellij.diagnostic.LocksActionsDumper
 import com.intellij.ide.DataManager
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.IdeEventQueue
 import com.intellij.ide.KeyboardAwareFocusOwner
 import com.intellij.openapi.MnemonicHelper
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.EmptyAction
+import com.intellij.openapi.actionSystem.KeyboardShortcut
+import com.intellij.openapi.actionSystem.Presentation
+import com.intellij.openapi.actionSystem.Shortcut
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.ex.AnActionListener
@@ -18,6 +28,7 @@ import com.intellij.openapi.actionSystem.impl.ActionMenu
 import com.intellij.openapi.actionSystem.impl.PresentationFactory
 import com.intellij.openapi.actionSystem.impl.Utils
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.TransactionGuard
 import com.intellij.openapi.application.TransactionGuardImpl
 import com.intellij.openapi.client.ClientSystemInfo
@@ -34,7 +45,11 @@ import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.popup.JBPopup
-import com.intellij.openapi.util.*
+import com.intellij.openapi.util.Condition
+import com.intellij.openapi.util.Conditions
+import com.intellij.openapi.util.NlsContexts
+import com.intellij.openapi.util.NlsSafe
+import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.wm.StatusBar.Info.set
 import com.intellij.openapi.wm.impl.FloatingDecorator
@@ -45,14 +60,19 @@ import com.intellij.ui.ComponentWithMnemonics
 import com.intellij.ui.KeyStrokeAdapter
 import com.intellij.ui.speedSearch.SpeedSearchSupply
 import com.intellij.util.ReflectionUtil
+import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.text.matching.KeyboardLayoutUtil
 import com.intellij.util.ui.MacUIUtil
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.NonNls
@@ -63,8 +83,20 @@ import java.awt.KeyboardFocusManager
 import java.awt.event.ActionEvent
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
-import java.util.*
-import javax.swing.*
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
+import java.util.function.Supplier
+import javax.swing.JComponent
+import javax.swing.JDialog
+import javax.swing.JFrame
+import javax.swing.JPopupMenu
+import javax.swing.JRootPane
+import javax.swing.JWindow
+import javax.swing.KeyStroke
+import javax.swing.MenuElement
+import javax.swing.MenuSelectionManager
+import javax.swing.RootPaneContainer
+import javax.swing.SwingUtilities
 import javax.swing.plaf.basic.ComboPopup
 import javax.swing.text.JTextComponent
 
@@ -127,6 +159,15 @@ class IdeKeyEventDispatcher(private val queue: IdeEventQueue?) {
             set(text = null, project = context.project)
           }
         }
+    }
+    LocksActionsDumper.setLocksAndActionsDumper {
+      val currentOffenders = actionLockOffenders.get()
+      if (currentOffenders.isNullOrEmpty()) {
+        return@setLocksAndActionsDumper null
+      }
+      """UI is currently processing actions. The following actions require locks:
+        |${currentOffenders.mapNotNull { it::class.qualifiedName }.joinToString("\n")}
+      """.trimMargin()
     }
   }
 
@@ -379,6 +420,8 @@ class IdeKeyEventDispatcher(private val queue: IdeEventQueue?) {
       KeyEvent.KEY_TYPED == e.id && isPressedWasProcessed -> true
       //see IDEADEV-8615
       KeyEvent.KEY_RELEASED == e.id && KeyEvent.VK_ALT == e.keyCode && isPressedWasProcessed -> true
+      //see PY-86725 (macOS generates three VK_MINUS events instead of one on non-English keyboards)
+      KeyEvent.KEY_PRESSED == e.id && KeyEvent.VK_MINUS == e.keyCode && isPressedWasProcessed && SystemInfoRt.isMac -> true
       else -> {
         state = KeyState.STATE_INIT
         isPressedWasProcessed = false
@@ -537,10 +580,14 @@ class IdeKeyEventDispatcher(private val queue: IdeEventQueue?) {
 
     fireBeforeShortcutTriggered(shortcut, actions, context)
 
-    val chosen = Utils.runUpdateSessionForInputEvent(
-      actions, e, wrappedContext, place, processor, presentationFactory
-    ) { rearranged, updater, events ->
-      doUpdateActionsInner(rearranged, updater, events, dumb, wouldBeEnabledIfNotDumb)
+    val chosen = recordActionOffenders(actions).use {
+      runInReadActionConditionally(actions) {
+        Utils.runUpdateSessionForInputEvent(
+          actions, e, wrappedContext, place, processor, presentationFactory
+        ) { rearranged, updater, events ->
+          doUpdateActionsInner(rearranged, updater, events, dumb, wouldBeEnabledIfNotDumb)
+        }
+      }
     }
     val doPerform = chosen != null && !this@IdeKeyEventDispatcher.context.secondStrokeActions.contains(chosen.action)
 
@@ -572,6 +619,16 @@ class IdeKeyEventDispatcher(private val queue: IdeEventQueue?) {
       }
     }
     return chosen != null
+  }
+
+  // inlining here to reduce the number of service stacktraces
+  @Suppress("NOTHING_TO_INLINE")
+  private inline fun <T> runInReadActionConditionally(actions: List<AnAction>, supplier: Supplier<T>): T {
+    return if (actions.any(Utils::isLockRequired)) {
+      ReadAction.computeBlocking<T, Throwable>(supplier::get)
+    } else {
+      supplier.get()
+    }
   }
 
   /**
@@ -913,6 +970,18 @@ private fun getMenuActionsHolder(component: Component): JRootPane? {
   }
   else {
     return SwingUtilities.getRootPane(component)
+  }
+}
+
+private val actionLockOffenders: AtomicReference<List<AnAction>?> = AtomicReference<List<AnAction>?>()
+
+private fun recordActionOffenders(actions: List<AnAction>) : AutoCloseable {
+  val offendingActions = actions.filter(Utils::isLockRequired)
+  ThreadingAssertions.assertEventDispatchThread()
+  val oldOffenders = actionLockOffenders.getAndSet(offendingActions)
+  return AutoCloseable {
+    val existingOffenders = actionLockOffenders.getAndSet(oldOffenders)
+    require(existingOffenders == offendingActions) { "Offenders should not change during action execution" }
   }
 }
 

@@ -2,6 +2,7 @@
 package com.jetbrains.python.inspections;
 
 import com.intellij.codeInspection.LocalInspectionToolSession;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
@@ -10,43 +11,121 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyPsiBundle;
+import com.jetbrains.python.ast.PyAstFunction;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
+import com.jetbrains.python.codeInsight.stdlib.PyStdlibTypeProvider;
 import com.jetbrains.python.codeInsight.typing.PyProtocolsKt;
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider.GeneratorTypeDescriptor;
 import com.jetbrains.python.documentation.PythonDocumentationProvider;
 import com.jetbrains.python.inspections.quickfix.PyMakeFunctionReturnTypeQuickFix;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.PyAnnotation;
+import com.jetbrains.python.psi.PyAnnotationOwner;
+import com.jetbrains.python.psi.PyAugAssignmentStatement;
+import com.jetbrains.python.psi.PyBinaryExpression;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCallSiteOwner;
+import com.jetbrains.python.psi.PyCallable;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyComprehensionElement;
+import com.jetbrains.python.psi.PyComprehensionForComponent;
+import com.jetbrains.python.psi.PyEllipsisLiteralExpression;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyForStatement;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyKeywordArgument;
+import com.jetbrains.python.psi.PyNamedParameter;
+import com.jetbrains.python.psi.PyParameterList;
+import com.jetbrains.python.psi.PyParenthesizedExpression;
+import com.jetbrains.python.psi.PyQualifiedExpression;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PyReferenceOwner;
+import com.jetbrains.python.psi.PyReturnStatement;
+import com.jetbrains.python.psi.PySequenceExpression;
+import com.jetbrains.python.psi.PyStarArgument;
+import com.jetbrains.python.psi.PyStatement;
+import com.jetbrains.python.psi.PySubscriptionExpression;
+import com.jetbrains.python.psi.PyTargetExpression;
+import com.jetbrains.python.psi.PyTupleExpression;
+import com.jetbrains.python.psi.PyTypeCommentOwner;
+import com.jetbrains.python.psi.PyUtil;
+import com.jetbrains.python.psi.PyWithItem;
+import com.jetbrains.python.psi.PyWithStatement;
+import com.jetbrains.python.psi.PyYieldExpression;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
+import com.jetbrains.python.psi.impl.PyCallExpressionHelper;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
 import com.jetbrains.python.psi.impl.PySubscriptionExpressionImpl;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyABCUtil;
+import com.jetbrains.python.psi.types.PyAnyType;
+import com.jetbrains.python.psi.types.PyCallableParameter;
+import com.jetbrains.python.psi.types.PyCallableParameterListType;
+import com.jetbrains.python.psi.types.PyCallableType;
+import com.jetbrains.python.psi.types.PyClassLikeType;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyCollectionType;
+import com.jetbrains.python.psi.types.PyConcatenateType;
+import com.jetbrains.python.psi.types.PyDescriptorTypeUtil;
+import com.jetbrains.python.psi.types.PyInstantiableType;
+import com.jetbrains.python.psi.types.PyLiteralType;
+import com.jetbrains.python.psi.types.PyNeverType;
+import com.jetbrains.python.psi.types.PyParamSpecType;
+import com.jetbrains.python.psi.types.PyPositionalVariadicType;
+import com.jetbrains.python.psi.types.PySelfType;
+import com.jetbrains.python.psi.types.PySentinelType;
+import com.jetbrains.python.psi.types.PyTupleType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeChecker;
+import com.jetbrains.python.psi.types.PyTypeInferenceCspFactory;
+import com.jetbrains.python.psi.types.PyTypeParameterMapping;
+import com.jetbrains.python.psi.types.PyTypeParameterMapping.Option;
+import com.jetbrains.python.psi.types.PyTypeParameterType;
+import com.jetbrains.python.psi.types.PyTypeUtil;
+import com.jetbrains.python.psi.types.PyTypedDictType;
+import com.jetbrains.python.psi.types.PyUnionType;
+import com.jetbrains.python.psi.types.PyUnpackedTupleType;
+import com.jetbrains.python.psi.types.PyUnpackedTupleTypeImpl;
+import com.jetbrains.python.psi.types.PyUnpackedTypedDictType;
+import com.jetbrains.python.psi.types.TypeEvalContext;
+import com.jetbrains.python.pyi.PyiUtil;
 import one.util.streamex.StreamEx;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.PropertyKey;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
-import static com.intellij.util.containers.ContainerUtil.exists;
 import static com.jetbrains.python.psi.PyUtil.as;
-import static com.jetbrains.python.psi.impl.PyCallExpressionHelper.*;
+import static com.jetbrains.python.psi.impl.PyCallExpressionHelper.mapArguments;
 import static com.jetbrains.python.psi.types.PyNoneTypeKt.isNoneType;
+import static com.jetbrains.python.psi.types.PyTypeUtilKt.isObject;
 
 public class PyTypeCheckerInspection extends PyInspection {
   private static final Logger LOG = Logger.getInstance(PyTypeCheckerInspection.class.getName());
   private static final Key<Long> TIME_KEY = Key.create("PyTypeCheckerInspection.StartTime");
 
   @Override
-  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly, @NotNull LocalInspectionToolSession session) {
+  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
+                                                 boolean isOnTheFly,
+                                                 @NotNull LocalInspectionToolSession session) {
     if (LOG.isDebugEnabled()) {
       session.putUserData(TIME_KEY, System.nanoTime());
     }
     TypeEvalContext context = PyInspectionVisitor.getContext(session);
-    return new PyReachableElementVisitor(new Visitor(holder, context), context);
+    Visitor visitor = new Visitor(holder, context);
+    return new PyReachableElementVisitor(visitor, context);
   }
 
   public static class Visitor extends PyInspectionVisitor {
@@ -70,6 +149,12 @@ public class PyTypeCheckerInspection extends PyInspection {
     @Override
     public void visitPyBinaryExpression(@NotNull PyBinaryExpression node) {
       checkCallSite(node);
+    }
+
+    @Override
+    public void visitPyAugAssignmentStatement(@NotNull PyAugAssignmentStatement node) {
+       checkCallSite(node);
+       visitPyTargetExpression(node.getAssignmentTarget());
     }
 
     @Override
@@ -109,9 +194,7 @@ public class PyTypeCheckerInspection extends PyInspection {
     public void visitPyReturnStatement(@NotNull PyReturnStatement node) {
       ScopeOwner owner = ScopeUtil.getScopeOwner(node);
       if (owner instanceof PyFunction function) {
-        PyAnnotation annotation = function.getAnnotation();
-        String typeCommentAnnotation = function.getTypeCommentAnnotation();
-        if (annotation != null || typeCommentAnnotation != null) {
+        if (hasExplicitType(function)) {
           PyType expected = getExpectedReturnStatementType(function, myTypeEvalContext);
           if (expected == null) return;
 
@@ -125,12 +208,10 @@ public class PyTypeCheckerInspection extends PyInspection {
           }
 
           PyType actual = returnExpr != null ? tryPromotingType(returnExpr, expected) : PyBuiltinCache.getInstance(node).getNoneType();
-
-          if (!PyTypeChecker.match(expected, actual, myTypeEvalContext)) {
-            final String expectedName = PythonDocumentationProvider.getVerboseTypeName(expected, myTypeEvalContext);
-            final String actualName = PythonDocumentationProvider.getTypeName(actual, myTypeEvalContext);
+          if (!matchesExpectedType(expected, actual, returnExpr, null)) {
             getHolder()
-              .problem(returnExpr != null ? returnExpr : node, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", expectedName, actualName))
+              .problem(returnExpr != null ? returnExpr : node, typeMismatchMessage(expected, actual))
+              .highlight(effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING))
               .fix(new PyMakeFunctionReturnTypeQuickFix(function, myTypeEvalContext))
               .register();
           }
@@ -142,18 +223,18 @@ public class PyTypeCheckerInspection extends PyInspection {
     public void visitPyYieldExpression(@NotNull PyYieldExpression node) {
       ScopeOwner owner = ScopeUtil.getScopeOwner(node);
       if (!(owner instanceof PyFunction function)) return;
-      
+
       if (node.isDelegating()) {
         visitDelegatingYieldExpression(node, function);
         return;
       }
-      
+
       final var annotatedGeneratorDesc = getGeneratorDescriptorFromAnnotation(function, node);
       if (annotatedGeneratorDesc == null) return;
-      
-      checkYieldType(annotatedGeneratorDesc.yieldType(), node, function);
+
+      checkYieldType(annotatedGeneratorDesc.yieldType, node, function);
     }
-    
+
     private void visitDelegatingYieldExpression(@NotNull PyYieldExpression node, @NotNull PyFunction function) {
       assert node.isDelegating();
 
@@ -164,7 +245,7 @@ public class PyTypeCheckerInspection extends PyInspection {
       if (delegateType == null) return;
 
       var delegateDesc = GeneratorTypeDescriptor.fromGeneratorOrProtocol(delegateType, myTypeEvalContext);
-      if (delegateDesc != null && delegateDesc.isAsync()) {
+      if (delegateDesc != null && delegateDesc.isAsync) {
         String delegateName = PythonDocumentationProvider.getTypeName(delegateType, myTypeEvalContext);
         registerProblem(yieldExpr, PyPsiBundle.message("INSP.type.checker.yield.from.async.generator", delegateName));
         return;
@@ -175,21 +256,20 @@ public class PyTypeCheckerInspection extends PyInspection {
       final var annotatedGeneratorDesc = getGeneratorDescriptorFromAnnotation(function, node);
       if (annotatedGeneratorDesc == null) return;
 
-      if (checkYieldType(annotatedGeneratorDesc.yieldType(), node, function)) return;
+      if (checkYieldType(annotatedGeneratorDesc.yieldType, node, function)) return;
 
       // Reversed because SendType is contravariant
-      final PyType expectedSendType = annotatedGeneratorDesc.sendType();
-      if (delegateDesc != null && !PyTypeChecker.match(delegateDesc.sendType(), expectedSendType, myTypeEvalContext)) {
+      final PyType expectedSendType = annotatedGeneratorDesc.sendType;
+      if (delegateDesc != null && !PyTypeChecker.match(delegateDesc.sendType, expectedSendType, myTypeEvalContext)) {
         String expectedName = PythonDocumentationProvider.getVerboseTypeName(expectedSendType, myTypeEvalContext);
-        String actualName = PythonDocumentationProvider.getTypeName(delegateDesc.sendType(), myTypeEvalContext);
+        String actualName = PythonDocumentationProvider.getTypeName(delegateDesc.sendType, myTypeEvalContext);
         registerProblem(yieldExpr, PyPsiBundle.message("INSP.type.checker.yield.from.send.type.mismatch", expectedName, actualName));
       }
     }
-    
-    private @Nullable GeneratorTypeDescriptor getGeneratorDescriptorFromAnnotation(@NotNull PyFunction function, @NotNull PyYieldExpression yieldExpr) {
-      final PyAnnotation annotation = function.getAnnotation();
-      final String typeCommentAnnotation = function.getTypeCommentAnnotation();
-      if (annotation == null && typeCommentAnnotation == null) return null;
+
+    private @Nullable GeneratorTypeDescriptor getGeneratorDescriptorFromAnnotation(@NotNull PyFunction function,
+                                                                                   @NotNull PyYieldExpression yieldExpr) {
+      if (!hasExplicitType(function)) return null;
 
       final PyType annotatedReturnType = myTypeEvalContext.getReturnType(function);
       if (annotatedReturnType == null) return null;
@@ -198,10 +278,8 @@ public class PyTypeCheckerInspection extends PyInspection {
       if (annotatedGeneratorDesc == null) {
         final PyType inferredReturnType = function.getInferredReturnType(myTypeEvalContext);
         if (!PyTypeChecker.match(annotatedReturnType, inferredReturnType, myTypeEvalContext)) {
-          String expectedName = PythonDocumentationProvider.getVerboseTypeName(annotatedReturnType, myTypeEvalContext);
-          String actualName = PythonDocumentationProvider.getTypeName(inferredReturnType, myTypeEvalContext);
           getHolder()
-            .problem(yieldExpr, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", expectedName, actualName))
+            .problem(yieldExpr, typeMismatchMessage(annotatedReturnType, inferredReturnType))
             .fix(new PyMakeFunctionReturnTypeQuickFix(function, myTypeEvalContext))
             .register();
         }
@@ -209,15 +287,17 @@ public class PyTypeCheckerInspection extends PyInspection {
       }
       return annotatedGeneratorDesc;
     }
-    
+
     private boolean checkYieldType(@Nullable PyType expectedYieldType, @NotNull PyYieldExpression node, @NotNull PyFunction function) {
       final PyType thisYieldType = node.getYieldType(myTypeEvalContext);
-      if (!PyTypeChecker.match(expectedYieldType, thisYieldType, myTypeEvalContext)) {
+      if (!matchesExpectedType(expectedYieldType, thisYieldType, node.getExpression(), null)) {
         final PyExpression yieldExpr = node.getExpression();
         String expectedName = PythonDocumentationProvider.getVerboseTypeName(expectedYieldType, myTypeEvalContext);
         String actualName = PythonDocumentationProvider.getTypeName(thisYieldType, myTypeEvalContext);
         getHolder()
-          .problem(yieldExpr != null ? yieldExpr : node, PyPsiBundle.message("INSP.type.checker.yield.type.mismatch", expectedName, actualName))
+          .problem(yieldExpr != null ? yieldExpr : node,
+                   PyPsiBundle.message("INSP.type.checker.yield.type.mismatch", expectedName, actualName))
+          .highlight(effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING))
           .fix(new PyMakeFunctionReturnTypeQuickFix(function, myTypeEvalContext))
           .register();
         return true;
@@ -230,12 +310,12 @@ public class PyTypeCheckerInspection extends PyInspection {
       if (function.isGenerator()) {
         final var generatorDesc = GeneratorTypeDescriptor.fromGeneratorOrProtocol(returnType, typeEvalContext);
         if (generatorDesc != null) {
-          return generatorDesc.returnType();
+          return generatorDesc.returnType;
         }
-        return null;
+        return PyAnyType.getUnknown();
       }
       if (function.isAsync()) {
-        return Ref.deref(PyTypingTypeProvider.coroutineOrGeneratorElementType(returnType));
+        return PyTypeUtil.derefOrUnknown(PyTypingTypeProvider.coroutineOrGeneratorElementType(returnType));
       }
       return returnType;
     }
@@ -248,37 +328,146 @@ public class PyTypeCheckerInspection extends PyInspection {
     @Override
     public void visitPyTargetExpression(@NotNull PyTargetExpression node) {
       checkClassAttributeAccess(node);
-      // TODO: Check types in class-level assignments
-      final ScopeOwner owner = ScopeUtil.getScopeOwner(node);
-      if (owner instanceof PyClass) return;
-      final PyExpression value = node.findAssignedValue();
-      if (value == null) return;
+      final PyExpression assignedValue = node.findAssignedValue();
+      if (assignedValue == null) return;
 
-      boolean descriptor = false;
-      PyType expected = myTypeEvalContext.getType(node);
-      Ref<PyType> classAttrType = getClassAttributeType(node);
-      if (classAttrType != null) {
-        Ref<PyType> dunderSetValueType = PyDescriptorTypeUtil.getExpectedValueTypeForDunderSet(node, classAttrType.get(), myTypeEvalContext);
-        if (dunderSetValueType != null) {
-          expected = dunderSetValueType.get();
-          descriptor = true;
+      final ScopeOwner scopeOwner = ScopeUtil.getScopeOwner(node);
+      if (scopeOwner instanceof PyClass cls && PyStdlibTypeProvider.isCustomEnum(cls, myTypeEvalContext)) {
+        final PyStdlibTypeProvider.EnumAttributeInfo info = PyStdlibTypeProvider.getEnumAttributeInfo(cls, node, myTypeEvalContext);
+        if (info == null || info.attributeKind() != PyStdlibTypeProvider.EnumAttributeKind.MEMBER) return;
+
+        PyType expected = PyStdlibTypeProvider.getEnumValueType(cls, myTypeEvalContext);
+        PyType actual = info.assignedValueType();
+        if (!PyTypeChecker.match(expected, actual, myTypeEvalContext)) {
+          registerProblem(assignedValue, typeMismatchMessage(expected, actual));
         }
-      }
-
-      if (expected instanceof PyTypedDictType expectedTypedDictType && PyTypedDictType.isDictExpression(value, myTypeEvalContext)) {
-        reportTypedDictProblems(expectedTypedDictType, value);
         return;
       }
 
-      final PyType actual = tryPromotingType(value, expected);
-      if (!PyTypeChecker.match(expected, actual, myTypeEvalContext)) {
-        String expectedName = PythonDocumentationProvider.getVerboseTypeName(expected, myTypeEvalContext);
-        String actualName = PythonDocumentationProvider.getTypeName(actual, myTypeEvalContext);
-        registerProblem(value, descriptor ?
-                               PyPsiBundle.message("INSP.type.checker.expected.type.from.dunder.set.got.type.instead",
-                                                   expectedName, actualName) :
-                               PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", expectedName, actualName));
+      PyType expected = myTypeEvalContext.getType(node);
+
+      if (scopeOwner instanceof PyClass) {
+        if (!hasExplicitType(node)) {
+          PsiElement resolved = node.getReference(PyResolveContext.defaultContext(myTypeEvalContext)).resolve();
+          if (!(resolved instanceof PyTargetExpression resolvedTarget) || !hasExplicitType(resolvedTarget)) return;
+        }
       }
+
+      if (node.isQualified()) {
+        PyTypeChecker.GenericSubstitutions substitutions = PyTypeChecker.unifyReceiver(node.getQualifier(), myTypeEvalContext);
+        expected = PyTypeChecker.substitute(expected, substitutions, myTypeEvalContext);
+      }
+
+      boolean isDescriptor = false;
+
+      Ref<PyType> classAttrType = getClassAttributeType(node);
+      if (classAttrType != null) {
+        Ref<PyType> dunderSetValueType =
+          PyDescriptorTypeUtil.getExpectedValueTypeForDunderSet(node, classAttrType.get(), myTypeEvalContext);
+        if (dunderSetValueType != null) {
+          expected = dunderSetValueType.get();
+          isDescriptor = true;
+        }
+      }
+
+      if (expected instanceof PyTypedDictType expectedTypedDictType && PyTypedDictType.isDictExpression(assignedValue, myTypeEvalContext)) {
+        reportTypedDictProblems(expectedTypedDictType, assignedValue);
+        return;
+      }
+
+      PyType actual = tryPromotingType(assignedValue, expected);
+
+      if (expected instanceof PySentinelType) {
+        if (isObject(actual)) return;
+      }
+
+      if (!matchesExpectedType(expected, actual, assignedValue, null)) {
+        boolean isAugAssignment = node.getParent() instanceof PyAugAssignmentStatement;
+        String message =
+          isDescriptor
+          ? typeMismatchMessage(
+            expected,
+            actual,
+            "INSP.type.checker.expected.type.from.dunder.set.got.type.instead"
+          )
+          : isAugAssignment
+            ? typeMismatchMessage(
+            expected,
+            actual,
+            "INSP.type.checker.expected.type.from.aug.assignment.got.type.instead"
+          )
+            : typeMismatchMessage(expected, actual);
+        registerProblem(assignedValue,
+                        message,
+                        effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
+      }
+    }
+
+    private @NotNull @Nls String typeMismatchMessage(@Nullable PyType expected,
+                                                     @Nullable PyType actual) {
+      return typeMismatchMessage(expected, actual, "INSP.type.checker.expected.type.got.type.instead");
+    }
+
+    private @NotNull @Nls String typeMismatchMessage(@Nullable PyType expected,
+                                                     @Nullable PyType actual,
+                                                     @NotNull @PropertyKey(resourceBundle = PyPsiBundle.BUNDLE) String messageKey) {
+      String expectedName = PythonDocumentationProvider.getVerboseTypeName(expected, myTypeEvalContext);
+      String actualName = PythonDocumentationProvider.getTypeName(actual, myTypeEvalContext);
+      return PyPsiBundle.message(messageKey, expectedName, actualName);
+    }
+
+    private boolean matchesExpectedType(@Nullable PyType expected,
+                                        @Nullable PyType actual,
+                                        @Nullable PyExpression expression,
+                                        @Nullable PyTypeChecker.GenericSubstitutions substitutions) {
+
+      boolean matches = substitutions == null
+                        ? PyTypeChecker.match(expected, actual, myTypeEvalContext)
+                        : PyTypeChecker.match(expected, actual, myTypeEvalContext, substitutions);
+      if (matches) return true;
+      return isCovariantMatchTempFix(expected, actual, expression, substitutions);
+    }
+
+    /**
+     * The failing subtype check could be due to respecting variance.
+     * However, the underlying reason is that the `actual` type was not correctly inferred.
+     * As a temporary solution, we mimic a covariant subtype check. (TODO PY-89564)
+     */
+    private boolean isCovariantMatchTempFix(PyType expected, PyType actual, PyExpression expExpr,
+                                            PyTypeChecker.GenericSubstitutions substitutions
+    ) {
+      var expectedSubst = substitutions == null ? expected : PyTypeChecker.substitute(expected, substitutions, myTypeEvalContext);
+      var actualSubst = substitutions == null ? actual : PyTypeChecker.substitute(actual, substitutions, myTypeEvalContext);
+      if (expectedSubst instanceof PyCollectionType expCT && actualSubst instanceof PyCollectionType actCT) {
+        var expClassType = expCT.getPyClass().getType(myTypeEvalContext);
+        var actClassType = actCT.getPyClass().getType(myTypeEvalContext);
+        var isCreational = expExpr instanceof PySequenceExpression
+                           || expExpr instanceof PyCallExpression ce && !(ce.getCallee() instanceof PySubscriptionExpression)
+                           || expExpr instanceof PyParenthesizedExpression pe && pe.getContainedExpression() instanceof PyTupleExpression;
+        var paramMapping = PyTypeParameterMapping.mapByShape(expCT.getElementTypes(), actCT.getElementTypes(), Option.USE_DEFAULTS);
+        if (isCreational
+            && paramMapping != null
+            && PyTypeChecker.match(expClassType, actClassType, myTypeEvalContext)
+        ) {
+          boolean allElementsMatch = true;
+          for (int i = 0; i < paramMapping.getMappedTypes().size(); i++) {
+            var couple = paramMapping.getMappedTypes().get(i);
+            var expET = couple.first;
+            var actET = couple.second;
+            if (actET instanceof PyUnpackedTupleType utt && utt.isUnbound()) {
+              actET = utt.getElementTypes().getFirst();
+            }
+            if (!PyTypeChecker.match(expET, actET, myTypeEvalContext) && !isCovariantMatchTempFix(expET, actET, expExpr, substitutions)) {
+              allElementsMatch = false;
+              break;
+            }
+          }
+          if (allElementsMatch) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
 
     // Using generic classes (parameterized or not) to access attributes will result in type check failure.
@@ -303,12 +492,14 @@ public class PyTypeCheckerInspection extends PyInspection {
     private static boolean requiresTypeSpecialization(@Nullable PyType type) {
       if (type instanceof PyTypeParameterType typeParameterType &&
           typeParameterType.getDefaultType() == null &&
-          !(type instanceof PySelfType)) return true;
+          !(type instanceof PySelfType)) {
+        return true;
+      }
       return type instanceof PyCollectionType collectionType &&
-             exists(collectionType.getElementTypes(), Visitor::requiresTypeSpecialization);
+             ContainerUtil.exists(collectionType.getElementTypes(), Visitor::requiresTypeSpecialization);
     }
 
-    private @Nullable Ref<PyType> getClassAttributeType(@NotNull PyTargetExpression attribute) {
+    private <T extends PyQualifiedExpression & PyReferenceOwner> @Nullable Ref<PyType> getClassAttributeType(@NotNull T attribute) {
       if (!attribute.isQualified()) return null;
       PsiElement definition = attribute.getReference(PyResolveContext.defaultContext(myTypeEvalContext)).resolve();
       if (!(definition instanceof PyTargetExpression attrDefinition && PyUtil.isAttribute(attrDefinition))) return null;
@@ -320,9 +511,8 @@ public class PyTypeCheckerInspection extends PyInspection {
       PyTypedDictType.checkExpression(expectedType, expression, myTypeEvalContext, result);
       result.getValueTypeErrors().forEach(error -> {
         registerProblem(error.getActualExpression(),
-                        PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead",
-                                            PythonDocumentationProvider.getTypeName(error.getExpectedType(), myTypeEvalContext),
-                                            PythonDocumentationProvider.getTypeName(error.getActualType(), myTypeEvalContext)));
+                        typeMismatchMessage(error.getExpectedType(), error.getActualType()),
+                        effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
       });
       result.getExtraKeys().forEach(error -> {
         registerProblem(Objects.requireNonNullElse(error.getActualExpression(), expression),
@@ -336,17 +526,36 @@ public class PyTypeCheckerInspection extends PyInspection {
       });
     }
 
-    private @Nullable PyType tryPromotingType(@NotNull PyExpression value, @Nullable PyType expected) {
-      final PyType promotedToLiteral = PyLiteralType.Companion.promoteToLiteral(value, expected, myTypeEvalContext, null);
+    private void reportUnpackedTypedDictProblems(@NotNull PyUnpackedTypedDictType expectedType,
+                                                 @NotNull PyExpression expression) {
+      if (expression instanceof PyStarArgument starArgument) {
+        expression = PsiTreeUtil.findChildOfType(starArgument, PyExpression.class);
+      }
+      if (expression == null) return;
+      PyType argumentType = myTypeEvalContext.getType(expression);
+      PyTypedDictType typedDictType = expectedType.getTypedDictType();
+      if (PyTypedDictType.isDictExpression(expression, myTypeEvalContext)) {
+        reportTypedDictProblems(typedDictType, expression);
+        return;
+      }
+      if (!PyTypeChecker.match(typedDictType, argumentType, myTypeEvalContext)) {
+        registerProblem(expression,
+                        PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead",
+                                            PythonDocumentationProvider.getTypeName(typedDictType, myTypeEvalContext),
+                                            PythonDocumentationProvider.getTypeName(argumentType, myTypeEvalContext)));
+      }
+    }
+
+    private @Nullable PyType tryPromotingType(@NotNull PyExpression expr, @Nullable PyType expected) {
+      final PyType promotedToLiteral = PyLiteralType.Companion.promoteToLiteral(expr, expected, myTypeEvalContext, null);
       if (promotedToLiteral != null) return promotedToLiteral;
-      return myTypeEvalContext.getType(value);
+      return myTypeEvalContext.getType(expr);
     }
 
     @Override
     public void visitPyFunction(@NotNull PyFunction node) {
-      final PyAnnotation annotation = node.getAnnotation();
-      final String typeCommentAnnotation = node.getTypeCommentAnnotation();
-      if (annotation != null || typeCommentAnnotation != null) {
+      if (hasExplicitType(node)) {
+        final PyAnnotation annotation = node.getAnnotation();
         final PyType expected = getExpectedReturnStatementType(node, myTypeEvalContext);
         final PyType noneType = PyBuiltinCache.getInstance(node).getNoneType();
         final boolean returnsNone = isNoneType(expected);
@@ -354,16 +563,15 @@ public class PyTypeCheckerInspection extends PyInspection {
 
         if (expected != null && !returnsOptional && !PyUtil.isEmptyFunction(node)) {
           final List<PyStatement> returnPoints = node.getReturnPoints(myTypeEvalContext);
-          final boolean hasImplicitReturns = exists(returnPoints, it -> !(it instanceof PyReturnStatement));
+          final boolean hasImplicitReturns = ContainerUtil.exists(returnPoints, it -> !(it instanceof PyReturnStatement));
 
           if (hasImplicitReturns) {
-            final String expectedName = PythonDocumentationProvider.getVerboseTypeName(expected, myTypeEvalContext);
-            final String actualName =
-              PythonDocumentationProvider.getTypeName(node.getReturnStatementType(myTypeEvalContext), myTypeEvalContext);
+            final PyType actual = node.getReturnStatementType(myTypeEvalContext);
             final PsiElement annotationValue = annotation != null ? annotation.getValue() : node.getTypeComment();
             if (annotationValue != null) {
               getHolder()
-                .problem(annotationValue, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", expectedName, actualName))
+                .problem(annotationValue, typeMismatchMessage(expected, actual))
+                .highlight(effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING))
                 .fix(new PyMakeFunctionReturnTypeQuickFix(node, myTypeEvalContext))
                 .register();
             }
@@ -380,22 +588,75 @@ public class PyTypeCheckerInspection extends PyInspection {
         if (node.isGenerator()) {
           final var generatorDesc = GeneratorTypeDescriptor.fromGeneratorOrProtocol(annotatedType, myTypeEvalContext);
           final boolean shouldBeAsync = node.isAsync() && node.isAsyncAllowed();
-          final boolean wrongSyncAsync = generatorDesc != null && generatorDesc.isAsync() != shouldBeAsync;
+          final boolean wrongSyncAsync = generatorDesc != null && generatorDesc.isAsync != shouldBeAsync;
 
           final PyType inferredType = node.getInferredReturnType(myTypeEvalContext);
           if (wrongSyncAsync || (generatorDesc == null && !PyTypeChecker.match(annotatedType, inferredType, myTypeEvalContext))) {
-            String expectedName = PythonDocumentationProvider.getVerboseTypeName(inferredType, myTypeEvalContext);
-            String actualName = PythonDocumentationProvider.getTypeName(annotatedType, myTypeEvalContext);
             final PsiElement annotationValue = annotation != null ? annotation.getValue() : node.getTypeComment();
             if (annotationValue != null) {
               getHolder()
-                .problem(annotationValue, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", expectedName, actualName))
+                .problem(annotationValue, typeMismatchMessage(inferredType, annotatedType))
                 .fix(new PyMakeFunctionReturnTypeQuickFix(node, myTypeEvalContext))
                 .register();
             }
           }
         }
       }
+    }
+
+    @Override
+    public void visitPyNamedParameter(@NotNull PyNamedParameter node) {
+      if (!hasExplicitType(node)) return;
+
+      final PyExpression defaultValue = PyPsiUtils.flattenParens(node.getDefaultValue());
+      if (defaultValue == null) return;
+
+      if (defaultValue instanceof PyEllipsisLiteralExpression && (isProtocolMethodParameter(node) || isOverloadSignature(node))) {
+        return;
+      }
+
+      // we use `PyTypingTypeProvider.getType` of the annotation directly, instead of `node.getType`,
+      //  because otherwise `PyTypingTypeProvider` will inject the type of `None`
+      final var expectedRef = PyTypingTypeProvider.getType(node.getAnnotation().getValue(), myTypeEvalContext);
+      if (expectedRef == null) return;
+      final var expected = expectedRef.get();
+      final var actual = tryPromotingType(defaultValue, expected);
+
+      if (actual instanceof PySentinelType) return;
+
+      if (!matchesExpectedType(expected, actual, defaultValue, null)) {
+        registerProblem(defaultValue, typeMismatchMessage(expected, actual),
+                        effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
+      }
+    }
+
+    private boolean isProtocolMethodParameter(@NotNull PyNamedParameter node) {
+      PsiElement parent = node.getContext();
+      if (parent instanceof PyParameterList parameterList) {
+        PyCallable containingCallable = parameterList.getContainingCallable();
+        if (containingCallable instanceof PyFunction function) {
+          PyClass containingClass = function.getContainingClass();
+          if (containingClass == null) {
+            return false;
+          }
+          PyType classType = myTypeEvalContext.getType(containingClass);
+          if (classType instanceof PyClassLikeType classLikeType && PyProtocolsKt.isProtocol(classLikeType, myTypeEvalContext)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    private boolean isOverloadSignature(@NotNull PyNamedParameter node) {
+      PsiElement parent = node.getParent();
+      if (parent instanceof PyParameterList parameterList) {
+        PyCallable containingCallable = parameterList.getContainingCallable();
+        if (containingCallable instanceof PyFunction function) {
+          return PyiUtil.isOverload(function, myTypeEvalContext);
+        }
+      }
+      return false;
     }
 
     @Override
@@ -407,7 +668,7 @@ public class PyTypeCheckerInspection extends PyInspection {
       }
     }
 
-    private void checkCallSite(@NotNull PyCallSiteExpression callSite) {
+    private void checkCallSite(@NotNull PyCallSiteOwner callSite) {
       final List<AnalyzeCalleeResults> calleesResults = StreamEx
         .of(mapArguments(callSite, getResolveContext()))
         .filter(mapping -> mapping.isComplete())
@@ -415,9 +676,10 @@ public class PyTypeCheckerInspection extends PyInspection {
         .nonNull()
         .toList();
 
-      if (!matchedCalleeResultsExist(calleesResults)) {
+      if (!ContainerUtil.exists(calleesResults, calleeResults -> isMatched(calleeResults))) {
         PyTypeCheckerInspectionProblemRegistrar
-          .registerProblem(this, callSite, getArgumentTypes(calleesResults), calleesResults, myTypeEvalContext);
+          .registerProblem(this, callSite, getArgumentTypes(calleesResults), calleesResults, myTypeEvalContext,
+                           effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
       }
     }
 
@@ -432,7 +694,8 @@ public class PyTypeCheckerInspection extends PyInspection {
           final String typeName = PythonDocumentationProvider.getTypeName(type, myTypeEvalContext);
 
           String qualifiedName = "collections." + iterableClassName;
-          registerProblem(iteratedValue, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", qualifiedName, typeName));
+          registerProblem(iteratedValue, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", qualifiedName, typeName),
+                          effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
           return true;
         }
       }
@@ -450,12 +713,13 @@ public class PyTypeCheckerInspection extends PyInspection {
           final String typeName = PythonDocumentationProvider.getTypeName(type, myTypeEvalContext);
 
           String qualifiedName = "contextlib." + contextManagerClassName;
-          registerProblem(iteratedValue, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", qualifiedName, typeName));
+          registerProblem(iteratedValue, PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", qualifiedName, typeName),
+                          effectiveHighlightType(ProblemHighlightType.GENERIC_ERROR_OR_WARNING));
         }
       }
     }
 
-    private @Nullable AnalyzeCalleeResults analyzeCallee(@NotNull PyCallSiteExpression callSite,
+    private @Nullable AnalyzeCalleeResults analyzeCallee(@NotNull PyCallSiteOwner callSite,
                                                          @NotNull PyCallExpression.PyArgumentsMapping mapping) {
       final PyCallableType callableType = mapping.getCallableType();
       if (callableType == null) return null;
@@ -465,9 +729,47 @@ public class PyTypeCheckerInspection extends PyInspection {
       final List<UnfilledParameterFromParamSpec> unfilledParameterFromParamSpecs = new ArrayList<>();
 
       final var receiver = callSite.getReceiver(callableType.getCallable());
-      final var substitutions = PyTypeChecker.unifyReceiver(receiver, myTypeEvalContext);
+      final var substitutions = PyTypeInferenceCspFactory.unifyReceiver(mapping, myTypeEvalContext);
+
+      PyCallableParameter selfParameter = ContainerUtil.getFirstItem(mapping.getImplicitParameters());
+      if (receiver != null && selfParameter != null) {
+        PyType actual = myTypeEvalContext.getType(receiver);
+        // TODO (PY-89400): Support validation for `receiver` of a union type
+        // When `receiver` has a union type, we must find the specific member of the union bound to `callableType`.
+        // See `Py3TypeCheckerInspectionTest.testAnnotatedSelfAgainstUnionReceiver`.
+        if (!(actual instanceof PyUnionType)) {
+          if (actual instanceof PyInstantiableType<?> instantiableType) {
+            if (isConstructorCall(callSite) && PyUtil.isInitMethod(callableType.getCallable())) {
+              actual = instantiableType.toInstance();
+            }
+            if (callableType.getModifier() == PyAstFunction.Modifier.CLASSMETHOD) {
+              actual = instantiableType.toClass();
+            }
+          }
+
+          PyType expected = selfParameter.getArgumentType(myTypeEvalContext);
+          // Skip the check when `expected` is a metaclass-scoped `PySelfType`:
+          // - explicit `typing.Self` usage on a metaclass is disallowed by the typing specification;
+          // - for an unannotated `self`/`cls` (for which the inferred type is also `PySelfType`),
+          //   the bound-receiver resolution already guarantees that the receiver is an instance of the metaclass;
+          // - matching a class receiver against a metaclass-scoped `PySelfType` currently fails
+          //   (see `Py3TypeCheckerInspectionTest.testSelfOnMetaclass`).
+          boolean isSelfOnMetaclass = false;
+          if (expected instanceof PySelfType expectedSelfType) {
+            PyClassType typeType = PyBuiltinCache.getInstance(callSite).getTypeType();
+            isSelfOnMetaclass = typeType != null &&
+                                expectedSelfType.getScopeClassType().getAncestorTypes(myTypeEvalContext).contains(typeType.toClass());
+          }
+          if (!isSelfOnMetaclass) {
+            if (!matchParameterAndArgument(expected, actual, receiver, substitutions)) {
+              result.add(new AnalyzeArgumentResult(receiver, expected, substituteGenerics(expected, substitutions), actual, false));
+            }
+          }
+        }
+      }
+
       final var mappedParameters = mapping.getMappedParameters();
-      final var regularMappedParameters = getRegularMappedParameters(mappedParameters);
+      final var regularMappedParameters = PyCallExpressionHelper.getRegularMappedParameters(mappedParameters);
 
       for (Map.Entry<PyExpression, PyCallableParameter> entry : regularMappedParameters.entrySet()) {
         final PyExpression argument = entry.getKey();
@@ -487,16 +789,32 @@ public class PyTypeCheckerInspection extends PyInspection {
           if (allArguments.isEmpty()) break;
 
           final var firstExpectedTypes = concatenateType.getFirstTypes();
-          final var argumentRightBound = Math.min(firstExpectedTypes.size(), allArguments.size());
+          int nonStarCount = 0;
+          for (PyExpression arg : allArguments) {
+            if (arg instanceof PyStarArgument) break;
+            nonStarCount++;
+          }
+          final var argumentRightBound = Math.min(firstExpectedTypes.size(), nonStarCount);
           final var firstArguments = allArguments.subList(0, argumentRightBound);
           matchArgumentsAndTypes(firstArguments, firstExpectedTypes, substitutions, result);
 
-          if (argumentRightBound < allArguments.size()) {
-            final var paramSpec = concatenateType.getParamSpec();
-            final var restArguments = allArguments.subList(argumentRightBound, allArguments.size());
-            if (paramSpec != null) {
-              analyzeParamSpec(paramSpec, restArguments, substitutions, result, unexpectedArgumentForParamSpecs, unfilledParameterFromParamSpecs);
+          final var paramSpec = concatenateType.getParamSpec();
+          final var restArguments = allArguments.subList(argumentRightBound, allArguments.size());
+          if (paramSpec != null) {
+            if (argumentRightBound < firstExpectedTypes.size()) {
+              // Not enough positional arguments to satisfy the Concatenate prefix, e.g., int, str in Concatenate[int, str, P]
+              PyCallableParameterListType paramSpecSubst = getParamSpecSubstitution(paramSpec, substitutions);
+              if (paramSpecSubst == null) {
+                for (PyExpression arg : restArguments) {
+                  if (arg instanceof PyStarArgument) {
+                    unexpectedArgumentForParamSpecs.add(new UnexpectedArgumentForParamSpec(arg, paramSpec));
+                    break;
+                  }
+                }
+              }
             }
+            analyzeParamSpec(paramSpec, restArguments, substitutions, result, unexpectedArgumentForParamSpecs,
+                             unfilledParameterFromParamSpecs);
           }
 
           break;
@@ -507,15 +825,26 @@ public class PyTypeCheckerInspection extends PyInspection {
         }
       }
 
-      PyCallableParameter positionalContainer = getMappedPositionalContainer(mappedParameters);
-      List<PyExpression> positionalArguments = getArgumentsMappedToPositionalContainer(mappedParameters);
-      PyCallableParameter keywordContainer = getMappedKeywordContainer(mappedParameters);
-      List<PyExpression> keywordArguments = getArgumentsMappedToKeywordContainer(mappedParameters);
+      PyCallableParameter positionalContainer = PyCallExpressionHelper.getMappedPositionalContainer(mappedParameters);
+      List<PyExpression> positionalArguments = PyCallExpressionHelper.getArgumentsMappedToPositionalContainer(mappedParameters);
+      PyCallableParameter keywordContainer = PyCallExpressionHelper.getMappedKeywordContainer(mappedParameters);
+      List<PyExpression> keywordArguments = PyCallExpressionHelper.getArgumentsMappedToKeywordContainer(mappedParameters);
       List<PyExpression> allArguments = ContainerUtil.concat(positionalArguments, keywordArguments);
 
       PyParamSpecType paramSpecType = getParamSpecTypeFromContainerParameters(keywordContainer, positionalContainer);
       if (paramSpecType != null) {
-        analyzeParamSpec(paramSpecType, allArguments, substitutions, result, unexpectedArgumentForParamSpecs, unfilledParameterFromParamSpecs);
+        // Keyword arguments for positional parameters preceding *args: P.args
+        // might shadow the values in ParamSpec, causing runtime errors. Report them when P is unsubstituted.
+        PyCallableParameterListType paramSpecSubst = getParamSpecSubstitution(paramSpecType, substitutions);
+        if (paramSpecSubst == null) {
+          for (var entry : regularMappedParameters.entrySet()) {
+            if (entry.getKey() instanceof PyKeywordArgument) {
+              unexpectedArgumentForParamSpecs.add(new UnexpectedArgumentForParamSpec(entry.getKey(), paramSpecType));
+            }
+          }
+        }
+        analyzeParamSpec(paramSpecType, allArguments, substitutions, result, unexpectedArgumentForParamSpecs,
+                         unfilledParameterFromParamSpecs);
       }
       else {
         if (positionalContainer != null) {
@@ -527,34 +856,47 @@ public class PyTypeCheckerInspection extends PyInspection {
       }
 
       List<UnfilledPositionalVararg> unfilledPositionalVarargs = new ArrayList<>();
-      for (var unmappedContainer: mapping.getUnmappedContainerParameters()) {
+      for (var unmappedContainer : mapping.getUnmappedContainerParameters()) {
         PyType containerType = unmappedContainer.getArgumentType(myTypeEvalContext);
         if (unmappedContainer.getName() == null || !(containerType instanceof PyPositionalVariadicType)) continue;
         PyType expandedVararg = PyTypeChecker.substitute(containerType, substitutions, myTypeEvalContext);
         if (!(expandedVararg instanceof PyUnpackedTupleType unpackedTuple) || unpackedTuple.isUnbound()) continue;
+        if (unpackedTuple.getElementTypes().isEmpty()) continue;
+        if (ContainerUtil.all(unpackedTuple.getElementTypes(), e -> e instanceof PyPositionalVariadicType)) continue;
         unfilledPositionalVarargs.add(
-          new UnfilledPositionalVararg(unmappedContainer.getName(), 
+          new UnfilledPositionalVararg(unmappedContainer.getName(),
                                        PythonDocumentationProvider.getTypeName(expandedVararg, myTypeEvalContext)));
       }
 
-      return new AnalyzeCalleeResults(callableType, callableType.getCallable(), result, 
+      return new AnalyzeCalleeResults(callableType, callableType.getCallable(), result,
                                       unexpectedArgumentForParamSpecs,
                                       unfilledParameterFromParamSpecs,
                                       unfilledPositionalVarargs);
     }
 
-
+    private boolean isConstructorCall(@NotNull PyCallSiteOwner callSite) {
+      if (callSite instanceof PyCallExpression callExpression) {
+        PyExpression callee = callExpression.getCallee();
+        if (callee != null && myTypeEvalContext.getType(callee) instanceof PyClassType calleeType && calleeType.isDefinition()) {
+          return true;
+        }
+      }
+      return false;
+    }
 
     private void analyzeParamSpec(@NotNull PyParamSpecType paramSpec, @NotNull List<PyExpression> arguments,
                                   @NotNull PyTypeChecker.GenericSubstitutions substitutions,
                                   @NotNull List<AnalyzeArgumentResult> result,
                                   @NotNull List<UnexpectedArgumentForParamSpec> unexpectedArgumentForParamSpecs,
                                   @NotNull List<UnfilledParameterFromParamSpec> unfilledParameterFromParamSpecs) {
-      PyCallableParameterListType paramSpecSubst = as(substitutions.getParamSpecs().get(paramSpec), PyCallableParameterListType.class);
-      if (paramSpecSubst == null) return;
+      PyCallableParameterListType paramSpecSubst = getParamSpecSubstitution(paramSpec, substitutions);
+      if (paramSpecSubst == null) {
+        analyzeUnsubstitutedParamSpec(paramSpec, arguments, unexpectedArgumentForParamSpecs);
+        return;
+      }
 
-      var mapping = analyzeArguments(arguments, paramSpecSubst.getParameters(), myTypeEvalContext);
-      for (var item: mapping.getMappedParameters().entrySet()) {
+      var mapping = PyCallExpressionHelper.analyzeArguments(arguments, paramSpecSubst, myTypeEvalContext);
+      for (var item : mapping.getMappedParameters().entrySet()) {
         PyExpression argument = item.getKey();
         PyCallableParameter parameter = item.getValue();
         PyType argType = myTypeEvalContext.getType(argument);
@@ -563,7 +905,7 @@ public class PyTypeCheckerInspection extends PyInspection {
         result.add(new AnalyzeArgumentResult(argument, paramType, substituteGenerics(paramType, substitutions), argType, matched));
       }
       if (!mapping.getUnmappedArguments().isEmpty()) {
-        for (var argument: mapping.getUnmappedArguments()) {
+        for (var argument : mapping.getUnmappedArguments()) {
           unexpectedArgumentForParamSpecs.add(new UnexpectedArgumentForParamSpec(argument, paramSpec));
         }
       }
@@ -571,6 +913,41 @@ public class PyTypeCheckerInspection extends PyInspection {
       if (!unmappedParameters.isEmpty()) {
         unfilledParameterFromParamSpecs.add(new UnfilledParameterFromParamSpec(unmappedParameters.get(0), paramSpec));
       }
+    }
+
+    private void analyzeUnsubstitutedParamSpec(@NotNull PyParamSpecType paramSpec,
+                                               @NotNull List<PyExpression> arguments,
+                                               @NotNull List<UnexpectedArgumentForParamSpec> unexpectedArgs) {
+      for (PyExpression argument : arguments) {
+        if (argument instanceof PyStarArgument starArg) {
+          PyExpression innerExpr = starArg.getExpression();
+          if (innerExpr != null && isParamSpecContainerForwarding(innerExpr, paramSpec, !starArg.isKeyword())) {
+            continue;
+          }
+        }
+        unexpectedArgs.add(new UnexpectedArgumentForParamSpec(argument, paramSpec));
+      }
+    }
+
+    private static @Nullable PyCallableParameterListType getParamSpecSubstitution(@NotNull PyParamSpecType paramSpecType,
+                                                                                  @NotNull PyTypeChecker.GenericSubstitutions substitutions) {
+      return as(substitutions.getParamSpecs().get(paramSpecType), PyCallableParameterListType.class);
+    }
+
+    private boolean isParamSpecContainerForwarding(@NotNull PyExpression expr,
+                                                   @NotNull PyParamSpecType paramSpec,
+                                                   boolean expectPositional) {
+      PyType type = myTypeEvalContext.getType(expr);
+      if (!(type instanceof PyParamSpecType exprParamSpec) || !exprParamSpec.equals(paramSpec)) {
+        return false;
+      }
+      if (expr instanceof PyReferenceExpression refExpr) {
+        PsiElement resolved = refExpr.getReference().resolve();
+        if (resolved instanceof PyNamedParameter param) {
+          return expectPositional ? param.isPositionalContainer() : param.isKeywordContainer();
+        }
+      }
+      return true;
     }
 
     private void matchArgumentsAndTypes(@NotNull List<PyExpression> arguments, @NotNull List<PyType> types,
@@ -643,30 +1020,34 @@ public class PyTypeCheckerInspection extends PyInspection {
                                               @NotNull PyTypeChecker.GenericSubstitutions substitutions) {
       argument = PyUtil.peelArgument(argument);
 
-      if (parameterType instanceof PyTypedDictType expectedTypedDictType) {
-        if (argument != null && PyTypedDictType.isDictExpression(argument, myTypeEvalContext)) {
+      if (argument != null) {
+        if (PyTypedDictType.isDictExpression(argument, myTypeEvalContext) &&
+            parameterType instanceof PyTypedDictType expectedTypedDictType) {
           reportTypedDictProblems(expectedTypedDictType, argument);
+          return true;
+        }
+        else if (parameterType instanceof PyUnpackedTypedDictType unpackedTypedDictType) {
+          reportUnpackedTypedDictProblems(unpackedTypedDictType, argument);
           return true;
         }
       }
 
-      return PyTypeChecker.match(parameterType, argumentType, myTypeEvalContext, substitutions) &&
-             !PyProtocolsKt.matchingProtocolDefinitions(parameterType, argumentType, myTypeEvalContext);
+      return matchesExpectedType(parameterType, argumentType, argument, substitutions)
+             && !PyProtocolsKt.matchingProtocolDefinitions(parameterType, argumentType, myTypeEvalContext);
     }
 
-    private @Nullable PyType substituteGenerics(@Nullable PyType expectedArgumentType, @NotNull PyTypeChecker.GenericSubstitutions substitutions) {
+    private @Nullable PyType substituteGenerics(@Nullable PyType expectedArgumentType,
+                                                @NotNull PyTypeChecker.GenericSubstitutions substitutions) {
       return PyTypeChecker.hasGenerics(expectedArgumentType, myTypeEvalContext)
              ? PyTypeChecker.substitute(expectedArgumentType, substitutions, myTypeEvalContext)
              : null;
     }
 
-    private static boolean matchedCalleeResultsExist(@NotNull List<AnalyzeCalleeResults> calleesResults) {
-      return exists(calleesResults, calleeResults ->
-        ContainerUtil.all(calleeResults.getResults(), AnalyzeArgumentResult::isMatched) &&
-        calleeResults.getUnmatchedArguments().isEmpty() &&
-        calleeResults.getUnmatchedParameters().isEmpty() &&
-        calleeResults.getUnfilledPositionalVarargs().isEmpty()
-      );
+    private static boolean isMatched(@NotNull AnalyzeCalleeResults calleeResults) {
+      return ContainerUtil.all(calleeResults.getResults(), AnalyzeArgumentResult::isMatched) &&
+             calleeResults.getUnmatchedArguments().isEmpty() &&
+             calleeResults.getUnmatchedParameters().isEmpty() &&
+             calleeResults.getUnfilledPositionalVarargs().isEmpty();
     }
 
     private static @NotNull List<PyType> getArgumentTypes(@NotNull List<AnalyzeCalleeResults> calleesResults) {
@@ -678,6 +1059,12 @@ public class PyTypeCheckerInspection extends PyInspection {
           .orElse(Collections.emptyList()),
         AnalyzeArgumentResult::getActualType
       );
+    }
+
+    private static boolean hasExplicitType(@NotNull PsiElement node) {
+      if (node instanceof PyAnnotationOwner owner && owner.getAnnotation() != null) return true;
+      if (node instanceof PyTypeCommentOwner owner && owner.getTypeCommentAnnotation() != null) return true;
+      return false;
     }
   }
 
@@ -835,5 +1222,4 @@ public class PyTypeCheckerInspection extends PyInspection {
 
   record UnfilledPositionalVararg(@NotNull String varargName, @NotNull String expectedTypes) {
   }
-
 }

@@ -21,7 +21,16 @@ import com.intellij.ide.CopyProvider;
 import com.intellij.ide.DeleteProvider;
 import com.intellij.ide.util.DeleteHandler;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.UiDataProvider;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
@@ -52,7 +61,12 @@ import org.intellij.images.editor.ImageDocument.ScaledImageProvider;
 import org.intellij.images.editor.ImageEditor;
 import org.intellij.images.editor.ImageZoomModel;
 import org.intellij.images.editor.actionSystem.ImageEditorActions;
-import org.intellij.images.options.*;
+import org.intellij.images.options.EditorOptions;
+import org.intellij.images.options.GridOptions;
+import org.intellij.images.options.Options;
+import org.intellij.images.options.OptionsManager;
+import org.intellij.images.options.TransparencyChessboardOptions;
+import org.intellij.images.options.ZoomOptions;
 import org.intellij.images.scientific.utils.ScientificUtils;
 import org.intellij.images.thumbnail.actionSystem.ThumbnailViewActions;
 import org.intellij.images.thumbnail.actions.ShowBorderAction;
@@ -64,14 +78,31 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingConstants;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.LayoutManager;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.Transferable;
 import java.awt.datatransfer.UnsupportedFlavorException;
-import java.awt.event.*;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+import java.awt.event.MouseWheelListener;
 import java.awt.image.BufferedImage;
 import java.awt.image.ColorModel;
 import java.beans.PropertyChangeEvent;
@@ -102,6 +133,9 @@ public final class ImageEditorUI extends JPanel implements UiDataProvider, CopyP
 
   private final JScrollPane myScrollPane;
   private final boolean isEmbedded;
+
+  private final JPanel myTopPanel;
+  private final @Nullable JComponent myActionToolbarPanel;
 
   ImageEditorUI(@Nullable ImageEditor editor) {
     this(editor, false, false);
@@ -150,16 +184,17 @@ public final class ImageEditorUI extends JPanel implements UiDataProvider, CopyP
 
 
     // toolbar is disabled in embedded mode
-    JComponent toolbarPanel = null;
     if (!isEmbedded) {
       ActionManager actionManager = ActionManager.getInstance();
       ActionGroup actionGroup = (ActionGroup)actionManager.getAction(ImageEditorActions.GROUP_TOOLBAR);
       ActionToolbar actionToolbar = actionManager.createActionToolbar(ImageEditorActions.ACTION_PLACE, actionGroup, true);
       actionToolbar.setTargetComponent(this);
 
-      toolbarPanel = actionToolbar.getComponent();
-      toolbarPanel.setBackground(JBColor.lazy(() -> Objects.requireNonNullElse(getBackground(), UIUtil.getPanelBackground())));
-      toolbarPanel.addMouseListener(new FocusRequester());
+      myActionToolbarPanel = actionToolbar.getComponent();
+      myActionToolbarPanel.setBackground(JBColor.lazy(() -> Objects.requireNonNullElse(getBackground(), UIUtil.getPanelBackground())));
+      myActionToolbarPanel.addMouseListener(new FocusRequester());
+    } else {
+      myActionToolbarPanel = null;
     }
 
     JLabel errorLabel = new JLabel(
@@ -175,17 +210,17 @@ public final class ImageEditorUI extends JPanel implements UiDataProvider, CopyP
     contentPanel.add(errorPanel, ERROR_PANEL);
 
     boolean isScientificMode = editor != null && editor.getFile().getUserData(ScientificUtils.SCIENTIFIC_MODE_KEY) != null;
-    JPanel topPanel = new NonOpaquePanel(new BorderLayout());
+    myTopPanel = new NonOpaquePanel(new BorderLayout());
     if (!isEmbedded) {
-      topPanel.add(toolbarPanel, BorderLayout.CENTER);
+      myTopPanel.add(myActionToolbarPanel, BorderLayout.CENTER);
       if (!isScientificMode) {
         infoLabel = new JLabel((String)null, SwingConstants.RIGHT);
         infoLabel.setBorder(JBUI.Borders.emptyRight(2));
-        topPanel.add(infoLabel, BorderLayout.EAST);
+        myTopPanel.add(infoLabel, BorderLayout.EAST);
       }
     }
 
-    add(topPanel, BorderLayout.NORTH);
+    add(myTopPanel, BorderLayout.NORTH);
     add(contentPanel, BorderLayout.CENTER);
 
     myScrollPane.addComponentListener(new ComponentAdapter() {
@@ -693,5 +728,15 @@ public final class ImageEditorUI extends JPanel implements UiDataProvider, CopyP
       imageComponent.setGridLineSpan(gridOptions.getLineSpan());
       imageComponent.setGridLineColor(gridOptions.getLineColor());
     }
+  }
+
+  @ApiStatus.Internal
+  public @NotNull JPanel getTopPanel() {
+    return myTopPanel;
+  }
+
+  @ApiStatus.Internal
+  public @Nullable JComponent getActionToolbarPanel() {
+    return myActionToolbarPanel;
   }
 }

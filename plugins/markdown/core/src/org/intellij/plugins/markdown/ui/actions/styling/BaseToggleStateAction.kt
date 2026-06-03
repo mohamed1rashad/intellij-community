@@ -12,6 +12,7 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.util.TextRange
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.tree.IElementType
 import com.intellij.psi.util.PsiTreeUtil
@@ -51,6 +52,15 @@ abstract class BaseToggleStateAction: ToggleAction(), DumbAware {
     val file = event.getData(CommonDataKeys.PSI_FILE) ?: return false
     val caretSnapshots = SelectionUtil.obtainCaretSnapshots(this, event)?.asSequence() ?: return false
     val selectionElements = caretSnapshots.map { getElementsUnderCaretOrSelection(file, it.selectionStart, it.selectionEnd) }
+    if (shouldIgnoreSelectedElements(selectionElements)) {
+      event.presentation.isEnabled = false
+      return false
+    }
+    if (shouldIgnoreLinkElement(selectionElements)) {
+      event.presentation.isEnabled = false
+      return false
+    }
+
     val commonParents = selectionElements.map { (left, right) -> getCommonParentOfType(left, right, targetNodeType) }
     val hasMissingParents = commonParents.any { it == null }
     val hasValidParents = commonParents.any { it != null }
@@ -155,7 +165,23 @@ abstract class BaseToggleStateAction: ToggleAction(), DumbAware {
     }
   }
 
+  private fun shouldIgnoreSelectedElements(selectionElements: Sequence<Pair<PsiElement, PsiElement>>) =
+    targetNodeType !in elementsToProhibit
+    && elementsToProhibit.any { elementType -> selectionElements.any { getCommonParentOfType(it.first, it.second, elementType) != null } }
+
+  private fun shouldIgnoreLinkElement(selectionElements: Sequence<Pair<PsiElement, PsiElement>>) =
+    selectionElements.any { (left, right) ->
+      elementsToIgnore.any { type -> getCommonParentOfType(left, right, type) != null }
+    }
+
   companion object {
+    // If element is prohibited then action's presentation will be disabled
+    private val elementsToProhibit = setOf(
+      MarkdownElementTypes.CODE_SPAN,
+      MarkdownElementTypes.TEST_LINK,
+    )
+
+    // If element is ignored then action won't be invoked
     private val elementsToIgnore = setOf(
       MarkdownElementTypes.LINK_DESTINATION,
       MarkdownElementTypes.AUTOLINK,

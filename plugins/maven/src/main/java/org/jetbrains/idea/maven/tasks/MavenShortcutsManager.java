@@ -18,7 +18,10 @@ import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.update.MergingQueueUtil;
 import com.intellij.util.ui.update.MergingUpdateQueue;
 import com.intellij.util.ui.update.Update;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.jetbrains.idea.maven.project.MavenProject;
 import org.jetbrains.idea.maven.project.MavenProjectChanges;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
@@ -27,7 +30,10 @@ import org.jetbrains.idea.maven.utils.MavenMergingUpdateQueue;
 import org.jetbrains.idea.maven.utils.MavenUtil;
 
 import java.nio.file.Path;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MavenShortcutsManager implements Disposable {
@@ -64,7 +70,7 @@ public final class MavenShortcutsManager implements Disposable {
     MyProjectsTreeListener listener = new MyProjectsTreeListener();
     MavenProjectsManager mavenProjectManager = MavenProjectsManager.getInstance(project);
     mavenProjectManager.addManagerListener(listener, this);
-    mavenProjectManager.addProjectsTreeListener(listener, this);
+    project.getMessageBus().connect(this).subscribe(MavenProjectsTree.Listener.TOPIC, listener);
 
     MessageBusConnection busConnection = ApplicationManager.getApplication().getMessageBus().connect(this);
     busConnection.subscribe(KeymapManagerListener.TOPIC, new KeymapManagerListener() {
@@ -165,13 +171,13 @@ public final class MavenShortcutsManager implements Disposable {
     }
 
     @Override
-    public void projectResolved(@NotNull Pair<MavenProject, MavenProjectChanges> projectWithChanges) {
-      scheduleKeymapUpdate(Collections.singletonList(projectWithChanges.first), true);
+    public void projectsResolved(@NotNull List<MavenProject> projects) {
+      scheduleKeymapUpdate(projects, true);
     }
 
     @Override
-    public void pluginsResolved(@NotNull MavenProject project) {
-      scheduleKeymapUpdate(Collections.singletonList(project), true);
+    public void pluginsResolved(@NotNull List<MavenProject> projects) {
+      scheduleKeymapUpdate(projects, true);
     }
 
     private void scheduleKeymapUpdate(List<MavenProject> mavenProjects, boolean forUpdate) {

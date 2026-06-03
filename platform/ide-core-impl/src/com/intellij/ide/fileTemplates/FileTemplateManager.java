@@ -8,6 +8,8 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
 
 public abstract class FileTemplateManager{
@@ -24,6 +26,7 @@ public abstract class FileTemplateManager{
   public static final String J2EE_TEMPLATES_CATEGORY = "J2EE";
 
   public static final String PROJECT_NAME_VARIABLE = "PROJECT_NAME";
+  protected static final String PROJECT_CONTEXT_VARIABLE = "__PROJECT__";
 
   public static FileTemplateManager getInstance(@NotNull Project project){
     return project.getService(FileTemplateManager.class).checkInitialized();
@@ -67,13 +70,13 @@ public abstract class FileTemplateManager{
   public abstract @NotNull Properties getDefaultProperties();
 
   /**
-   * @deprecated use {@link #getDefaultProperties()} instead
+   * @return a new Map object filled with predefined properties.
+   * It contains all the properties returned by {@link #getDefaultProperties()} 
+   * and may contain something additional.
    */
-  @Deprecated(forRemoval = true)
-  public @NotNull Properties getDefaultProperties(@NotNull Project project) {
-    Properties properties = getDefaultProperties();
-    properties.setProperty(PROJECT_NAME_VARIABLE, project.getName());
-    return properties;
+  public @NotNull Map<String, Object> getDefaultContextMap() {
+    //noinspection rawtypes,unchecked
+    return new HashMap<>((Map)getDefaultProperties());
   }
 
   /**

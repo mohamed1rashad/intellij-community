@@ -1,18 +1,27 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.cce.actions
 
-import com.intellij.cce.core.*
+import com.intellij.cce.core.JvmProperties
+import com.intellij.cce.core.PropertyAdapters
+import com.intellij.cce.core.Session
+import com.intellij.cce.core.SymbolLocation
+import com.intellij.cce.core.TokenProperties
 import com.intellij.cce.evaluable.EvaluationStrategy
 import com.intellij.cce.evaluable.common.CommonActionsInvoker
 import com.intellij.cce.evaluation.EvaluationChunk
 import com.intellij.cce.evaluation.EvaluationEnvironment
 import com.intellij.cce.evaluation.EvaluationRootInfo
 import com.intellij.cce.evaluation.EvaluationStep
-import com.intellij.cce.evaluation.step.runInIntellij
-import com.intellij.cce.interpreter.*
+import com.intellij.cce.interpreter.ActionInvokingInterpreter
+import com.intellij.cce.interpreter.ActionsInvoker
+import com.intellij.cce.interpreter.AsyncFeatureInvoker
+import com.intellij.cce.interpreter.InterpretFilter
+import com.intellij.cce.interpreter.InterpretationHandler
+import com.intellij.cce.interpreter.InterpretationOrder
+import com.intellij.cce.interpreter.InvokersFactory
+import com.intellij.cce.processor.ActionGenerator
 import com.intellij.cce.processor.DefaultEvaluationRootProcessor
 import com.intellij.cce.processor.EvaluationRootByRangeProcessor
-import com.intellij.cce.processor.GenerateActionsProcessor
 import com.intellij.cce.util.ExceptionsUtil.stackTraceToString
 import com.intellij.cce.util.FilesHelper
 import com.intellij.cce.util.Progress
@@ -20,16 +29,15 @@ import com.intellij.cce.util.Summary
 import com.intellij.cce.util.text
 import com.intellij.cce.visitor.CodeFragmentBuilder
 import com.intellij.cce.workspace.Config
-import com.intellij.cce.workspace.EvaluationWorkspace
 import com.intellij.cce.workspace.info.FileErrorInfo
 import com.intellij.cce.workspace.storages.storage.ActionsSingleFileStorage
 import com.intellij.configurationStore.StoreUtil.saveSettings
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import java.util.*
+import java.util.Locale
 import kotlin.random.Random
 
 open class ProjectActionsEnvironment(
@@ -39,10 +47,10 @@ open class ProjectActionsEnvironment(
   private val sessionsLimit: Int?,
   private val evaluationRootInfo: EvaluationRootInfo,
   val project: Project,
-  val processor: GenerateActionsProcessor,
+  val processor: ActionGenerator,
   override val setupSteps: List<EvaluationStep>,
   private val featureName: String,
-  val featureInvoker: FeatureInvoker,
+  val featureInvoker: AsyncFeatureInvoker,
 ) : EvaluationEnvironment {
   private val datasetRef = config.sourceFile.run {
     val sf = this ?: ""
@@ -56,17 +64,17 @@ open class ProjectActionsEnvironment(
 
   override val preparationDescription: String = "Generating actions by selected files"
 
-  override fun initialize(datasetContext: DatasetContext) {
+  override suspend fun initialize(datasetContext: DatasetContext) {
     datasetRef?.prepare(datasetContext)
   }
 
-  override fun prepareDataset(datasetContext: DatasetContext, progress: Progress) {
+  override suspend fun prepareDataset(datasetContext: DatasetContext, progress: Progress) {
     if (datasetRef != null) {
       val finalPath = DatasetRefConverter().convert(datasetRef, datasetContext, project) ?: datasetContext.path(datasetRef)
       datasetContext.replaceActionsStorage(ActionsSingleFileStorage(finalPath))
     }
     else {
-      val filesForEvaluation = ReadAction.compute<List<VirtualFile>, Throwable> {
+      val filesForEvaluation = readAction {
         FilesHelper.getFilesOfLanguage(project, config.evaluationRoots, config.ignoreFileNames, config.language)
       }
 
@@ -99,7 +107,7 @@ open class ProjectActionsEnvironment(
     }
   }
 
-  protected fun generateActions(
+  protected suspend fun generateActions(
     datasetContext: DatasetContext,
     languageName: String?,
     files: Collection<VirtualFile>,
@@ -170,9 +178,6 @@ open class ProjectActionsEnvironment(
 
     actionsSummarizer.save(datasetContext)
   }
-
-  override fun execute(step: EvaluationStep, workspace: EvaluationWorkspace): EvaluationWorkspace? =
-    step.runInIntellij(project, workspace)
 
   override fun close() {
     ProjectOpeningUtils.closeProject(project)
@@ -248,7 +253,7 @@ open class ProjectActionsEnvironment(
     override val name: String = fileActions.path
     override val sessionsExist: Boolean = fileActions.sessionsCount > 0
 
-    override fun evaluate(
+    override suspend fun evaluate(
       handler: InterpretationHandler,
       filter: InterpretFilter,
       order: InterpretationOrder,
@@ -256,7 +261,7 @@ open class ProjectActionsEnvironment(
     ): EvaluationChunk.Result {
       val factory = object : InvokersFactory {
         override fun createActionsInvoker(): ActionsInvoker = CommonActionsInvoker(project)
-        override fun createFeatureInvoker(): FeatureInvoker = featureInvoker
+        override fun createFeatureInvoker(): AsyncFeatureInvoker = featureInvoker
       }
       val actionInterpreter = ActionInvokingInterpreter(factory, handler, filter, order)
       return EvaluationChunk.Result(

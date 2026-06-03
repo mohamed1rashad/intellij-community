@@ -4,12 +4,15 @@ package com.intellij.tools.build.bazel.jvmIncBuilder
 
 import com.intellij.tools.build.bazel.jvmIncBuilder.impl.BuildContextImpl
 import com.intellij.tools.build.bazel.jvmIncBuilder.impl.instrumentation.*
+import com.intellij.tools.build.bazel.jvmIncBuilder.util.ArgMap
+import com.intellij.tools.build.bazel.jvmIncBuilder.util.createArgMap
 import io.opentelemetry.api.trace.Tracer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.job
 import org.jetbrains.bazel.jvm.*
-import org.jetbrains.bazel.jvm.util.*
+import org.jetbrains.jps.dependency.impl.ElementInternerImpl
+import org.jetbrains.jps.dependency.impl.GraphElementInterner
 import org.jetbrains.jps.javac.ExternalRefCollectorCompilerToolExtension
 import java.io.InputStream
 import java.io.Writer
@@ -31,7 +34,7 @@ internal class BazelIncExecutor : WorkRequestExecutor {
       scope.coroutineContext.job.invokeOnCompletion { globalSpan.end() }
 
       // configure logging for the code using IJ Platform logging API
-      com.intellij.openapi.diagnostic.Logger.setFactory { IJPrintStreamLogger(category = it, stream = System.err, span = globalSpan) }
+      org.jetbrains.kotlin.com.intellij.openapi.diagnostic.Logger.setFactory { IJPrintStreamLogger(category = it, stream = System.err, span = globalSpan) }
 
       // configure logging for the code using Java SDK logging API
       val rootLogger = java.util.logging.Logger.getLogger("")
@@ -44,6 +47,7 @@ internal class BazelIncExecutor : WorkRequestExecutor {
 
     private fun configureGlobals() {
       ExternalRefCollectorCompilerToolExtension.enable()
+      GraphElementInterner.setImplementation(ElementInternerImpl())
       // TMH assertions
       System.setProperty(ThreadingModelInstrumenter.INSTRUMENT_ANNOTATIONS_PROPERTY, "true")
       System.setProperty(ThreadingModelInstrumenter.GENERATE_LINE_NUMBERS_PROPERTY, "true")

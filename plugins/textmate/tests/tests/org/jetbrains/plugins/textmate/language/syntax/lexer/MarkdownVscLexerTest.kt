@@ -2,7 +2,7 @@ package org.jetbrains.plugins.textmate.language.syntax.lexer
 
 import org.jetbrains.plugins.textmate.TestUtil
 import org.jetbrains.plugins.textmate.language.syntax.TextMateLexerTestCase
-import org.junit.jupiter.api.Test
+import kotlin.test.Test
 
 class MarkdownVscLexerTest : TextMateLexerTestCase() {
   @Test
@@ -13,6 +13,9 @@ class MarkdownVscLexerTest : TextMateLexerTestCase() {
 
   @Test
   fun inlineBold() = doTest("inline_bold.md", "inline_bold_after.md")
+
+  @Test
+  fun links() = doTest("links.md", "links_after.md")
 
   override val testDirRelativePath = "markdown_vsc"
   override val bundleName = TestUtil.MARKDOWN_VSC

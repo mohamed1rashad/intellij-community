@@ -13,7 +13,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -62,6 +62,8 @@ public class MarkdownColorSettingsPage implements ColorSettingsPage {
     result.put("dd", MarkdownHighlighterColors.DEFINITION);
     result.put("dt", MarkdownHighlighterColors.TERM);
     result.put("dm", MarkdownHighlighterColors.DEFINITION_LIST_MARKER);
+
+    result.put("footnote_def", MarkdownHighlighterColors.FOOTNOTE_DEFINITION);
 
     return result;
   }
@@ -154,6 +156,8 @@ public class MarkdownColorSettingsPage implements ColorSettingsPage {
       put("markdown.editor.colors.definition_list_marker", MarkdownHighlighterColors.DEFINITION_LIST_MARKER);
       put("markdown.editor.colors.definition", MarkdownHighlighterColors.DEFINITION);
       put("markdown.editor.colors.term", MarkdownHighlighterColors.TERM);
+
+      put("markdown.editor.colors.footnote_definition", MarkdownHighlighterColors.FOOTNOTE_DEFINITION);
     }
 
     public AttributesDescriptor @NotNull [] get() {

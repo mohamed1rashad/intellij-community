@@ -18,7 +18,6 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.coroutineToIndicator
 import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
@@ -99,7 +98,7 @@ class MavenProjectAsyncBuilder {
     if (createDummyModule) {
       val previewModule = createPreviewModule(project, rootDirectory)
       // do not update all modules because it can take a lot of time (freeze at project opening)
-      val cs =  project.service<CoroutineService>().coroutineScope
+      val cs = project.service<CoroutineService>().coroutineScope
       cs.launchTracked {
         project.trackActivity(MavenActivityKey) {
           doCommit(project,
@@ -155,10 +154,9 @@ class MavenProjectAsyncBuilder {
     }
 
     val tree = MavenProjectsTree(project)
-    tree.addManagedFilesWithProfiles(files, MavenExplicitProfiles.NONE)
 
     generalSettings.updateFromMavenConfig(files)
-    updateMavenSettingsFromEnvironment(project, generalSettings, importingSettings)
+    updateMavenSettingsFromEnvironment(project, generalSettings, importingSettings, rootDirectory)
     MavenSettingsCache.getInstance(project).reloadAsync()
 
     val manager = MavenProjectsManager.getInstance(project)
@@ -178,7 +176,7 @@ class MavenProjectAsyncBuilder {
       reportRawProgress { reporter ->
         val mavenEmbedderWrappers = project.service<MavenEmbedderWrappersManager>().createMavenEmbedderWrappers()
         mavenEmbedderWrappers.use {
-          tree.updateAll(false, generalSettings, mavenEmbedderWrappers, reporter)
+          tree.updateAll(files, false, generalSettings, MavenExplicitProfiles.NONE, mavenEmbedderWrappers, reporter)
         }
       }
     }
@@ -190,9 +188,10 @@ class MavenProjectAsyncBuilder {
 
     val selectedProfiles = getProfilesFromSystemProperties()
 
-    manager.setIgnoredState(projects, false)
-
-    return manager.addManagedFilesWithProfiles(MavenUtil.collectFiles(projects), selectedProfiles, modelsProvider, previewModule, syncProject)
+    return withContext(Dispatchers.IO) {
+      manager.setIgnoredState(projects, false)
+      manager.addManagedFilesWithProfiles(MavenUtil.collectFiles(projects), selectedProfiles, modelsProvider, previewModule, syncProject)
+    }
   }
 
   private fun getProfilesFromSystemProperties(): MavenExplicitProfiles {
@@ -210,6 +209,7 @@ class MavenProjectAsyncBuilder {
     project: Project,
     generalSettings: MavenGeneralSettings,
     importingSettings: MavenImportingSettings,
+    rootDirectory: Path,
   ) {
     val settings = MavenWorkspaceSettingsComponent.getInstance(project).settings
     settings.generalSettings = generalSettings
@@ -218,7 +218,7 @@ class MavenProjectAsyncBuilder {
     if (!settingsFile.isNullOrBlank()) {
       settings.generalSettings.setUserSettingsFile(settingsFile.trim { it <= ' ' })
     }
-    val distributionUrl = getWrapperDistributionUrl(project.guessProjectDir())
+    val distributionUrl = getWrapperDistributionUrl(rootDirectory)
     if (distributionUrl != null) {
       settings.generalSettings.mavenHomeType = MavenWrapper
     }

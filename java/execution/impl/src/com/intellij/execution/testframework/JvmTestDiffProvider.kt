@@ -1,26 +1,45 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.testframework
 
 import com.intellij.execution.filters.ExceptionInfoCache
 import com.intellij.execution.filters.ExceptionLineParserFactory
 import com.intellij.execution.testframework.actions.TestDiffProvider
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.ElementManipulators
+import com.intellij.psi.PsiCompiledElement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiType
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.PsiLiteralUtil
 import com.intellij.psi.util.startOffset
 import com.intellij.util.asSafely
 import com.siyeh.ig.testFrameworks.UAssertHint
-import org.jetbrains.uast.*
+import org.jetbrains.uast.UCallExpression
+import org.jetbrains.uast.UExpression
+import org.jetbrains.uast.UMethod
+import org.jetbrains.uast.UParameter
+import org.jetbrains.uast.UReferenceExpression
+import org.jetbrains.uast.UVariable
+import org.jetbrains.uast.evaluateString
 import org.jetbrains.uast.expressions.UInjectionHost
+import org.jetbrains.uast.getContainingUMethod
+import org.jetbrains.uast.getUCallExpression
+import org.jetbrains.uast.resolveToUElement
+import org.jetbrains.uast.resolveToUElementOfType
+import org.jetbrains.uast.toUElement
 
 class JvmTestDiffProvider : TestDiffProvider {
   override fun updateExpected(element: PsiElement, actual: String) {
-    ElementManipulators.getManipulator(element)?.handleContentChange(element, actual)
+    ElementManipulators.getManipulator(element)?.handleContentChange(element, element.prepareContent(actual))
   }
+
+  private fun PsiElement.prepareContent(content: String) =
+    if (this !is PsiLiteralExpression || !this.isTextBlock) content
+    else PsiLiteralUtil.escapeBackSlashesInTextBlock(content)
 
   /**
    * Finds the expected value from a [stackTrace]. To do this the following algorithm is used:
@@ -44,28 +63,35 @@ class JvmTestDiffProvider : TestDiffProvider {
     val lineParser = ExceptionLineParserFactory.getInstance().create(exceptionCache)
     val expectedArgCandidates = mutableListOf<PsiElement>()
     searchStacktrace.lines().forEach { line ->
+      ProgressManager.checkCanceled()
       lineParser.execute(line, line.length) ?: return@findExpected null
       val file = lineParser.file ?: return@findExpected null
       val diffProvider = TestDiffProvider.getProviderByLanguage(file.language).asSafely<JvmTestDiffProvider>()
                          ?: return@findExpected null
       val failedCall = findFailedCall(file, lineParser.info.lineNumber, expectedParam?.getContainingUMethod()) ?: return@findExpected null
+      if (failedCall.sourcePsi?.isValid != true) return@forEach
       expectedArgCandidates.addAll(failedCall.valueArguments.mapNotNull { diffProvider.getExpectedElement(it, expected) })
       if (expectedParam != null) { // precise tracking don't need to look through whole stack trace
-        val containingMethod = expectedParam?.getContainingUMethod() ?: return@findExpected null
+        val containingMethod = expectedParam.getContainingUMethod() ?: return@findExpected null
 
         val expectedArg = failedCall.getArgumentForParameter(containingMethod.uastParameters.indexOf(expectedParam))
                           ?: return@findExpected null
         diffProvider.getExpectedElement(expectedArg, expected)?.let { return it }
         if (expectedArg is UReferenceExpression) {
-          val resolved = expectedArg.resolveToUElement()
-          if (resolved is UVariable) {
-            resolved.uastInitializer?.let { initializer -> diffProvider.getExpectedElement(initializer, expected)?.let { return it } }
+          if (expectedArg.sourcePsi?.isValid == true) {
+            val resolved = expectedArg.resolveToUElement()
+            if (resolved is UVariable) {
+              resolved.uastInitializer?.let { initializer -> diffProvider.getExpectedElement(initializer, expected)?.let { return it } }
+            }
+            expectedParam = if (resolved is UParameter && resolved.uastParent is UMethod) {
+              val method = resolved.uastParent?.asSafely<UMethod>()
+              if (method != null && !method.isConstructor) resolved else null
+            }
+            else null
           }
-          expectedParam = if (resolved is UParameter && resolved.uastParent is UMethod) {
-            val method = resolved.uastParent?.asSafely<UMethod>()
-            if (method != null && !method.isConstructor) resolved else null
+          else {
+            expectedParam = null
           }
-          else null
         }
       }
     }
@@ -78,6 +104,7 @@ class JvmTestDiffProvider : TestDiffProvider {
   private fun findExpectedEntryPoint(stackTrace: String, exceptionCache: ExceptionInfoCache): ExpectedEntryPoint? {
     val lineParser = ExceptionLineParserFactory.getInstance().create(exceptionCache)
     stackTrace.lineSequence().forEach { line ->
+      ProgressManager.checkCanceled()
       lineParser.execute(line, line.length) ?: return@forEach
       val file = lineParser.file ?: return@findExpectedEntryPoint null
       val failedCall = findFailedCall(file, lineParser.info.lineNumber, null) ?: return@forEach
@@ -88,8 +115,9 @@ class JvmTestDiffProvider : TestDiffProvider {
   }
 
   private fun findExpectedEntryPointParam(call: UCallExpression): UParameter? {
-    val assertHint = UAssertHint.createAssertEqualsHint(call) ?: return null
     val srcCall = call.sourcePsi ?: return null
+    if (!srcCall.isValid) return null
+    val assertHint = UAssertHint.createAssertEqualsHint(call) ?: return null
     val stringType = PsiType.getJavaLangString(srcCall.manager, srcCall.resolveScope)
     if (assertHint.expected.getExpressionType() != stringType || assertHint.actual.getExpressionType() != stringType) return null
     val method = call.resolveToUElementOfType<UMethod>() ?: return null
@@ -98,6 +126,7 @@ class JvmTestDiffProvider : TestDiffProvider {
   }
 
   private fun findFailedCall(file: PsiFile, lineNumber: Int, resolvedMethod: UMethod?): UCallExpression? {
+    if (file is PsiCompiledElement) return null
     val virtualFile = file.virtualFile ?: return null
     val document = FileDocumentManager.getInstance().getDocument(virtualFile) ?: return null
     if (lineNumber < 1 || lineNumber > document.lineCount) return null
@@ -126,11 +155,20 @@ class JvmTestDiffProvider : TestDiffProvider {
   }
 
   private fun getExpectedElement(expression: UExpression, expected: String): PsiElement? {
-    if (expression.asSafely<UInjectionHost>()?.evaluateString()?.withoutLineEndings() == expected) {
+    val value = expression.asSafely<UInjectionHost>()?.evaluateString() ?: return null
+    if (value == expected || value.withoutLineEndings() == expected.withoutLineEndings()) {
       return expression.sourcePsi
     }
     return null
   }
 
   private fun String.withoutLineEndings() = replace("\n", "").replace("\r", "")
+
+  override fun getExpectedValue(element: PsiElement): String {
+    if (element is PsiLiteralExpression) {
+      val value = element.value
+      if (value is String) return value
+    }
+    return ElementManipulators.getValueText(element)
+  }
 }

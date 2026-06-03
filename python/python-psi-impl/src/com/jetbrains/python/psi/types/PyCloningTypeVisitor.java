@@ -1,14 +1,14 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.psi.types;
 
+import com.google.common.collect.Sets;
 import com.intellij.openapi.util.Ref;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashSet;
-import java.util.List;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -37,7 +37,8 @@ import java.util.stream.Collectors;
 @ApiStatus.Experimental
 public abstract class PyCloningTypeVisitor extends PyTypeVisitorExt<PyType> {
   private final @NotNull TypeEvalContext myTypeEvalContext;
-  private final @NotNull Set<@Nullable PyType> cloning = new HashSet<>();
+  private final @NotNull Set<@Nullable PyType> cloning = Sets.newIdentityHashSet();
+  private final @NotNull Map<@Nullable PyType, @Nullable PyType> cloned = new IdentityHashMap<>();
 
   public static @Nullable PyType clone(@Nullable PyType type, @NotNull PyCloningTypeVisitor visitor) {
     return visitor.clone(type);
@@ -49,13 +50,26 @@ public abstract class PyCloningTypeVisitor extends PyTypeVisitorExt<PyType> {
 
   // Intentionally not marked as @Nullable to avoid false positives. 
   // A recursive type is an exceptional case.
-  protected <T extends PyType> T clone(@Nullable PyType type) {
+  protected final <T extends PyType> T clone(@Nullable PyType type) {
+    final @Nullable PyType result;
+    if (cloned.containsKey(type)) {
+      result = cloned.get(type);
+    }
+    else {
+      result = doClone(type);
+      PyAnyType.validate(result);
+      cloned.put(type, result);
+    }
+    //noinspection unchecked
+    return (T)result;
+  }
+
+  private @Nullable PyType doClone(@Nullable PyType type) {
     if (!cloning.add(type)) {
-      return null;
+      return PyAnyType.getUnknown();
     }
     try {
-      //noinspection unchecked
-      return (T)visit(type, this);
+      return visit(type, this);
     }
     finally {
       cloning.remove(type);
@@ -124,8 +138,9 @@ public abstract class PyCloningTypeVisitor extends PyTypeVisitorExt<PyType> {
         )
       )
     );
-    return new PyTypedDictType("TypedDict", substitutedTDFields, typedDictType.myClass, PyTypedDictType.DefinitionLevel.INSTANCE,
-                               List.of());
+    return new PyTypedDictType(typedDictType.getName(), substitutedTDFields, typedDictType.myClass, typedDictType.isDefinition(),
+                               typedDictType.getDeclarationElement(), typedDictType.isClosed(), clone(typedDictType.getExtraItemsType()),
+                               typedDictType.getExtraItemsQualifiers());
   }
 
   @Override
@@ -136,6 +151,11 @@ public abstract class PyCloningTypeVisitor extends PyTypeVisitorExt<PyType> {
   @Override
   public PyType visitPyUnsafeUnionType(@NotNull PyUnsafeUnionType unsafeUnionType) {
     return PyUnsafeUnionType.unsafeUnion(ContainerUtil.map(unsafeUnionType.getMembers(), type -> clone(type)));
+  }
+
+  @Override
+  public PyType visitPyIntersectionType(@NotNull PyIntersectionType intersectionType) {
+    return PyIntersectionType.intersection(ContainerUtil.map(intersectionType.getMembers(), type -> clone(type)));
   }
 
   @Override
@@ -179,23 +199,21 @@ public abstract class PyCloningTypeVisitor extends PyTypeVisitorExt<PyType> {
 
   @Override
   public PyType visitPyCallableType(@NotNull PyCallableType callableType) {
-    List<PyCallableParameter> parameters = callableType.getParameters(myTypeEvalContext);
+    PyCallableParameterVariadicType clonedParametersType = clone(callableType.getParametersType(myTypeEvalContext));
+    var typeParameters = callableType.getTypeParameters(myTypeEvalContext);
     return new PyCallableTypeImpl(
-      parameters != null ? ContainerUtil.map(parameters, parameter ->
-        new PyCallableParameterImpl(
-          parameter.getName(),
-          Ref.create(clone(parameter.getType(myTypeEvalContext))),
-          parameter.getDefaultValue(),
-          parameter.getParameter(),
-          parameter.isPositionalContainer(),
-          parameter.isKeywordContainer(),
-          parameter.getDeclarationElement()
-        )) : null,
+      typeParameters != null ? ContainerUtil.map(typeParameters, this::clone) : null,
+      clonedParametersType,
       clone(callableType.getReturnType(myTypeEvalContext)),
       callableType.getCallable(),
       callableType.getModifier(),
       callableType.getImplicitOffset()
     );
+  }
+
+  @Override
+  public PyType visitPyOverloadType(@NotNull PyOverloadType overloadType) {
+    return new PyOverloadType(ContainerUtil.map(overloadType.getItems(), this::clone), overloadType.getImpl());
   }
 
   @Override
@@ -229,11 +247,20 @@ public abstract class PyCloningTypeVisitor extends PyTypeVisitorExt<PyType> {
           parameter.getName(),
           Ref.create(clone(parameter.getType(myTypeEvalContext))),
           parameter.getDefaultValue(),
+          parameter.getDefaultValueText(),
           parameter.getParameter(),
           parameter.isPositionalContainer(),
           parameter.isKeywordContainer(),
+          parameter.isSelf(),
+          parameter.isKeywordOnlySeparator(),
+          parameter.isPositionOnlySeparator(),
           parameter.getDeclarationElement()
         ))
     );
+  }
+
+  @Override
+  public PyType visitPyUnpackedTypedDictType(@NotNull PyUnpackedTypedDictType unpackedTypedDictType) {
+    return new PyUnpackedTypedDictTypeImpl(clone(unpackedTypedDictType.getTypedDictType()));
   }
 }

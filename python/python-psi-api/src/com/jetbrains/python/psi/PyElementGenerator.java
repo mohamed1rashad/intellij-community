@@ -30,15 +30,15 @@ public abstract class PyElementGenerator extends PyAstElementGenerator {
   /**
    * Creates a string literal, adding appropriate quotes, properly escaping characters inside.
    *
-   * @param destination where the literal is destined to; used to determine the encoding.
-   * @param unescaped   the string
-   * @param preferUTF8 try to use UTF8 (would use ascii if false)
+   * @param destination        where the literal is destined to; used to determine the encoding.
+   * @param unescaped          the string
+   * @param preferUTF8         try to use UTF8 (would use ascii if false)
    * @param preferDoubleQuotes try to use double/single quotes
    * @return a newly created literal
    */
   protected abstract PyStringLiteralExpression createStringLiteralFromString(@Nullable PsiFile destination,
-                                                                          @NotNull String unescaped,
-                                                                          boolean preferUTF8, boolean preferDoubleQuotes);
+                                                                             @NotNull String unescaped,
+                                                                             boolean preferUTF8, boolean preferDoubleQuotes);
 
   public abstract PyStringLiteralExpression createStringLiteralFromString(@NotNull String unescaped, boolean preferDoubleQuotes);
 
@@ -55,11 +55,13 @@ public abstract class PyElementGenerator extends PyAstElementGenerator {
                                                             @NotNull PyExpression rightOperand);
 
   @Override
-  public @NotNull PyExpression createExpressionFromText(@NotNull LanguageLevel languageLevel, @NotNull String text) throws IncorrectOperationException {
+  public @NotNull PyExpression createExpressionFromText(@NotNull LanguageLevel languageLevel, @NotNull String text)
+    throws IncorrectOperationException {
     return (PyExpression)super.createExpressionFromText(languageLevel, text);
   }
 
-  public abstract @NotNull PyPattern createPatternFromText(@NotNull LanguageLevel languageLevel, @NotNull String text) throws IncorrectOperationException;
+  public abstract @NotNull PyPattern createPatternFromText(@NotNull LanguageLevel languageLevel, @NotNull String text)
+    throws IncorrectOperationException;
 
   /**
    * Adds elements to list inserting required commas.
@@ -130,10 +132,22 @@ public abstract class PyElementGenerator extends PyAstElementGenerator {
    * @param alias         optional alias for {@code as alias} part
    * @return created {@link PyFromImportStatement}
    */
-  public abstract @NotNull PyFromImportStatement createFromImportStatement(@NotNull LanguageLevel languageLevel,
+  public @NotNull PyFromImportStatement createFromImportStatement(@NotNull LanguageLevel languageLevel,
                                                                   @NotNull String qualifier,
                                                                   @NotNull String name,
-                                                                  @Nullable String alias);
+                                                                  @Nullable String alias) {
+    return createFromImportStatement(languageLevel, qualifier, name, alias, false);
+  }
+
+  /**
+   * Same as {@link #createFromImportStatement(LanguageLevel, String, String, String)} but with an optional
+   * {@code lazy} prefix (PEP 810).
+   */
+  public abstract @NotNull PyFromImportStatement createFromImportStatement(@NotNull LanguageLevel languageLevel,
+                                                                           @NotNull String qualifier,
+                                                                           @NotNull String name,
+                                                                           @Nullable String alias,
+                                                                           boolean lazy);
 
   /**
    * Creates import statement of form {@code import name as alias}.
@@ -142,10 +156,23 @@ public abstract class PyElementGenerator extends PyAstElementGenerator {
    * @param name          text of the reference in import element (module name)
    * @param alias         optional alias for {@code as alias} part
    * @return created {@link PyImportStatement}
+   * @deprecated use #createImportStatement(com.jetbrains.python.psi.LanguageLevel, java.lang.String, java.lang.String, boolean)
+   */
+  @Deprecated
+  public @NotNull PyImportStatement createImportStatement(@NotNull LanguageLevel languageLevel,
+                                                          @NotNull String name,
+                                                          @Nullable String alias) {
+    return createImportStatement(languageLevel, name, alias, false);
+  }
+
+  /**
+   * Same as {@link #createImportStatement(LanguageLevel, String, String)} but with an optional
+   * {@code lazy} prefix (PEP 810).
    */
   public abstract @NotNull PyImportStatement createImportStatement(@NotNull LanguageLevel languageLevel,
-                                                          @NotNull String name,
-                                                          @Nullable String alias);
+                                                                   @NotNull String name,
+                                                                   @Nullable String alias,
+                                                                   boolean lazy);
 
   public abstract @NotNull PyEllipsisLiteralExpression createEllipsis();
 

@@ -8,17 +8,26 @@ import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.idea.maven.server.security.MavenToken;
 import org.jetbrains.idea.maven.server.security.TokenReader;
 
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.*;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Scanner;
 
 public final class MavenServerUtil {
-  private static final Properties mySystemPropertiesCache;
+  private static final Properties mySystemPropertiesCache = mavenPropsFromEnvironment(System.getenv(), SystemInfoRt.isWindows);
   private static MavenToken ourToken;
 
 
-
-  static {
+  public static Properties mavenPropsFromEnvironment(Map<String, String> env, boolean isWindows) {
     Properties res = new Properties();
     res.putAll((Properties)System.getProperties().clone());
 
@@ -28,20 +37,19 @@ public final class MavenServerUtil {
         itr.remove();
       }
     }
-
-    for (Map.Entry<String, String> entry : System.getenv().entrySet()) {
+    for (Map.Entry<String, String> entry : env.entrySet()) {
       String key = entry.getKey();
 
       if (isMagicalProperty(key)) continue;
 
-      if (SystemInfoRt.isWindows) {
+      if (isWindows) {
         key = key.toUpperCase(Locale.ENGLISH);
       }
 
       res.setProperty("env." + key, entry.getValue());
+      res.setProperty(key, entry.getValue());
     }
-
-    mySystemPropertiesCache = res;
+    return res;
   }
 
   public static Properties collectSystemProperties() {
@@ -52,8 +60,7 @@ public final class MavenServerUtil {
     File baseDir = workingDir;
     File dir = workingDir;
     while (dir != null) {
-      MavenServerStatsCollector.fileRead(new File(dir, ".mvn"));
-      if (new File(dir, ".mvn").exists()) {
+      if (isDotMvnRoot(dir) || isPomXmlRoot(dir)) {
         baseDir = dir;
         break;
       }
@@ -67,6 +74,39 @@ public final class MavenServerUtil {
     }
   }
 
+  private static boolean isPomXmlRoot(File dir) {
+    File pom = new File(dir, "pom.xml");
+    //we cannot use any maven models here, just good old XML parsing
+    try (BufferedInputStream is = new BufferedInputStream(new FileInputStream(pom))) {
+      XMLInputFactory factory = XMLInputFactory.newFactory();
+      try {
+        factory.setProperty("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setProperty("http://xml.org/sax/features/external-general-entities", false);
+        factory.setProperty("http://xml.org/sax/features/external-parameter-entities", false);
+      }
+      catch (IllegalArgumentException ignored) {
+      }
+      XMLStreamReader parser = factory.createXMLStreamReader(is);
+      if (parser.nextTag() != XMLStreamConstants.START_ELEMENT || !parser.getLocalName().equals("project")) {
+        return false;
+      }
+      for (int i = 0; i < parser.getAttributeCount(); i++) {
+        String attributeName = parser.getAttributeLocalName(i);
+        String attributeValue = parser.getAttributeValue(i);
+        if ("root".equals(attributeName) && Boolean.parseBoolean(attributeValue)) {
+          return true;
+        }
+      }
+    }
+    catch (IOException | XMLStreamException ignore) {
+      return false;
+    }
+    return false;
+  }
+
+  private static boolean isDotMvnRoot(File dir) {
+    return new File(dir, ".mvn").isDirectory();
+  }
 
   private static boolean isMagicalProperty(String key) {
     return key.startsWith("=");
@@ -99,7 +139,8 @@ public final class MavenServerUtil {
   public static void readToken() {
     try {
       ourToken = new TokenReader(new Scanner(System.in), 10000).getToken();
-    } catch (Throwable e) {
+    }
+    catch (Throwable e) {
       ExceptionUtilRt.rethrowUnchecked(e);
     }
   }

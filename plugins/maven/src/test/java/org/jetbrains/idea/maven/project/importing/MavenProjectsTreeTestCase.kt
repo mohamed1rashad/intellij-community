@@ -12,7 +12,15 @@ import com.intellij.testFramework.RunAll
 import com.intellij.util.ThrowableRunnable
 import org.jetbrains.idea.maven.buildtool.MavenLogEventHandler
 import org.jetbrains.idea.maven.model.MavenExplicitProfiles
-import org.jetbrains.idea.maven.project.*
+import org.jetbrains.idea.maven.project.MavenEmbedderWrappers
+import org.jetbrains.idea.maven.project.MavenEmbedderWrappersManager
+import org.jetbrains.idea.maven.project.MavenGeneralSettings
+import org.jetbrains.idea.maven.project.MavenProject
+import org.jetbrains.idea.maven.project.MavenProjectChanges
+import org.jetbrains.idea.maven.project.MavenProjectResolver
+import org.jetbrains.idea.maven.project.MavenProjectsManager
+import org.jetbrains.idea.maven.project.MavenProjectsTree
+import org.jetbrains.idea.maven.project.MavenSettingsCache
 import org.jetbrains.idea.maven.utils.MavenUtil
 import java.io.IOException
 import java.util.concurrent.CopyOnWriteArrayList
@@ -27,15 +35,11 @@ abstract class MavenProjectsTreeTestCase : MavenMultiVersionImportingTestCase() 
       return myTree!!
     }
 
-  @Throws(Exception::class)
-  override fun setUpInWriteAction() {
-    super.setUpInWriteAction()
-    myTree = MavenProjectsManager.getInstance(project).getProjectsTree()
-  }
 
   override fun setUp() {
     super.setUp()
     mavenEmbedderWrappers = project.service<MavenEmbedderWrappersManager>().createMavenEmbedderWrappers()
+    myTree = MavenProjectsManager.getInstance(project).getProjectsTree()
   }
 
   override fun tearDown() {
@@ -49,17 +53,16 @@ abstract class MavenProjectsTreeTestCase : MavenMultiVersionImportingTestCase() 
     updateAll(emptyList<String>(), *files)
   }
 
-  protected suspend fun updateAll(profiles: List<String?>?, vararg files: VirtualFile) {
-    tree.resetManagedFilesAndProfiles(listOf(*files), MavenExplicitProfiles(profiles))
-    tree.updateAll(false, mavenGeneralSettings, mavenEmbedderWrappers, rawProgressReporter)
+  protected suspend fun updateAll(profiles: List<String>, vararg files: VirtualFile) {
+    tree.updateAll(listOf(*files),false, mavenGeneralSettings, MavenExplicitProfiles(profiles, emptySet()), mavenEmbedderWrappers, rawProgressReporter)
   }
 
   protected suspend fun update(file: VirtualFile) {
-    tree.update(listOf(file), false, mavenGeneralSettings, mavenEmbedderWrappers, rawProgressReporter)
+    tree.update(listOf(file), false, mavenGeneralSettings, MavenExplicitProfiles.NONE, mavenEmbedderWrappers, rawProgressReporter)
   }
 
   protected suspend fun deleteProject(file: VirtualFile) {
-    tree.delete(listOf(file), mavenGeneralSettings, mavenEmbedderWrappers, rawProgressReporter)
+    tree.delete(listOf(file), mavenGeneralSettings, MavenExplicitProfiles.NONE, mavenEmbedderWrappers, rawProgressReporter)
   }
 
   @Throws(IOException::class)
@@ -98,12 +101,16 @@ abstract class MavenProjectsTreeTestCase : MavenMultiVersionImportingTestCase() 
       add(text, updated.map { it.mavenId.artifactId }.toSet())
     }
 
-    override fun projectResolved(projectWithChanges: Pair<MavenProject, MavenProjectChanges>) {
-      add("resolved", setOf(projectWithChanges.first.mavenId.artifactId))
+    override fun projectsResolved(projects: List<MavenProject>) {
+      for (project in projects) {
+        add("resolved", setOf(project.mavenId.artifactId))
+      }
     }
 
-    override fun pluginsResolved(project: MavenProject) {
-      add("plugins", setOf(project.mavenId.artifactId))
+    override fun pluginsResolved(projects: List<MavenProject>) {
+      for (project in projects) {
+        add("plugins", setOf(project.mavenId.artifactId))
+      }
     }
 
     override fun foldersResolved(projectWithChanges: Pair<MavenProject, MavenProjectChanges>) {
@@ -121,6 +128,7 @@ abstract class MavenProjectsTreeTestCase : MavenMultiVersionImportingTestCase() 
     resolver.resolve(true,
                      listOf(mavenProject),
                      tree,
+                     MavenExplicitProfiles.NONE,
                      tree.workspaceMap,
                      MavenSettingsCache.getInstance(project).getEffectiveUserLocalRepo(),
                      updateSnapshots,

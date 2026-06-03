@@ -17,7 +17,10 @@ enum class SeLog {
   WARNING,
   LISTENERS,
   BALANCING,
-  EQUALITY;
+  EQUALITY,
+  SCOPE,
+  PATTERN,
+  CARET;
 
   companion object {
     private val allowedCategories = setOf(
@@ -30,7 +33,9 @@ enum class SeLog {
       WARNING,
       LISTENERS,
       BALANCING,
-      EQUALITY
+      EQUALITY,
+      PATTERN,
+      CARET,
     )
 
     // #com.intellij.platform.searchEverywhere.providers.SeLog

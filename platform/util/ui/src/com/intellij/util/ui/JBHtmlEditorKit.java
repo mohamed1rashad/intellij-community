@@ -12,12 +12,27 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
+import javax.swing.JEditorPane;
+import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
-import javax.swing.text.*;
-import javax.swing.text.html.*;
-import java.awt.*;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import javax.swing.text.Element;
+import javax.swing.text.MutableAttributeSet;
+import javax.swing.text.StyledDocument;
+import javax.swing.text.ViewFactory;
+import javax.swing.text.html.CSS;
+import javax.swing.text.html.HTML;
+import javax.swing.text.html.HTMLDocument;
+import javax.swing.text.html.HTMLEditorKit;
+import javax.swing.text.html.StyleSheet;
+import java.awt.Cursor;
+import java.awt.Font;
+import java.awt.Point;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeEvent;
@@ -51,18 +66,8 @@ public class JBHtmlEditorKit extends HTMLEditorKit {
    */
   @Deprecated
   public JBHtmlEditorKit() {
-    this(true);
-  }
-
-  /**
-   * @deprecated use {@link HTMLEditorKitBuilder}
-   */
-  @Deprecated(forRemoval = true)
-  public JBHtmlEditorKit(boolean noGapsBetweenParagraphs) {
     this(ExtendableHTMLViewFactory.DEFAULT, StyleSheetUtil.getDefaultStyleSheet(), false);
-    if (noGapsBetweenParagraphs) {
-      getStyleSheet().addStyleSheet(StyleSheetUtil.INSTANCE.getNO_GAPS_BETWEEN_PARAGRAPHS_STYLE());
-    }
+    getStyleSheet().addStyleSheet(StyleSheetUtil.INSTANCE.getNO_GAPS_BETWEEN_PARAGRAPHS_STYLE());
   }
 
   /**
@@ -249,27 +254,32 @@ public class JBHtmlEditorKit extends HTMLEditorKit {
     }
   }
 
-  /**
-   * @see HTMLEditorKitBuilder
-   * @deprecated in favor of {@link ExtendableHTMLViewFactory}
-   */
-  @Deprecated(forRemoval = true)
-  public static class JBHtmlFactory extends HTMLFactory {
-
-    private final ViewFactory myDelegate = ExtendableHTMLViewFactory.DEFAULT;
-
-    @Override
-    public View create(Element elem) {
-      return myDelegate.create(elem);
-    }
-  }
-
   @ApiStatus.Internal
   public final class JBHtmlDocument extends HTMLDocument {
+
+    private long myModCount = 0L;
+
     private JBHtmlDocument(StyleSheet styles) {
       super(styles);
       TextLayoutUtil.disableTextLayoutIfNeeded(this);
       patchAttributes(styles);
+      addDocumentListener(new DocumentListener() {
+
+        @Override
+        public void insertUpdate(DocumentEvent e) {
+          myModCount++;
+        }
+
+        @Override
+        public void removeUpdate(DocumentEvent e) {
+          myModCount++;
+        }
+
+        @Override
+        public void changedUpdate(DocumentEvent e) {
+          myModCount++;
+        }
+      });
     }
 
     @Override
@@ -296,6 +306,10 @@ public class JBHtmlEditorKit extends HTMLEditorKit {
       }
       HTMLReader reader = new JBHtmlReader(pos, popDepth, pushDepth, insertTag);
       return myDisableLinkedCss ? new CallbackWrapper(reader) : reader;
+    }
+
+    public long getModCount() {
+      return myModCount;
     }
 
     public void tryRunUnderWriteLock(Runnable runnable) {

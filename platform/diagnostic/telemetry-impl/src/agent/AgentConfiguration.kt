@@ -7,7 +7,7 @@ import com.intellij.platform.diagnostic.telemetry.rt.context.TelemetryContext
 import org.jetbrains.annotations.ApiStatus
 import java.net.URI
 import java.nio.file.Path
-import java.util.*
+import java.util.Properties
 import kotlin.time.Duration
 
 @ApiStatus.Internal
@@ -140,7 +140,7 @@ data class AgentConfiguration(
   private fun getAgentExtensionPath(): Path? {
     val moduleDescriptor = PluginManagerCore.getPluginSet().findEnabledModule(PluginModuleId(AGENT_EXTENSION_MODULE_NAME, PluginModuleId.JETBRAINS_NAMESPACE))
                            ?: return null
-    return moduleDescriptor.jarFiles?.first {
+    return moduleDescriptor.ownClassPath?.first {
       it.fileName.toString() == "$AGENT_EXTENSION_MODULE_NAME.jar"
     }
   }

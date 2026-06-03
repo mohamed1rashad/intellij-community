@@ -10,7 +10,18 @@ import com.intellij.java.analysis.JavaAnalysisBundle;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.ModificationTracker;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiRecordComponent;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.impl.light.LightElement;
 import com.intellij.psi.impl.source.PsiMethodImpl;
 import com.intellij.psi.util.CachedValue;
@@ -163,13 +174,15 @@ public enum Mutability {
     if (AnnotationUtil.isAnnotated(owner, Collections.singleton(UNMODIFIABLE_ANNOTATION),
                                    AnnotationUtil.CHECK_HIERARCHY |
                                    AnnotationUtil.CHECK_EXTERNAL |
-                                   AnnotationUtil.CHECK_INFERRED)) {
+                                   AnnotationUtil.CHECK_INFERRED |
+                                   AnnotationUtil.CHECK_TYPE)) {
       return UNMODIFIABLE;
     }
     if (AnnotationUtil.isAnnotated(owner, Collections.singleton(UNMODIFIABLE_VIEW_ANNOTATION),
                                    AnnotationUtil.CHECK_HIERARCHY |
                                    AnnotationUtil.CHECK_EXTERNAL |
-                                   AnnotationUtil.CHECK_INFERRED)) {
+                                   AnnotationUtil.CHECK_INFERRED |
+                                   AnnotationUtil.CHECK_TYPE)) {
       return UNMODIFIABLE_VIEW;
     }
     if (owner instanceof PsiField field && owner.hasModifierProperty(PsiModifier.FINAL)) {

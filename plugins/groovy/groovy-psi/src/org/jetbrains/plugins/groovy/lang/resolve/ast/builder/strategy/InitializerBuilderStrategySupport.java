@@ -4,7 +4,15 @@ package org.jetbrains.plugins.groovy.lang.resolve.ast.builder.strategy;
 import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameterListOwner;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.impl.light.LightMethodBuilder;
 import com.intellij.psi.impl.light.LightPsiClassBuilder;
 import com.intellij.psi.impl.light.LightTypeParameterBuilder;
@@ -15,6 +23,7 @@ import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
 import org.jetbrains.plugins.groovy.lang.resolve.ast.builder.BuilderAnnotationContributor;
 import org.jetbrains.plugins.groovy.lang.resolve.ast.builder.BuilderHelperLightPsiClass;
 import org.jetbrains.plugins.groovy.transformations.TransformationContext;
+import org.jetbrains.plugins.groovy.transformations.singleton.LightAstTransformationSupport;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -22,7 +31,11 @@ import java.util.Objects;
 import static org.jetbrains.plugins.groovy.lang.resolve.ast.builder.strategy.DefaultBuilderStrategySupport.getBuilderClassName;
 import static org.jetbrains.plugins.groovy.lang.resolve.ast.builder.strategy.DefaultBuilderStrategySupport.getFieldMethodName;
 
-public final class InitializerBuilderStrategySupport extends BuilderAnnotationContributor {
+/**
+ * Same as {@link DefaultBuilderStrategySupport}, but uses {@link groovy.transform.builder.InitializerStrategy}
+ *
+ */
+public final class InitializerBuilderStrategySupport extends BuilderAnnotationContributor implements LightAstTransformationSupport {
 
   public static final String INITIALIZER_STRATEGY_NAME = "InitializerStrategy";
   public static final String SET_FQN = "groovy.transform.builder.InitializerStrategy.SET";

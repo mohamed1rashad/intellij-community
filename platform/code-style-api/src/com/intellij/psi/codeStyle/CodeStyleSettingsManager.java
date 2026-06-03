@@ -19,7 +19,11 @@ import com.intellij.psi.PsiFile;
 import com.intellij.util.containers.WeakList;
 import com.intellij.util.messages.MessageBus;
 import org.jdom.Element;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.lang.reflect.Field;
 import java.util.Collection;
@@ -33,7 +37,8 @@ public class CodeStyleSettingsManager implements PersistentStateComponentWithMod
   /**
    * @deprecated Use {@link #setMainProjectCodeStyle(CodeStyleSettings)} or {@link #getMainProjectCodeStyle()} instead
    */
-  @Deprecated(forRemoval = true) public volatile @Nullable CodeStyleSettings PER_PROJECT_SETTINGS;
+  @ApiStatus.Internal
+  public volatile @Nullable CodeStyleSettings PER_PROJECT_SETTINGS;
 
   public volatile boolean USE_PER_PROJECT_SETTINGS;
   public volatile String PREFERRED_PROJECT_CODE_STYLE;
@@ -404,6 +409,9 @@ public class CodeStyleSettingsManager implements PersistentStateComponentWithMod
   }
 
   private void fireCodeStyleSettingsChanged(@NotNull CodeStyleSettingsChangeEvent event) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Firing code style settings changed event: " + event);
+    }
     MessageBus bus = getMessageBus();
     if (!bus.isDisposed()) {
       bus.syncPublisher(CodeStyleSettingsListener.TOPIC).codeStyleSettingsChanged(event);

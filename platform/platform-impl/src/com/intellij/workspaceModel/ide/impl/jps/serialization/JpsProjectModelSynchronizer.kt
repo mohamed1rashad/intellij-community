@@ -13,7 +13,11 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.backgroundWriteAction
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.ComponentManagerEx
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceAsync
+import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.module.ModuleManager
@@ -32,16 +36,30 @@ import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
-import com.intellij.platform.backend.workspace.*
+import com.intellij.platform.backend.workspace.BuilderSnapshot
+import com.intellij.platform.backend.workspace.WorkspaceModel
+import com.intellij.platform.backend.workspace.WorkspaceModelChangeListener
+import com.intellij.platform.backend.workspace.WorkspaceModelTopics
+import com.intellij.platform.backend.workspace.WorkspaceModelUnloadedStorageChangeListener
 import com.intellij.platform.backend.workspace.impl.WorkspaceModelInternal
 import com.intellij.platform.diagnostic.telemetry.helpers.Milliseconds
 import com.intellij.platform.diagnostic.telemetry.helpers.MillisecondsMeasurer
-import com.intellij.platform.eel.provider.getEelDescriptor
-import com.intellij.platform.workspace.jps.*
+import com.intellij.platform.eel.provider.getEelMachine
+import com.intellij.platform.workspace.jps.CustomModuleEntitySource
+import com.intellij.platform.workspace.jps.JpsFileDependentEntitySource
+import com.intellij.platform.workspace.jps.JpsFileEntitySource
+import com.intellij.platform.workspace.jps.JpsGlobalFileEntitySource
+import com.intellij.platform.workspace.jps.JpsImportedEntitySource
 import com.intellij.platform.workspace.jps.entities.ContentRootEntity
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
-import com.intellij.platform.workspace.jps.serialization.impl.*
+import com.intellij.platform.workspace.jps.serialization.impl.ErrorReporter
+import com.intellij.platform.workspace.jps.serialization.impl.FileInDirectorySourceNames
+import com.intellij.platform.workspace.jps.serialization.impl.JpsConfigurationFilesChange
+import com.intellij.platform.workspace.jps.serialization.impl.JpsFileContentWriter
 import com.intellij.platform.workspace.jps.serialization.impl.JpsProjectEntitiesLoader.createProjectSerializers
+import com.intellij.platform.workspace.jps.serialization.impl.JpsProjectSerializers
+import com.intellij.platform.workspace.jps.serialization.impl.JpsProjectSerializersImpl
+import com.intellij.platform.workspace.jps.serialization.impl.UrlAndChangeRequestor
 import com.intellij.platform.workspace.storage.DummyParentEntitySource
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.MutableEntityStorage
@@ -51,17 +69,23 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.project.ProjectStoreOwner
-import com.intellij.util.PlatformUtils.*
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext
+import com.intellij.util.PlatformUtils.getPlatformPrefix
+import com.intellij.util.PlatformUtils.isFleetBackend
+import com.intellij.util.PlatformUtils.isIntelliJ
+import com.intellij.util.PlatformUtils.isRider
 import com.intellij.workspaceModel.ide.EntitiesOrphanage
 import com.intellij.workspaceModel.ide.getJpsProjectConfigLocation
-import com.intellij.workspaceModel.ide.impl.*
+import com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModel
+import com.intellij.workspaceModel.ide.impl.WorkspaceModelFusLogger
+import com.intellij.workspaceModel.ide.impl.WorkspaceModelImpl
+import com.intellij.workspaceModel.ide.impl.WorkspaceModelInitialTestContent
+import com.intellij.workspaceModel.ide.impl.jpsMetrics
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.LegacyCustomLibraryEntitySource
 import io.opentelemetry.api.metrics.Meter
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.jps.util.JpsPathUtil
-import java.util.*
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -71,7 +95,6 @@ import java.util.concurrent.atomic.AtomicReference
 @Service(Service.Level.PROJECT)
 class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
   companion object {
-    @RequiresBlockingContext
     fun getInstance(project: Project): JpsProjectModelSynchronizer = project.service()
 
     private val LOG = logger<JpsProjectModelSynchronizer>()
@@ -157,7 +180,8 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
       return@addMeasuredTime
     }
 
-    val description = "Reload entities after changes in JPS configuration files"
+    val requestors = (changes.addedFileUrls + changes.removedFileUrls + changes.changedFileUrls).mapTo(HashSet()) { it.second }
+    val description = "Reload entities after changes in JPS configuration files. VFS change requestors: $requestors"
     val affectedEntityFilter: (EntitySource) -> Boolean = {
       it in reloadingResult.affectedSources
       || (it is JpsImportedEntitySource && !it.storedExternally && it.internalFile in reloadingResult.affectedSources)
@@ -295,9 +319,9 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
       override fun after(events: List<VFileEvent>) {
         //todo support move/rename
         //todo optimize: filter events before creating lists
-        var addedUrls: MutableList<String>? = null
-        var removedUrls: MutableList<String>? = null
-        var changedUrls: MutableList<String>? = null
+        var addedUrls: MutableList<UrlAndChangeRequestor>? = null
+        var removedUrls: MutableList<UrlAndChangeRequestor>? = null
+        var changedUrls: MutableList<UrlAndChangeRequestor>? = null
         // JPS model is loaded from *.iml files, files in .idea directory (modules.xml),
         // files from directories in .idea (libraries) and *.ipr file, so we can ignore all other events to speed up processing
         for (event in events) {
@@ -310,7 +334,7 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
                   if (addedUrls == null) {
                     addedUrls = mutableListOf()
                   }
-                  addedUrls.add(JpsPathUtil.pathToUrl(event.path))
+                  addedUrls.add(Pair(JpsPathUtil.pathToUrl(event.path), event.requestor))
                 }
               }
               is VFileDeleteEvent -> {
@@ -318,7 +342,7 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
                   if (removedUrls == null) {
                     removedUrls = mutableListOf()
                   }
-                  removedUrls.add(JpsPathUtil.pathToUrl(event.path))
+                  removedUrls.add(Pair(JpsPathUtil.pathToUrl(event.path), event.requestor))
                 }
               }
               is VFileContentChangeEvent -> {
@@ -326,7 +350,7 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
                   if (changedUrls == null) {
                     changedUrls = mutableListOf()
                   }
-                  changedUrls.add(JpsPathUtil.pathToUrl(event.path))
+                  changedUrls.add(Pair(JpsPathUtil.pathToUrl(event.path), event.requestor))
                 }
               }
             }
@@ -389,7 +413,7 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
       workspaceModel.entityTracer.printInfoAboutTracedEntity(builder, "JPS files")
       childActivity = childActivity?.endAndStart("applying entities from global storage")
       val mutableStorage = MutableEntityStorage.create()
-      GlobalWorkspaceModel.getInstanceAsync(project.getEelDescriptor().machine).applyStateToProjectBuilder(mutableStorage, workspaceModel)
+      GlobalWorkspaceModel.getInstanceAsync(project.getEelMachine()).applyStateToProjectBuilder(mutableStorage, workspaceModel)
       builder.applyChangesFrom(mutableStorage)
       childActivity = childActivity?.endAndStart("applying loaded changes (in queue)")
       LoadedProjectEntities(builder, orphanage, unloadedEntitiesBuilder, sourcesToUpdate)
@@ -477,6 +501,7 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
   // IDEA-288703
   suspend fun hasNoSerializedJpsModules(): Boolean {
     return !isIntelliJ() && // todo: https://youtrack.jetbrains.com/issue/IDEA-291451#focus=Comments-27-5967781.0-0
+           !isAndroidStudio() &&
            !isRider() &&
            !isFleetBackend() && // https://youtrack.jetbrains.com/issue/IDEA-323592#focus=Comments-27-7967807.0-0
            (prepareSerializers() as JpsProjectSerializersImpl).moduleSerializers.isEmpty()
@@ -517,7 +542,7 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
     return createProjectSerializers(configLocation, externalStoragePath, context)
   }
 
-  fun saveChangedProjectEntities(writer: JpsFileContentWriter, workspaceModel: WorkspaceModel): Unit = saveChangedProjectEntitiesTimeMs.addMeasuredTime {
+  suspend fun saveChangedProjectEntities(writer: JpsFileContentWriter, workspaceModel: WorkspaceModel): Unit = saveChangedProjectEntitiesTimeMs.addMeasuredTime {
     LOG.debug("Saving project entities")
     val data = serializers.get()
     if (data == null) {
@@ -581,9 +606,9 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
     if (singleChange != null) {
       return singleChange
     }
-    val allAdded = LinkedHashSet<String>()
-    val allRemoved = LinkedHashSet<String>()
-    val allChanged = LinkedHashSet<String>()
+    val allAdded = LinkedHashSet<UrlAndChangeRequestor>()
+    val allRemoved = LinkedHashSet<UrlAndChangeRequestor>()
+    val allChanged = LinkedHashSet<UrlAndChangeRequestor>()
     for (change in incomingChanges) {
       allChanged.addAll(change.changedFileUrls)
       for (addedUrl in change.addedFileUrls) {
@@ -609,6 +634,8 @@ class JpsProjectModelSynchronizer(private val project: Project) : Disposable {
 
   @TestOnly
   fun getSerializers(): JpsProjectSerializersImpl = serializers.get() as JpsProjectSerializersImpl
+
+  private fun isAndroidStudio(): Boolean = getPlatformPrefix() == "AndroidStudio"
 }
 
 @ApiStatus.Internal

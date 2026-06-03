@@ -2,6 +2,11 @@
 package com.jetbrains.python.sdk;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.TypeAdapter;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.JsonWriter;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SdkAdditionalData;
@@ -23,16 +28,23 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Python-specific stuff each SDK must have. Use ``PySdkExt.getOrCreateAdditionalData`` to obtain it.
  */
 // TODO: Use new annotation-based API to save data instead of legacy manual save
 public class PythonSdkAdditionalData implements SdkAdditionalData {
+  private static final PyFlavorAndData<?, ?> UNKNOWN_DATA = new PyFlavorAndData<>(PyFlavorData.Empty.INSTANCE,
+                                                                                                          PythonSdkFlavor.UnknownFlavor.INSTANCE);
   @ApiStatus.Internal
-  public static final @NonNls String REQUIREMENT_TXT_DEFAULT = "requirements.txt";
+  public static final Path REQUIREMENT_TXT_DEFAULT = Path.of("requirements.txt");
 
   private static final @NonNls String PATHS_ADDED_BY_USER_ROOT = "PATHS_ADDED_BY_USER_ROOT";
   private static final @NonNls String PATH_ADDED_BY_USER = "PATH_ADDED_BY_USER";
@@ -56,7 +68,7 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
   private String myAssociatedModulePath;
   private Path myRequiredTxtPath;
 
-  private final Gson myGson = new Gson();
+  private final Gson myGson = new GsonBuilder().registerTypeAdapter(Path.class, new PathSerializer()).create();
 
 
   public PythonSdkAdditionalData() {
@@ -70,7 +82,7 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
   @Deprecated(forRemoval = true)
   public PythonSdkAdditionalData(@Nullable PythonSdkFlavor<?> flavor) {
     this(flavor == null
-         ? PyFlavorAndData.getUNKNOWN_FLAVOR_DATA()
+         ? UNKNOWN_DATA
          : new PyFlavorAndData(PyFlavorData.Empty.INSTANCE, ensureSupportsEmptyData(flavor)));
   }
 
@@ -82,7 +94,7 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
   }
 
   public PythonSdkAdditionalData(@Nullable PyFlavorAndData<?, ?> flavorAndData) {
-    myFlavorAndData = (flavorAndData != null ? flavorAndData : PyFlavorAndData.getUNKNOWN_FLAVOR_DATA());
+    myFlavorAndData = (flavorAndData != null ? flavorAndData : UNKNOWN_DATA);
     myAddedPaths = VirtualFilePointerManager.getInstance().createContainer(PythonPluginDisposable.getInstance());
     myExcludedPaths = VirtualFilePointerManager.getInstance().createContainer(PythonPluginDisposable.getInstance());
     myPathsToTransfer = VirtualFilePointerManager.getInstance().createContainer(PythonPluginDisposable.getInstance());
@@ -96,14 +108,6 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
     myRequiredTxtPath = from.myRequiredTxtPath;
     myFlavorAndData = from.myFlavorAndData;
     myUUID = from.myUUID;
-  }
-
-  /**
-   * Temporary hack to deal with leagcy conda. Use constructor instead
-   */
-  @ApiStatus.Internal
-  public final void changeFlavorAndData(@NotNull PyFlavorAndData<?, ?> flavorAndData) {
-    this.myFlavorAndData = flavorAndData;
   }
 
   /**
@@ -291,5 +295,27 @@ public class PythonSdkAdditionalData implements SdkAdditionalData {
     Set<VirtualFile> ret = new LinkedHashSet<>();
     Collections.addAll(ret, paths.getFiles());
     return ret;
+  }
+
+  private static class PathSerializer extends TypeAdapter<@Nullable Path> {
+    @Override
+    public void write(JsonWriter out, @Nullable Path value) throws IOException {
+      if (value == null) {
+        out.nullValue();
+      }
+      else {
+        out.value(value.toString());
+      }
+    }
+
+    @Override
+    public @Nullable Path read(JsonReader in) throws IOException {
+      if (in.peek() == JsonToken.NULL) {
+        in.nextNull();
+        return null;
+      }
+
+      return Path.of(in.nextString());
+    }
   }
 }

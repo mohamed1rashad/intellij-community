@@ -1,8 +1,8 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.util
 
+import com.intellij.openapi.diagnostic.rethrowControlFlowException
 import com.intellij.openapi.externalSystem.model.execution.ExternalSystemTaskExecutionSettings
-import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunnableState
 import com.intellij.openapi.externalSystem.service.execution.ProgressExecutionMode
 import com.intellij.openapi.externalSystem.util.task.TaskExecutionSpec
 import com.intellij.openapi.externalSystem.util.task.TaskExecutionUtil
@@ -15,7 +15,7 @@ import com.intellij.platform.eel.getOrThrow
 import com.intellij.platform.eel.path.EelPath
 import com.intellij.platform.eel.provider.asNioPath
 import com.intellij.platform.eel.provider.getEelDescriptor
-import kotlinx.coroutines.CancellationException
+import com.intellij.platform.eel.provider.toEelApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.future.asCompletableFuture
 import org.jetbrains.annotations.Nls
@@ -23,7 +23,7 @@ import org.jetbrains.plugins.gradle.GradleJavaCoroutineScope.gradleCoroutineScop
 import org.jetbrains.plugins.gradle.service.execution.loadDownloadArtifactInitScript
 import org.jetbrains.plugins.gradle.service.task.GradleTaskManager
 import java.nio.file.Path
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.readText
@@ -56,7 +56,14 @@ object GradleArtifactDownloader {
     errorHandler: GradleDependencySourceDownloaderErrorHandler,
   ): CompletableFuture<Path?> {
     return project.gradleCoroutineScope.async {
-      downloadArtifactImpl(project, executionName, artifactNotation, projectPath, errorHandler)
+      try {
+        downloadArtifactImpl(project, executionName, artifactNotation, projectPath)
+      }
+      catch (exception: Exception) {
+        rethrowControlFlowException(exception)
+        errorHandler.handle(project, projectPath, artifactNotation, exception)
+        null
+      }
     }.asCompletableFuture()
   }
 
@@ -65,8 +72,7 @@ object GradleArtifactDownloader {
     executionName: @Nls String,
     artifactNotation: String,
     projectPath: String,
-    errorHandler: GradleDependencySourceDownloaderErrorHandler,
-  ): Path? {
+  ): Path {
     val eel = project.getEelDescriptor().toEelApi()
     val taskOutputEelPath = createTaskOutputFile(eel)
     val taskOutputPath = taskOutputEelPath.asNioPath()
@@ -88,10 +94,10 @@ object GradleArtifactDownloader {
           .withProgressExecutionMode(ProgressExecutionMode.IN_BACKGROUND_ASYNC)
           .withUserData(UserDataHolderBase().apply {
             putUserData(GradleTaskManager.VERSION_SPECIFIC_SCRIPTS_KEY, initScript)
-            putUserData(ExternalSystemRunnableState.NAVIGATE_TO_ERROR, errorHandler.navigateToError())
           })
           .withActivateToolWindowBeforeRun(false)
           .withActivateToolWindowOnFailure(false)
+          .dontNavigateToError()
       )
 
       val downloadedArtifactPath = taskOutputPath.readText().toEelPath(eel).asNioPath()
@@ -99,13 +105,6 @@ object GradleArtifactDownloader {
         throw IllegalStateException("Incorrect file header: $downloadedArtifactPath. Unable to process downloaded file as a JAR file")
       }
       return downloadedArtifactPath
-    }
-    catch (ce: CancellationException) {
-      throw ce
-    }
-    catch (e: Exception) {
-      errorHandler.handle(project, projectPath, artifactNotation, e)
-      return null
     }
     finally {
       taskOutputPath.deleteIfExists()

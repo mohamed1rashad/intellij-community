@@ -65,7 +65,19 @@ object CoroutinesIds {
             val ID: ClassId = ClassId(PACKAGE, Name.identifier("Flow"))
         }
 
+        val count: CallableId = CallableId(PACKAGE, Name.identifier("count"))
+        val filter: CallableId = CallableId(PACKAGE, Name.identifier("filter"))
+        val filterIsInstance: CallableId = CallableId(PACKAGE, Name.identifier("filterIsInstance"))
+        val filterNotNull: CallableId = CallableId(PACKAGE, Name.identifier("filterNotNull"))
+        val first: CallableId = CallableId(PACKAGE, Name.identifier("first"))
+        val firstOrNull: CallableId = CallableId(PACKAGE, Name.identifier("firstOrNull"))
+        val flatMapConcat: CallableId = CallableId(PACKAGE, Name.identifier("flatMapConcat"))
+        val flatMapMerge: CallableId = CallableId(PACKAGE, Name.identifier("flatMapMerge"))
+        val flattenConcat: CallableId = CallableId(PACKAGE, Name.identifier("flattenConcat"))
+        val flattenMerge: CallableId = CallableId(PACKAGE, Name.identifier("flattenMerge"))
         val flowOn: CallableId = CallableId(PACKAGE, Name.identifier("flowOn"))
+        val map: CallableId = CallableId(PACKAGE, Name.identifier("map"))
+        val mapNotNull: CallableId = CallableId(PACKAGE, Name.identifier("mapNotNull"))
     }
     
     object CoroutineDispatcher {
@@ -84,7 +96,9 @@ object CoroutinesIds {
     val promise: CallableId = CallableId(PACKAGE, Name.identifier("promise"))
 
     object ParameterNames {
+        val concurrency: Name = Name.identifier("concurrency")
         val context: Name = Name.identifier("context")
+        val transform: Name = Name.identifier("transform")
     }
 
     object Stdlib {

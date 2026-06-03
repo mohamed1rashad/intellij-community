@@ -1,12 +1,21 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.testFramework
 
-import com.intellij.ide.plugins.*
+import com.intellij.ide.plugins.DynamicPlugins
+import com.intellij.ide.plugins.IdeaPluginDescriptorImpl
+import com.intellij.ide.plugins.PluginDescriptorLoadingContext
+import com.intellij.ide.plugins.PluginMainDescriptor
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.plugins.loadDescriptorFromFileOrDirInTests
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.util.BuildNumber
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.platform.testFramework.plugins.*
+import com.intellij.platform.testFramework.plugins.PluginSpec
+import com.intellij.platform.testFramework.plugins.dependsIntellijModulesLang
+import com.intellij.platform.testFramework.plugins.extensions
+import com.intellij.platform.testFramework.plugins.installAt
+import com.intellij.platform.testFramework.plugins.plugin
 import com.intellij.testFramework.IndexingTestUtil
 import org.assertj.core.api.Assertions.assertThat
 import java.nio.file.Path
@@ -58,9 +67,9 @@ fun loadPluginWithText(
     pluginSpec = pluginSpec,
     pluginsDir = pluginsDir,
   )
-  assertThat(DynamicPlugins.checkCanUnloadWithoutRestart(descriptor)).isNull()
+  assertThat(DynamicPlugins.validateCanUnloadWithoutRestart(descriptor)).isNull()
   try {
-    DynamicPlugins.loadPlugin(pluginDescriptor = descriptor)
+    assert(DynamicPlugins.loadPlugin(pluginDescriptor = descriptor)) { "plugin is expected to load $descriptor" }
     IndexingTestUtil.waitUntilIndexesAreReadyInAllOpenedProjects()
   }
   catch (e: Exception) {
@@ -69,7 +78,7 @@ fun loadPluginWithText(
   }
 
   return Disposable {
-    val reason = DynamicPlugins.checkCanUnloadWithoutRestart(descriptor)
+    val reason = DynamicPlugins.validateCanUnloadWithoutRestart(descriptor)
     invokeAndWaitIfNeeded {
       unloadAndUninstallPlugin(descriptor)
     }
@@ -81,7 +90,7 @@ fun loadDescriptorInTest(
   pluginSpec: PluginSpec,
   pluginsDir: Path
 ): PluginMainDescriptor {
-  val path = pluginSpec.buildDistribution(pluginsDir)
+  val path = pluginSpec.installAt(pluginsDir)
   return loadDescriptorInTest(fileOrDir = path)
 }
 
@@ -94,11 +103,11 @@ fun setPluginClassLoaderForMainAndSubPlugins(rootDescriptor: IdeaPluginDescripto
   }
 }
 
-fun unloadAndUninstallPlugin(descriptor: IdeaPluginDescriptorImpl): Boolean {
-  return DynamicPlugins.unloadPlugin(
+fun unloadAndUninstallPlugin(descriptor: PluginMainDescriptor): Boolean {
+  val unloaded = DynamicPlugins.unloadPlugin(
     descriptor,
     DynamicPlugins.UnloadPluginOptions(disable = false),
-  ).also {
-    IndexingTestUtil.waitUntilIndexesAreReadyInAllOpenedProjects()
-  }
+  )
+  if (unloaded) IndexingTestUtil.waitUntilIndexesAreReadyInAllOpenedProjects()
+  return unloaded
 }

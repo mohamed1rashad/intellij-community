@@ -30,7 +30,12 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeNode;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import static com.intellij.openapi.vcs.changes.ui.TreeModelBuilderKeys.IS_CACHING_ROOT;
@@ -232,23 +237,10 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
         ChangeNodeDecorator baseDecorator = modelBuilderEx != null ?
                                             modelBuilderEx.getChangeNodeInChangelistBaseDecorator(listRemoteState, change, i) : null;
         ChangeNodeDecorator decorator = changeDecoratorProvider != null ? changeDecoratorProvider.apply(baseDecorator) : baseDecorator;
-        if (ChangesUtil.isMergeConflict(change)) {
-          if (conflictsRoot == null) {
-            conflictsRoot = new ChangesBrowserConflictsNode(myProject);
-            conflictsRoot.markAsHelperNode();
-            myModel.insertNodeInto(conflictsRoot, myRoot, myModel.getChildCount(myRoot));
-          }
-          ChangesBrowserNode<?> changeNode = Objects.requireNonNullElseGet(
-            ChangesTreeNodeFactory.Companion.createChangeNode(myProject, change, decorator, conflictsRoot),
-            () -> createChangeNode(change, decorator));
-          insertChangeNode(change, conflictsRoot, changeNode);
-        }
-        else {
-          ChangesBrowserNode<?> changeNode = Objects.requireNonNullElseGet(
-            ChangesTreeNodeFactory.Companion.createChangeNode(myProject, change, decorator, changesParent),
-            () -> createChangeNode(change, decorator));
-          insertChangeNode(change, changesParent, changeNode);
-        }
+        ChangesBrowserNode<?> changeNode = Objects.requireNonNullElseGet(
+          ChangesTreeNodeFactory.Companion.createChangeNode(myProject, change, decorator, changesParent),
+          () -> createChangeNode(change, decorator));
+        insertChangeNode(change, changesParent, changeNode);
       }
     }
     return this;
@@ -394,7 +386,7 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
       GROUPING_POLICY.set(subtreeRoot, policy);
     }
 
-    ChangesBrowserNode<?> parentNode = ReadAction.compute(
+    ChangesBrowserNode<?> parentNode = ReadAction.computeBlocking(
       () -> notNull(GROUPING_POLICY.getRequired(subtreeRoot).getParentNodeFor(pathKey, node, subtreeRoot), subtreeRoot));
     ChangesBrowserNode<?> cachingRoot = BaseChangesGroupingPolicy.getCachingRoot(parentNode, subtreeRoot);
 

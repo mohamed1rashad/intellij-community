@@ -13,6 +13,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.application.ApplicationNamesInfo
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.InitialConfigImportState
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.components.service
@@ -43,7 +44,8 @@ import kotlin.io.path.extension
 import kotlin.io.path.name
 import kotlin.system.exitProcess
 
-private const val MIGRATION_FILE_MARKER = ".ce_migration_attempted"
+@ApiStatus.Internal
+const val MIGRATION_FILE_MARKER: String = ".ce_migration_attempted"
 
 @ApiStatus.Internal
 fun migrateCommunityToSingleProductIfNeeded(args: List<String>) {
@@ -52,7 +54,7 @@ fun migrateCommunityToSingleProductIfNeeded(args: List<String>) {
     AppMode.isRemoteDevHost()
   ) return
 
-  val currentDir = PathManager.getHomeDir().parent
+  val currentDir = PathManager.getHomeDir().let { if (OS.CURRENT == OS.macOS) it.parent else it }
   val currentDirName = currentDir.name
   val newDirName = currentDirName.replace(" CE", "").replace(" Community Edition", "")
   if (newDirName == currentDirName) return
@@ -66,15 +68,28 @@ fun migrateCommunityToSingleProductIfNeeded(args: List<String>) {
     return
   }
 
+  if (System.getenv("TOOLBOX_VERSION") != null) return
   if (!(OS.CURRENT == OS.macOS && currentDirName.endsWith(".app"))) return
 
   val newDir = currentDir.resolveSibling(newDirName)
   if (Files.exists(newDir)) return
 
-  val renameCommand = listOf("/bin/mv", "-n", currentDir.toString(), newDir.toString())
-  val startCommand = listOf(newDir.resolve("Contents/MacOS/${ApplicationNamesInfo.getInstance().scriptName}").toString()) + args
+  try {
+    InitialConfigImportState.writeOptionsForRestart(PathManager.getConfigDir())
+  }
+  catch (_: Exception) { }
+
+  val commands = buildList {
+    add(listOf("/bin/mv", "-n", currentDir.toString(), newDir.toString()))
+    val vmOptionsFile = currentDir.resolveSibling("${currentDirName}.vmoptions")
+    if (Files.exists(vmOptionsFile)) {
+      val newVmOptionsFile = currentDir.resolveSibling("${newDirName}.vmoptions")
+      add(listOf("/bin/mv", "-n", vmOptionsFile.toString(), newVmOptionsFile.toString()))
+    }
+    add(listOf(newDir.resolve("Contents/MacOS/${ApplicationNamesInfo.getInstance().scriptName}").toString()) + args)
+  }
   Restarter.setMainAppArgs(args)  // fallback if the rename fails
-  Restarter.scheduleRestart(false, renameCommand, startCommand)
+  Restarter.scheduleRestart(false, *commands.toTypedArray())
   exitProcess(0)
 }
 
@@ -174,10 +189,10 @@ private object MigrateToSingleProductCollector : CounterUsagesCollector() {
   private val GROUP = @Suppress("DEPRECATION") EventLogGroup("migrate.to.single.product", 1)
 
   @JvmField
-  val WELCOME_PAGE_SHOWN: EventId = GROUP.registerEvent("vision.page.shown", "How many times button on welcome vision page was shown after patch update to SID")
+  val WELCOME_PAGE_SHOWN: EventId = GROUP.registerEvent("vision.page.shown")
 
   @JvmField
-  val BUTTON_CLICKED: EventId = GROUP.registerEvent("vision.button.clicked", "How many times button on welcome vision page was clicked")
+  val BUTTON_CLICKED: EventId = GROUP.registerEvent("vision.button.clicked")
 
   override fun getGroup(): EventLogGroup = GROUP
 }
@@ -188,6 +203,6 @@ interface MigrationToSingleProductResourceProvider {
 
   companion object {
     @JvmStatic
-    fun getInstance(): MigrationToSingleProductResourceProvider = service()
+    fun getInstance(): MigrationToSingleProductResourceProvider = service()  // NB: registered only in IU and PY; check before use
   }
 }

@@ -4,11 +4,9 @@ package org.jetbrains.plugins.terminal.runner;
 import com.intellij.execution.CommandLineUtil;
 import com.intellij.execution.process.LocalPtyOptions;
 import com.intellij.ide.plugins.PluginManagerCore;
-import com.intellij.openapi.application.Application;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.PathManager;
+import com.intellij.idea.AppMode;
+import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.util.io.OSAgnosticPathUtil;
 import com.intellij.openapi.util.registry.Registry;
@@ -27,7 +25,9 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
-import org.jetbrains.plugins.terminal.*;
+import org.jetbrains.plugins.terminal.ShellStartupOptions;
+import org.jetbrains.plugins.terminal.ShellStartupOptionsKt;
+import org.jetbrains.plugins.terminal.ShellTerminalWidget;
 import org.jetbrains.plugins.terminal.util.ShellIntegration;
 import org.jetbrains.plugins.terminal.util.ShellNameUtil;
 import org.jetbrains.plugins.terminal.util.ShellType;
@@ -40,12 +40,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static com.intellij.platform.eel.provider.EelNioBridgeServiceKt.asEelPath;
 import static com.intellij.platform.eel.provider.utils.EelPathUtils.transferLocalContentToRemote;
 import static org.jetbrains.plugins.terminal.LocalBlockTerminalRunner.BLOCK_TERMINAL_FISH_REGISTRY;
 import static org.jetbrains.plugins.terminal.LocalTerminalDirectRunner.LOGIN_CLI_OPTIONS;
-import static org.jetbrains.plugins.terminal.TerminalStartupKt.findEelDescriptor;
 
 @ApiStatus.Internal
 public final class LocalShellIntegrationInjector {
@@ -68,8 +68,10 @@ public final class LocalShellIntegrationInjector {
     String shellExe = ContainerUtil.getFirstItem(shellCommand);
     if (shellCommand == null || shellExe == null) return options;
 
+    EelDescriptor eelDescriptor = options.getEelDescriptorNotNull();
+
     List<String> arguments = new ArrayList<>(shellCommand.subList(1, shellCommand.size()));
-    Map<String, String> envs = ShellStartupOptionsKt.createEnvVariablesMap(options.getEnvVariables());
+    Map<String, String> envs = ShellStartupOptionsKt.createEnvVariablesMap(eelDescriptor.getOsFamily(), options.getEnvVariables());
     ShellIntegration integration = null;
 
     List<String> resultCommand = new ArrayList<>();
@@ -77,11 +79,11 @@ public final class LocalShellIntegrationInjector {
 
     String shellName = PathUtil.getFileName(shellExe);
     Path rcFile = findRCFile(shellName);
-    EelDescriptor eelDescriptor = findEelDescriptor(options.getWorkingDirectory(), shellCommand);
     String remoteRcFilePath = rcFile != null ? transferAndGetRemotePath(rcFile, eelDescriptor) : null;
     if (remoteRcFilePath != null) {
       boolean addBlocksIntegration = supportsBlocksShellIntegration(shellName, eelDescriptor);
-      if (ShellNameUtil.isBash(shellName) || (SystemInfo.isMac && shellName.equals(ShellNameUtil.SH_NAME))) {
+      if (ShellNameUtil.isBash(shellName)
+          || (eelDescriptor == LocalEelDescriptor.INSTANCE && OS.CURRENT == OS.macOS && shellName.equals(ShellNameUtil.SH_NAME))) {
         addBashRcFileArgument(envs, arguments, resultCommand, remoteRcFilePath);
         // remove --login to enable --rcfile sourcing
         boolean loginShell = arguments.removeAll(LOGIN_CLI_OPTIONS);
@@ -163,30 +165,20 @@ public final class LocalShellIntegrationInjector {
 
   @VisibleForTesting
   public static @NotNull Path findAbsolutePath(@NotNull String relativePath) throws IOException {
-    String jarPath = PathUtil.getJarPathForClass(LocalTerminalDirectRunner.class);
-    final Path result;
+    Path result;
     if (PluginManagerCore.isRunningFromSources()) {
-      result = Path.of(PathManager.getCommunityHomePath()).resolve("plugins/terminal/resources/").resolve(relativePath);
-    } else if (jarPath.endsWith(".jar")) {
-      Path jarFile = Path.of(jarPath);
-      if (!Files.isRegularFile(jarFile)) {
-        throw new IOException("Broken installation: " + jarPath + " is not a file");
-      }
-      // Find "plugins/terminal" by "plugins/terminal/lib/terminal.jar"
-      Path pluginBaseDir = jarFile.getParent().getParent();
-      result = pluginBaseDir.resolve(relativePath);
+      result = PluginPathManager.getPluginHome("terminal").toPath().resolve("resources").resolve(relativePath);
+    }
+    else if (AppMode.isRunningFromDevBuild()) {
+      result = PluginPathManager.getPluginHome("terminal").toPath().resolve(relativePath);
     }
     else {
-      Application application = ApplicationManager.getApplication();
-      if (application != null && application.isInternal()) {
-        jarPath = StringUtil.trimEnd(jarPath.replace('\\', '/'), '/') + '/';
-        String srcDir = jarPath.replace("/out/classes/production/intellij.terminal/",
-                                        "/community/plugins/terminal/resources/");
-        if (Files.isDirectory(Path.of(srcDir))) {
-          jarPath = srcDir;
-        }
-      }
-      result = Path.of(jarPath).resolve(relativePath);
+      // The production distribution case: find the plugin path by JAR location that contains this class,
+      // so it should work even if the terminal plugin is installed in the custom location.
+      //noinspection DataFlowIssue
+      result = Optional.ofNullable(PluginPathManager.getPluginResource(LocalShellIntegrationInjector.class, relativePath))
+        .orElseThrow(() -> new IOException("Cannot find " + relativePath))
+        .toPath();
     }
     if (!Files.isRegularFile(result)) {
       throw new IOException("Cannot find " + relativePath + ": " + result + " is not a file");
@@ -220,7 +212,7 @@ public final class LocalShellIntegrationInjector {
       Instant started = Instant.now();
       Path remoteBaseDirectory = transferLocalContentToRemote(baseDirectory, new EelPathUtils.TransferTarget.Temporary(eelDescriptor));
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Transferred shell integration files to remote (" + eelDescriptor.getMachine().getName() + ") in "
+        LOG.debug("Transferred shell integration files to remote (" + eelDescriptor.getName() + ") in "
                   + Duration.between(started, Instant.now()).toMillis() + "ms: "
                   + baseDirectory + " -> " + remoteBaseDirectory
          );
@@ -228,7 +220,7 @@ public final class LocalShellIntegrationInjector {
       return asEelPath(remoteBaseDirectory.resolve(relativePath)).toString();
     }
     catch (Exception e) {
-      LOG.warn("Unable to transfer shell integration (" + baseDirectory + ") to remote (" + eelDescriptor.getMachine().getName() + ")", e);
+      LOG.warn("Unable to transfer shell integration (" + baseDirectory + ") to remote (" + eelDescriptor.getName() + ")", e);
       return null;
     }
   }

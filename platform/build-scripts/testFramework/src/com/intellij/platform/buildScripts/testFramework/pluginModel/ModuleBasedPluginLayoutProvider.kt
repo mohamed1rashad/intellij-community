@@ -3,11 +3,10 @@ package com.intellij.platform.buildScripts.testFramework.pluginModel
 
 import com.intellij.platform.runtime.product.ProductMode
 import com.intellij.platform.runtime.product.ProductModules
-import com.intellij.platform.runtime.product.RuntimeModuleLoadingRule
 import com.intellij.platform.runtime.product.serialization.ProductModulesSerialization
 import com.intellij.platform.runtime.product.serialization.ResourceFileResolver
-import com.intellij.platform.runtime.repository.RuntimeModuleDescriptor
 import com.intellij.platform.runtime.repository.RuntimeModuleId
+import com.intellij.platform.runtime.repository.RuntimeModuleLoadingRule
 import com.intellij.platform.runtime.repository.RuntimeModuleRepository
 import org.jetbrains.jps.model.JpsProject
 import org.jetbrains.jps.model.java.JpsJavaExtensionService
@@ -17,78 +16,68 @@ import java.nio.file.Path
 import kotlin.io.path.inputStream
 import kotlin.io.path.pathString
 
-fun createLayoutProviderForProductWithModuleBasedLoader(
-  project: JpsProject,
-  runtimeModuleRepository: RuntimeModuleRepository,
-  productRootModuleName: String,
-  productMode: ProductMode,
-  corePluginDescriptorPath: String,
-): PluginLayoutProvider {
-  return ModuleBasedPluginLayoutProvider(project, runtimeModuleRepository, productRootModuleName, productMode, corePluginDescriptorPath)
-}
-
-private class ModuleBasedPluginLayoutProvider(
+class ModuleBasedPluginLayoutProvider(
   private val project: JpsProject,
   private val runtimeModuleRepository: RuntimeModuleRepository,
+  private val corePluginConfigurationModuleName: String,
   private val productRootModuleName: String,
   productMode: ProductMode,
   private val corePluginDescriptorPath: String,
 ) : PluginLayoutProvider {
   private val productModules: ProductModules
   private val mainModulesOfBundledPlugins: Set<String>
+  private val embeddedModulesInBundledPlugins: Map<String, List<String>>
 
   init {
-    val productRootModule = project.findModuleByName(productRootModuleName) ?: error("Cannot find module '$productRootModuleName'")
-    val productModulesPath = productRootModule.findProductionFile("META-INF/$productRootModuleName/product-modules.xml")
-                             ?: error("Cannot find product-modules.xml in '$productRootModuleName' module")
+    val productRootModule = requireNotNull(project.findModuleByName(productRootModuleName)) { "Cannot find module '$productRootModuleName'" }
+    val productModulesPath = requireNotNull(productRootModule.findProductionFile("META-INF/$productRootModuleName/product-modules.xml")) {
+      "Cannot find product-modules.xml in '$productRootModuleName' module"
+    }
     val resourceFileResolver = object : ResourceFileResolver {
       override fun readResourceFile(moduleId: RuntimeModuleId, relativePath: String): InputStream? {
-        val module = project.findModuleByName(moduleId.stringId) ?: return null
+        val module = project.findModuleByName(moduleId.name) ?: return null
         return module.findProductionFile(relativePath)?.inputStream()
       }
     }
     productModules = ProductModulesSerialization.loadProductModules(
-      productModulesPath.inputStream(), 
+      productModulesPath.inputStream(),
       productModulesPath.pathString,
-      productMode,
-      runtimeModuleRepository,
       resourceFileResolver,
     )
-    mainModulesOfBundledPlugins = productModules.bundledPluginModuleGroups.mapTo(HashSet()) { it.mainModule.moduleId.stringId }
+    mainModulesOfBundledPlugins = productModules.bundledPluginDescriptorModules.mapTo(HashSet()) { it.name }
+    embeddedModulesInBundledPlugins = productModules.bundledPluginDescriptorModules.associateBy(
+      { it.name },
+      { pluginDescriptorModule ->
+        val header = runtimeModuleRepository.findBundledPluginHeader(pluginDescriptorModule) ?: return@associateBy emptyList()
+        header.includedModules
+          .filter { it.loadingRule == RuntimeModuleLoadingRule.EMBEDDED && it.moduleId.namespace != RuntimeModuleId.LEGACY_JPS_LIBRARY_NAMESPACE
+                    && it.moduleId.namespace != RuntimeModuleId.LEGACY_JPS_MODULE_TESTS_NAMESPACE }
+          .map { it.moduleId.name }
+      })
   }
 
   private fun JpsModule.findProductionFile(relativePath: String): Path? = JpsJavaExtensionService.getInstance().findSourceFileInProductionRoots(this, relativePath)
 
   override fun loadCorePluginLayout(): PluginLayoutDescription {
-    val rootEmbeddedModules = productModules.mainModuleGroup.includedModules
+    val corePluginHeader = runtimeModuleRepository.findBundledPluginHeader(RuntimeModuleId.legacyJpsModule(corePluginConfigurationModuleName))
+                           ?: error("Cannot find core plugin header for module '$corePluginConfigurationModuleName'")
+    val embeddedModules = corePluginHeader.includedModules
       .asSequence()
       .filter { it.loadingRule == RuntimeModuleLoadingRule.EMBEDDED }
-      .map { it.moduleDescriptor }
-    val embeddedModulesWithDependencies = LinkedHashSet<RuntimeModuleDescriptor>()
-    fun collectDependencies(descriptor: RuntimeModuleDescriptor, result: MutableSet<RuntimeModuleDescriptor>) {
-      if (result.add(descriptor)) {
-        descriptor.dependencies.forEach { collectDependencies(it, result) }
+      .map { it.moduleId }
+      .filterNot { it.namespace == RuntimeModuleId.LEGACY_JPS_LIBRARY_NAMESPACE }
+      .mapNotNull {
+        project.findModuleByName(it.name)
       }
+
+    val mainModule = requireNotNull(embeddedModules.find { it.findProductionFile(corePluginDescriptorPath) != null }) {
+      "Cannot find '$corePluginDescriptorPath' in the main module group of '$productRootModuleName'"
     }
-    for (descriptor in rootEmbeddedModules) {
-      collectDependencies(descriptor, embeddedModulesWithDependencies)
-    }
-    
-    val mainGroupModules = embeddedModulesWithDependencies
-      .asSequence()
-      .map { it.moduleId.stringId }
-      .filterNot { it.startsWith(RuntimeModuleId.LIB_NAME_PREFIX) }
-      .mapNotNull { 
-        project.findModuleByName(it)
-      }
-    val mainModule = mainGroupModules.find { 
-      it.findProductionFile(corePluginDescriptorPath) != null
-    } ?: error("Cannot find '$corePluginDescriptorPath' in the main module group of '$productRootModuleName'")
-    
+
     return PluginLayoutDescription(
       mainJpsModule = mainModule.name,
       pluginDescriptorPath = corePluginDescriptorPath,
-      jpsModulesInClasspath = mainGroupModules.mapTo(LinkedHashSet()) { it.name },
+      jpsModulesInClasspath = embeddedModules.mapTo(LinkedHashSet()) { it.name },
     )
   }
 
@@ -100,11 +89,12 @@ private class ModuleBasedPluginLayoutProvider(
     if (mainModule.name !in mainModulesOfBundledPlugins) {
       return null
     }
-    
+
+    val embeddedModules = embeddedModulesInBundledPlugins[mainModule.name]?.toSet() ?: emptySet()
     return PluginLayoutDescription(
       mainJpsModule = mainModule.name,
       pluginDescriptorPath = "META-INF/plugin.xml",
-      jpsModulesInClasspath = setOf(mainModule.name),
+      jpsModulesInClasspath = embeddedModules,
     )
   }
 

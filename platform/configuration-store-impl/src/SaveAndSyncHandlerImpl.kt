@@ -1,11 +1,26 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.configurationStore
 
 import com.intellij.conversion.ConversionService
-import com.intellij.ide.*
-import com.intellij.openapi.application.*
+import com.intellij.ide.GeneralSettings
+import com.intellij.ide.IdeBundle
+import com.intellij.ide.IdleTracker
+import com.intellij.ide.SaveAndSyncHandler
+import com.intellij.ide.SaveAndSyncHandlerListener
+import com.intellij.idea.AppMode
+import com.intellij.openapi.application.AccessToken
+import com.intellij.openapi.application.Application
+import com.intellij.openapi.application.ApplicationActivationListener
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.CoroutineSupport
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.application.impl.LaterInvocator
-import com.intellij.openapi.components.*
+import com.intellij.openapi.application.ui
+import com.intellij.openapi.components.ComponentManager
+import com.intellij.openapi.components.ComponentManagerEx
+import com.intellij.openapi.components.serviceAsync
+import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.extensions.ExtensionPointName
@@ -17,22 +32,50 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.getOpenedProjects
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.openapi.vfs.newvfs.*
-import com.intellij.openapi.vfs.newvfs.monitoring.VfsUsageCollector
+import com.intellij.openapi.util.registry.RegistryManager
+import com.intellij.openapi.vfs.newvfs.ManagingFS
+import com.intellij.openapi.vfs.newvfs.NewVirtualFile
+import com.intellij.openapi.vfs.newvfs.RefreshQueue
+import com.intellij.openapi.vfs.newvfs.RefreshSession
+import com.intellij.openapi.vfs.newvfs.monitoring.VfsUsageCollector.logBackgroundRefresh
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.platform.ide.progress.ModalTaskOwner
 import com.intellij.platform.ide.progress.TaskCancellation
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.project.stateStore
 import com.intellij.util.ui.EDT
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.*
-import java.util.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flatMapConcat
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.nio.file.Path
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit.NANOSECONDS
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
@@ -40,8 +83,12 @@ private val EP_NAME = ExtensionPointName<SaveAndSyncHandlerListener>("com.intell
 private val LISTEN_DELAY = 15.seconds
 
 @OptIn(FlowPreview::class)
-private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope) : SaveAndSyncHandler() {
+internal class SaveAndSyncHandlerImpl @JvmOverloads constructor(
+  private val coroutineScope: CoroutineScope,
+  listenDelay: Duration = LISTEN_DELAY,
+) : SaveAndSyncHandler() {
   private val refreshKnownLocalRootsRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+  private val scopedVfsRefreshScheduler = ScopedVfsRefreshScheduler()
   private val refreshOpenedFilesRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
   private val saveRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
@@ -57,7 +104,7 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
   init {
     coroutineScope.launch {
       // add listeners after some delay - doesn't make sense to listen earlier
-      delay(LISTEN_DELAY)
+      delay(listenDelay)
 
       val settings = serviceAsync<GeneralSettings>()
       launch {
@@ -77,16 +124,18 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
           .debounce(300.milliseconds)
           .collect {
             if (!isSyncBlocked(settings)) {
-              for (listener in EP_NAME.extensionList) {
-                runCatching {
-                  listener.beforeRefresh()
-                }.getOrLogException(LOG)
-              }
-
+              notifyBeforeRefresh()
               doRefreshAllKnownLocalRoots(refreshQueue, refreshSession)
             }
           }
       }
+
+      scopedVfsRefreshScheduler.launchProcessing(
+        coroutineScope = this,
+        refreshQueue = refreshQueue,
+        refreshGate = { getVfsRefreshGate(settings) },
+        beforeRefresh = ::notifyBeforeRefresh,
+      )
 
       launch(CoroutineName("refresh opened files requests flow processing")) {
         // not collectLatest - wait for previous execution
@@ -150,12 +199,24 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
     session.launch()
   }
 
+  private suspend fun notifyBeforeRefresh() {
+    for (listener in EP_NAME.extensionList) {
+      runCatching {
+        listener.beforeRefresh()
+      }.getOrLogException(LOG)
+    }
+  }
+
   private fun isSyncBlocked(settings: GeneralSettings): Boolean {
+    return getVfsRefreshGate(settings) != ScopedVfsRefreshGate.Ready
+  }
+
+  private fun getVfsRefreshGate(settings: GeneralSettings): ScopedVfsRefreshGate {
     if (!settings.isSyncOnFrameActivation) {
       LOG.debug("VFS refresh rejected: isSyncOnFrameActivation=false")
-      return true
+      return ScopedVfsRefreshGate.DropPending
     }
-    return isSyncBlockedTemporarily()
+    return if (isSyncBlockedTemporarily()) ScopedVfsRefreshGate.RetryLater else ScopedVfsRefreshGate.Ready
   }
 
   private fun isSyncBlockedTemporarily(): Boolean {
@@ -219,38 +280,36 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
       executeOnIdle()
     }
 
+    val backgroundRefreshController = createBackgroundRefreshController(settings)
+    backgroundRefreshController.start()
+
     ApplicationManager.getApplication().messageBus.connect(coroutineScope)
       .subscribe(ApplicationActivationListener.TOPIC, object : ApplicationActivationListener {
-        private var backgroundRefreshJob: Job? = null
 
         override fun applicationDeactivated(ideFrame: IdeFrame) {
           externalChangesModificationTracker.incModificationCount()
 
           if (settings.isSaveOnFrameDeactivation && canSyncOrSave()) {
             // for many tasks (compilation, web development, etc.), it is important to save documents on frame deactivation ASAP
-            if (Registry.`is`("document.save.in.background.allowed")) {
+            if (!AppMode.isRemoteDevHost() && Registry.`is`("document.save.in.background.allowed")) {
               saveDocumentsInBackgroundWriteAction()
             }
             else {
               WriteIntentReadAction.run {
                 (FileDocumentManager.getInstance() as FileDocumentManagerImpl).saveAllDocuments(false)
               }
+              //flush pending IO tasks, if any:
+              ManagingFS.getInstance().flushPendingUpdates()
             }
             if (addToSaveQueue(saveAppAndProjectsSettingsTask)) {
               requestSave()
             }
           }
-
-          if (settings.isBackgroundSync) {
-            backgroundRefreshJob = startBackgroundSync()
-          }
+          backgroundRefreshController.applicationDeactivated()
         }
 
         override fun applicationActivated(ideFrame: IdeFrame) {
-          backgroundRefreshJob?.let {
-            backgroundRefreshJob = null
-            it.cancel()
-          }
+          backgroundRefreshController.applicationActivated()
 
           if (settings.isSyncOnFrameActivation && !isSyncBlocked(settings)) {
             scheduleRefresh()
@@ -272,11 +331,13 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
       }
   }
 
+  private val savingDispatcher = Dispatchers.IO.limitedParallelism(1)
+
   private fun saveDocumentsInBackgroundWriteAction() {
-    coroutineScope.launch(CoroutineName("Saving documents on frame deactivation") + NonCancellable) {
-      backgroundWriteAction {
-        (FileDocumentManager.getInstance() as FileDocumentManagerImpl).saveAllDocuments(false)
-      }
+    coroutineScope.launch(CoroutineName("Saving documents on frame deactivation") + savingDispatcher + NonCancellable) {
+      (FileDocumentManager.getInstance() as FileDocumentManagerImpl).saveAllDocuments(false)
+      //flush pending IO tasks, if any:
+      ManagingFS.getInstance().flushPendingUpdates()
     }
   }
 
@@ -373,35 +434,32 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
 
   private fun canSyncOrSave(): Boolean = !LaterInvocator.isInModalContext() && !ProgressManager.getInstance().hasModalProgressIndicator()
 
-  private fun startBackgroundSync(): Job {
-    LOG.debug("starting background VFS sync")
-    val startTime = System.nanoTime()
-    val sessions = AtomicInteger()
-    val events = AtomicInteger()
-    val job = coroutineScope.launch(CoroutineName("background sync")) {
-      val roots = listOf(*ManagingFS.getInstance().localRoots)
-      val queue = RefreshQueue.getInstance() as RefreshQueueImpl
-      val interval = Registry.intValue("vfs.background.refresh.interval", 15).coerceIn(0, Int.MAX_VALUE).seconds
-      while (true) {
-        delay(interval)
-        if (!isSyncBlockedTemporarily() || roots.any { it is NewVirtualFile && it.isDirty }) {
-          queue.refresh(true, roots)
-          sessions.incrementAndGet()
-        }
-      }
+  private suspend fun refreshAllLocalRootsInBackground(queue: RefreshQueue): Boolean {
+    val roots = ManagingFS.getInstance().localRoots
+    if (roots.isEmpty()) {
+      return false
     }
-    job.invokeOnCompletion {
-      if (coroutineScope.isActive) {
-        VfsUsageCollector.logBackgroundRefresh(NANOSECONDS.toMillis(System.nanoTime() - startTime), sessions.get(), events.get())
-      }
+    if (isSyncBlockedTemporarily() || roots.none { it is NewVirtualFile && it.isDirty }) {
+      return false
     }
-    return job
+
+    LOG.debug("VFS refresh started (background sync)")
+    queue.refresh(true, roots.toList())
+    return true
   }
 
   override fun scheduleRefresh() {
     externalChangesModificationTracker.incModificationCount()
     check(refreshOpenedFilesRequests.tryEmit(Unit))
     check(refreshKnownLocalRootsRequests.tryEmit(Unit))
+  }
+
+  override fun scheduleRefresh(paths: Collection<Path>) {
+    if (paths.isEmpty()) {
+      return
+    }
+    externalChangesModificationTracker.incModificationCount()
+    scopedVfsRefreshScheduler.schedule(paths)
   }
 
   override fun maybeRefresh(modalityState: ModalityState) {
@@ -447,14 +505,144 @@ private class SaveAndSyncHandlerImpl(private val coroutineScope: CoroutineScope)
   }
 
   override fun unblockSyncOnFrameActivation() {
-    blockSyncCount.decrementAndGet()
+    if (blockSyncCount.decrementAndGet() == 0) {
+      scopedVfsRefreshScheduler.requestProcessing()
+    }
     LOG.debug("sync unblocked")
+  }
+
+
+  private suspend fun createBackgroundRefreshController(settings: GeneralSettings): BackgroundRefreshController {
+    val registryManager = serviceAsync<RegistryManager>()
+    return if (registryManager.`is`("vfs.background.refresh.on.idle")) {
+      IdleBackgroundRefreshController(settings, registryManager)
+    }
+    else {
+      UnfocusedBackgroundRefreshController(settings, registryManager)
+    }
+  }
+
+
+  private interface BackgroundRefreshController {
+    fun start()
+    fun applicationActivated()
+    fun applicationDeactivated()
+  }
+
+  private enum class BackgroundRefreshEvents { START, STOP }
+
+  /**
+   * Runs vfs refresh in the background when the user is inactive
+   */
+  @OptIn(FlowPreview::class)
+  private inner class IdleBackgroundRefreshController(
+    private val settings: GeneralSettings,
+    private val registryManager: RegistryManager,
+  ) : BackgroundRefreshController {
+    private var isStarted = false
+    private var refreshJob: Job? = null
+    @Volatile
+    private var jobNumber: Int = 0
+
+    override fun start() {
+      check(!isStarted)
+      isStarted = true
+
+      coroutineScope.launch(CoroutineName("idle background sync")) {
+        val interval = registryManager.backgroundVfsRefreshInterval()
+        val idleTracker = serviceAsync<IdleTracker>()
+
+        val inactivityEvents = idleTracker.events.debounce(interval).map { BackgroundRefreshEvents.START }
+        // drop(1) to skip the repeating first event immediately firing
+        val activityEvents = idleTracker.events.drop(1).map { BackgroundRefreshEvents.STOP }
+
+        merge(inactivityEvents, activityEvents).collect { event ->
+          when (event) {
+            BackgroundRefreshEvents.START -> this@launch.startRefreshWindow()
+            BackgroundRefreshEvents.STOP -> stopRefreshWindow()
+          }
+        }
+      }
+    }
+
+    private fun CoroutineScope.startRefreshWindow() {
+      if (!settings.isBackgroundSync || refreshJob != null) return
+
+      val currentJobNumber = jobNumber
+      refreshJob = this.launch(CoroutineName("background sync")) {
+        val interval = registryManager.backgroundVfsRefreshInterval()
+        backgroundRefreshWindow(settings, interval) { currentJobNumber == jobNumber }
+      }
+    }
+
+    private fun stopRefreshWindow() {
+      jobNumber += 1
+      refreshJob = null
+    }
+
+    override fun applicationActivated() = Unit
+    override fun applicationDeactivated() = Unit
+  }
+
+  /**
+   * Runs vfs refresh in the background when ide frame is not focused
+   */
+  private inner class UnfocusedBackgroundRefreshController(
+    private val settings: GeneralSettings,
+    private val registryManager: RegistryManager,
+  ) : BackgroundRefreshController {
+    private var refreshJob: Job? = null
+    private var isStarted = false
+
+    override fun start() {
+      check(!isStarted)
+      isStarted = true
+    }
+
+    override fun applicationActivated() {
+      cancelBackgroundRefreshJob()
+    }
+
+    override fun applicationDeactivated() {
+      cancelBackgroundRefreshJob()
+      if (settings.isBackgroundSync) {
+        val interval = registryManager.backgroundVfsRefreshInterval()
+        refreshJob = coroutineScope.launch(CoroutineName("background sync")) {
+          delay(interval)
+          backgroundRefreshWindow(settings, interval) { true }
+        }
+      }
+    }
+
+    private fun cancelBackgroundRefreshJob() {
+      refreshJob?.cancel()
+      refreshJob = null
+    }
+  }
+
+  private suspend fun backgroundRefreshWindow(settings: GeneralSettings, interval: Duration, keepRefreshing: () -> Boolean) {
+    val startTime = System.nanoTime()
+    val sessions = AtomicInteger()
+    val queue = serviceAsync<RefreshQueue>()
+    try {
+      while (keepRefreshing()) {
+        if (settings.isBackgroundSync && refreshAllLocalRootsInBackground(queue)) {
+          sessions.incrementAndGet()
+        }
+        delay(interval)
+      }
+    }
+    finally {
+      if (coroutineScope.isActive) {
+        logBackgroundRefresh(NANOSECONDS.toMillis(System.nanoTime() - startTime), sessions.get(), 0)
+      }
+    }
   }
 }
 
 private suspend fun doRefreshOpenedFiles(refreshQueue: RefreshQueue) {
   val files = getOpenedProjects()
-    .flatMap { it.serviceIfCreated<FileEditorManager>()?.selectedEditors?.asSequence() ?: emptySequence() }
+    .flatMap { it.serviceIfCreated<FileEditorManager>()?.selectedEditorWithRemotes?.asSequence() ?: emptySequence() }
     .flatMap { it.filesToRefresh }
     .filter { it is NewVirtualFile }
     .toList()
@@ -462,17 +650,8 @@ private suspend fun doRefreshOpenedFiles(refreshQueue: RefreshQueue) {
     return
   }
 
-  withContext(Dispatchers.EDT) {
-    writeIntentReadAction {
-      val session = refreshQueue.createSession(
-        /* async = */ false,
-        /* recursive = */ false,
-        /* finishRunnable = */ null,
-        /* state = */ ModalityState.nonModal(),
-      )
-      session.addAllFiles(files)
-      session.launch()
-    }
+  withContext(Dispatchers.Default) {
+    refreshQueue.refreshWithHighPriority(false, files)
   }
 }
 
@@ -493,4 +672,8 @@ private fun getProgressTitle(componentManager: ComponentManager): String {
   else {
     return IdeBundle.message("progress.saving.app")
   }
+}
+
+private fun RegistryManager.backgroundVfsRefreshInterval(): Duration {
+  return intValue("vfs.background.refresh.interval", 15).coerceIn(0, Int.MAX_VALUE).seconds
 }

@@ -4,7 +4,11 @@ package com.intellij.openapi.fileTypes;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
-import com.intellij.openapi.extensions.*;
+import com.intellij.openapi.extensions.ExtensionPointListener;
+import com.intellij.openapi.extensions.ExtensionPointName;
+import com.intellij.openapi.extensions.ExtensionPointPriorityListener;
+import com.intellij.openapi.extensions.KeyedFactoryEPBean;
+import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.KeyedLazyInstance;
@@ -13,6 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
+import java.util.Objects;
 
 public final class FileTypeEditorHighlighterProviders extends FileTypeExtension<EditorHighlighterProvider> {
 
@@ -33,6 +38,11 @@ public final class FileTypeEditorHighlighterProviders extends FileTypeExtension<
 
   private FileTypeEditorHighlighterProviders() {
     super(EP_NAME);
+  }
+
+  @Override
+  public @NotNull EditorHighlighterProvider forFileType(@NotNull FileType t) {
+    return Objects.requireNonNull(super.forFileType(t), "buildExtensions should pass at least defaultProvider");
   }
 
   @Override

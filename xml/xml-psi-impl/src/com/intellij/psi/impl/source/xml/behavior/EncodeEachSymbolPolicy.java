@@ -17,13 +17,13 @@ package com.intellij.psi.impl.source.xml.behavior;
 
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.ASTNode;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.impl.GeneratedMarkerVisitor;
 import com.intellij.psi.impl.source.DummyHolderFactory;
 import com.intellij.psi.impl.source.tree.FileElement;
-import com.intellij.psi.impl.source.tree.TreeElement;
 import com.intellij.psi.impl.source.tree.SharedImplUtil;
+import com.intellij.psi.impl.source.tree.TreeElement;
 import com.intellij.psi.xml.XmlTokenType;
-import com.intellij.psi.PsiElement;
 import com.intellij.util.CharTable;
 
 public class EncodeEachSymbolPolicy extends DefaultXmlPsiPolicy{
@@ -49,7 +49,7 @@ public class EncodeEachSymbolPolicy extends DefaultXmlPsiPolicy{
       dummyParent.rawAddChildren((TreeElement)super.encodeXmlTextContents(plainSection, text));
     }
 
-    dummyParent.acceptTree(new GeneratedMarkerVisitor());
+    dummyParent.acceptTree(new GeneratedMarkerVisitor(dummyParent));
     return dummyParent.getFirstChildNode();
   }
 

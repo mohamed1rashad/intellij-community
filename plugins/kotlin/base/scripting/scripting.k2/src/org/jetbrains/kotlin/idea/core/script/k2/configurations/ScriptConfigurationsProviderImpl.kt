@@ -3,11 +3,8 @@ package org.jetbrains.kotlin.idea.core.script.k2.configurations
 
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.roots.OrderRootType
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.platform.backend.workspace.toVirtualFileUrl
 import com.intellij.platform.backend.workspace.virtualFile
 import com.intellij.platform.backend.workspace.workspaceModel
 import com.intellij.platform.workspace.jps.entities.SdkEntity
@@ -17,22 +14,21 @@ import com.intellij.psi.search.NonClasspathDirectoriesScope.compose
 import com.intellij.psi.util.CachedValue
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
-import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.customName
-import com.intellij.workspaceModel.ide.legacyBridge.ModifiableRootModelBridge
 import kotlinx.coroutines.CoroutineScope
+import org.jetbrains.kotlin.idea.core.script.k2.asCompilationConfiguration
 import org.jetbrains.kotlin.idea.core.script.k2.modules.KotlinScriptEntity
+import org.jetbrains.kotlin.idea.core.script.k2.modules.KotlinScriptEntityProvider
 import org.jetbrains.kotlin.idea.core.script.k2.modules.KotlinScriptLibraryEntity
-import org.jetbrains.kotlin.idea.core.script.k2.modules.ScriptRefinedConfigurationResolver
 import org.jetbrains.kotlin.idea.core.script.v1.ScriptDependenciesModificationTracker
 import org.jetbrains.kotlin.idea.core.script.v1.ScriptDependencyAware
 import org.jetbrains.kotlin.idea.core.script.v1.alwaysVirtualFile
 import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.scripting.definitions.K1SpecificScriptingServiceAccessor
 import org.jetbrains.kotlin.scripting.definitions.ScriptConfigurationsProvider
-import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
-import org.jetbrains.kotlin.scripting.definitions.findScriptDefinition
 import org.jetbrains.kotlin.scripting.resolve.ScriptCompilationConfigurationResult
-import kotlin.script.experimental.api.ScriptCompilationConfiguration
-import kotlin.script.experimental.api.ide
+import org.jetbrains.kotlin.scripting.resolve.ScriptCompilationConfigurationWrapper
+import org.jetbrains.kotlin.scripting.resolve.VirtualFileScriptSource
+import kotlin.script.experimental.api.ResultWithDiagnostics
 
 private class AllScriptsDependencies(
     val classes: Set<VirtualFile>,
@@ -91,17 +87,10 @@ class ScriptConfigurationsProviderImpl(project: Project, val coroutineScope: Cor
     override fun getScriptDependenciesClassFiles(virtualFile: VirtualFile): Collection<VirtualFile> =
         virtualFile.currentDependencies.classes
 
-    override fun getScriptSdk(virtualFile: VirtualFile): Sdk? =
-        virtualFile.currentDependencies.sdk?.let { ModifiableRootModelBridge.findSdk(it.name, it.type) }
-
     private val VirtualFile.currentDependencies: ScriptDependencies
         get() {
             val snapshot = project.workspaceModel.currentSnapshot
-
-            val virtualFileUrl = this.toVirtualFileUrl(project.workspaceModel.getVirtualFileUrlManager())
-            val entity =
-                snapshot.getVirtualFileUrlIndex().findEntitiesByUrl(virtualFileUrl).filterIsInstance<KotlinScriptEntity>().firstOrNull()
-                    ?: return ScriptDependencies.EMPTY
+            val entity = KotlinScriptEntityProvider.provide(project, this) ?: return ScriptDependencies.EMPTY
 
             val (classes, sources) = entity.dependencies.asSequence()
                 .mapNotNull { snapshot.resolve(it) }
@@ -119,19 +108,25 @@ class ScriptConfigurationsProviderImpl(project: Project, val coroutineScope: Cor
             accClasses to accSources
         }
 
+    @OptIn(K1SpecificScriptingServiceAccessor::class)
+    @Deprecated("Use getScriptCompilationConfiguration(KtFileScriptSource(ktFile)) instead")
     override fun getScriptConfigurationResult(file: KtFile): ScriptCompilationConfigurationResult? {
-        val definition = file.findScriptDefinition() ?: return null
-        return getConfigurationSupplier(definition).get(file.alwaysVirtualFile)?.scriptConfiguration
-    }
+        val virtualFile = file.alwaysVirtualFile
+        val entity = KotlinScriptEntityProvider.provide(project, virtualFile) ?: return null
+        val snapshot = project.workspaceModel.currentSnapshot
+        val diagnostics = entity.reports.map { report -> report.map() }
+        val configuration =
+            entity.configurationId?.let { snapshot.resolve(it) }?.data?.asCompilationConfiguration() ?: return null
 
-    private fun getConfigurationSupplier(definition: ScriptDefinition): ScriptRefinedConfigurationResolver {
-        return definition.compilationConfiguration[ScriptCompilationConfiguration.ide.configurationResolverDelegate]?.invoke()
-            ?: DefaultScriptConfigurationHandler.getInstance(project)
+        return ResultWithDiagnostics.Success(
+            ScriptCompilationConfigurationWrapper(VirtualFileScriptSource(virtualFile), configuration),
+            diagnostics
+        )
     }
 
     companion object {
-        private val classesTypeId = SdkRootTypeId(OrderRootType.CLASSES.customName)
-        private val sourcesTypeId = SdkRootTypeId(OrderRootType.SOURCES.customName)
+        private val classesTypeId = SdkRootTypeId.CLASSES
+        private val sourcesTypeId = SdkRootTypeId.SOURCES
 
         fun getInstance(project: Project): ScriptConfigurationsProviderImpl =
             project.service<ScriptConfigurationsProvider>() as ScriptConfigurationsProviderImpl

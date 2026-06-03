@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.fir.completion;
 
@@ -53,6 +53,11 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
     @TestMetadata("ChainCompletionDontDuplicate")
     public void testChainCompletionDontDuplicate() throws Exception {
         runTest("../../completion/testData/basic/multifile/ChainCompletionDontDuplicate/");
+    }
+
+    @TestMetadata("ChainCompletionDontShowSameProperty")
+    public void testChainCompletionDontShowSameProperty() throws Exception {
+        runTest("../../completion/testData/basic/multifile/ChainCompletionDontShowSameProperty/");
     }
 
     @TestMetadata("ClassInExcludedPackage")
@@ -118,6 +123,16 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
     @TestMetadata("EnumEntryExpectedPreferredJava")
     public void testEnumEntryExpectedPreferredJava() throws Exception {
         runTest("../../completion/testData/basic/multifile/EnumEntryExpectedPreferredJava/");
+    }
+
+    @TestMetadata("EnumInCollectionLiteralJavaAnnotation")
+    public void testEnumInCollectionLiteralJavaAnnotation() throws Exception {
+        runTest("../../completion/testData/basic/multifile/EnumInCollectionLiteralJavaAnnotation/");
+    }
+
+    @TestMetadata("EnumInCollectionLiteralJavaAnnotationVarargs")
+    public void testEnumInCollectionLiteralJavaAnnotationVarargs() throws Exception {
+        runTest("../../completion/testData/basic/multifile/EnumInCollectionLiteralJavaAnnotationVarargs/");
     }
 
     @TestMetadata("EnumValuesMethodJavaUsualPriorityWhenFeatureDisabled")
@@ -198,6 +213,31 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
     @TestMetadata("FileRefInStringLiteralNoPrefix")
     public void testFileRefInStringLiteralNoPrefix() throws Exception {
         runTest("../../completion/testData/basic/multifile/FileRefInStringLiteralNoPrefix/");
+    }
+
+    @TestMetadata("FlexibleType")
+    public void testFlexibleType() throws Exception {
+        runTest("../../completion/testData/basic/multifile/FlexibleType/");
+    }
+
+    @TestMetadata("FlexibleTypeCompanionObjectValues")
+    public void testFlexibleTypeCompanionObjectValues() throws Exception {
+        runTest("../../completion/testData/basic/multifile/FlexibleTypeCompanionObjectValues/");
+    }
+
+    @TestMetadata("FlexibleTypeEnum")
+    public void testFlexibleTypeEnum() throws Exception {
+        runTest("../../completion/testData/basic/multifile/FlexibleTypeEnum/");
+    }
+
+    @TestMetadata("FlexibleTypeNotNull")
+    public void testFlexibleTypeNotNull() throws Exception {
+        runTest("../../completion/testData/basic/multifile/FlexibleTypeNotNull/");
+    }
+
+    @TestMetadata("FlexibleTypeSealed")
+    public void testFlexibleTypeSealed() throws Exception {
+        runTest("../../completion/testData/basic/multifile/FlexibleTypeSealed/");
     }
 
     @TestMetadata("GroovyClassNameCompletionFromDefaultPackage")
@@ -358,6 +398,56 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
     @TestMetadata("MoreSpecificExtensionIsPrivate")
     public void testMoreSpecificExtensionIsPrivate() throws Exception {
         runTest("../../completion/testData/basic/multifile/MoreSpecificExtensionIsPrivate/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaCollectionPlatformTypes")
+    public void testMultipleArgumentsJavaCollectionPlatformTypes() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaCollectionPlatformTypes/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaMethodWithTheFirstArgument")
+    public void testMultipleArgumentsJavaMethodWithTheFirstArgument() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaMethodWithTheFirstArgument/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaNotNullParameter")
+    public void testMultipleArgumentsJavaNotNullParameter() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaNotNullParameter/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaOverloadedConstructor")
+    public void testMultipleArgumentsJavaOverloadedConstructor() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaOverloadedConstructor/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaOverloadedConstructorWithTheFirstArgument")
+    public void testMultipleArgumentsJavaOverloadedConstructorWithTheFirstArgument() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaOverloadedConstructorWithTheFirstArgument/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaRecord")
+    public void testMultipleArgumentsJavaRecord() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaRecord/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaStaticMethod")
+    public void testMultipleArgumentsJavaStaticMethod() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaStaticMethod/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaSupertypes")
+    public void testMultipleArgumentsJavaSupertypes() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaSupertypes/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaSupertypesWithNullableKotlinSubtypes")
+    public void testMultipleArgumentsJavaSupertypesWithNullableKotlinSubtypes() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaSupertypesWithNullableKotlinSubtypes/");
+    }
+
+    @TestMetadata("MultipleArgumentsJavaWithNullableKotlin")
+    public void testMultipleArgumentsJavaWithNullableKotlin() throws Exception {
+        runTest("../../completion/testData/basic/multifile/MultipleArgumentsJavaWithNullableKotlin/");
     }
 
     @TestMetadata("NoAutoInsertionOfNotImported")
@@ -525,6 +615,11 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
         runTest("../../completion/testData/basic/multifile/PreferMoreSpecificExtension3/");
     }
 
+    @TestMetadata("PrefillImportedVariableAbsent")
+    public void testPrefillImportedVariableAbsent() throws Exception {
+        runTest("../../completion/testData/basic/multifile/PrefillImportedVariableAbsent/");
+    }
+
     @TestMetadata("PropertyKeysEmptyString")
     public void testPropertyKeysEmptyString() throws Exception {
         runTest("../../completion/testData/basic/multifile/PropertyKeysEmptyString/");
@@ -538,6 +633,56 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
     @TestMetadata("PropertyKeysWithPrefix")
     public void testPropertyKeysWithPrefix() throws Exception {
         runTest("../../completion/testData/basic/multifile/PropertyKeysWithPrefix/");
+    }
+
+    @TestMetadata("RerunStaticFromAnnotation")
+    public void testRerunStaticFromAnnotation() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromAnnotation/");
+    }
+
+    @TestMetadata("RerunStaticFromClass")
+    public void testRerunStaticFromClass() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromClass/");
+    }
+
+    @TestMetadata("RerunStaticFromEnum")
+    public void testRerunStaticFromEnum() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromEnum/");
+    }
+
+    @TestMetadata("RerunStaticFromGeneric")
+    public void testRerunStaticFromGeneric() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromGeneric/");
+    }
+
+    @TestMetadata("RerunStaticFromInterface")
+    public void testRerunStaticFromInterface() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromInterface/");
+    }
+
+    @TestMetadata("RerunStaticFromNested")
+    public void testRerunStaticFromNested() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromNested/");
+    }
+
+    @TestMetadata("RerunStaticFromRecord")
+    public void testRerunStaticFromRecord() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticFromRecord/");
+    }
+
+    @TestMetadata("RerunStaticOtherPackage")
+    public void testRerunStaticOtherPackage() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticOtherPackage/");
+    }
+
+    @TestMetadata("RerunStaticPrivateOuter")
+    public void testRerunStaticPrivateOuter() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticPrivateOuter/");
+    }
+
+    @TestMetadata("RerunStaticSamePackage")
+    public void testRerunStaticSamePackage() throws Exception {
+        runTest("../../completion/testData/basic/multifile/RerunStaticSamePackage/");
     }
 
     @TestMetadata("StaticMembersOfImportedClassFromJava")
@@ -568,6 +713,21 @@ public class HighLevelMultiFileJvmBasicCompletionTestGenerated extends AbstractH
     @TestMetadata("StaticMembersOfNotImportedClassNameConflict")
     public void testStaticMembersOfNotImportedClassNameConflict() throws Exception {
         runTest("../../completion/testData/basic/multifile/StaticMembersOfNotImportedClassNameConflict/");
+    }
+
+    @TestMetadata("StaticMembersOfPrivateClassHiddenInRerun")
+    public void testStaticMembersOfPrivateClassHiddenInRerun() throws Exception {
+        runTest("../../completion/testData/basic/multifile/StaticMembersOfPrivateClassHiddenInRerun/");
+    }
+
+    @TestMetadata("StaticPrivateMembersHiddenInRerun")
+    public void testStaticPrivateMembersHiddenInRerun() throws Exception {
+        runTest("../../completion/testData/basic/multifile/StaticPrivateMembersHiddenInRerun/");
+    }
+
+    @TestMetadata("StaticPrivateMembersHighInvocation")
+    public void testStaticPrivateMembersHighInvocation() throws Exception {
+        runTest("../../completion/testData/basic/multifile/StaticPrivateMembersHighInvocation/");
     }
 
     @TestMetadata("SuspensionPointInMonitor")

@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.dom
 
 import com.intellij.lang.properties.IProperty
@@ -24,23 +24,40 @@ import com.intellij.psi.xml.XmlFile
 import com.intellij.psi.xml.XmlTag
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.util.ObjectUtils
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
+import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.containers.ContainerUtil
-import com.intellij.util.xml.*
-import org.jetbrains.idea.maven.dom.model.*
+import com.intellij.util.xml.DomElement
+import com.intellij.util.xml.DomFileElement
+import com.intellij.util.xml.DomManager
+import com.intellij.util.xml.DomService
+import com.intellij.util.xml.DomUtil
+import org.jetbrains.idea.maven.dom.model.MavenDomDependencies
+import org.jetbrains.idea.maven.dom.model.MavenDomDependency
+import org.jetbrains.idea.maven.dom.model.MavenDomParent
+import org.jetbrains.idea.maven.dom.model.MavenDomProfiles
+import org.jetbrains.idea.maven.dom.model.MavenDomProfilesModel
+import org.jetbrains.idea.maven.dom.model.MavenDomProjectModel
+import org.jetbrains.idea.maven.dom.model.MavenDomProperties
 import org.jetbrains.idea.maven.model.MavenConstants
+import org.jetbrains.idea.maven.model.MavenConstants.MAVEN_4_XMLNS
+import org.jetbrains.idea.maven.model.MavenConstants.MAVEN_4_XMLNS_HTTPS
+import org.jetbrains.idea.maven.model.MavenConstants.MODEL_VERSION_4_0_0
 import org.jetbrains.idea.maven.model.MavenCoordinate
 import org.jetbrains.idea.maven.model.MavenId
 import org.jetbrains.idea.maven.model.MavenResource
-import org.jetbrains.idea.maven.plugins.groovy.MavenGroovyPomCompletionContributor
 import org.jetbrains.idea.maven.project.MavenProject
 import org.jetbrains.idea.maven.project.MavenProjectsManager
-import org.jetbrains.idea.maven.server.MavenDistribution
 import org.jetbrains.idea.maven.server.MavenDistributionsCache
 import org.jetbrains.idea.maven.utils.MavenLog
+import org.jetbrains.idea.maven.utils.MavenUtil
 import org.jetbrains.idea.maven.utils.MavenUtil.isPomFileName
 import java.util.regex.Pattern
 
 object MavenDomUtil {
+  @JvmField
+  val POM_COMPLETION_ORIGINAL_FILE: Key<VirtualFile> = Key.create("POM_COMPLETION_ORIGINAL_FILE")
+
   private val FILTERED_RESOURCES_ROOTS_KEY = Key.create<Pair<Long?, MutableSet<VirtualFile?>?>?>("MavenDomUtil.FILTERED_RESOURCES_ROOTS")
 
   // see http://maven.apache.org/settings.html
@@ -72,13 +89,37 @@ object MavenDomUtil {
   }
 
   @JvmStatic
+  fun isProjectFileWithModel410(file: PsiFile?): Boolean {
+    if (file !is XmlFile) return false
+
+    val rootTag = file.getRootTag()
+    if (rootTag == null || "project" != rootTag.getName()) return false
+
+    val xmlns = rootTag.getAttributeValue("xmlns")
+    if (xmlns != MAVEN_4_XMLNS && xmlns != MAVEN_4_XMLNS_HTTPS) {
+      return false
+    }
+
+    if (!isPomFileName(file.getName())) return false
+
+    val modelTags = rootTag.findSubTags("modelVersion")
+    if (modelTags.size > 1) return false
+    val modelVersion = modelTags.singleOrNull()?.value?.text ?: MavenUtil.inferModelVersionFromNamespace(xmlns)
+    if (modelVersion == MODEL_VERSION_4_0_0) return false
+    return MavenUtil.isMaven410(
+      rootTag.getAttribute("xmlns")?.value,
+      rootTag.getAttribute("xsi:schemaLocation")?.value
+    )
+  }
+
+  @JvmStatic
   fun getXmlProjectModelVersion(file: PsiFile?): @NlsSafe String? {
     if (file !is XmlFile) return null
 
     val rootTag = file.getRootTag()
     if (rootTag == null || "project" != rootTag.getName()) return null
 
-    return rootTag.getSubTagText("modelVersion")
+    return rootTag.getSubTagText("modelVersion") ?: MavenUtil.inferModelVersionFromNamespace(rootTag.getAttributeValue("xmlns"))
   }
 
   @JvmStatic
@@ -202,8 +243,7 @@ object MavenDomUtil {
     psiFile = psiFile.getOriginalFile()
     var virtualFile = psiFile.getVirtualFile()
     if (virtualFile is LightVirtualFile) {
-      virtualFile = ObjectUtils.chooseNotNull<VirtualFile>(
-        psiFile.getUserData<VirtualFile?>(MavenGroovyPomCompletionContributor.ORIGINAL_POM_FILE), virtualFile)
+      virtualFile = ObjectUtils.chooseNotNull<VirtualFile>(psiFile.getUserData(POM_COMPLETION_ORIGINAL_FILE), virtualFile)
     }
     return virtualFile
   }
@@ -216,6 +256,7 @@ object MavenDomUtil {
     val file = getVirtualFile(element)
     if (file == null) return null
     val manager = MavenProjectsManager.getInstance(element.getProject())
+    if (!manager.isInitialized) return null
     return manager.findProject(file)
   }
 
@@ -233,6 +274,8 @@ object MavenDomUtil {
     return manager.findContainingProject(file)
   }
 
+  @RequiresReadLock
+  @RequiresBackgroundThread(generateAssertion = false)
   @JvmStatic
   fun getMavenDomProjectModel(project: Project, file: VirtualFile): MavenDomProjectModel? {
     return getMavenDomModel(project, file, MavenDomProjectModel::class.java)
@@ -250,6 +293,8 @@ object MavenDomUtil {
     return getMavenDomModel<MavenDomProfiles>(project, file, MavenDomProfiles::class.java) // try an old-style model
   }
 
+  @RequiresReadLock
+  @RequiresBackgroundThread(generateAssertion = false)
   @JvmStatic
   fun <T : MavenDomElement?> getMavenDomModel(
     project: Project,
@@ -260,6 +305,13 @@ object MavenDomUtil {
     val psiFile = PsiManager.getInstance(project).findFile(file)
     if (psiFile == null) return null
     return getMavenDomModel<T>(psiFile, clazz)
+  }
+
+  @JvmStatic
+  inline fun <reified T : MavenDomElement?> getMavenDomModel(file: PsiFile): T? {
+    val xmlFile = file as? XmlFile ?: return null
+    val fileElement = DomManager.getDomManager(xmlFile.getProject()).getFileElement(xmlFile, T::class.java)
+    return fileElement?.getRootElement()
   }
 
   @JvmStatic
@@ -510,15 +562,7 @@ object MavenDomUtil {
 
   @JvmStatic
   fun getMavenVersion(file: VirtualFile?, project: Project): String? {
-    val directory = file?.getParent()
-    val distribution: MavenDistribution?
-    if (directory == null) {
-      distribution = MavenDistributionsCache.getInstance(project).getSettingsDistribution()
-    }
-    else {
-      distribution = MavenDistributionsCache.getInstance(project).getMavenDistribution(directory.getPath())
-    }
-    return distribution.version
+    return MavenDistributionsCache.getInstance(project).getMavenVersion(file)
   }
 
   @JvmStatic

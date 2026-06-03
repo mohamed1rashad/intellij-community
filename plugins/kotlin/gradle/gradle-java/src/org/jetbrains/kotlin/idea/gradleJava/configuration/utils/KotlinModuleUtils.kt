@@ -10,18 +10,19 @@ import org.jetbrains.kotlin.config.ExternalSystemTestRunTask
 import org.jetbrains.kotlin.idea.gradleTooling.KotlinMPPGradleModel
 import org.jetbrains.kotlin.idea.gradleTooling.compilationFullName
 import org.jetbrains.kotlin.idea.gradleTooling.resolveAllDependsOnSourceSets
-import org.jetbrains.kotlin.idea.projectModel.*
+import org.jetbrains.kotlin.idea.projectModel.KotlinCompilation
+import org.jetbrains.kotlin.idea.projectModel.KotlinComponent
+import org.jetbrains.kotlin.idea.projectModel.KotlinPlatform
+import org.jetbrains.kotlin.idea.projectModel.KotlinSourceSet
+import org.jetbrains.kotlin.idea.projectModel.KotlinTarget
 import org.jetbrains.plugins.gradle.model.ExternalProject
 import org.jetbrains.plugins.gradle.service.project.GradleProjectResolverUtil
 import org.jetbrains.plugins.gradle.service.project.ProjectResolverContext
-import java.util.*
-import java.util.stream.Collectors
-import kotlin.collections.HashMap
-import kotlin.collections.LinkedHashSet
+
 
 object KotlinModuleUtils {
 
-    fun KotlinComponent.fullName(simpleName: String = name) = when (this) {
+    fun KotlinComponent.fullName(simpleName: String = name): String = when (this) {
         is KotlinCompilation -> compilationFullName(simpleName, disambiguationClassifier)
         else -> simpleName
     }
@@ -87,7 +88,7 @@ object KotlinModuleUtils {
 
     fun getKotlinModuleId(
         gradleModule: IdeaModule, kotlinComponent: KotlinComponent, resolverCtx: ProjectResolverContext
-    ) = getGradleModuleQualifiedName(resolverCtx, gradleModule, kotlinComponent.fullName())
+    ): String = getGradleModuleQualifiedName(resolverCtx, gradleModule, kotlinComponent.fullName())
 
     fun getInternalModuleName(
         gradleModule: IdeaModule,
@@ -126,9 +127,10 @@ object KotlinModuleUtils {
         rootName: String,
         gradlePath: String
     ): String {
-        return ((if (gradlePath.startsWith(":")) "$rootName." else "")
-                + Arrays.stream(gradlePath.split(":".toRegex()).toTypedArray())
-            .filter { s: String -> s.isNotEmpty() }
-            .collect(Collectors.joining(".")))
+        val prefix = if (gradlePath.startsWith(":")) "$rootName." else ""
+        val path = gradlePath.split(":".toRegex())
+            .filter { it.isNotEmpty() }
+            .joinToString(".")
+        return prefix + path
     }
 }

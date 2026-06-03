@@ -1,9 +1,9 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build.impl
 
+import com.intellij.platform.bazel.runfiles.BazelRunfiles
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.common.Attributes
-import io.opentelemetry.api.trace.Span
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.intellij.build.BuildOptions
 import org.jetbrains.intellij.build.CompilationContext
@@ -16,20 +16,9 @@ import org.jetbrains.jps.api.CmdlineRemoteProto.Message.ControllerMessage.Parame
 import org.jetbrains.jps.api.GlobalOptions
 import org.jetbrains.jps.backwardRefs.JavaBackwardReferenceIndexWriter
 import org.jetbrains.jps.build.Standalone
-import org.jetbrains.jps.builders.java.JavaModuleBuildTargetType
-import org.jetbrains.jps.incremental.artifacts.ArtifactBuildTargetType
-import org.jetbrains.jps.incremental.artifacts.impl.ArtifactSorter
-import org.jetbrains.jps.incremental.artifacts.impl.JpsArtifactUtil
 import org.jetbrains.jps.incremental.dependencies.DependencyResolvingBuilder
-import org.jetbrains.jps.model.artifact.JpsArtifact
-import org.jetbrains.jps.model.artifact.JpsArtifactService
-import org.jetbrains.jps.model.artifact.elements.JpsModuleOutputPackagingElement
-import org.jetbrains.jps.model.java.JpsJavaExtensionService
 import org.jetbrains.jps.model.module.JpsModule
-import java.nio.file.Files
-import java.nio.file.Path
 import java.util.concurrent.TimeUnit
-import kotlin.io.path.extension
 
 internal class JpsCompilationRunner(private val context: CompilationContext) {
   companion object {
@@ -62,203 +51,36 @@ internal class JpsCompilationRunner(private val context: CompilationContext) {
   }
 
   suspend fun buildModules(modules: List<JpsModule>, canceledStatus: CanceledStatus = CanceledStatus.NULL) {
-    val names = LinkedHashSet<String>()
-    spanBuilder("collect dependencies")
-      .setAttribute(AttributeKey.longKey("moduleCount"), modules.size.toLong())
-      .use { span ->
-        val requiredDependencies = ArrayList<String>()
-        for (module in modules) {
-          requiredDependencies.clear()
-          for (dependency in getModuleDependencies(module = module, includeTests = false)) {
-            if (names.add(dependency)) {
-              requiredDependencies.add(dependency)
-            }
-          }
-
-          if (!requiredDependencies.isEmpty()) {
-            span.addEvent("required dependencies", Attributes.of(
-              AttributeKey.stringKey("module"), module.name,
-              AttributeKey.stringArrayKey("module"), java.util.List.copyOf(requiredDependencies)
-            ))
-          }
-        }
-      }
-    runBuild(
-      moduleSet = names,
-      allModules = false,
-      artifactNames = emptyList(),
-      includeTests = false,
-      canceledStatus = canceledStatus,
-    )
-  }
-
-  suspend fun buildModulesWithoutDependencies(modules: Collection<JpsModule>, includeTests: Boolean) {
-    runBuild(moduleSet = modules.map { it.name }, allModules = false, artifactNames = emptyList(), includeTests = includeTests)
+    throw NotImplementedError("JPS compilation was broken on purpose, for details see MRI-3677")
   }
 
   suspend fun resolveProjectDependencies() {
-    runBuild(moduleSet = emptyList(), allModules = false, artifactNames = emptyList(), resolveProjectDependencies = true)
+    runBuild()
   }
 
   suspend fun buildModuleTests(module: JpsModule, canceledStatus: CanceledStatus = CanceledStatus.NULL) {
-    runBuild(
-      moduleSet = getModuleDependencies(module = module, includeTests = true).distinct().toList(),
-      allModules = false,
-      artifactNames = emptyList(),
-      includeTests = true,
-      canceledStatus = canceledStatus,
-    )
+    throw NotImplementedError("JPS compilation was broken on purpose, for details see MRI-3677")
   }
 
   suspend fun buildAll(canceledStatus: CanceledStatus = CanceledStatus.NULL) {
-    runBuild(moduleSet = emptyList(),
-             allModules = true,
-             artifactNames = emptyList(),
-             includeTests = true,
-             canceledStatus = canceledStatus)
+    throw NotImplementedError("JPS compilation was broken on purpose, for details see MRI-3677")
   }
 
   suspend fun buildProduction(canceledStatus: CanceledStatus = CanceledStatus.NULL) {
-    runBuild(
-      moduleSet = emptyList(),
-      allModules = true,
-      artifactNames = emptyList(),
-      canceledStatus = canceledStatus,
-    )
+    throw NotImplementedError("JPS compilation was broken on purpose, for details see MRI-3677")
   }
 
-  suspend fun buildArtifacts(artifactNames: Set<String>, buildIncludedModules: Boolean) {
-    val artifacts = getArtifactsWithIncluded(artifactNames)
-    val missing = artifactNames.filter { name ->
-      artifacts.none { it.name == name }
-    }
-    check(missing.isEmpty()) {
-      "Artifacts aren't configured in the project: " + missing.joinToString()
-    }
-    artifacts.forEach {
-      if (context.compilationData.builtArtifacts.contains(it.name) &&
-          it.outputFilePath?.let(Path::of)?.let(Files::exists) != true) {
-        context.messages.warning("${it.name} is expected to be already built at ${it.outputFilePath} but it's missing")
-        context.compilationData.builtArtifacts.remove(it.name)
-      }
-    }
-    val includedModules = getModulesIncludedInArtifacts(artifacts)
-    val modules = if (buildIncludedModules) {
-      includedModules
-    }
-    else {
-      includedModules.filter {
-        val module = context.findRequiredModule(it)
-        val outputDir = context.getModuleOutputDir(module)
-        if (Files.isDirectory(outputDir) && Files.newDirectoryStream(outputDir).use { stream -> stream.any() }) {
-          false
-        } else if (Files.isRegularFile(outputDir) && outputDir.extension == "jar") {
-          false
-        }
-        else {
-          /**
-           * See [compileMissingArtifactsModules]
-           */
-          Span.current().addEvent("compilation output of module $it is missing: $outputDir")
-          true
-        }
-      }
-    }
-    runBuild(moduleSet = modules, allModules = false, artifactNames = artifacts.map { it.name })
-    val failedToBeBuilt = artifacts.filter {
-      if (it.outputFilePath?.let(Path::of)?.let(Files::exists) == true) {
-        Span.current().addEvent("${it.name} was successfully built at ${it.outputFilePath}")
-        false
-      }
-      else {
-        Span.current().addEvent("${it.name} is expected to be built at ${it.outputFilePath}")
-        true
-      }
-    }
-    if (failedToBeBuilt.isNotEmpty()) {
-      compileMissingArtifactsModules(failedToBeBuilt)
-    }
-  }
+  private suspend fun runBuild() = context.withCompilationLock {
+    val mavenLibrariesDownloading = context.options.mavenLibrariesDownloadLocation != null
 
-  // FIXME: workaround for sporadically missing build artifacts, to be investigated
-  private suspend fun compileMissingArtifactsModules(artifacts: Collection<JpsArtifact>) {
-    val modules = getModulesIncludedInArtifacts(artifacts)
-    require(modules.isNotEmpty()) {
-      "No modules found for artifacts ${artifacts.map { it.name }}"
+    require(!BazelRunfiles.isRunningFromBazel || mavenLibrariesDownloading) {
+      "Running JPS compiler is not supported when running from Bazel."
     }
-    for (artifact in artifacts) {
-      context.compilationData.builtArtifacts.remove(artifact.name)
-    }
-    spanBuilder("Compiling modules for missing artifacts: ${modules.joinToString()}").use {
-      runBuild(moduleSet = modules, allModules = false, artifactNames = artifacts.map { it.name })
-    }
-    for (artifact in artifacts) {
-      if (artifact.outputFilePath?.let(Path::of)?.let(Files::exists) == false) {
-        context.messages.logErrorAndThrow("${artifact.name} is expected to be built at ${artifact.outputFilePath}")
-      }
-    }
-  }
 
-  fun getModulesIncludedInArtifacts(artifactNames: Collection<String>): Collection<String> {
-    return getModulesIncludedInArtifacts(getArtifactsWithIncluded(artifactNames))
-  }
-
-  private fun getModulesIncludedInArtifacts(artifacts: Collection<JpsArtifact>): Set<String> {
-    val modulesSet = LinkedHashSet<String>()
-    for (artifact in artifacts) {
-      JpsArtifactUtil.processPackagingElements(artifact.rootElement) { element ->
-        if (element is JpsModuleOutputPackagingElement) {
-          modulesSet.addAll(getModuleDependencies(module = context.findRequiredModule(element.moduleReference.moduleName), includeTests = false))
-        }
-        true
-      }
-    }
-    return modulesSet
-  }
-
-  private fun getArtifactsWithIncluded(artifactNames: Collection<String>): Set<JpsArtifact> {
-    val artifacts = JpsArtifactService.getInstance().getArtifacts(context.project).filter { it.name in artifactNames }
-    return ArtifactSorter.addIncludedArtifacts(artifacts)
-  }
-
-  private suspend fun runBuild(
-    moduleSet: Collection<String>,
-    allModules: Boolean,
-    artifactNames: Collection<String>,
-    includeTests: Boolean = false,
-    resolveProjectDependencies: Boolean = false,
-    canceledStatus: CanceledStatus = CanceledStatus.NULL,
-  ) = context.withCompilationLock {
     val compilationData = context.compilationData
 
-    val forceBuild = !context.options.incrementalCompilation || !context.compilationData.isIncrementalCompilationDataAvailable()
     val scopes = ArrayList<TargetTypeBuildScope>()
-    for (type in JavaModuleBuildTargetType.ALL_TYPES) {
-      if (includeTests || !type.isTests) {
-        val namesToCompile = if (allModules) context.project.modules.mapTo(mutableListOf()) { it.name } else moduleSet.toMutableList()
-        if (type.isTests) {
-          namesToCompile.removeAll(compilationData.compiledModuleTests)
-          compilationData.compiledModuleTests.addAll(namesToCompile)
-        }
-        else {
-          namesToCompile.removeAll(compilationData.compiledModules)
-          compilationData.compiledModules.addAll(namesToCompile)
-        }
-        if (namesToCompile.isEmpty()) {
-          continue
-        }
-
-        val builder = TargetTypeBuildScope.newBuilder().setTypeId(type.typeId).setForceBuild(forceBuild)
-        if (allModules) {
-          scopes.add(builder.setAllTargets(true).build())
-        }
-        else {
-          scopes.add(builder.addAllTargetId(namesToCompile).build())
-        }
-      }
-    }
-
-    if (resolveProjectDependencies && !compilationData.projectDependenciesResolved) {
+    if (!compilationData.projectDependenciesResolved) {
       scopes.add(
         TargetTypeBuildScope.newBuilder()
           .setTypeId("project-dependencies-resolving")
@@ -268,19 +90,13 @@ internal class JpsCompilationRunner(private val context: CompilationContext) {
       )
     }
 
-    val artifactsToBuild = artifactNames - compilationData.builtArtifacts
-    if (!artifactsToBuild.isEmpty()) {
-      val builder = TargetTypeBuildScope.newBuilder().setTypeId(ArtifactBuildTargetType.INSTANCE.typeId).setForceBuild(forceBuild)
-      scopes.add(builder.addAllTargetId(artifactsToBuild).build())
-    }
-
     val compilationStart = System.nanoTime()
     spanBuilder("compilation")
-      .setAttribute("scope", "${if (allModules) "all" else moduleSet.size} modules")
-      .setAttribute("includeTests", includeTests)
-      .setAttribute("artifactsToBuild", artifactsToBuild.size.toLong())
-      .setAttribute("resolveProjectDependencies", resolveProjectDependencies)
-      .setAttribute("modules", moduleSet.joinToString(separator = ", "))
+      .setAttribute("scope", "0 modules")
+      .setAttribute("includeTests", false)
+      .setAttribute("artifactsToBuild", 0L)
+      .setAttribute("resolveProjectDependencies", true)
+      .setAttribute("modules", "")
       .setAttribute("incremental", context.options.incrementalCompilation)
       .setAttribute("cacheDir", compilationData.dataStorageRoot.toString())
       .use(Dispatchers.IO) { span ->
@@ -292,7 +108,7 @@ internal class JpsCompilationRunner(private val context: CompilationContext) {
             messageHandler,
             scopes,
             false,
-            canceledStatus,
+            CanceledStatus.NULL,
           )
 
           if (!messageHandler.errorMessagesByCompiler.isEmpty()) {
@@ -322,12 +138,7 @@ internal class JpsCompilationRunner(private val context: CompilationContext) {
         }
       }
 
-    if (!artifactsToBuild.isEmpty()) {
-      compilationData.builtArtifacts.addAll(artifactsToBuild)
-    }
-    if (resolveProjectDependencies) {
-      compilationData.projectDependenciesResolved = true
-    }
+    compilationData.projectDependenciesResolved = true
   }
 }
 
@@ -335,12 +146,4 @@ private fun setSystemPropertyIfUndefined(name: String, value: String) {
   if (System.getProperty(name) == null) {
     System.setProperty(name, value)
   }
-}
-
-private fun getModuleDependencies(module: JpsModule, includeTests: Boolean): Sequence<String> {
-  var enumerator = JpsJavaExtensionService.dependencies(module).recursively()
-  if (!includeTests) {
-    enumerator = enumerator.productionOnly()
-  }
-  return enumerator.modules.asSequence().map { it.name }
 }

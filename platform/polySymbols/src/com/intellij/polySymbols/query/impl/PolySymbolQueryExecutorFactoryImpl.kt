@@ -16,12 +16,20 @@ import com.intellij.polySymbols.context.PolyContext
 import com.intellij.polySymbols.context.PolyContextKindRules
 import com.intellij.polySymbols.context.PolyContextRulesProvider
 import com.intellij.polySymbols.context.impl.buildPolyContext
-import com.intellij.polySymbols.query.*
+import com.intellij.polySymbols.query.PolySymbolNameConversionRules
+import com.intellij.polySymbols.query.PolySymbolNameConversionRulesProvider
+import com.intellij.polySymbols.query.PolySymbolNamesProvider
+import com.intellij.polySymbols.query.PolySymbolQueryConfigurator
+import com.intellij.polySymbols.query.PolySymbolQueryExecutor
+import com.intellij.polySymbols.query.PolySymbolQueryExecutorFactory
+import com.intellij.polySymbols.query.PolySymbolQueryResultsCustomizerFactory
+import com.intellij.polySymbols.query.PolySymbolScope
 import com.intellij.polySymbols.utils.PolySymbolPrioritizedScope
 import com.intellij.polySymbols.utils.createModificationTracker
 import com.intellij.polySymbols.utils.findOriginalFile
 import com.intellij.psi.PsiElement
 import com.intellij.util.asSafely
+import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.containers.MultiMap
 
 class PolySymbolQueryExecutorFactoryImpl(private val project: Project) : PolySymbolQueryExecutorFactory, Disposable {
@@ -30,26 +38,29 @@ class PolySymbolQueryExecutorFactoryImpl(private val project: Project) : PolySym
   private var modificationCount = 0L
 
   override fun create(location: PsiElement?, allowResolve: Boolean): PolySymbolQueryExecutor {
-    val application = ApplicationManager.getApplication()
-    application.assertReadAccessAllowed()
+    ThreadingAssertions.assertReadAccess()
 
     PolySymbolQueryConfigurator.EP_NAME.extensionList
       .forEach { it.beforeQueryExecutorCreation(project) }
 
     val context = location?.let { buildPolyContext(it) } ?: PolyContext.empty()
 
+    val scopeOrigin = mutableMapOf<PolySymbolScope, Any>()
     val scopeList = mutableListOf<PolySymbolScope>()
     getCustomScope(location).forEach(scopeList::add)
     val originalLocation = location?.originalElement
-    scopeList.addAll(
-      application.service<PolySymbolQueryScopeService>()
-        .buildScope(project, originalLocation, context, allowResolve)
-    )
+    service<PolySymbolQueryScopeService>()
+      .buildScope(project, originalLocation, context, allowResolve)
+      .forEach { (scope, origin) ->
+        scopeList.add(scope)
+        scopeOrigin[scope] = origin
+      }
 
     scopeList.sortBy { (it.asSafely<PolySymbolPrioritizedScope>()?.priority ?: PolySymbol.Priority.NORMAL).value }
 
     return PolySymbolQueryExecutorImpl(location,
                                        scopeList,
+                                       scopeOrigin,
                                        createNamesProvider(project, originalLocation, context),
                                        PolySymbolQueryResultsCustomizerFactory.getQueryResultsCustomizer(location, context),
                                        context,
@@ -85,13 +96,14 @@ class PolySymbolQueryExecutorFactoryImpl(private val project: Project) : PolySym
         result.putAllValues(it)
       }
 
-    val providers = mutableListOf<Pointer<out PolyContextRulesProvider>>()
+    val providers = mutableListOf<Pointer<out ModificationTracker>>()
     for (provider in PolySymbolQueryConfigurator.EP_NAME.extensionList.flatMap {
       it.beforeQueryExecutorCreation(project)
       it.getContextRulesProviders(project, dir)
     }) {
       result.putAllValues(provider.getContextRules())
-      providers.add(provider.createPointer())
+      val providerPtr = provider.createPointer()
+      providers.add(Pointer { providerPtr.dereference()?.modificationTracker })
     }
     return Pair(result, createModificationTracker(providers))
   }
@@ -105,7 +117,10 @@ class PolySymbolQueryExecutorFactoryImpl(private val project: Project) : PolySym
       nameConversionRules.add(provider.getNameConversionRules())
       providers.add(provider.createPointer())
     }
-    return PolySymbolNamesProviderImpl(context.framework, nameConversionRules, createModificationTracker(providers))
+    val trackers = providers.map { providerPointer ->
+      Pointer { providerPointer.dereference()?.modificationTracker }
+    }
+    return PolySymbolNamesProviderImpl(context, nameConversionRules, createModificationTracker(trackers))
   }
 
   private fun getCustomScope(context: PsiElement?): List<PolySymbolScope> =
@@ -130,6 +145,16 @@ class PolySymbolQueryExecutorFactoryImpl(private val project: Project) : PolySym
       }
     }
     return result
+  }
+
+  private object ScopesPriorityComparator : Comparator<PolySymbolScope> {
+    override fun compare(a: PolySymbolScope, b: PolySymbolScope): Int {
+      if (a == b) return 0
+      val priorityA = ((a as? PolySymbolPrioritizedScope)?.priority ?: PolySymbol.Priority.NORMAL).value
+      val priorityB = ((b as? PolySymbolPrioritizedScope)?.priority ?: PolySymbol.Priority.NORMAL).value
+      if (priorityA != priorityB) return priorityA.compareTo(priorityB)
+      return System.identityHashCode(a).compareTo(System.identityHashCode(b))
+    }
   }
 
 }

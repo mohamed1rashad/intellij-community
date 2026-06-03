@@ -1,0 +1,12 @@
+<idea-plugin xmlns:xi="http://www.w3.org/2001/XInclude">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <plugin id="com.intellij.modules.idea.community"/>
+    <module name="intellij.platform.backend"/>
+    <module name="intellij.java"/>
+    <module name="intellij.java.ui"/>
+  </dependencies>
+  <!-- endregion -->
+
+  <xi:include href="/META-INF/community-integration.xml"/>
+</idea-plugin>

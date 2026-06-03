@@ -1,7 +1,8 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.devkit.dom.impl;
 
 import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.injected.editor.VirtualFileWindow;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
@@ -27,8 +28,14 @@ import org.jetbrains.idea.devkit.dom.index.PluginIdDependenciesIndex;
 import org.jetbrains.idea.devkit.dom.index.PluginIdModuleIndex;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
+
+import static java.util.Collections.singleton;
 
 public final class ExtensionsDomExtender extends DomExtender<Extensions> {
   private static final DomExtender<Extension> EXTENSION_EXTENDER = new ExtensionDomExtender();
@@ -41,10 +48,17 @@ public final class ExtensionsDomExtender extends DomExtender<Extensions> {
   @Override
   public void registerExtensions(final @NotNull Extensions extensions, final @NotNull DomExtensionsRegistrar registrar) {
     Project project = extensions.getManager().getProject();
-    VirtualFile currentFile = getVirtualFile(extensions);
-    if (currentFile == null || DumbService.isDumb(project)) return;
+    if (DumbService.isDumb(project)) return;
 
-    Set<VirtualFile> files = getVisibleFiles(project, currentFile);
+    VirtualFile currentFile = getVirtualFile(extensions);
+    if (currentFile == null) return;
+    Set<VirtualFile> files = switch (currentFile) {
+      case VirtualFileWithId ignored -> getVisibleFiles(project, currentFile);
+      // injected code, consider it the context of all project files:
+      case VirtualFileWindow ignored -> new HashSet<>(PluginIdModuleIndex.getFiles(project, ""));
+      default -> null;
+    };
+    if (files == null) return;
 
     String epPrefix = extensions.getEpPrefix();
     Map<String, Supplier<ExtensionPoint>> points = ExtensionPointIndex.getExtensionPoints(project, files, epPrefix);
@@ -60,26 +74,26 @@ public final class ExtensionsDomExtender extends DomExtender<Extensions> {
   }
 
   private static @Nullable VirtualFile getVirtualFile(DomElement domElement) {
-    final VirtualFile file = DomUtil.getFile(domElement).getOriginalFile().getVirtualFile();
-    return file instanceof VirtualFileWithId ? file : null;
+    return DomUtil.getFile(domElement).getOriginalFile().getVirtualFile();
   }
 
   private static Set<VirtualFile> getVisibleFiles(Project project, @NotNull VirtualFile file) {
     Set<VirtualFile> result = new HashSet<>();
-    collectFiles(project, file, result);
+    collectFiles(project, file, result, new HashSet<>());
     result.addAll(PluginIdModuleIndex.getFiles(project, ""));
     return result;
   }
 
-  private static void collectFiles(Project project, @NotNull VirtualFile file, Set<VirtualFile> result) {
+  private static void collectFiles(Project project, @NotNull VirtualFile file, Set<VirtualFile> result, Set<String> processedDeps) {
     ProgressManager.checkCanceled();
     if (!result.add(file)) {
       return;
     }
 
     for (String id : getDependencies(project, file)) {
+      if (!processedDeps.add(id)) continue;
       for (VirtualFile dep : PluginIdModuleIndex.getFiles(project, id)) {
-        collectFiles(project, dep, result);
+        collectFiles(project, dep, result, processedDeps);
       }
     }
   }
@@ -98,7 +112,7 @@ public final class ExtensionsDomExtender extends DomExtender<Extensions> {
     Set<String> result = new HashSet<>();
     result.add(PluginManagerCore.CORE_PLUGIN_ID);
 
-    result.addAll(PluginIdDependenciesIndex.getPluginAndDependsIds(project, Collections.singleton(currentFile)));
+    result.addAll(PluginIdDependenciesIndex.getPluginAndDependsIds(project, singleton(currentFile)));
 
     final String pluginId = PluginIdDependenciesIndex.getPluginId(project, currentFile);
     if (pluginId != null) {

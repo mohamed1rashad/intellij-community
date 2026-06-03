@@ -3,13 +3,20 @@ package org.jetbrains.idea.maven.project
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.runReadAction
-import com.intellij.openapi.externalSystem.dependency.analyzer.*
+import com.intellij.openapi.externalSystem.dependency.analyzer.DAArtifact
+import com.intellij.openapi.externalSystem.dependency.analyzer.DADependency
+import com.intellij.openapi.externalSystem.dependency.analyzer.DAModule
+import com.intellij.openapi.externalSystem.dependency.analyzer.DAOmitted
+import com.intellij.openapi.externalSystem.dependency.analyzer.DAProject
+import com.intellij.openapi.externalSystem.dependency.analyzer.DAScope
+import com.intellij.openapi.externalSystem.dependency.analyzer.DAWarning
+import com.intellij.openapi.externalSystem.dependency.analyzer.DependencyAnalyzerContributor
 import com.intellij.openapi.externalSystem.dependency.analyzer.DependencyAnalyzerDependency.Scope.Type.CUSTOM
 import com.intellij.openapi.externalSystem.dependency.analyzer.DependencyAnalyzerDependency.Scope.Type.STANDARD
+import com.intellij.openapi.externalSystem.dependency.analyzer.DependencyAnalyzerProject
 import com.intellij.openapi.externalSystem.util.ExternalSystemBundle.message
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.Pair
 import org.jetbrains.annotations.Nls
 import org.jetbrains.idea.maven.model.MavenArtifactNode
 import org.jetbrains.idea.maven.model.MavenArtifactState
@@ -21,12 +28,11 @@ import com.intellij.openapi.externalSystem.dependency.analyzer.DependencyAnalyze
 class MavenDependencyAnalyzerContributor(private val project: Project) : DependencyAnalyzerContributor {
 
   override fun whenDataChanged(listener: () -> Unit, parentDisposable: Disposable) {
-    val projectsManager = MavenProjectsManager.getInstance(project)
-    projectsManager.addProjectsTreeListener(object : MavenProjectsTree.Listener {
-      override fun projectResolved(projectWithChanges: Pair<MavenProject, MavenProjectChanges>) {
+    project.messageBus.connect(parentDisposable).subscribe(MavenProjectsTree.Listener.TOPIC, object : MavenProjectsTree.Listener {
+      override fun projectsResolved(projects: List<MavenProject>) {
         listener()
       }
-    }, parentDisposable)
+    })
   }
 
   override fun getProjects(): List<DependencyAnalyzerProject> {

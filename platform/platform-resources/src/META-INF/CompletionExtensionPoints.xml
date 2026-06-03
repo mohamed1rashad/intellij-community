@@ -27,6 +27,9 @@
     <extensionPoint name="lookup.actionProvider" interface="com.intellij.codeInsight.lookup.LookupActionProvider" dynamic="true"/>
     <extensionPoint name="lookup.vetoPolicy" interface="com.intellij.codeInsight.lookup.impl.LookupImplVetoPolicy" dynamic="true"/>
     <extensionPoint name="lookup.bottomPanelProvider" interface="com.intellij.codeInsight.lookup.LookupBottomPanelProvider" dynamic="true"/>
+    <extensionPoint name="lookup.bottomPanelAdvertiserCustomizer"
+                    interface="com.intellij.codeInsight.lookup.LookupBottomPanelAdvertiserCustomizer"
+                    dynamic="true"/>
 
     <extensionPoint name="lookup.usageDetails" interface="com.intellij.codeInsight.lookup.impl.LookupUsageDescriptor" dynamic="true"/>
 
@@ -59,6 +62,14 @@
     <extensionPoint qualifiedName="com.intellij.mlCompletionFeaturesCollector" dynamic="true" beanClass="com.intellij.lang.LanguageExtensionPoint">
       <with attribute="implementationClass" implements="com.intellij.codeInsight.inline.completion.features.InlineCompletionFeaturesCollector"/>
     </extensionPoint>
+    <extensionPoint qualifiedName="com.intellij.modcompletion.completionItemProvider" 
+                    beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
+      <with attribute="implementationClass" implements="com.intellij.modcompletion.ModCompletionItemProvider"/>
+    </extensionPoint>
+    <extensionPoint qualifiedName="com.intellij.modcompletion.completionItemFilter" 
+                    beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
+      <with attribute="implementationClass" implements="com.intellij.modcompletion.ModCompletionItemFilter"/>
+    </extensionPoint>
 
     <extensionPoint qualifiedName="com.intellij.codeInsight.completion.command.factory"
                     beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
@@ -79,4 +90,8 @@
       <with attribute="implementationClass" implements="com.intellij.codeInsight.completion.command.commands.IntentionCommandOffsetProvider"/>
     </extensionPoint>
   </extensionPoints>
+  <extensions defaultExtensionNs="com.intellij">
+    <registryKey defaultValue="false" description="ModCompletion contributors (see com.intellij.modcompletion.CompletionItemProvider)"
+                 key="ide.completion.modcommand"/>
+  </extensions>
 </idea-plugin>

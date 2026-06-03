@@ -11,25 +11,38 @@ import com.intellij.psi.PsiElementVisitor
 import com.jetbrains.python.PyPsiBundle
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider
 import com.jetbrains.python.documentation.PythonDocumentationProvider
-import com.jetbrains.python.psi.*
-import com.jetbrains.python.psi.types.*
+import com.jetbrains.python.psi.LanguageLevel
+import com.jetbrains.python.psi.PyCallExpression
+import com.jetbrains.python.psi.PyElementGenerator
+import com.jetbrains.python.psi.PyFunction
+import com.jetbrains.python.psi.types.PyClassLikeType
+import com.jetbrains.python.psi.types.PyCollectionType
+import com.jetbrains.python.psi.types.PyType
+import com.jetbrains.python.psi.types.PyTypeUtil.isOverlappingWith
+import com.jetbrains.python.psi.types.TypeEvalContext
 
 class PyInvalidCastInspection : PyInspection() {
   override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean, session: LocalInspectionToolSession): PsiElementVisitor {
-    return object : PyInspectionVisitor(holder, getContext(session)) {
+    val context = PyInspectionVisitor.getContext(session)
+    if (context.usesExternalTypeEngine) {
+      return PsiElementVisitor.EMPTY_VISITOR
+    }
+    return object : PyInspectionVisitor(holder, context) {
       override fun visitPyCallExpression(callExpression: PyCallExpression) {
         val callees = callExpression.multiResolveCalleeFunction(resolveContext)
-        val isCastCall = callees.any { (it as? PyFunction)?.qualifiedName == PyTypingTypeProvider.CAST ||
-                                      (it as? PyFunction)?.qualifiedName == PyTypingTypeProvider.CAST_EXT }
+        val isCastCall = callees.any {
+          (it as? PyFunction)?.qualifiedName == PyTypingTypeProvider.CAST ||
+          (it as? PyFunction)?.qualifiedName == PyTypingTypeProvider.CAST_EXT
+        }
         if (!isCastCall) return
 
         val args = callExpression.getArguments()
         if (args.size != 2) return
-        val targetTypeRef: Ref<PyType>? = PyTypingTypeProvider.getType(args[0], myTypeEvalContext)
+        val targetTypeRef = PyTypingTypeProvider.getType(args[0], myTypeEvalContext)
         val targetType = Ref.deref(targetTypeRef)
         val actualType = myTypeEvalContext.getType(args[1])
 
-        if (PyTypeUtil.isOverlappingWith(targetType, actualType, myTypeEvalContext)) return
+        if (targetType.isOverlappingWith(actualType, myTypeEvalContext)) return
         val fromName = PythonDocumentationProvider.getTypeName(actualType, myTypeEvalContext)
         val toName = PythonDocumentationProvider.getVerboseTypeName(targetType, myTypeEvalContext)
 
@@ -83,7 +96,7 @@ private fun computeSuggestedIntermediateTypeName(targetType: PyType?, actualType
     fun mro(t: PyClassLikeType): List<PyClassLikeType> {
       val result = ArrayList<PyClassLikeType>()
       result.add(t)
-      result.addAll(t.getAncestorTypes(context))
+      result.addAll(t.getAncestorTypes(context).filterNotNull())
       return result
     }
 

@@ -19,7 +19,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 
-import static com.jetbrains.python.codeInsight.imports.AddImportHelper.ImportPriority.*;
+import static com.jetbrains.python.codeInsight.imports.AddImportHelper.ImportPriority.BUILTIN;
+import static com.jetbrains.python.codeInsight.imports.AddImportHelper.ImportPriority.PROJECT;
+import static com.jetbrains.python.codeInsight.imports.AddImportHelper.ImportPriority.THIRD_PARTY;
 
 
 public class PyAddImportTest extends PyTestCase {
@@ -27,11 +29,11 @@ public class PyAddImportTest extends PyTestCase {
     runWithAdditionalFileInLibDir(
       "sys.py",
       "",
-      (__) ->
+      (_) ->
         runWithAdditionalFileInLibDir(
           "datetime.py",
           "",
-          (___) -> doAddImport("re", BUILTIN)
+          (_) -> doAddImport("re", BUILTIN)
         )
     );
   }
@@ -56,11 +58,11 @@ public class PyAddImportTest extends PyTestCase {
     runWithAdditionalFileInLibDir(
       "sys.py",
       "",
-      (__) ->
+      (_) ->
         runWithAdditionalFileInLibDir(
           "datetime.py",
           "",
-          (___) -> doAddImportWithResolveInProject("sys", BUILTIN)
+          (_) -> doAddImportWithResolveInProject("sys", BUILTIN)
         )
     );
   }
@@ -120,7 +122,7 @@ public class PyAddImportTest extends PyTestCase {
     runWithAdditionalFileInLibDir(
       "sys.py",
       "path = 10",
-      (__) -> {
+      (_) -> {
         myFixture.configureByFile(getTestName(true) + ".py");
         myFixture.enableInspections(PyUnresolvedReferencesInspection.class);
         assertNotNull(myFixture.findSingleIntention("Import 'sys' locally"));

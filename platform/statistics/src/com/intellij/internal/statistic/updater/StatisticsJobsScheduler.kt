@@ -6,9 +6,10 @@ import com.intellij.ide.StatisticsNotificationManager
 import com.intellij.internal.statistic.eventLog.StatisticsEventLogProviderUtil.getEventLogProviders
 import com.intellij.internal.statistic.eventLog.StatisticsEventLogProvidersHolder
 import com.intellij.internal.statistic.eventLog.StatisticsEventLoggerProvider
-import com.intellij.internal.statistic.eventLog.connection.StatisticsResult
 import com.intellij.internal.statistic.eventLog.uploader.EventLogExternalUploader
 import com.intellij.internal.statistic.eventLog.validator.IntellijSensitiveDataValidator
+import com.intellij.internal.statistic.eventLog.validator.storage.FusComponentProvider.listenToMetadataEvents
+import com.intellij.internal.statistic.eventLog.validator.storage.FusComponentProvider.listenToOptionsChanges
 import com.intellij.internal.statistic.utils.StatisticsUploadAssistant
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
@@ -17,7 +18,16 @@ import com.intellij.openapi.extensions.ExtensionNotApplicableException
 import com.intellij.openapi.extensions.ExtensionPointListener
 import com.intellij.openapi.extensions.InternalIgnoreDependencyViolation
 import com.intellij.openapi.extensions.PluginDescriptor
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.milliseconds
@@ -25,7 +35,7 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 @InternalIgnoreDependencyViolation
-private class StatisticsJobsScheduler : ApplicationActivity {
+internal class StatisticsJobsScheduler : ApplicationActivity {
   private val sendJobs = ConcurrentHashMap<String, Job>()
 
   init {
@@ -35,15 +45,15 @@ private class StatisticsJobsScheduler : ApplicationActivity {
   }
 
   override suspend fun execute() {
-    coroutineScope {
+    withContext(Dispatchers.IO) {
       if (ApplicationManager.getApplication().extensionArea.hasExtensionPoint(StatisticsEventLoggerProvider.EP_NAME)) {
-        StatisticsEventLoggerProvider.EP_NAME.addExtensionPointListener(object : ExtensionPointListener<StatisticsEventLoggerProvider> {
+        StatisticsEventLoggerProvider.EP_NAME.addExtensionPointListener(this@withContext, object : ExtensionPointListener<StatisticsEventLoggerProvider> {
           override fun extensionAdded(extension: StatisticsEventLoggerProvider, pluginDescriptor: PluginDescriptor) {
             launch {
               launchStatisticsSendJob(extension, this)
 
               if (extension.isLoggingEnabled()) {
-                IntellijSensitiveDataValidator.getInstance(extension.recorderId).update()
+                launchValidationRulesUpdate(extension)
               }
             }
           }
@@ -54,8 +64,10 @@ private class StatisticsJobsScheduler : ApplicationActivity {
         })
       }
 
+      delay(5.seconds)
+
       launch {
-        delay(10.seconds)
+        delay(5.seconds)
 
         serviceAsync<StatisticsNotificationManager>().showNotificationIfNeeded()
       }
@@ -102,16 +114,20 @@ private class StatisticsJobsScheduler : ApplicationActivity {
   }
 }
 
-private suspend fun runValidationRulesUpdate() {
-  if (!System.getProperty("fus.internal.reduce.initial.delay").toBoolean()) {
-    delay(3.minutes)
+private suspend fun CoroutineScope.runValidationRulesUpdate() {
+  val providers = getEventLogProviders()
+  for (provider in providers) {
+    launchValidationRulesUpdate(provider)
   }
+  serviceAsync<StatisticsValidationUpdatedService>().updatedDeferred.complete(Unit)
+}
 
-  while (true) {
-    updateValidationRules()
-    serviceAsync<StatisticsValidationUpdatedService>().updatedDeferred.complete(Unit)
-
-    delay(180.minutes)
+private suspend fun CoroutineScope.launchValidationRulesUpdate(provider: StatisticsEventLoggerProvider) {
+  if (provider.isLoggingEnabled()) {
+    val validator = IntellijSensitiveDataValidator.getInstance(provider.recorderId)
+    listenToOptionsChanges(provider.recorderId, validator.messageBus)
+    listenToMetadataEvents(provider.recorderId, validator.messageBus)
+    validator.validationRulesStorage.update(this)
   }
 }
 
@@ -134,5 +150,5 @@ private suspend fun checkPreviousExternalUploadResult() {
 @ApiStatus.Internal
 @Service(Service.Level.APP)
 class StatisticsValidationUpdatedService {
-  val updatedDeferred = CompletableDeferred<Unit>()
+  val updatedDeferred: CompletableDeferred<Unit> = CompletableDeferred()
 }

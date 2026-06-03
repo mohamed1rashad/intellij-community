@@ -1,12 +1,14 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.polySymbols
 
+import com.intellij.codeInsight.highlighting.ReadWriteAccessDetector
 import com.intellij.find.usages.api.SearchTarget
 import com.intellij.find.usages.api.UsageSearcher
 import com.intellij.find.usages.symbol.SearchTargetSymbol
 import com.intellij.model.Pointer
 import com.intellij.model.Symbol
 import com.intellij.navigation.NavigatableSymbol
+import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.backend.documentation.DocumentationTarget
@@ -14,28 +16,39 @@ import com.intellij.platform.backend.navigation.NavigationTarget
 import com.intellij.platform.backend.presentation.TargetPresentation
 import com.intellij.polySymbols.context.PolyContext
 import com.intellij.polySymbols.documentation.PolySymbolDocumentationCustomizer
-import com.intellij.polySymbols.query.*
+import com.intellij.polySymbols.documentation.PolySymbolDocumentationDsl
+import com.intellij.polySymbols.impl.PolySymbolPropertyGetter
+import com.intellij.polySymbols.query.PolySymbolMatch
+import com.intellij.polySymbols.query.PolySymbolMatchCustomizer
+import com.intellij.polySymbols.query.PolySymbolQueryExecutor
+import com.intellij.polySymbols.query.PolySymbolQueryExecutorFactory
+import com.intellij.polySymbols.query.PolySymbolQueryScopeContributor
+import com.intellij.polySymbols.query.PolySymbolScope
+import com.intellij.polySymbols.query.PolySymbolWithPattern
 import com.intellij.polySymbols.refactoring.PolySymbolRenameTarget
 import com.intellij.polySymbols.search.PolySymbolSearchTarget
-import com.intellij.polySymbols.utils.*
+import com.intellij.polySymbols.utils.PolySymbolPrioritizedScope
+import com.intellij.polySymbols.utils.kindName
+import com.intellij.polySymbols.utils.matchedNameOrName
+import com.intellij.polySymbols.utils.namespace
 import com.intellij.psi.PsiElement
 import com.intellij.refactoring.rename.api.RenameTarget
 import com.intellij.refactoring.rename.api.RenameUsageSearcher
 import com.intellij.refactoring.rename.symbol.RenameableSymbol
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresReadLock
-import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.Locale
 import javax.swing.Icon
+import kotlin.reflect.KClass
 
 /**
- * The core element of the Poly Symbols framework. It is identified through `name` and `qualifiedKind` properties.
+ * The core element of the Poly Symbols framework. It is identified through `name` and `kind` properties.
  * The symbol has a very generic meaning and may represent a variable in some language, or an endpoint of some web server,
  * or a file.
  *
- * Symbols, which share some common characteristics should be grouped using the same `qualifiedKind`.
- * The `qualifiedKind` consists of a `namespace`, which roughly indicates a language or a framework the symbol belongs to,
- * and a `kind`, which roughly indicates, what the symbol basic characteristics are.
+ * Symbols, which share some common characteristics should be grouped using the same `kind`.
+ * The `kind` consists of a `namespace`, which roughly indicates a language or a framework the symbol belongs to,
+ * and a `kindName`, which roughly indicates, what the symbol basic characteristics are.
  *
  * [PolySymbol]s provide a straightforward way of implementing:
  * - navigation support - through [PolySymbol.getNavigationTargets] method
@@ -52,15 +65,47 @@ import javax.swing.Icon
  * retrieved using [PolySymbolQueryExecutor] acquired using [PolySymbolQueryExecutorFactory].
  * The PolySymbol framework requires an integration into language or framework support through:
  * - completion provider - you can use `com.intellij.polySymbols.completion.PolySymbolsCompletionProviderBase`
- * - reference contributor - use `com.intellij.polySymbols.references.PsiPolySymbolReferenceProvider`
+ * - reference contributor - use [com.intellij.polySymbols.references.PsiPolySymbolReferenceProvider]
+ * - declaration contributor - use [com.intellij.polySymbols.declarations.PolySymbolDeclarationProvider]
+ *
+ * ## Properties
+ *
+ * PolySymbols are meant to be used in as generic a way as possible. So, when you get results from a
+ * [PolySymbolQueryExecutor] query, you should avoid casting symbols to specialized interfaces. For instance,
+ * a query may return symbols of unexpected classes contributed by some 3rd party plugins.
+ * However, you might want to access a very specific property of a symbol, like a type of variable symbol.
+ * To do that, define first a [PolySymbolProperty] object (you need to define an object, to be able to pass it as an annotation parameter):
+ * ```kotlin
+ * object JSTypeProperty : PolySymbolProperty<JSType>("js-type", JSType::class.java)
+ * ```
+ * In the class implementing variable symbol, annotate the type property with [PolySymbol.Property] annotation:
+ * ```kotlin
+ * class JSVariableSymbol(...) : PolySymbol {
+ *   @PolySymbol.Property(JSTypeProperty::class)
+ *   val type: JSType
+ * }
+ * ```
+ * Then, you can access the property using [PolySymbol.get] operator with the property object as a parameter:
+ * ```kotlin
+ * val PolySymbol.jsType: JSType? get() = this[JSTypeProperty]
+ * ```
+ * The PolySymbol property is identified by its name and value type.
+ * You can get a property object by calling [PolySymbolProperty.get] operator, e.g.:
+ * ```kotlin
+ * val jsTypeProperty = PolySymbolProperty["js-type", JSType::class.java]
+ * ```
+ *
+ * ## Patterns
  *
  * The [PolySymbolQueryExecutor] queries support evaluation of [PolySymbolWithPattern] patterns.
  * Symbols, which implement this interface and provide a pattern are expanded to a [PolySymbolMatch]
  * composite symbols during queries. Such patterns allow for handy implementation of a microsyntax.
  *
  * Each symbol can be a scope for other symbols (like a Java class is a scope for its methods and fields). Such symbols
- * should implement [PolySymbolScope] interface. When pattern evaluation is happening, each matched symbol's `queryScope`
+ * should implement [PolySymbolScope] interface. When pattern evaluation is happening, each matched symbol's [PolySymbol.queryScope]
  * is put on the scope stack, allowing for expanding the scope during the pattern match process.
+ *
+ * ## Lifecycle span
  *
  * The symbol lifecycle is a single read action. If you need it to survive between read actions,
  * use [PolySymbol.createPointer] to create a symbol pointer.
@@ -70,24 +115,15 @@ import javax.swing.Icon
  *
  * See also: [Implementing Poly Symbols](https://plugins.jetbrains.com/docs/intellij/websymbols-implementation.html)
  */
-/*
- * INAPPLICABLE_JVM_NAME -> https://youtrack.jetbrains.com/issue/KT-31420
- **/
 @Suppress("INAPPLICABLE_JVM_NAME")
+@PolySymbolDocumentationDsl
 interface PolySymbol : Symbol, NavigatableSymbol, PolySymbolPrioritizedScope {
-
-  /**
-   * Specifies where this symbol comes from. Besides descriptive information like
-   * framework, library, version or default icon, it also provides an interface to
-   * load symbol types and icons.
-   **/
-  val origin: PolySymbolOrigin
 
   /**
    * Describes which group of symbols (kind) within the particular language
    * or concept (namespace) the symbol belongs to.
    */
-  val qualifiedKind: PolySymbolQualifiedKind
+  val kind: PolySymbolKind
 
   /**
    * The name of the symbol. If the symbol does not have a pattern, the name will be used as-is for matching.
@@ -106,8 +142,8 @@ interface PolySymbol : Symbol, NavigatableSymbol, PolySymbolPrioritizedScope {
 
   /**
    * An optional icon associated with the symbol, which is going to be used across the IDE.
-   * If none is specified, a default icon of the origin will be used and if that’s not available,
-   * a default icon for symbol namespace and kind.
+   * To not show an icon in the documentation, for property [DocHideIconProperty] return `true`.
+   * If no icon is provided, in code completion a default icon for symbol namespace and kind will be used.
    */
   val icon: Icon?
     get() = null
@@ -149,19 +185,30 @@ interface PolySymbol : Symbol, NavigatableSymbol, PolySymbolPrioritizedScope {
   /**
    * A [PsiElement], which is a file or an element, which can be used to roughly
    * locate the source of the symbol within a project to provide a context for loading additional information,
-   * like types. If the symbol is [com.intellij.polySymbols.search.PsiSourcedPolySymbol], then `psiContext` is equal to source.
+   * like types. If the symbol is [com.intellij.polySymbols.search.PsiLinkedPolySymbol], then `psiContext` is equal to source.
    */
   val psiContext: PsiElement?
     get() = null
 
   /**
-   * Accessor for various symbol properties. Plugins can use properties to provide additional information on the symbol.
-   * All properties supported by IDEs are defined through `PROP_*` constants of [PolySymbol] interface.
-   * Check their documentation for further reference. To ensure that results are properly casted, use
-   * [PolySymbolProperty.tryCast] method for returned values.
+   * Accessor for various symbol properties. All properties supported by the PolySymbol framework are defined through `*Property`
+   * objects within the [PolySymbol] interface. Check their documentation for further reference. Overall, you should avoid
+   * overriding this method to provide property values and instead define property getters by annotating properties,
+   * fields, or methods with [PolySymbol.Property] annotation.
+   *
+   * E.g., to provide custom presentation for a symbol, implement getter for [TextAttributesKeyProperty]:
+   * ```kotlin
+   * class MySymbol: PolySymbol {
+   *
+   *   @PolySymbol.Property(TextAttributesKeyProperty::class)
+   *   private val textAttributesKey: TextAttributesKey
+   *     get() = EditorColors.REFERENCE_HYPERLINK_COLOR
+   *
+   * }
+   *
    */
   operator fun <T : Any> get(property: PolySymbolProperty<T>): T? =
-    null
+    PolySymbolPropertyGetter.get(this, property)
 
   /**
    * Returns [TargetPresentation] used by [SearchTarget] and [RenameTarget].
@@ -172,7 +219,7 @@ interface PolySymbol : Symbol, NavigatableSymbol, PolySymbolPrioritizedScope {
   val presentation: TargetPresentation
     get() {
       // TODO use kind description provider
-      val kindName = kind.replace('-', ' ').lowercase(Locale.US).let {
+      val kindName = kindName.replace('-', ' ').lowercase(Locale.US).let {
         when {
           it.endsWith("ies") -> it.substring(0, it.length - 3) + "y"
           it.endsWith("ses") -> it.substring(0, it.length - 2)
@@ -243,27 +290,16 @@ interface PolySymbol : Symbol, NavigatableSymbol, PolySymbolPrioritizedScope {
 
   /**
    * Return `true` if the symbol should be present in the query results
-   * in the particular context. By default, the current symbol framework is checked.
+   * in the particular context.
    */
   fun matchContext(context: PolyContext): Boolean =
-    origin.framework == null || context.framework == null || origin.framework == context.framework
+    true
 
   /**
    * Returns `true` if two symbols are the same or equivalent for resolve purposes.
    */
   fun isEquivalentTo(symbol: Symbol): Boolean =
     this == symbol
-
-  /**
-   * Poly Symbols can have various naming conventions.
-   * This method is used by the framework to determine a new name for a symbol based on its occurrence
-   *
-   * Note: do not implement - to be removed
-   */
-  @ApiStatus.Internal
-  fun adjustNameForRefactoring(queryExecutor: PolySymbolQueryExecutor, newName: String, occurence: String): String =
-    queryExecutor.namesProvider.adjustRename(qualifiedName, newName, occurence)
-
 
   sealed interface Priority : Comparable<Priority> {
 
@@ -303,34 +339,46 @@ interface PolySymbol : Symbol, NavigatableSymbol, PolySymbolPrioritizedScope {
     }
   }
 
-  companion object {
+  @Target(AnnotationTarget.PROPERTY, AnnotationTarget.FIELD, AnnotationTarget.PROPERTY_GETTER,
+          AnnotationTarget.ANNOTATION_CLASS)
+  @Retention(AnnotationRetention.RUNTIME)
+  annotation class Property(val property: KClass<*>)
 
-    /**
-     * Supported by `html/elements` and `html/attributes` symbols,
-     * allows to inject the specified language into HTML element text or HTML attribute value.
-     */
-    @JvmField
-    val PROP_INJECT_LANGUAGE: PolySymbolProperty<String> = PolySymbolProperty["inject-language"]
 
-    /**
-     * If a symbol uses a RegEx pattern, usually it will be displayed in a documentation
-     * popup section "pattern". Setting this property to `true` hides that section.
-     */
-    @JvmField
-    val PROP_DOC_HIDE_PATTERN: PolySymbolProperty<Boolean> = PolySymbolProperty["doc-hide-pattern"]
+  /**
+   * By default, all symbols show up in code completion.
+   * Setting this property to true prevents a symbol from showing up in the code completion.
+   */
+  object HideFromCompletionProperty : PolySymbolProperty<Boolean>("hide-from-completion", Boolean::class.java)
 
-    /**
-     * By default, all symbols show up in code completion.
-     * Setting this property to true prevents a symbol from showing up in the code completion.
-     */
-    @JvmField
-    val PROP_HIDE_FROM_COMPLETION: PolySymbolProperty<Boolean> = PolySymbolProperty["hide-from-completion"]
+  /**
+   * If a symbol uses a RegEx pattern, usually it will be displayed in a documentation
+   * popup section "pattern". Setting this property to `true` hides that section.
+   */
+  object DocHidePatternProperty : PolySymbolProperty<Boolean>("doc-hide-pattern", Boolean::class.java)
 
-    /**
-     * Text attributes key of an IntelliJ ColorScheme.
-     **/
-    @JvmField
-    val PROP_IJ_TEXT_ATTRIBUTES_KEY: PolySymbolProperty<String> = PolySymbolProperty["ij-text-attributes-key"]
-  }
+  /**
+   * If a symbol has an icon associated, it will be shown in the documentation in the definition section
+   * by default. Setting this property to `true` hides the icon.
+   */
+  object DocHideIconProperty : PolySymbolProperty<Boolean>("doc-hide-icon", Boolean::class.java)
+
+  /**
+   * Supported by `html/elements` and `html/attributes` symbols,
+   * allows to inject the specified language into HTML element text or HTML attribute value.
+   */
+  object InjectLanguageProperty : PolySymbolProperty<String>("inject-language", String::class.java)
+
+  /**
+   * Text attributes key of an IntelliJ ColorScheme.
+   */
+  object TextAttributesKeyProperty : PolySymbolProperty<TextAttributesKey>("ij-text-attributes-key", TextAttributesKey::class.java)
+
+  /**
+   * Read/write access information for the symbol.
+   */
+  object ReadWriteAccessProperty : PolySymbolProperty<ReadWriteAccessDetector.Access>("ij-read-write-access",
+                                                                                      ReadWriteAccessDetector.Access::class.java)
+
 }
 

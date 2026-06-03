@@ -1,11 +1,15 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ijent
 
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.Service
-import com.intellij.openapi.components.service
-import com.intellij.openapi.components.serviceAsync
-import kotlinx.coroutines.*
+import com.intellij.platform.ijent.IjentSessionRegistry.register
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -13,13 +17,13 @@ import java.util.concurrent.atomic.AtomicLong
  * This service MUST know about a running IJent if it's going to be used through [java.nio.file.spi.FileSystemProvider].
  * It also MAY know about delegates and wrappers over interfaces, if they are registered with [register].
  */
-@Service(Service.Level.APP)
-class IjentSessionRegistry(private val coroutineScope: CoroutineScope) {
+@OptIn(DelicateCoroutinesApi::class)
+object IjentSessionRegistry {
   private val counter = AtomicLong()
 
   private class IjentBundle(
-    val factory: suspend (ijentId: IjentId) -> IjentSession<IjentPosixApi>,
-    val deferred: Deferred<IjentSession<IjentPosixApi>>?,
+    val factory: suspend (ijentId: IjentId) -> IjentSession.Posix,
+    val deferred: Deferred<IjentSession.Posix>?,
     val oneOff: Boolean,
   )
 
@@ -33,7 +37,7 @@ class IjentSessionRegistry(private val coroutineScope: CoroutineScope) {
    */
   fun register(
     ijentName: String,
-    launcher: suspend (ijentId: IjentId) -> IjentSession<IjentPosixApi>,
+    launcher: suspend (ijentId: IjentId) -> IjentSession.Posix,
   ): IjentId {
     val ijentId = IjentId("ijent-${counter.getAndIncrement()}-${ijentName.replace(Regex("[^A-Za-z0-9-]"), "-")}")
     ijents[ijentId] = IjentBundle(launcher, null, oneOff = false)
@@ -65,7 +69,8 @@ class IjentSessionRegistry(private val coroutineScope: CoroutineScope) {
    * An instance of [IjentApi] that has ever thrown [IjentUnavailableException] will never be returned by this function again.
    */
   @OptIn(ExperimentalCoroutinesApi::class)
-  suspend fun get(ijentId: IjentId): IjentSession<IjentPosixApi> {
+  suspend fun get(ijentId: IjentId): IjentSession.Posix {
+    val currentDispatcher = currentCoroutineDispatcher()
     val bundle = ijents.compute(ijentId, @Suppress("NAME_SHADOWING") { ijentId, oldBundle ->
       require(oldBundle != null) {
         "Not registered: $ijentId"
@@ -73,7 +78,7 @@ class IjentSessionRegistry(private val coroutineScope: CoroutineScope) {
 
       val oldDeferred = oldBundle.deferred
 
-      val reusedOldDeferred: Deferred<IjentSession<IjentPosixApi>>? = when {
+      val reusedOldDeferred: Deferred<IjentSession.Posix>? = when {
         oldDeferred == null -> null
         oldBundle.oneOff -> oldDeferred
         !oldDeferred.isCompleted -> oldDeferred
@@ -84,7 +89,7 @@ class IjentSessionRegistry(private val coroutineScope: CoroutineScope) {
 
       val actualDeferred =
         reusedOldDeferred
-        ?: coroutineScope.async(start = CoroutineStart.LAZY) {
+        ?: GlobalScope.async(context = currentDispatcher, start = CoroutineStart.LAZY) {
           oldBundle.factory(ijentId)
         }
 
@@ -100,15 +105,5 @@ class IjentSessionRegistry(private val coroutineScope: CoroutineScope) {
     catch (err: Throwable) {
       throw IjentUnavailableException.unwrapFromCancellationExceptions(err)
     }
-  }
-
-  companion object {
-    @JvmStatic
-    suspend fun instanceAsync(): IjentSessionRegistry =
-      serviceAsync()
-
-    @JvmStatic
-    fun instance(): IjentSessionRegistry =
-      ApplicationManager.getApplication().service()
   }
 }

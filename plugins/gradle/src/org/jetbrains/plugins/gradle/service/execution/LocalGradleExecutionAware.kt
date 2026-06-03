@@ -23,7 +23,6 @@ import com.intellij.openapi.roots.ui.configuration.SdkLookupProvider
 import com.intellij.openapi.roots.ui.configuration.SdkLookupProvider.SdkInfo
 import com.intellij.openapi.util.io.toCanonicalPath
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.serviceContainer.AlreadyDisposedException
 import com.intellij.util.PathMapper
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.PropertyKey
@@ -145,7 +144,7 @@ class LocalGradleExecutionAware : GradleExecutionAware {
       LOG.warn("No Gradle JVM ($gradleJvm) home path: $sdkInfo")
       throw jdkConfigurationException("gradle.jvm.is.invalid")
     }
-    checkForWslJdkOnWindows(project, homePath, projectSettings.externalProjectPath, task)
+    checkJdkCompatibility(project, homePath, projectSettings.externalProjectPath, task)
     if (!JdkUtil.checkForJdk(homePath)) {
       LOG.warn("Invalid Gradle JVM ($gradleJvm) home path: $sdkInfo")
       throw jdkConfigurationException("gradle.jvm.is.invalid")
@@ -154,12 +153,13 @@ class LocalGradleExecutionAware : GradleExecutionAware {
       LOG.warn("Gradle JVM ($gradleJvm) is JRE instead JDK: $sdkInfo")
       throw jdkConfigurationException("gradle.jvm.is.jre")
     }
+    LOG.debug("Gradle JVM configured successfully: reference='$gradleJvm', homePath='$homePath'")
   }
 
-  private fun checkForWslJdkOnWindows(project: Project, homePath: Path, externalProjectPath: String, task: ExternalSystemTask) {
+  private fun checkJdkCompatibility(project: Project, homePath: Path, externalProjectPath: String, task: ExternalSystemTask) {
     if (!JdkUtil.isCompatible(homePath, project)) {
       val isResolveProjectTask = task is ExternalSystemResolveProjectTask
-      val message = GradleBundle.message("gradle.incorrect.jvm.wslJdk.on.win.issue.description")
+      val message = GradleBundle.message("gradle.incorrect.jvm.issue.description", homePath, externalProjectPath)
       throw BuildIssueException(
         IncorrectGradleJdkIssue(
           externalProjectPath,

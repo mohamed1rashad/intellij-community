@@ -23,7 +23,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.ui.LayeredIcon;
-import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -33,7 +33,8 @@ import org.jetbrains.idea.devkit.inspections.DescriptionTypesKt;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 import org.jetbrains.jps.model.java.JavaResourceRootType;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.ListSelectionModel;
 import java.util.List;
 
 /**
@@ -76,7 +77,7 @@ public class CreateHtmlDescriptionFix implements LocalQuickFix, Iconable {
     if (editor == null) return;
     JBPopupFactory.getInstance()
       .createPopupChooserBuilder(roots)
-      .setRenderer(SimpleListCellRenderer.create("", VirtualFile::getPath))
+      .setRenderer(BuilderKt.textListCellRenderer("", VirtualFile::getPath))
       .setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
       .setTitle(DevKitBundle.message("select.target.location.of.description", myFilename))
       .setItemChosenCallback((root) -> ApplicationManager.getApplication().runWriteAction(() -> createDescription(root)))

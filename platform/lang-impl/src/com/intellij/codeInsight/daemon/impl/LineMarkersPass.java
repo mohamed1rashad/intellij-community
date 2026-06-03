@@ -2,13 +2,18 @@
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeHighlighting.TextEditorHighlightingPass;
-import com.intellij.codeInsight.daemon.*;
+import com.intellij.codeInsight.daemon.GutterIconNavigationHandler;
+import com.intellij.codeInsight.daemon.LineMarkerInfo;
+import com.intellij.codeInsight.daemon.LineMarkerProvider;
+import com.intellij.codeInsight.daemon.LineMarkerProviderDescriptor;
+import com.intellij.codeInsight.daemon.LineMarkerProviders;
+import com.intellij.codeInsight.daemon.LineMarkerSettings;
+import com.intellij.codeInsight.daemon.MergeableLineMarkerInfo;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightingLevelManager;
 import com.intellij.diagnostic.PluginException;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.InjectedLanguageManager;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -34,6 +39,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.InjectionUtils;
 import com.intellij.util.PairConsumer;
+import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.NotNullList;
 import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
@@ -41,8 +47,13 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.Icon;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 
 public final class LineMarkersPass extends TextEditorHighlightingPass implements DumbAware {
@@ -109,13 +120,13 @@ public final class LineMarkersPass extends TextEditorHighlightingPass implements
              Collection<LineMarkerProvider> providers = getMarkerProviders(language, myProject);
              List<LineMarkerProvider> providersList = new ArrayList<>(providers);
              queryProviders(
-               elements.inside(), root, providersList, (__, info) -> {
+               elements.inside(), root, providersList, (_, info) -> {
                  info.updatePass = passId;
                  lineMarkers.add(info);
                  LineMarkersUtil.addLineMarkerToEditorIncrementally(myProject, getDocument(), info, myHighlightingSession);
                });
              queryProviders(elements.outside(), root, providersList,
-               (__, info) -> {
+               (_, info) -> {
                  info.updatePass = passId;
                  lineMarkers.add(info);
                });
@@ -137,7 +148,7 @@ public final class LineMarkersPass extends TextEditorHighlightingPass implements
     for (LineMarkerInfo<?> marker : markers) {
       if (marker instanceof MergeableLineMarkerInfo<?> mergeable) {
         int line = document.getLineNumber(marker.startOffset);
-        List<MergeableLineMarkerInfo<?>> infos = sameLineMarkers.computeIfAbsent(line, __ -> new ArrayList<>());
+        List<MergeableLineMarkerInfo<?>> infos = sameLineMarkers.computeIfAbsent(line, _ -> new ArrayList<>());
         infos.add(mergeable);
       }
       else {
@@ -167,7 +178,7 @@ public final class LineMarkersPass extends TextEditorHighlightingPass implements
                               @NotNull PsiFile containingFile,
                               @NotNull List<? extends LineMarkerProvider> providers,
                               @NotNull PairConsumer<? super PsiElement, ? super LineMarkerInfo<?>> consumer) {
-    ApplicationManager.getApplication().assertReadAccessAllowed();
+    ThreadingAssertions.assertReadAccess();
 
     if (myMode != Mode.SLOW) {
       //noinspection ForLoopReplaceableByForEach
@@ -291,7 +302,7 @@ public final class LineMarkersPass extends TextEditorHighlightingPass implements
       return Collections.emptyList();
     }
     LineMarkersPass pass = new LineMarkersPass(psiFile.getProject(), psiFile, document, psiFile.getTextRange(), psiFile.getTextRange(), Mode.ALL,
-                                               HighlightingSessionImpl.getFromCurrentIndicator(psiFile));
+                                               DaemonCodeAnalyzerEx.getInstanceEx(psiFile.getProject()).getHighlightSessionFromCurrentIndicator(psiFile));
     return pass.doCollectMarkers();
   }
 

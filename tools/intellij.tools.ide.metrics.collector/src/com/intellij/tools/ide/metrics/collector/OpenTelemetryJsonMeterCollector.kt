@@ -1,7 +1,11 @@
 package com.intellij.tools.ide.metrics.collector
 
 import com.intellij.platform.diagnostic.telemetry.exporters.meters.OpenTelemetryMetersJsonImporter
-import com.intellij.tools.ide.metrics.collector.meters.*
+import com.intellij.tools.ide.metrics.collector.meters.DoubleCounterToMetricConverter
+import com.intellij.tools.ide.metrics.collector.meters.DoubleGaugeToMetricConverter
+import com.intellij.tools.ide.metrics.collector.meters.DoubleHistogramMeterToMetricConverter
+import com.intellij.tools.ide.metrics.collector.meters.LongCounterToMetricConverter
+import com.intellij.tools.ide.metrics.collector.meters.LongGaugeToMetricConverter
 import com.intellij.tools.ide.metrics.collector.metrics.MetricsSelectionStrategy
 import com.intellij.tools.ide.metrics.collector.metrics.PerformanceMetrics
 import com.intellij.tools.ide.util.common.logError
@@ -11,9 +15,9 @@ import io.opentelemetry.sdk.metrics.data.MetricData
 import io.opentelemetry.sdk.metrics.data.MetricDataType
 import io.opentelemetry.sdk.resources.Resource
 import java.nio.file.Path
+import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.io.path.name
-
 
 /**
  * Collects metrics from `open-telemetry-meters.*DATE*.json` files usually located in IDE's log directory.
@@ -33,11 +37,13 @@ open class OpenTelemetryJsonMeterCollector(
 ) : MetricsCollector {
 
   fun collect(logsDirPath: Path, transform: (String, Long) -> Pair<String, Int>): List<PerformanceMetrics.Metric> {
-    val metricsFiles = logsDirPath.listDirectoryEntries("*.json").filter { it.name.startsWith("open-telemetry-meter") }
+    val newMeterDir = logsDirPath.resolve("telemetry")
+    // we recently moved .json telemetry files into /telemetry subfolder, same as .csv telemetry files above
+    val metricsFiles = listMeterFiles(newMeterDir) + listMeterFiles(logsDirPath)
 
     // fallback to the collecting meters from the .csv files for older IDEs versions (where meters aren't exported to JSON files)
     if (metricsFiles.isEmpty()) {
-      logError("Cannot find JSON files with metrics `open-telemetry-meters.***.json` in '${logsDirPath.toUri()}'. Falling back to use metrics from *.csv files")
+      logError("Cannot find JSON files with metrics `open-telemetry-meters.***.json` in '${newMeterDir.toUri()}'. Falling back to use metrics from *.csv files")
 
       return OpenTelemetryCsvMeterCollector(metricsSelectionStrategy) { metricEntry ->
         val metricData = object : MetricData {
@@ -55,6 +61,7 @@ open class OpenTelemetryJsonMeterCollector(
         meterFilter(metricData)
       }.collect(logsDirPath, transform)
     }
+
     val telemetryMetrics: List<MetricData> = metricsFiles.flatMap { OpenTelemetryMetersJsonImporter.fromJsonFile(it) }
       .filter(meterFilter)
 
@@ -71,6 +78,13 @@ open class OpenTelemetryJsonMeterCollector(
         else -> TODO("Type ${it.type} isn't supported yet")
       }.convert(it, transform)
     }
+  }
+
+  private fun listMeterFiles(logsDirPath: Path): List<Path> {
+    if (!logsDirPath.exists()) return emptyList()
+
+    return logsDirPath.listDirectoryEntries("*.json")
+      .filter { it.name.startsWith("open-telemetry-meter") }
   }
 
   override fun collect(logsDirPath: Path): List<PerformanceMetrics.Metric> {

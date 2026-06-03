@@ -1,11 +1,37 @@
 <idea-plugin package="com.intellij.compose.ide.plugin.resources">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <plugin id="com.intellij.gradle"/>
-    <module name="intellij.compose.ide.plugin.shared"/>
-    <module name="intellij.compose.ide.plugin.gradleTooling.rt"/>
+    <plugin id="com.intellij.modules.xml"/>
+    <module name="intellij.gradle"/>
     <module name="intellij.kotlin.gradle.tooling"/>
+    <module name="intellij.compose.ide.plugin.gradleTooling.rt"/>
+    <module name="intellij.compose.ide.plugin.shared"/>
+    <module name="intellij.java.psi"/>
+    <module name="kotlin.gradle.gradle-java"/>
   </dependencies>
+  <!-- endregion -->
+  <extensionPoints>
+    <extensionPoint
+      dynamic="true"
+      qualifiedName="com.intellij.compose.ide.plugin.resources.drawablePreviewRenderer"
+      interface="com.intellij.compose.ide.plugin.resources.vectorDrawable.preview.BaseVectorDrawablePreviewRenderer"/>
+  </extensionPoints>
+
+  <extensions defaultExtensionNs="com.intellij.compose.ide.plugin.resources">
+    <drawablePreviewRenderer
+      implementation="com.intellij.compose.ide.plugin.resources.vectorDrawable.preview.ComposeResourcesDrawablePreviewRenderer"
+      order="last"/>
+  </extensions>
+
   <extensions defaultExtensionNs="com.intellij">
+    <annotator language="XML" implementationClass="com.intellij.compose.ide.plugin.resources.highlighting.ComposeResourcesXmlAnnotator"/>
+
+
+    <codeInsight.unresolvedReferenceQuickFixProvider
+      implementation="com.intellij.compose.ide.plugin.resources.intentions.ComposeResourcesUnresolvedStringReferenceQuickFixProvider"/>
+    <customLiveTemplate
+      implementation="com.intellij.compose.ide.plugin.resources.emmetLikeTemplates.ComposeResourcesEmmetLikeCustomLiveTemplate"
+      order="before emmet"/>
     <gotoDeclarationHandler implementation="com.intellij.compose.ide.plugin.resources.ComposeResourcesGotoDeclarationHandler"/>
     <renamePsiElementProcessor id="ComposeResources"
                                implementation="com.intellij.compose.ide.plugin.resources.rename.ComposeResourcesRenameProcessor"
@@ -28,6 +54,9 @@
       implementation="com.intellij.compose.ide.plugin.resources.findUsages.ComposeResourcesXmlFindUsagesHandlerFactory"/>
     <usageTargetProvider implementation="com.intellij.compose.ide.plugin.resources.findUsages.ComposeResourcesUsagesTargetProvider"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.compose.ide.plugin.resources.ComposeResourcesUsageCollector"/>
+    <lang.foldingBuilder language="kotlin"
+                         implementationClass="com.intellij.compose.ide.plugin.resources.folding.ComposeResourcesFoldingBuilder"/>
+    <fileEditorProvider implementation="com.intellij.compose.ide.plugin.resources.vectorDrawable.preview.ComposeResourceEditorProvider"/>
   </extensions>
 
   <projectListeners>

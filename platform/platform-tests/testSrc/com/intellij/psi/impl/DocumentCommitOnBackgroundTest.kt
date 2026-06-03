@@ -3,7 +3,6 @@ package com.intellij.psi.impl
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.backgroundWriteAction
-import com.intellij.openapi.application.impl.TransferredWriteActionService
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.command.CommandProcessor
@@ -19,8 +18,8 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiTreeChangeAdapter
 import com.intellij.psi.PsiTreeChangeEvent
-import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.common.timeoutRunBlocking
+import com.intellij.testFramework.common.waitForAllDocumentsCommitted
 import com.intellij.testFramework.junit5.TestApplication
 import com.intellij.testFramework.junit5.TestDisposable
 import com.intellij.testFramework.junit5.fixture.moduleFixture
@@ -28,7 +27,10 @@ import com.intellij.testFramework.junit5.fixture.projectFixture
 import com.intellij.testFramework.junit5.fixture.psiFileFixture
 import com.intellij.testFramework.junit5.fixture.sourceRootFixture
 import com.intellij.util.application
+import com.intellij.util.concurrency.TransferredWriteActionService
 import com.intellij.util.ui.EDT
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
@@ -122,7 +124,7 @@ class DocumentCommitOnBackgroundTest {
       val file = file.get()
       val document = psiDocumentManager.getDocument(file)!!
       WriteCommandAction.runWriteCommandAction(project.get()) { document.insertString(0, "def") }
-      PlatformTestUtil.waitForAllDocumentsCommitted(10, TimeUnit.SECONDS)
+      waitForAllDocumentsCommitted(10, TimeUnit.SECONDS)
     }
 
     DumbService.getInstance(project.get()).waitForSmartMode()
@@ -153,7 +155,7 @@ class DocumentCommitOnBackgroundTest {
       val file = file.get()
       val document = psiDocumentManager.getDocument(file)!!
       WriteCommandAction.runWriteCommandAction(project.get()) { document.insertString(0, "abc") }
-      PlatformTestUtil.waitForAllDocumentsCommitted(10, TimeUnit.SECONDS)
+      waitForAllDocumentsCommitted(10, TimeUnit.SECONDS)
     }
 
     assertTrue(plainListener.recorder.invoked.get() > 0)
@@ -188,11 +190,13 @@ class DocumentCommitOnBackgroundTest {
     application.messageBus.connect(disposable).subscribe(FileDocumentManagerListener.TOPIC, plainListener)
     application.messageBus.connect(disposable).subscribe(FileDocumentManagerListenerBackgroundable.TOPIC, backgroundableListener)
 
-    backgroundWriteAction {
-      application.service<TransferredWriteActionService>().runOnEdtWithTransferredWriteActionAndWait {
-        CommandProcessor.getInstance().executeCommand(project.get(), {
-          document.insertString(0, " ")
-        }, "test command", Any())
+    withContext(Dispatchers.Default) {
+      backgroundWriteAction {
+        application.service<TransferredWriteActionService>().runOnEdtWithTransferredWriteActionAndWait {
+          CommandProcessor.getInstance().executeCommand(project.get(), {
+            document.insertString(0, " ")
+          }, "test command", Any())
+        }
       }
       saveAction(document)
     }

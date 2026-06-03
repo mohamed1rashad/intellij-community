@@ -1,15 +1,25 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
-import com.intellij.codeInsight.intention.*;
+import com.intellij.codeInsight.intention.IntentionAction;
+import com.intellij.codeInsight.intention.IntentionActionProvider;
+import com.intellij.codeInsight.intention.IntentionActionWithOptions;
+import com.intellij.codeInsight.intention.LowPriorityAction;
+import com.intellij.codeInsight.intention.PriorityAction;
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInspection.util.IntentionName;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionUiKind;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorBundle;
 import com.intellij.openapi.editor.colors.ColorKey;
@@ -27,6 +37,7 @@ import com.intellij.openapi.util.Weighted;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiFile;
 import com.intellij.ui.border.NamedBorder;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.panels.HorizontalLayout;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.components.panels.Wrapper;
@@ -39,14 +50,28 @@ import com.intellij.util.SlowOperations;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.border.AbstractBorder;
 import javax.swing.border.Border;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.plaf.basic.BasicPanelUI;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Insets;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -63,12 +88,19 @@ import static com.intellij.ui.border.NamedBorderKt.withName;
 public class EditorNotificationPanel extends JPanel implements IntentionActionProvider, Weighted {
 
   private static final Supplier<EditorColorsScheme> GLOBAL_SCHEME_SUPPLIER = () -> EditorColorsManager.getInstance().getGlobalScheme();
-  private static final Consumer<Class<?>> VOID_CONSUMER = __ -> {
+  private static final Consumer<Class<?>> VOID_CONSUMER = _ -> {
   };
   private static final String BORDER_WITHOUT_STATUS = "borderWithoutStatus";
   private static final String BORDER_WITH_STATUS = "borderWithStatus";
 
-  protected final JLabel myLabel = new JLabel();
+  protected final JBLabel myTextLabel = new JBLabel();
+
+  /**
+   * @deprecated use {@link #myTextLabel} instead
+   */
+  @Deprecated(forRemoval = true)
+  protected final JLabel myLabel = myTextLabel;
+
   protected final JLabel myGearLabel = new JLabel();
   protected final JPanel myLinksPanel = new NonOpaquePanel(new HorizontalLayout(16));
 
@@ -129,7 +161,7 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
   public EditorNotificationPanel(@Nullable FileEditor fileEditor,
                                  @Nullable Color backgroundColor,
                                  @Nullable ColorKey backgroundColorKey) {
-    this(fileEditor instanceof TextEditor ? ((TextEditor)fileEditor).getEditor() : null,
+    this(fileEditor instanceof TextEditor te ? te.getEditor() : null,
          backgroundColor,
          backgroundColorKey);
   }
@@ -145,7 +177,7 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
     putClientProperty(FileEditorManager.SEPARATOR_COLOR, JBUI.CurrentTheme.Editor.BORDER_COLOR);
 
     JPanel panel = new NonOpaquePanel(new BorderLayout());
-    panel.add(BorderLayout.CENTER, myLabel);
+    panel.add(BorderLayout.CENTER, myTextLabel);
     panel.add(BorderLayout.EAST, myLinksPanel);
     panel.setMinimumSize(new Dimension(0, 0));
 
@@ -162,7 +194,8 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
     setBorder(borderWithoutStatus());
     setOpaque(true);
 
-    myLabel.setForeground(mySchemeSupplier.get().getDefaultForeground());
+    myTextLabel.setForeground(mySchemeSupplier.get().getDefaultForeground());
+    myTextLabel.setCopyable(true);
     putClientProperty(DslComponentProperty.VISUAL_PADDINGS, UnscaledGaps.EMPTY);
   }
 
@@ -178,7 +211,7 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
                                  @Nullable Color backgroundColor,
                                  @Nullable ColorKey backgroundColorKey,
                                  @NotNull Status status) {
-    this(fileEditor instanceof TextEditor ? ((TextEditor)fileEditor).getEditor() : null, backgroundColor, backgroundColorKey, status);
+    this(fileEditor instanceof TextEditor te ? te.getEditor() : null, backgroundColor, backgroundColorKey, status);
   }
 
   public EditorNotificationPanel(@Nullable Editor editor,
@@ -192,11 +225,11 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
     }
 
     var icon = status.getIcon();
-    myLabel.setIconTextGap(JBUI.scale(8));
-    myLabel.setIcon(new Icon() {
+    myTextLabel.setIconTextGap(JBUI.scale(8));
+    myTextLabel.setIcon(new Icon() {
       @Override
       public void paintIcon(Component component, Graphics graphics, int x, int y) {
-        if (!StringUtil.isEmpty(myLabel.getText())) {
+        if (!StringUtil.isEmpty(myTextLabel.getText())) {
           icon.paintIcon(component, graphics, x, y);
         }
       }
@@ -211,8 +244,8 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
         return icon.getIconHeight();
       }
     });
-    myLabel.setForeground(JBUI.CurrentTheme.Banner.FOREGROUND);
-    myLabel.setBorder(JBUI.Borders.emptyRight(20));
+    myTextLabel.setForeground(JBUI.CurrentTheme.Banner.FOREGROUND);
+    myTextLabel.setBorder(JBUI.Borders.emptyRight(20));
 
     setBorder(borderWithStatus());
 
@@ -331,7 +364,7 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
   }
 
   public void setText(@NotNull @Label String text) {
-    myLabel.setText(text);
+    myTextLabel.setText(text);
   }
   
   public @Nullable HyperlinkLabel findLabelByName(@NotNull @Label String text) {
@@ -346,21 +379,21 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
   }
 
   public EditorNotificationPanel text(@NotNull @Label String text) {
-    myLabel.setText(text);
+    myTextLabel.setText(text);
     return this;
   }
 
   public @NotNull @Label String getText() {
-    return myLabel.getText();
+    return myTextLabel.getText();
   }
 
   public EditorNotificationPanel icon(@NotNull Icon icon) {
-    myLabel.setIcon(icon);
+    myTextLabel.setIcon(icon);
     return this;
   }
 
   public EditorNotificationPanel noIcon() {
-    myLabel.setIcon(null);
+    myTextLabel.setIcon(null);
     return this;
   }
 
@@ -448,7 +481,7 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
   }
 
   public void clear() {
-    myLabel.setText("");
+    myTextLabel.setText("");
     myLinksPanel.removeAll();
   }
 
@@ -564,7 +597,9 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
         @Override
         protected void hyperlinkActivated(@NotNull HyperlinkEvent e) {
           if (!isEnabled()) return;
-          myHandler.handlePanelActionClick(EditorNotificationPanel.this, e);
+          WriteIntentReadAction.run(() -> {
+            myHandler.handlePanelActionClick(EditorNotificationPanel.this, e);
+          });
         }
       });
     }
@@ -627,7 +662,7 @@ public class EditorNotificationPanel extends JPanel implements IntentionActionPr
       if (!myOptions.isEmpty()) {
         return myOptions.get(0).getText();
       }
-      String text = myLabel.getText();
+      String text = myTextLabel.getText();
       return StringUtil.isEmpty(text) ? EditorBundle.message("editor.notification.default.action.name")
                                       : StringUtil.shortenTextWithEllipsis(text, 50, 0);
     }

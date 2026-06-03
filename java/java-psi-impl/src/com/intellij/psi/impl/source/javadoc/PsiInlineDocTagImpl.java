@@ -10,7 +10,6 @@ import com.intellij.psi.impl.source.Constants;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
 import com.intellij.psi.impl.source.tree.ChildRole;
 import com.intellij.psi.impl.source.tree.CompositePsiElement;
-import com.intellij.psi.impl.source.tree.JavaDocElementType;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.javadoc.PsiDocTagValue;
 import com.intellij.psi.javadoc.PsiInlineDocTag;
@@ -25,7 +24,8 @@ public class PsiInlineDocTagImpl extends CompositePsiElement implements PsiInlin
   static final TokenSet VALUE_BIT_SET = TokenSet.orSet(TAG_VALUE_BIT_SET, TokenSet.create(
     JAVA_CODE_REFERENCE, DOC_TAG_VALUE_TOKEN, DOC_COMMENT_DATA, DOC_INLINE_TAG, DOC_REFERENCE_HOLDER,
     DOC_COMMENT_BAD_CHARACTER, DOC_SNIPPET_TAG_VALUE,
-    DOC_SHARP, DOC_LBRACKET, DOC_RBRACKET, DOC_LPAREN, DOC_RPAREN, DOC_CODE_FENCE, DOC_INLINE_CODE_FENCE, DOC_MARKDOWN_CODE_BLOCK, DOC_COMMA));
+    DOC_SHARP, DOC_LBRACKET, DOC_RBRACKET, DOC_LPAREN, DOC_RPAREN, DOC_CODE_FENCE, DOC_INLINE_CODE_FENCE, DOC_MARKDOWN_CODE_BLOCK,
+    DOC_COMMA, DOC_MARKDOWN_LINK));
 
   public PsiInlineDocTagImpl() {
     super(DOC_INLINE_TAG);
@@ -34,7 +34,7 @@ public class PsiInlineDocTagImpl extends CompositePsiElement implements PsiInlin
   @Override
   public PsiDocComment getContainingComment() {
     ASTNode scope = getTreeParent();
-    while (scope.getElementType() != JavaDocElementType.DOC_COMMENT) {
+    while (!DOC_COMMENT_TOKENS.contains(scope.getElementType())) {
       scope = scope.getTreeParent();
     }
     return (PsiDocComment)SourceTreeToPsiMap.treeElementToPsi(scope);
@@ -69,7 +69,7 @@ public class PsiInlineDocTagImpl extends CompositePsiElement implements PsiInlin
     if (i == DOC_TAG_NAME) {
       return ChildRole.DOC_TAG_NAME;
     }
-    else if (i == JavaDocElementType.DOC_COMMENT || i == DOC_INLINE_TAG) {
+    else if (DOC_COMMENT_TOKENS.contains(i) || i == DOC_INLINE_TAG) {
       return ChildRole.DOC_CONTENT;
     }
     else if (i == DOC_INLINE_TAG_START) {

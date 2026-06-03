@@ -1,7 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.tools.build.bazel.jvmIncBuilder.impl;
 
-import com.intellij.openapi.vfs.VirtualFile;
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinToJVMBytecodeCompiler;
 import org.jetbrains.kotlin.cli.jvm.compiler.PsiBasedProjectFileSearchScope;
@@ -27,7 +27,7 @@ public class KotlinIncrementalCompilationComponents implements IncrementalCompil
 
   @Override
   public @NotNull AbstractProjectFileSearchScope createSearchScope(@NotNull VfsBasedProjectEnvironment pe) {
-    return new PsiBasedProjectFileSearchScope(new KotlinToJVMBytecodeCompiler.DirectoriesScope(pe.getProject(), Set.of(myOutputRoot)));
+    return new PsiBasedProjectFileSearchScope(new VfsBasedProjectEnvironment.DirectoriesScope(pe.getProject(), Set.of(myOutputRoot)));
   }
 
   @Override

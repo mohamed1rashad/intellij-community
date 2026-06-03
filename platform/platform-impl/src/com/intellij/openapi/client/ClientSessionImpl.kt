@@ -15,6 +15,7 @@ import com.intellij.openapi.components.impl.stores.IComponentStore
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.extensions.impl.ExtensionPointDeferredListenersNotification
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.project.impl.ProjectImpl
@@ -23,12 +24,15 @@ import com.intellij.openapi.project.impl.projectMethodType
 import com.intellij.platform.kernel.util.kernelCoroutineContext
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.serviceContainer.ComponentManagerImpl
-import com.intellij.serviceContainer.executeRegisterTaskForOldContent
 import com.intellij.serviceContainer.findConstructorOrNull
 import com.intellij.util.SystemProperties
 import com.intellij.util.messages.MessageBus
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.plus
 import org.jetbrains.annotations.ApiStatus
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
@@ -84,12 +88,6 @@ abstract class ClientSessionImpl(
     assert(containerState.compareAndSet(ContainerState.PRE_INIT, ContainerState.COMPONENT_CREATED))
   }
 
-  final override suspend fun preloadService(service: ServiceDescriptor, serviceInterface: String) {
-    return withContext(clientId.asContextElement()) {
-      super.preloadService(service, serviceInterface)
-    }
-  }
-
   final override fun isServiceSuitable(descriptor: ServiceDescriptor): Boolean {
     return descriptor.client?.let { type.matches(it) } ?: false
   }
@@ -98,15 +96,12 @@ abstract class ClientSessionImpl(
    * only per-client services are supported (no components, extensions, listeners)
    */
   final override fun registerComponents(
-    modules: List<IdeaPluginDescriptorImpl>,
+    descriptors: Sequence<IdeaPluginDescriptorImpl>,
     app: Application?,
-    listenerCallbacks: MutableList<in Runnable>?
+    listenerCallbacks: MutableList<ExtensionPointDeferredListenersNotification>?
   ) {
-    for (rootModule in modules) {
-      registerServices(getContainerDescriptor(rootModule).services, rootModule)
-      executeRegisterTaskForOldContent(rootModule) { module ->
-        registerServices(getContainerDescriptor(module).services, module)
-      }
+    for (module in descriptors) {
+      registerServices(getContainerDescriptor(module).services, module)
     }
   }
 

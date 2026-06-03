@@ -1,9 +1,9 @@
 <idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <module name="intellij.libraries.gson"/>
-    <module name="intellij.libraries.xml.rpc"/>
     <module name="intellij.platform.tasks.impl"/>
   </dependencies>
+  <!-- endregion -->
 
   <extensions defaultExtensionNs="com.intellij">
     <!-- JQL support -->

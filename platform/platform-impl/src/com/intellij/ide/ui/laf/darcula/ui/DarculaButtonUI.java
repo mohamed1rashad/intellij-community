@@ -18,19 +18,40 @@ import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBOptionButton;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.ui.*;
+import com.intellij.util.ui.JBInsets;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.JBValue;
+import com.intellij.util.ui.MacUIUtil;
+import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.UIUtilities;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.AbstractButton;
+import javax.swing.ButtonModel;
+import javax.swing.Icon;
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.plaf.ComponentUI;
 import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicGraphicsUtils;
 import javax.swing.plaf.basic.BasicHTML;
 import javax.swing.text.View;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.Paint;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
 
@@ -80,6 +101,11 @@ public class DarculaButtonUI extends BasicButtonUI {
     ComboBoxAction a = (ComboBoxAction)b.getClientProperty("styleCombo");
 
     return smallVariant || a != null && a.isSmallVariant();
+  }
+
+  @ApiStatus.Internal
+  public static boolean isRootPaneBackgroundImage(Component c) {
+    return c instanceof AbstractButton b && b.getClientProperty("JButton.rootPaneBackgroundImage") == Boolean.TRUE;
   }
 
   public static boolean isTag(Component c) {
@@ -336,8 +362,9 @@ public class DarculaButtonUI extends BasicButtonUI {
       Dimension minimumSize = JBUI.CurrentTheme.Button.minimumSize();
       int width = isComboAction(c) ? prefSize.width :
                   Math.max(HORIZONTAL_PADDING.get() * 2 + prefSize.width, minimumSize.width + i.left + i.right);
-      int height = Math.max(prefSize.height,
-                            (isSmallVariant(c) ? ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE.height : JBUI.CurrentTheme.Button.minimumSize().height) + i.top + i.bottom);
+      int height = Math.max(prefSize.height, (isSmallVariant(c) && !isRootPaneBackgroundImage(c)
+                                              ? ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE.height
+                                              : JBUI.CurrentTheme.Button.minimumSize().height) + i.top + i.bottom);
 
       return new Dimension(width, height);
     }

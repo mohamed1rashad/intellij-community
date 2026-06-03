@@ -18,27 +18,33 @@ import com.intellij.vcs.log.impl.CommonUiProperties
 import com.intellij.vcs.log.impl.onPropertyChange
 import com.intellij.vcs.log.paint.GraphCellPainter
 import com.intellij.vcs.log.paint.SimpleGraphCellPainter
-import com.intellij.vcs.log.ui.VcsLogBookmarkReferenceProvider.Companion.getBookmarkRefs
+import com.intellij.vcs.log.ui.VcsLogBookmarkSupport
 import com.intellij.vcs.log.ui.VcsLogBookmarksListener
 import com.intellij.vcs.log.ui.frame.CommitPresentationUtil
 import com.intellij.vcs.log.ui.render.GraphCommitCell
 import com.intellij.vcs.log.ui.render.GraphCommitCellRenderer
 import com.intellij.vcs.log.ui.render.RootCell
-import com.intellij.vcs.log.ui.table.*
+import com.intellij.vcs.log.ui.table.GraphTableModel
+import com.intellij.vcs.log.ui.table.NewUiRootCellRenderer
+import com.intellij.vcs.log.ui.table.RootCellRenderer
+import com.intellij.vcs.log.ui.table.VcsLogGraphTable
+import com.intellij.vcs.log.ui.table.VcsLogStringCellRenderer
+import com.intellij.vcs.log.ui.table.VcsLogTableIndex
+import com.intellij.vcs.log.ui.table.getKnownCommitId
 import com.intellij.vcs.log.ui.table.links.CommitLinksResolveListener
 import com.intellij.vcs.log.util.VcsLogUtil
 import com.intellij.vcsUtil.VcsUtil
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.NonNls
-import java.util.*
+import java.util.Locale
 import javax.swing.table.TableCellRenderer
 
 internal fun getDefaultDynamicColumns() = listOf<VcsLogDefaultColumn<*>>(Author, Hash, Date)
 
 @ApiStatus.Internal
 sealed class VcsLogDefaultColumn<T>(
-  @NonNls override val id: String,
+  @param:NonNls override val id: String,
   override val localizedName: @Nls String,
   override val isDynamic: Boolean = true,
 ) : VcsLogColumn<T> {
@@ -90,7 +96,7 @@ object Commit : VcsLogDefaultColumn<GraphCommitCell>("Default.Subject", VcsLogBu
       commitId,
       getValue(model, metadata),
       model.getRefsAtRow(row),
-      if (metadata !is LoadingDetails) getBookmarkRefs(model.logData.project, metadata.id, metadata.root) else emptyList(),
+      if (metadata !is LoadingDetails) VcsLogBookmarkSupport.getBookmarkRefs(model.logData.project, metadata.id, metadata.root) else emptyList(),
       printElements,
       metadata is LoadingDetails
     )

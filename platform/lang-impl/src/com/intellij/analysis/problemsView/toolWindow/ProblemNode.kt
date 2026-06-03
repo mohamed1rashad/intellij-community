@@ -3,6 +3,7 @@ package com.intellij.analysis.problemsView.toolWindow
 
 import com.intellij.analysis.problemsView.FileProblem
 import com.intellij.analysis.problemsView.Problem
+import com.intellij.analysis.problemsView.toolWindow.splitApi.HighlightingBaseProblem
 import com.intellij.codeInsight.multiverse.CodeInsightContext
 import com.intellij.codeInsight.multiverse.codeInsightContext
 import com.intellij.ide.projectView.PresentationData
@@ -17,7 +18,11 @@ import com.intellij.ui.tree.LeafState
 import org.jetbrains.annotations.ApiStatus
 import java.util.Objects.hash
 
-class ProblemNode(parent: Node, val file: VirtualFile, override val problem: Problem) : Node(parent), ProblemNodeI {
+class ProblemNode(
+  parent: Node,
+  val file: VirtualFile,
+  override val problem: Problem,
+) : Node(parent), ProblemNodeI {
   init {
     Logger.getInstance(javaClass).assertTrue(project != null, this)
   }
@@ -58,7 +63,7 @@ class ProblemNode(parent: Node, val file: VirtualFile, override val problem: Pro
     text = problem.text
     line = (problem as? FileProblem)?.line ?: -1
     column = (problem as? FileProblem)?.column ?: -1
-    severity = (problem as? HighlightingProblem)?.severity ?: -1
+    severity = (problem as? HighlightingBaseProblem)?.severity ?: -1
     context = (problem as? HighlightingProblem)?.highlighter?.codeInsightContext
     presentation.addText(text, REGULAR_ATTRIBUTES)
     presentation.setIcon(problem.icon)

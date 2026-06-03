@@ -4,7 +4,6 @@ package com.intellij.platform.eel
 import com.intellij.platform.eel.path.EelPath.OS
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
-import java.nio.file.Path
 
 /**
  * A marker interface that indicates an environment where native file chooser dialogs should be disabled.
@@ -22,6 +21,14 @@ import java.nio.file.Path
 interface EelDescriptorWithoutNativeFileChooserSupport : EelDescriptor
 
 /**
+ * Marker interface enforcing an isolated workspace for the project located in a container. The workspace file located under config/workspace
+ * is shared by default if the project is both opened locally and mounted, which may cause undesirable side effects.
+ */
+@ApiStatus.OverrideOnly
+@ApiStatus.Internal
+interface EelDescriptorWithIsolatedWorkspace : EelDescriptor
+
+/**
  * Identifies a specific machine — such as a Docker container, WSL distribution, or SSH host.
  *
  * Multiple [EelDescriptor]s may map to the same machine.
@@ -35,44 +42,19 @@ interface EelDescriptorWithoutNativeFileChooserSupport : EelDescriptor
  */
 @ApiStatus.Experimental
 interface EelMachine {
-  /**
-   * The platform of an environment corresponding to this [EelMachine].
-   */
-  @get:ApiStatus.Experimental
-  val osFamily: EelOsFamily
 
-  /**
-   * Describes machine in a user-readable manner, i.e: "Docker: <container_name>" or "Wsl: <distro name>".
-   * Format is *not* specified but guaranteed to be user-readable.
-   */
-  @get:ApiStatus.Experimental
-  val name: @NonNls String
+  @get:ApiStatus.Internal
+  val internalName: String
 
   /**
    * Converts this machine into a [EelApi] — starts or reuses a running environment.
+   * @throws EelUnavailableException if eel is unavailable (i.e. remote machine is gone, docker container removed e.t.c.). Show it to a user, ask to fix and try again.
    */
   @ApiStatus.Experimental
+  @Throws(EelUnavailableException::class)
   suspend fun toEelApi(descriptor: EelDescriptor): EelApi
-}
 
-/**
- * Specialization of [EelDescriptor] that resolves to a path-based environment.
- *
- * These descriptors are tied to a concrete filesystem root (e.g. `\\wsl$\Ubuntu` or `/docker-xyz`).
- * Different paths to the same logical environment yield different descriptors — even if they point to the same [EelMachine].
- *
- * This allows tools to distinguish between environments even if the underlying host is the same.
- */
-@ApiStatus.Experimental
-interface EelPathBoundDescriptor : EelDescriptor {
-  /**
-   * A platform-specific base path representing the environment's root.
-   *
-   * Examples:
-   * - `\\wsl$\Ubuntu` for a WSL distribution
-   * - `/docker-12345/` for Docker containers
-   */
-  val rootPath: Path
+  fun ownsDescriptor(descriptor: EelDescriptor): Boolean
 }
 
 /**
@@ -120,30 +102,15 @@ interface EelDescriptor {
     }
 
   /**
-   * Returns the machine this descriptor belongs to.
-   *
-   * Multiple descriptors may resolve to the same [EelMachine], e.g.:
-   * - Docker paths with different mount points
-   * - WSL descriptors using `wsl$` vs `wsl.localhost`
+   * Describes descriptor in a user-readable manner, i.e: "Docker: <container_name>" or "Wsl: <distro name>".
+   * Format is *not* specified but guaranteed to be user-readable.
    */
-  val machine: EelMachine
+  @get:ApiStatus.Experimental
+  val name: @NonNls String
 
   /**
    * The platform of an environment corresponding to this [EelDescriptor].
    */
   @get:ApiStatus.Experimental
-  val osFamily: EelOsFamily get() = machine.osFamily
-
-  @ApiStatus.Experimental
-  suspend fun toEelApi(): EelApi {
-    return machine.toEelApi(this)
-  }
-
-  /**
-   * Retrieves an instance of [EelApi] corresponding to this [EelDescriptor].
-   * This method may run a container, so it could suspend for a long time.
-   */
-  @Deprecated("Use toEelApi() instead", replaceWith = ReplaceWith("toEelApi()"))
-  @ApiStatus.Internal
-  suspend fun upgrade(): EelApi = toEelApi()
+  val osFamily: EelOsFamily
 }

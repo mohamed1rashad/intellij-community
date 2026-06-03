@@ -7,6 +7,7 @@ import com.intellij.ide.projectWizard.NewProjectWizardCollector.Base.logNameChan
 import com.intellij.ide.util.installNameGenerators
 import com.intellij.ide.util.projectWizard.ModuleBuilder
 import com.intellij.ide.util.projectWizard.WizardContext
+import com.intellij.ide.wizard.NewProjectWizardBaseData.Companion.KEY
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
@@ -14,7 +15,13 @@ import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.observable.properties.GraphProperty
 import com.intellij.openapi.observable.properties.ObservableProperty
-import com.intellij.openapi.observable.util.*
+import com.intellij.openapi.observable.properties.PropertyGraph
+import com.intellij.openapi.observable.util.bind
+import com.intellij.openapi.observable.util.joinCanonicalPath
+import com.intellij.openapi.observable.util.operation
+import com.intellij.openapi.observable.util.toUiPathProperty
+import com.intellij.openapi.observable.util.trim
+import com.intellij.openapi.observable.util.widthProperty
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.rootManager
 import com.intellij.openapi.roots.ProjectRootManager
@@ -24,25 +31,39 @@ import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.getCanonicalPath
 import com.intellij.openapi.ui.getPresentablePath
 import com.intellij.openapi.ui.shortenTextWithEllipsis
-import com.intellij.openapi.ui.validation.*
+import com.intellij.openapi.ui.validation.CHECK_DIRECTORY
+import com.intellij.openapi.ui.validation.CHECK_MODULE_NAME
+import com.intellij.openapi.ui.validation.CHECK_MODULE_PATH
+import com.intellij.openapi.ui.validation.CHECK_NON_EMPTY
+import com.intellij.openapi.ui.validation.CHECK_PROJECT_PATH
+import com.intellij.openapi.ui.validation.WHEN_GRAPH_PROPAGATION_FINISHED
+import com.intellij.openapi.ui.validation.invoke
+import com.intellij.openapi.util.Key
+import com.intellij.openapi.util.getOrCreateUserData
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.io.toCanonicalPath
 import com.intellij.openapi.util.io.toNioPathOrNull
 import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.ui.UIBundle
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.COLUMNS_MEDIUM
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.MAX_LINE_LENGTH_NO_WRAP
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.bindText
+import com.intellij.ui.dsl.builder.columns
+import com.intellij.ui.dsl.builder.trimmedTextValidation
+import com.intellij.ui.dsl.builder.whenTextChangedFromUi
 import com.intellij.ui.util.getTextWidth
 import com.intellij.util.applyIf
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.name
 
-/**
- * Handles the project **Name** and **Location** fields.
- *
- * @see <a href="https://plugins.jetbrains.com/docs/intellij/new-project-wizard.html">New Project Wizard API (IntelliJ Platform Docs)</a>
- */
-class NewProjectWizardBaseStep(parent: NewProjectWizardStep) : AbstractNewProjectWizardStep(parent), NewProjectWizardBaseData {
+private class NewProjectWizardBaseDataImpl(propertyGraph: PropertyGraph, val context: WizardContext) :
+  NewProjectWizardBaseData {
   override val nameProperty: GraphProperty<String> = propertyGraph.lazyProperty(::suggestName)
   override val pathProperty: GraphProperty<String> = propertyGraph.lazyProperty { suggestLocation().toCanonicalPath() }
 
@@ -50,8 +71,6 @@ class NewProjectWizardBaseStep(parent: NewProjectWizardStep) : AbstractNewProjec
   override var path: String by pathProperty
 
   var defaultName: String = "untitled"
-
-  internal var bottomGap: Boolean = true
 
   private fun suggestLocation(): Path {
     val location = context.projectDirectory
@@ -99,6 +118,30 @@ class NewProjectWizardBaseStep(parent: NewProjectWizardStep) : AbstractNewProjec
   init {
     nameProperty.dependsOn(pathProperty, ::suggestUniqueName)
   }
+
+  companion object {
+    val KEY: Key<NewProjectWizardBaseDataImpl> = Key.create(NewProjectWizardBaseDataImpl::class.java.name)
+  }
+}
+
+/**
+ * Handles the project **Name** and **Location** fields.
+ *
+ * @see <a href="https://plugins.jetbrains.com/docs/intellij/new-project-wizard.html">New Project Wizard API (IntelliJ Platform Docs)</a>
+ */
+class NewProjectWizardBaseStep(parent: NewProjectWizardStep) : AbstractNewProjectWizardStep(parent), NewProjectWizardBaseData {
+
+  private var wizardBaseData: NewProjectWizardBaseDataImpl =
+    context.getOrCreateUserData(NewProjectWizardBaseDataImpl.KEY) { NewProjectWizardBaseDataImpl(propertyGraph, context) }
+
+  override val nameProperty: GraphProperty<String> by wizardBaseData::nameProperty
+  override val pathProperty: GraphProperty<String> by wizardBaseData::pathProperty
+  override var name: String by wizardBaseData::name
+  override var path: String by wizardBaseData::path
+
+  var defaultName: String by wizardBaseData::defaultName
+
+  internal var bottomGap: Boolean = true
 
   override fun setupUI(builder: Panel) {
     val locationProperty = pathProperty.joinCanonicalPath(nameProperty)
@@ -164,7 +207,7 @@ class NewProjectWizardBaseStep(parent: NewProjectWizardStep) : AbstractNewProjec
   }
 
   init {
-    data.putUserData(NewProjectWizardBaseData.KEY, this)
+    data.putUserData(KEY, wizardBaseData)
   }
 
   companion object {

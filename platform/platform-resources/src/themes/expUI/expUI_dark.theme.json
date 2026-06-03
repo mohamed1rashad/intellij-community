@@ -158,7 +158,21 @@
 
     "Badge": {
       "greenOutlineForeground": "Green7",
-      "greenOutlineBorderColor": "Green5"
+      "greenOutlineBorderColor": "Green5",
+      "blueSecondaryBackground": "#375FADCC",
+      "blueSecondaryForeground": "Blue12",
+      "blueBackground": "Blue8",
+      "blueForeground": "Gray1",
+      "greenSecondaryBackground": "#436946CC",
+      "greenSecondaryForeground": "Green12",
+      "greenBackground": "Green6",
+      "greenForeground": "Gray1",
+      "purpleSecondaryBackground": "#6C469CCC",
+      "purpleSecondaryForeground": "Purple12",
+      "graySecondaryBackground": "#FFFFFF29",
+      "graySecondaryForeground": "#FFFFFFCC",
+      "disabledBackground": "#FFFFFF29",
+      "disabledForeground": "#FFFFFF66"
     },
 
     "Bookmark": {
@@ -558,7 +572,7 @@
     },
 
     "SearchEverywhere": {
-      "List.settingsBackground": "Gray8",
+      "List.settingsBackground": "Gray3",
       "Tab": {
         "selectedBackground": "Blue2",
         "selectedForeground": "Gray14"
@@ -1200,6 +1214,13 @@
       "infoForeground": "Gray11",
       "lineSeparatorColor": "Gray3"
     },
+
+    "NuGet": {
+      "section": {
+        "background": "#252629",
+        "hoverBackground": "#292B2E"
+      }
+    },
     
     "DataSummary.Chart.barColor": "Blue6",
 
@@ -1209,7 +1230,25 @@
     "ManagedIdeMenuItemHover": "Gray4",
 
     "InlineBanner.hoverBackground": "#FFFFFF14",
-    "InlineBanner.pressedBackground": "#FFFFFF1E"
+    "InlineBanner.pressedBackground": "#FFFFFF1E",
+    
+    "Recap": {
+      "ijnext": "#55339C",
+      "cardBackground": "#1E1F22",
+      "cardBorderColor": "#1E1F22",
+      "cardHeaderTitle": "#F0F1F2",
+      "cardHeaderLinkBackground": "#2B2D30",
+      "cardHeaderSubtitle": "#B4B8BF",
+      "cardFooterForeground": "#CED0D6",
+      "chroniclesBackground": "#2B2D30",
+      "chroniclesBorderColor": "#2B2D30",
+      "chroniclesBackgroundHovered": "#393B40",
+      "chroniclesForeground": "#DFE1E5",
+      "chroniclesForegroundGreyed": "#868A91",
+      "errorBackground": "#3D3223",
+      "errorBorder": "#5E4D33",
+      "errorForeground": "#DFE1E5"
+    }
   },
 
   "icons": {

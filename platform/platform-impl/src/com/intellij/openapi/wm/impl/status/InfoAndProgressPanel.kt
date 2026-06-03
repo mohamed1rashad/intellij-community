@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplaceGetOrSet", "ReplacePutWithAssignment")
 @file:OptIn(FlowPreview::class)
 
@@ -12,61 +12,95 @@ import com.intellij.ide.impl.ProjectUtil.getActiveProject
 import com.intellij.ide.ui.UISettings
 import com.intellij.ide.ui.UISettings.Companion.getInstance
 import com.intellij.ide.ui.UISettingsListener
-import com.intellij.idea.ActionsBundle
 import com.intellij.internal.statistic.service.fus.collectors.UIEventLogger.ProgressPaused
 import com.intellij.internal.statistic.service.fus.collectors.UIEventLogger.ProgressResumed
 import com.intellij.notification.impl.ApplicationNotificationsModel
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.UI
 import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.fileEditor.impl.MergingUpdateChannel
+import com.intellij.openapi.observable.util.addMouseHoverListener
 import com.intellij.openapi.progress.ProgressModel
 import com.intellij.openapi.progress.TaskInfo
 import com.intellij.openapi.progress.impl.ProgressSuspender
 import com.intellij.openapi.progress.impl.ProgressSuspender.SuspenderListener
 import com.intellij.openapi.progress.util.TitledIndicator
 import com.intellij.openapi.ui.MessageType
+import com.intellij.openapi.ui.getParentOfType
 import com.intellij.openapi.ui.panel.ProgressPanel
 import com.intellij.openapi.ui.panel.ProgressPanelBuilder
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.BalloonHandler
+import com.intellij.openapi.ui.popup.IconButton
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.NlsContexts
-import com.intellij.openapi.util.Pair
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.util.registry.RegistryValue
+import com.intellij.openapi.util.registry.RegistryValueListener
+import com.intellij.openapi.wm.StatusBar
 import com.intellij.platform.util.coroutines.flow.throttle
 import com.intellij.reference.SoftReference
-import com.intellij.ui.*
 import com.intellij.ui.AnimatedIcon
+import com.intellij.ui.ClientProperty
+import com.intellij.ui.ExperimentalUI
+import com.intellij.ui.GuiUtils
+import com.intellij.ui.InplaceButton
+import com.intellij.ui.ScreenUtil
 import com.intellij.ui.awt.RelativePoint
-import com.intellij.ui.components.ActionLink
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.panels.NonOpaquePanel
+import com.intellij.ui.hover.HoverListener
+import com.intellij.ui.util.width
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.containers.JBIterable
 import com.intellij.util.containers.UnmodifiableHashMap
-import com.intellij.util.ui.*
+import com.intellij.util.ui.AbstractLayoutManager
+import com.intellij.util.ui.AsyncProcessIcon
+import com.intellij.util.ui.EdtInvocationManager
+import com.intellij.util.ui.JBInsets
+import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.StartupUiUtil.getCenterPoint
+import com.intellij.util.ui.UIUtil
 import it.unimi.dsi.fastutil.ints.IntArrays
 import it.unimi.dsi.fastutil.ints.IntComparator
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Runnable
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Container
+import java.awt.Dimension
+import java.awt.Graphics
+import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.lang.ref.WeakReference
-import javax.swing.*
+import javax.accessibility.AccessibleContext
+import javax.accessibility.AccessibleRole
+import javax.accessibility.AccessibleState
+import javax.accessibility.AccessibleStateSet
+import javax.accessibility.AccessibleValue
+import javax.swing.Icon
+import javax.swing.JComponent
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JRootPane
+import javax.swing.SwingUtilities
 import javax.swing.event.HyperlinkListener
 import kotlin.math.max
 import kotlin.time.Duration.Companion.milliseconds
@@ -82,8 +116,10 @@ class InfoAndProgressPanel internal constructor(
     @ApiStatus.Internal
     val FAKE_BALLOON: Any = Any()
 
+    private const val SHOW_COUNTER_REGISTRY_KEY: String = "progresses.show.counter.icon.instead.of.show.link"
+
     private val showCounterInsteadOfMultiProcessLink: Boolean
-      get() = Registry.`is`("progresses.show.counter.icon.instead.of.show.link", false)
+      get() = Registry.`is`(SHOW_COUNTER_REGISTRY_KEY, false)
 
     private val supportSecondaryProgresses: Boolean
       get() = showCounterInsteadOfMultiProcessLink && Registry.`is`("progresses.support.secondary.progresses", false)
@@ -110,6 +146,9 @@ class InfoAndProgressPanel internal constructor(
   internal val component: JPanel
     get() = mainPanel
 
+  internal val focusableComponents: List<JComponent>
+    get() = mainPanel.inlinePanel.getFocusableComponents()
+
   private val originals = ArrayList<ProgressModel>()
   private val infos = ArrayList<TaskInfo>()
   private var inlineToOriginal = UnmodifiableHashMap.empty<MyProgressComponent, ProgressModel>()
@@ -124,14 +163,17 @@ class InfoAndProgressPanel internal constructor(
   private val updateRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
   private val removeProgressRequests = MergingUpdateChannel<MyProgressComponent>(delay = 50.milliseconds) { toUpdate ->
-    withContext(Dispatchers.EDT) {
+    withContext(Dispatchers.UI) {
       for (indicator in toUpdate) {
         removeProgress(indicator)
       }
     }
   }
+  private val lifecycleDisposable = Disposer.newDisposable()
 
   init {
+    statusBar.registerFocusableWidget(mainPanel.inlinePanel, onActivate = ::triggerPopupShowing)
+
     val connection = ApplicationManager.getApplication().getMessageBus().connect(coroutineScope = coroutineScope)
     connection.subscribe(PowerSaveMode.TOPIC, PowerSaveMode.Listener {
       EdtInvocationManager.invokeLaterIfNeeded(::updateProgressIcon)
@@ -165,7 +207,7 @@ class InfoAndProgressPanel internal constructor(
             indicators = ArrayList(dirtyIndicators)
             dirtyIndicators.clear()
           }
-          withContext(Dispatchers.EDT) {
+          withContext(Dispatchers.UI) {
             for (indicator in indicators) {
               indicator.updateAndRepaint()
             }
@@ -211,6 +253,7 @@ class InfoAndProgressPanel internal constructor(
       }
       inlineToOriginal = UnmodifiableHashMap.empty()
       originalToInlines.clear()
+      Disposer.dispose(lifecycleDisposable)
       disposed = true
       infos.clear()
     }
@@ -247,6 +290,7 @@ class InfoAndProgressPanel internal constructor(
     synchronized(originals) {
       if (originals.isEmpty()) {
         mainPanel.updateNavBarAutoscrollToSelectedLimit(AutoscrollLimit.ALLOW_ONCE)
+        getPopup().setHideOnFocusLost(false)
       }
       originals.add(original)
       infos.add(info)
@@ -416,7 +460,8 @@ class InfoAndProgressPanel internal constructor(
     val htmlContent = htmlBody.replace("\n", "<br>")
     val icon = icon ?: if (type == MessageType.INFO) {
       null
-    } else {
+    }
+    else {
       type.defaultIcon
     }
     val balloon = JBPopupFactory.getInstance()
@@ -548,7 +593,10 @@ class InfoAndProgressPanel internal constructor(
       setRefreshHidden()
       setLayout(InlineLayout())
       add(refreshAndInfoPanel)
-      add(inlinePanel)
+      val wrapper = NonOpaquePanel(BorderLayout())
+      wrapper.add(inlinePanel, BorderLayout.CENTER)
+      wrapper.border = JBUI.Borders.empty(0, 40, 0, 4)
+      add(wrapper)
       refreshAndInfoPanel.revalidate()
       refreshAndInfoPanel.repaint()
     }
@@ -572,7 +620,7 @@ class InfoAndProgressPanel internal constructor(
       if (showNavBar) {
         val centralComponent = centralComponent
         if (centralComponent != null) {
-          host.coroutineScope.launch(Dispatchers.EDT) {
+          host.coroutineScope.launch(Dispatchers.UI) {
             refreshAndInfoPanel.add(centralComponent, BorderLayout.CENTER)
             centralComponent.updateUI()
           }
@@ -618,10 +666,14 @@ class InfoAndProgressPanel internal constructor(
 
     fun removeProgress(progress: MyProgressComponent, last: Boolean) {
       if (last) {
+        host.statusBar.focusNextWidgetAfter(inlinePanel)
         updateNavBarAutoscrollToSelectedLimit(AutoscrollLimit.UNLIMITED)
         inlinePanel.updateState(null)
         if (host.shouldClosePopupAndOnProcessFinish) {
-          host.hideProcessPopup()
+          host.popup?.setHideOnFocusLost(true)
+          if (host.popup?.isBannerPresent == false) {
+            host.hideProcessPopup()
+          }
         }
       }
       else if (inlinePanel.indicator != null && inlinePanel.indicator!!.info === progress.info) {
@@ -730,7 +782,7 @@ class InfoAndProgressPanel internal constructor(
   internal open inner class MyProgressComponent(compact: Boolean, task: TaskInfo, progressModel: ProgressModel)
     : ProgressComponent(compact, task, progressModel), TitledIndicator {
     private var original: ProgressModel?
-    internal var addedProgressBarWidth: Int = 0
+    private lateinit var focusableButtons: List<InplaceButton>
     internal val visibleInStatusBar: Boolean
       get() = indicatorModel.visibleInStatusBar
 
@@ -758,19 +810,21 @@ class InfoAndProgressPanel internal constructor(
     override fun createCompactTextAndProgress(component: JPanel) {
       textPanel.setTextAlignment(Component.RIGHT_ALIGNMENT)
       textPanel.recomputeSize()
-      UIUtil.setCursor(textPanel, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR))
-      UIUtil.setCursor(progress, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR))
       super.createCompactTextAndProgress(component)
       (progress.parent as JComponent).setBorder(JBUI.Borders.empty(0, 8, 0, 4))
     }
 
     override fun wrapProgress(): JComponent {
-      val progressWrapper = object : NonOpaquePanel(BorderLayout()) {
-        override fun getPreferredSize(): Dimension? {
-          val original = super.getPreferredSize()
-          original.width += addedProgressBarWidth
-          return original
+      val progressWrapper = if (isCompact) {
+        object : NonOpaquePanel(BorderLayout()) {
+          override fun getPreferredSize(): Dimension {
+            val insets = border.getBorderInsets(this)
+            return Dimension(JBUI.scale(104 + insets.width), -1)
+          }
         }
+      }
+      else {
+        NonOpaquePanel(BorderLayout())
       }
       progressWrapper.add(progress, BorderLayout.CENTER)
       return progressWrapper
@@ -783,7 +837,16 @@ class InfoAndProgressPanel internal constructor(
     open fun canCheckPowerSaveMode(): Boolean = true
 
     override fun createEastButtons(): List<ProgressButton> {
-      return listOf(createSuspendButton()) + super.createEastButtons()
+      val buttons = listOf(createSuspendButton()) + super.createEastButtons()
+      focusableButtons = if (isCompact) buttons.map { it.button } else emptyList()
+      for (button in focusableButtons) {
+        statusBar.registerFocusableWidget(button, onActivate = { button.doClick() })
+      }
+      return buttons
+    }
+
+    fun getFocusableComponents(): List<JComponent> {
+      return if (::focusableButtons.isInitialized) focusableButtons else emptyList()
     }
 
     protected fun updateCancelButton(suspend: InplaceButton, cancel: InplaceButton) {
@@ -802,7 +865,8 @@ class InfoAndProgressPanel internal constructor(
     }
 
     private fun createSuspendButton(): ProgressButton {
-      val suspendButton = InplaceButton("", AllIcons.Actions.Pause, ActionListener { createSuspendRunnable().run() }).setFillBg(false)
+      val suspendButton = createInplaceButton(IconButton("", AllIcons.Actions.Pause, AllIcons.Actions.Pause),
+                                             ActionListener { createSuspendRunnable().run() })
       return ProgressButton(suspendButton, createSuspendUpdateRunnable(suspendButton))
     }
 
@@ -886,6 +950,7 @@ class InfoAndProgressPanel internal constructor(
       progress.isVisible = !PowerSaveMode.isEnabled() || !isPaintingIndeterminate
       super.updateProgressNow()
       if (presentationModeProgressPanel != null) presentationModeProgressPanel!!.update()
+      if (isCompact) mainPanel.inlinePanel.fireAccessibleValueChanged()
     }
 
     fun showInPresentationMode(): Boolean {
@@ -898,6 +963,10 @@ class InfoAndProgressPanel internal constructor(
 
     override fun getTitle(): @NlsContexts.ProgressTitle String? {
       return processNameValue
+    }
+
+    internal fun setHoveredEffectForText(hovered: Boolean) {
+      textPanel.setHoveredEffectForText(hovered)
     }
   }
 
@@ -944,7 +1013,7 @@ class InfoAndProgressPanel internal constructor(
     }
   }
 
-  private class InlineProgressPanel(private val host: InfoAndProgressPanel) : NonOpaquePanel() {
+  private class InlineProgressPanel(private val host: InfoAndProgressPanel) : NonOpaquePanel(), WidgetEffectBoundsProvider {
     companion object {
       private val gap: Int
         get() = JBUI.scale(10)
@@ -966,17 +1035,12 @@ class InfoAndProgressPanel internal constructor(
 
     val progressIcon: AsyncProcessIcon = AsyncProcessIcon(host.coroutineScope)
     var indicator: MyProgressComponent? = null
-    private val multiProcessLink: ActionLink = object : ActionLink("", ActionListener { host.triggerPopupShowing() }) {
-      override fun updateUI() {
-        super.updateUI()
-        if (!ExperimentalUI.isNewUI()) {
-          setFont(if (SystemInfo.isMac) JBUI.Fonts.label(11f) else JBFont.label())
-        }
-      }
-    }
+    private val multiProcessLink = TextPanel()
     private val counterComponent: CounterLabel
+    private var isHovered = false
 
     init {
+      border = JBUI.CurrentTheme.StatusBar.Widget.border()
       progressIcon.setOpaque(false)
       progressIcon.addMouseListener(object : MouseAdapter() {
         override fun mousePressed(e: MouseEvent) {
@@ -987,9 +1051,18 @@ class InfoAndProgressPanel internal constructor(
           host.handle(e)
         }
       })
-      progressIcon.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR))
-      progressIcon.setBorder(JBUI.CurrentTheme.StatusBar.Widget.border())
-      progressIcon.setToolTipText(ActionsBundle.message("action.ShowProcessWindow.double.click"))
+      updateProgressIconBorder()
+      val listener = object : RegistryValueListener {
+        override fun afterValueChanged(value: RegistryValue) {
+          updateProgressIconBorder()
+        }
+      }
+      Registry.get(SHOW_COUNTER_REGISTRY_KEY).addListener(listener, host.coroutineScope)
+      multiProcessLink.addMouseListener(object : MouseAdapter() {
+        override fun mouseClicked(e: MouseEvent) {
+          host.triggerPopupShowing()
+        }
+      })
 
       counterComponent = CounterLabel()
       counterComponent.addMouseListener(object : MouseAdapter() {
@@ -997,13 +1070,31 @@ class InfoAndProgressPanel internal constructor(
           host.triggerPopupShowing()
         }
       })
-      UIUtil.setCursor(counterComponent, Cursor.getPredefinedCursor(Cursor.HAND_CURSOR))
+      addMouseHoverListener(host.lifecycleDisposable, object : HoverListener() {
+        override fun mouseEntered(component: Component, x: Int, y: Int) {
+          setHovered(true)
+        }
+
+        override fun mouseMoved(component: Component, x: Int, y: Int) {
+        }
+
+        override fun mouseExited(component: Component) {
+          setHovered(false)
+        }
+
+        private fun setHovered(hovered: Boolean) {
+          isHovered = hovered
+          counterComponent.setHoveredEffectForText(hovered)
+          indicator?.textPanel?.setHoveredEffectForText(hovered)
+          repaint()
+        }
+      })
 
       setLayout(object : AbstractLayoutManager() {
         override fun preferredLayoutSize(parent: Container): Dimension {
           val result = Dimension()
-          fun addVisibleToPreferred(component: JComponent, withGap: Boolean, enforceOnInvisible: Boolean = false) {
-            if (enforceOnInvisible || component.isVisible) {
+          fun addVisibleToPreferred(component: JComponent, withGap: Boolean) {
+            if (component.isVisible) {
               if (withGap && result.width > 0) {
                 result.width += gap
               }
@@ -1016,12 +1107,12 @@ class InfoAndProgressPanel internal constructor(
           if (indicator != null) {
             addVisibleToPreferred(indicator!!.component, withGap = false)
           }
+          addVisibleToPreferred(multiProcessLink, withGap = true)
 
           if (showCounterInsteadOfMultiProcessLink) {
-            addVisibleToPreferred(counterComponent, withGap = true, enforceOnInvisible = true)
+            addVisibleToPreferred(counterComponent, withGap = false)
             addVisibleToPreferred(progressIcon, withGap = false)
           }
-          addVisibleToPreferred(multiProcessLink, withGap = true)
 
           if (progressIcon.isVisible) {
             result.height = max(result.height, progressIcon.getPreferredSize().height)
@@ -1036,7 +1127,6 @@ class InfoAndProgressPanel internal constructor(
             counterComponent.isVisible = false
             return
           }
-          indicator?.addedProgressBarWidth = 0
           val insets = parent.insets
           val x = insets.left
           val centerY = (parent.height + insets.top - insets.bottom) / 2
@@ -1081,11 +1171,13 @@ class InfoAndProgressPanel internal constructor(
           indicatorComponent.setBounds(0, 0, 0, 0)
 
           if (showCounterInsteadOfMultiProcessLink && counterComponent.isVisible) {
-            progressIcon.isVisible = false
-            setBounds(counterComponent, rightX, centerY, null, true)
+            rightX = setBounds(counterComponent, rightX, centerY, null, true)
+
+            progressIcon.isVisible = true
+            setBounds(progressIcon, rightX, centerY, null, true)
             return
           }
-          // With showCounterInsteadOfMultiProcessLink and !counterLabel.isVisible (single progress)
+          // With showCounterInsteadOfMultiProcessLink and !counterComponent.isVisible (single progress)
           // behavior is just the same as with !showCounterInsteadOfMultiProcessLink
 
           progressIcon.isVisible = true
@@ -1111,32 +1203,21 @@ class InfoAndProgressPanel internal constructor(
             }
             setBounds(progressIcon, rightX, centerY, iconSize, miniWidth)
           }
-          progressIcon.isVisible = true
         }
 
         private fun layoutWithFittingIndicator(indicatorComponent: JPanel, initialIndicatorSize: Dimension?, initialRightX: Int, centerY: Int) {
           var rightX = initialRightX
           var indicatorSize = initialIndicatorSize
           progressIcon.isVisible = false
-          var additionalWidth = 0
 
           when {
             showCounterInsteadOfMultiProcessLink && counterComponent.isVisible -> {
-              rightX = setBounds(counterComponent, rightX, centerY, null, true) - gap
-            }
-            showCounterInsteadOfMultiProcessLink /* && !counterLabel.isVisible */ -> {
-              additionalWidth = counterComponent.preferredSize.width + gap
+              rightX = setBounds(counterComponent, rightX, centerY, null, true)
             }
             multiProcessLink.isVisible /* && !showCounterInsteadOfMultiProcessLink */ -> {
               rightX = setBounds(multiProcessLink, rightX, centerY, null, true) - gap
             }
             //for single progress with `showCounterInsteadOfMultiProcessLink == false` do nothing, see IJPL-192911
-          }
-
-          if (additionalWidth != 0) {
-            indicatorSize = initialIndicatorSize ?: indicatorComponent.getPreferredSize()
-            indicatorSize.width += additionalWidth
-            indicator?.addedProgressBarWidth = additionalWidth
           }
           setBounds(indicatorComponent, rightX, centerY, indicatorSize, true)
         }
@@ -1168,13 +1249,32 @@ class InfoAndProgressPanel internal constructor(
           }
         }
       })
-      setBorder(JBUI.Borders.empty(0, 20, 0, 4))
       add(progressIcon)
       progressIcon.isVisible = false
       add(multiProcessLink)
       multiProcessLink.isVisible = false
       add(counterComponent)
       counterComponent.isVisible = false
+    }
+
+    fun getFocusableComponents(): List<JComponent> {
+      val ind = indicator?.takeIf { it.component.isVisible }
+      if (ind == null && !progressIcon.isVisible && !multiProcessLink.isVisible && !counterComponent.isVisible) {
+        return emptyList()
+      }
+      return buildList {
+        add(this@InlineProgressPanel)
+        ind?.let { addAll(it.getFocusableComponents()) }
+      }
+    }
+
+    private fun updateProgressIconBorder() {
+      if (showCounterInsteadOfMultiProcessLink) {
+        progressIcon.setBorder(JBUI.Borders.empty())
+      }
+      else {
+        progressIcon.setBorder(JBUI.CurrentTheme.StatusBar.Widget.border())
+      }
     }
 
     fun updateProgress(compact: MyProgressComponent?) {
@@ -1196,13 +1296,16 @@ class InfoAndProgressPanel internal constructor(
           return
         }
         remove(this.indicator!!.component)
+        this.indicator?.setHoveredEffectForText(false)
       }
       this.indicator = indicator
+      this.indicator?.setHoveredEffectForText(isHovered)
       if (indicator == null) {
         multiProcessLink.isVisible = false
         doLayout()
         revalidate()
         repaint()
+        fireAccessibleValueChanged()
       }
       else {
         add(indicator.component)
@@ -1212,17 +1315,18 @@ class InfoAndProgressPanel internal constructor(
 
     @JvmOverloads
     fun updateState(showPopup: Boolean = host.popup != null && host.popup!!.isShowing) {
-      if (indicator == null) {
+      val currentIndicator = indicator
+      if (currentIndicator == null) {
         return
       }
       val size = host.originals.size
-      val isIndicatorVisible = !showPopup && (!supportSecondaryProgresses || indicator!!.visibleInStatusBar)
-      indicator!!.component.isVisible = isIndicatorVisible
+      val isIndicatorVisible = !showPopup && (!supportSecondaryProgresses || currentIndicator.visibleInStatusBar)
+      currentIndicator.component.isVisible = isIndicatorVisible
       if (showCounterInsteadOfMultiProcessLink) {
         counterComponent.setNumber(size, isIndicatorVisible, showPopup)
         counterComponent.isVisible = true
         progressIcon.isVisible = !showPopup && !isIndicatorVisible
-        multiProcessLink.setText(IdeBundle.message("link.hide.processes", size))
+        multiProcessLink.text = IdeBundle.message("link.hide.processes", size)
         multiProcessLink.isVisible = showPopup
       }
       else {
@@ -1230,70 +1334,150 @@ class InfoAndProgressPanel internal constructor(
         progressIcon.isVisible = false
         multiProcessLink.isVisible = showPopup || size > 1
         if (showPopup) {
-          multiProcessLink.setText(IdeBundle.message("link.hide.processes", size))
+          multiProcessLink.text = IdeBundle.message("link.hide.processes", size)
         }
         else if (size > 1) {
-          multiProcessLink.setText(IdeBundle.message("link.show.all.processes", size))
+          multiProcessLink.text = IdeBundle.message("link.show.all.processes", size)
         }
       }
+
+      val tooltip = ProgressComponent.computeTooltipText(if (isIndicatorVisible) currentIndicator.indicatorModel else null)
+      progressIcon.toolTipText = tooltip
+      counterComponent.toolTipText = tooltip
+      counterComponent.getAccessibleContext().accessibleDescription = "" // override tooltip
       doLayout()
       revalidate()
       repaint()
+      fireAccessibleValueChanged()
+    }
+
+    fun fireAccessibleValueChanged() {
+      getAccessibleContext().firePropertyChange(AccessibleContext.ACCESSIBLE_VALUE_PROPERTY,
+                                                null,
+                                                getAccessibleContext().accessibleValue.currentAccessibleValue)
+    }
+
+    override fun getWidgetEffectBounds(): Rectangle {
+      val result = bounds
+      result.setLocation(0, 0)
+      result.width -= counterComponent.getWidthAdditionForAlignmemt()
+      return result
+    }
+
+    override fun paintComponent(g: Graphics) {
+      if (isHovered && indicator != null) {
+        val statusBar = this.getParentOfType<StatusBar>()
+        if (statusBar != null) {
+          val bounds = getWidgetEffectBounds()
+          WidgetEffectRenderer.paintHover(g = g,
+                                          component = this,
+                                          highlightBounds = bounds,
+                                          bg = JBUI.CurrentTheme.StatusBar.Widget.HOVER_BACKGROUND,
+                                          statusBar = statusBar)
+        }
+      }
+      super.paintComponent(g)
+    }
+
+    override fun getAccessibleContext(): AccessibleContext {
+      if (accessibleContext == null) {
+        accessibleContext = AccessibleInlineProgressPanel()
+      }
+      return accessibleContext
+    }
+
+    private inner class AccessibleInlineProgressPanel : AccessibleJComponent(), AccessibleValue {
+      override fun getAccessibleRole(): AccessibleRole = AccessibleRole.PROGRESS_BAR
+
+      override fun getAccessibleName(): @NlsContexts.Label String {
+        val baseName = IdeBundle.message("progress.accessible.name")
+        val ind = indicator ?: return baseName
+        val visibleCounterText = counterComponent.takeIf { it.isVisible }?.text?.takeIf(String::isNotEmpty)
+        val progressText = listOfNotNull(ind.textPanel.text, visibleCounterText)
+          .filter(String::isNotEmpty)
+          .joinToString(". ")
+
+        return if (progressText.isEmpty()) baseName
+        else IdeBundle.message("progress.accessible.name.with.progress", progressText)
+      }
+
+      override fun getAccessibleDescription(): @NlsContexts.Tooltip String = ProgressComponent.computeTooltipText(indicator?.indicatorModel)
+
+      override fun getAccessibleValue(): AccessibleValue = this
+      override fun getCurrentAccessibleValue(): Number = indicator?.progress?.value ?: 0
+      override fun getMinimumAccessibleValue(): Number = indicator?.progress?.minimum ?: 0
+      override fun getMaximumAccessibleValue(): Number = indicator?.progress?.maximum ?: 100
+      override fun setCurrentAccessibleValue(n: Number?): Boolean = false
+
+      override fun getAccessibleStateSet(): AccessibleStateSet =
+        super.getAccessibleStateSet().also { it.add(AccessibleState.HORIZONTAL) }
     }
   }
 }
 
-private class CounterLabel : JPanel() {
-  private val label: JBLabel
+private class CounterLabel : JPanel(), UISettingsListener {
+  private val textPanel: TextPanel
   private var numberOfProgresses: Int = 0
   private var isProgressVisible: Boolean = false
+  private var isPopupShowing: Boolean = false
 
   private var lastDigitNumber: Int = 0
   private var textsForMinimumSize: IntRange? = null
 
   private var minimumSize: Dimension? = null
 
+  val text: String?
+    get() = textPanel.text
+
   init {
-    label = createLabel()
+    textPanel = createTextPanel()
     layout = BorderLayout()
-    add(label, BorderLayout.CENTER)
+    add(textPanel, BorderLayout.CENTER)
     isOpaque = false
-    setNumber(0, isProgressVisible =false, isPopupShowing = false)
+    setNumber(0, isProgressVisible = false, isPopupShowing = false)
   }
 
-  private fun createLabel(): JBLabel {
-    val label = JBLabel()
-    label.font = TextPanel.getFont()
-    label.foreground = JBUI.CurrentTheme.StatusBar.Widget.FOREGROUND
-    return label
+  private fun createTextPanel(): TextPanel {
+    val panel = TextPanel()
+    panel.foreground = JBUI.CurrentTheme.StatusBar.Widget.FOREGROUND
+    panel.border = JBUI.Borders.emptyLeft(4)
+    panel.isFocusable = false
+    return panel
   }
 
 
   fun setNumber(numberOfProgresses: Int, isProgressVisible: Boolean, isPopupShowing: Boolean) {
     this.numberOfProgresses = numberOfProgresses
     this.isProgressVisible = isProgressVisible
+    this.isPopupShowing = isPopupShowing
 
-    val numberToShow = if (isProgressVisible) {
+    refreshTextForMinimumSizeIfNeeded()
+    refreshPanelText(textPanel)
+  }
+
+  private fun getNumberToShow(): Int {
+    return if (isProgressVisible) {
       numberOfProgresses - 1
     }
     else {
       numberOfProgresses
     }
+  }
 
-    refreshTextForMinimumSizeIfNeeded(numberToShow)
-
-    val labelText = when {
+  private fun refreshPanelText(panel: TextPanel) {
+    val numberToShow = getNumberToShow()
+    val text = when {
       isPopupShowing -> ""
       numberToShow <= 0 -> ""
       !isProgressVisible && numberToShow == 1 -> ""
       isProgressVisible -> "+${numberToShow}"
       else -> "${numberToShow}"
     }
-    label.text = labelText
+    panel.text = text
   }
 
-  private fun refreshTextForMinimumSizeIfNeeded(numberToShow: Int) {
-    val numberToShowString = numberToShow.toString()
+  private fun refreshTextForMinimumSizeIfNeeded() {
+    val numberToShowString = getNumberToShow().toString()
     if (numberToShowString.length != lastDigitNumber) {
       lastDigitNumber = numberToShowString.length
       textsForMinimumSize = when (lastDigitNumber) {
@@ -1306,6 +1490,10 @@ private class CounterLabel : JPanel() {
     }
   }
 
+  fun setHoveredEffectForText(hovered: Boolean) {
+    textPanel.setHoveredEffectForText(hovered)
+  }
+
   override fun getPreferredSize(): Dimension {
     val precalculated = minimumSize
     if (precalculated != null) return precalculated
@@ -1313,7 +1501,7 @@ private class CounterLabel : JPanel() {
     val texts = textsForMinimumSize
     if (texts == null || texts.isEmpty()) return super.getPreferredSize()
 
-    val probe = createLabel()
+    val probe = createTextPanel()
 
     var minSize = Dimension(0, 0)
     for (text in texts) {
@@ -1329,4 +1517,24 @@ private class CounterLabel : JPanel() {
   override fun getMinimumSize(): Dimension {
     return preferredSize
   }
+
+  override fun uiSettingsChanged(uiSettings: UISettings) {
+    minimumSize = null
+  }
+
+  fun getWidthAdditionForAlignmemt(): Int {
+    if (!isVisible) return 0
+    val minWidth = getPreferredSize().width
+    val panel = createTextPanel()
+    refreshPanelText(panel)
+    return minWidth - panel.preferredSize.width
+  }
+}
+
+// In TextPanel only text is painted by the component. The color of the text is defined by effect,
+// and not by foreground property.
+// TextPanel is not opaque, and a background for hovered effect is provided by [IdeStatusBarImpl]
+private fun TextPanel.setHoveredEffectForText(hovered: Boolean) {
+  val value = if (hovered) IdeStatusBarImpl.WidgetEffect.HOVER else null
+  putClientProperty(WIDGET_EFFECT_KEY, value)
 }

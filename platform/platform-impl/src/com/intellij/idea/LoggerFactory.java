@@ -1,16 +1,17 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.idea;
 
 import com.intellij.diagnostic.DialogAppender;
 import com.intellij.diagnostic.JsonLogHandler;
-import com.intellij.diagnostic.logs.LogLevelConfigurationManager;
 import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.JulLogger;
+import com.intellij.openapi.diagnostic.LogLevel;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.logging.Level;
 
 public final class LoggerFactory implements Logger.Factory {
@@ -26,45 +27,36 @@ public final class LoggerFactory implements Logger.Factory {
     var rootLogger = java.util.logging.Logger.getLogger("");
     rootLogger.setLevel(Level.INFO);
 
-    var logToJsonStdout = Boolean.getBoolean("intellij.log.to.json.stdout");
-    if (logToJsonStdout) {
+    var consoleLogLevel = LogLevel.OFF;
+    if (Boolean.getBoolean("intellij.log.to.json.stdout")) {
       System.setProperty("intellij.log.stdout", "false");
-      var jsonLogHandler = new JsonLogHandler();
-      rootLogger.addHandler(jsonLogHandler);
+      rootLogger.addHandler(new JsonLogHandler());
+    }
+    else {
+      var consoleLogLevelValue = System.getProperty("intellij.console.log.level");
+      if (consoleLogLevelValue != null) {
+        try {
+          consoleLogLevel = LogLevel.valueOf(consoleLogLevelValue.toUpperCase(Locale.ROOT));
+        }
+        catch (IllegalArgumentException _) { }
+      }
+      else if (AppMode.isRunningFromDevBuild() || Boolean.getBoolean("idea.log.console")) {
+        consoleLogLevel = LogLevel.WARNING;
+      }
     }
 
-    var enableConsoleLogger = !logToJsonStdout && Boolean.parseBoolean(System.getProperty("idea.log.console", "true"));
     var append = Boolean.parseBoolean(System.getProperty("idea.log.append", "true"));
 
-    JulLogger.configureLogFileAndConsole(getLogFilePath(), append, enableConsoleLogger, true, () -> IdeaLogger.dropFrequentExceptionsCaches(), null, null);
+    var writeAttachments = Boolean.parseBoolean(
+      System.getProperty("idea.log.persist.attachments", System.getProperty(ApplicationManagerEx.IS_INTERNAL_PROPERTY))
+    );
 
-    var dialogAppender = new DialogAppender();
-    dialogAppender.setLevel(Level.SEVERE);
-    rootLogger.addHandler(dialogAppender);
+    JulLogger.configureStandardLoggers(
+      consoleLogLevel, true, getLogFilePath(), append, writeAttachments, IdeaLogger::dropFrequentExceptionsCaches
+    );
 
-    configureLoggersFromSystemProperties();
-  }
-
-  private static void configureLoggersFromSystemProperties() {
-    setLevelsForCategories(System.getProperty(LogLevelConfigurationManager.LOG_DEBUG_CATEGORIES_SYSTEM_PROPERTY), Level.FINE);
-    setLevelsForCategories(System.getProperty(LogLevelConfigurationManager.LOG_TRACE_CATEGORIES_SYSTEM_PROPERTY), Level.FINER);
-    setLevelsForCategories(System.getProperty(LogLevelConfigurationManager.LOG_ALL_CATEGORIES_SYSTEM_PROPERTY), Level.ALL);
-  }
-
-  private static void setLevelsForCategories(@Nullable String categories, Level level) {
-    if (categories == null) {
-      return;
-    }
-    var lastSeparator = -1;
-    for (int i = 0; i <= categories.length(); i++) {
-      if (i == categories.length() || categories.charAt(i) == ',' || categories.charAt(i) == '#') {
-        if (lastSeparator + 1 < i) {
-          var category = categories.substring(lastSeparator + 1, i);
-          java.util.logging.Logger.getLogger(category).setLevel(level);
-          java.util.logging.Logger.getLogger('#' + category).setLevel(level);
-        }
-        lastSeparator = i;
-      }
+    if (!AppMode.isCommandLine() || ApplicationManagerEx.isInIntegrationTest()) {
+      rootLogger.addHandler(new DialogAppender());
     }
   }
 

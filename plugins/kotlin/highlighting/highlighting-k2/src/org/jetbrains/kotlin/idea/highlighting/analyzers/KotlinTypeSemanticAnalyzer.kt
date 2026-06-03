@@ -4,16 +4,35 @@ package org.jetbrains.kotlin.idea.highlighting.analyzers
 import com.intellij.codeInsight.daemon.impl.HighlightInfoType
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightInfoHolder
 import com.intellij.psi.PsiClass
-import com.intellij.psi.PsiElement
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.analysis.api.KaSession
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.components.containingDeclaration
+import org.jetbrains.kotlin.analysis.api.components.resolveToSymbol
+import org.jetbrains.kotlin.analysis.api.components.type
+import org.jetbrains.kotlin.analysis.api.symbols.KaAnonymousObjectSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassKind
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassifierSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
+import org.jetbrains.kotlin.analysis.api.symbols.KaTypeAliasSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaTypeParameterSymbol
 import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.analysis.api.types.symbol
-import org.jetbrains.kotlin.idea.highlighter.HighlightingFactory.highlightName
 import org.jetbrains.kotlin.idea.highlighter.KotlinHighlightInfoTypeSemanticNames
 import org.jetbrains.kotlin.idea.references.mainReference
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtAnnotationEntry
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtConstructorCalleeExpression
+import org.jetbrains.kotlin.psi.KtInstanceExpressionWithLabel
+import org.jetbrains.kotlin.psi.KtIntersectionType
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.KtTypeReference
+import org.jetbrains.kotlin.psi.KtUserType
+import org.jetbrains.kotlin.psi.KtValueArgumentList
 
 internal class KotlinTypeSemanticAnalyzer(holder: HighlightInfoHolder, session: KaSession) : KotlinSemanticAnalyzer(holder, session) {
     override fun visitSimpleNameExpression(expression: KtSimpleNameExpression) {
@@ -23,17 +42,17 @@ internal class KotlinTypeSemanticAnalyzer(holder: HighlightInfoHolder, session: 
     override fun visitIntersectionType(intersectionType: KtIntersectionType) {
         for (element in intersectionType.children) {
             val typeReference = element as? KtTypeReference ?: continue
-            val infoType = with(session) {
-                when(val type = typeReference.type) {
+            val infoType = context(session) {
+                when (val type = typeReference.type) {
                     is KaTypeParameterType -> KotlinHighlightInfoTypeSemanticNames.TYPE_PARAMETER
                     else -> type.symbol?.toInfoType()
                 }
             } ?: continue
-            highlight(typeReference, infoType)
+            highlightName(typeReference, infoType)
         }
     }
 
-    private fun highlightSimpleNameExpression(expression: KtSimpleNameExpression): Unit = with(session) {
+    private fun highlightSimpleNameExpression(expression: KtSimpleNameExpression): Unit = context(session) {
         if (expression.isCalleeExpression()) return
         val parent = expression.parent
 
@@ -61,7 +80,7 @@ internal class KotlinTypeSemanticAnalyzer(holder: HighlightInfoHolder, session: 
 
         val color = symbol.toInfoType()
 
-        highlight(expression, color)
+        highlightName(expression, color)
     }
 
     private fun KaClassifierSymbol.toInfoType(): HighlightInfoType = when (this) {
@@ -90,11 +109,8 @@ internal class KotlinTypeSemanticAnalyzer(holder: HighlightInfoHolder, session: 
         is KaTypeParameterSymbol -> KotlinHighlightInfoTypeSemanticNames.TYPE_PARAMETER
     }
 
-    private fun highlight(element: PsiElement, color: HighlightInfoType) {
-        holder.add(highlightName(element, color)?.create())
-    }
-
-    private fun KaSession.isAnnotationCall(expression: KtSimpleNameExpression, target: KaSymbol): Boolean {
+    context(session: KaSession)
+    private fun isAnnotationCall(expression: KtSimpleNameExpression, target: KaSymbol): Boolean {
         val isKotlinAnnotation = target is KaConstructorSymbol
                 && target.isPrimary
                 && (target.containingDeclaration as? KaClassSymbol)?.classKind == KaClassKind.ANNOTATION_CLASS

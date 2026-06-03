@@ -1,7 +1,12 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package andel.text
 
-import andel.text.impl.*
+import andel.text.impl.MAX_LEAF_SIZE
+import andel.text.impl.TextMonoid
+import andel.text.impl.TextRope
+import andel.text.impl.TextViewImpl
+import andel.text.impl.charCount
+import andel.text.impl.linesCount
 import fleet.util.normalizeLineEndings
 import fleet.util.serialization.DataSerializer
 import kotlinx.serialization.Serializable
@@ -9,7 +14,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlin.jvm.JvmStatic
 
 internal class TextSerializer : DataSerializer<Text, String>(String.serializer()) {
-  override fun fromData(data: String): Text = Text.fromString(data)
+  override fun fromData(data: String): Text = Text.fromStringExact(data)
 
   override fun toData(value: Text): String = value.view().charSequence().toString()
 }

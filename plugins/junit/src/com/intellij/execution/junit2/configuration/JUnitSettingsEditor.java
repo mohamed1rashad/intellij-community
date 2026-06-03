@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.junit2.configuration;
 
 import com.intellij.execution.ExecutionBundle;
@@ -6,18 +6,22 @@ import com.intellij.execution.JUnitBundle;
 import com.intellij.execution.application.JavaSettingsEditorBase;
 import com.intellij.execution.junit.JUnitConfiguration;
 import com.intellij.execution.testframework.TestSearchScope;
-import com.intellij.execution.ui.*;
-import com.intellij.openapi.application.ReadAction;
+import com.intellij.execution.ui.CommonJavaFragments;
+import com.intellij.execution.ui.CommonParameterFragments;
+import com.intellij.execution.ui.ConfigurationModuleSelector;
+import com.intellij.execution.ui.DefaultJreSelector;
+import com.intellij.execution.ui.JrePathEditor;
+import com.intellij.execution.ui.ModuleClasspathCombo;
+import com.intellij.execution.ui.SettingsEditorFragment;
+import com.intellij.execution.ui.TagButton;
+import com.intellij.execution.ui.TargetPathFragment;
+import com.intellij.execution.ui.VariantTagFragment;
 import com.intellij.openapi.ui.LabeledComponent;
 import com.intellij.openapi.wm.IdeFocusManager;
-import com.intellij.psi.PsiJavaModule;
-import com.intellij.psi.search.FilenameIndex;
-import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.execution.junit.RepeatCount;
-import com.intellij.util.concurrency.NonUrgentExecutor;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JTextField;
+import java.awt.BorderLayout;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
@@ -46,9 +50,6 @@ public class JUnitSettingsEditor extends JavaSettingsEditorBase<JUnitConfigurati
                                          configuration -> !configuration.isUseModulePath(),
                                          (configuration, value) -> configuration.setUseModulePath(!value));
       fragments.add(fragment);
-      ReadAction.nonBlocking(() -> fragment.setRemovable(
-        FilenameIndex.getFilesByName(getProject(), PsiJavaModule.MODULE_INFO_FILE, GlobalSearchScope.projectScope(getProject())).length > 0))
-        .expireWith(fragment).submit(NonUrgentExecutor.getInstance());
     }
 
     ConfigurationModuleSelector moduleSelector = new ConfigurationModuleSelector(getProject(), moduleClasspath.component());

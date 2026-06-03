@@ -15,7 +15,23 @@ import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClassInitializer;
+import com.intellij.psi.PsiDeclarationStatement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.ResolveState;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.psi.controlFlow.ControlFlowUtil;
 import com.intellij.psi.impl.light.LightElement;
 import com.intellij.psi.scope.processor.VariablesProcessor;
@@ -25,13 +41,14 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.refactoring.rename.inplace.InplaceRefactoring;
-import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.awt.RelativePoint;
+import com.intellij.ui.dsl.listCellRenderer.LcrJavaHelper;
+import com.intellij.ui.dsl.listCellRenderer.RendererPresentation;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.annotations.VisibleForTesting;
 
-import java.awt.*;
+import java.awt.Point;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -50,7 +67,8 @@ public final class ReassignVariableUtil {
   }
   
   @VisibleForTesting
-  public static boolean reassign(final Editor editor) {
+  public static boolean reassign(final @Nullable Editor editor) {
+    if (editor == null) return false;
     final SmartPsiElementPointer<PsiDeclarationStatement> pointer = editor.getUserData(DECLARATION_KEY);
     final PsiDeclarationStatement declaration = pointer != null ? pointer.getElement() : null;
     final PsiType type = getVariableType(declaration);
@@ -82,12 +100,10 @@ public final class ReassignVariableUtil {
           .createPopupChooserBuilder(vars)
           .setTitle(JavaRefactoringBundle.message("introduce.local.variable.to.reassign.title"))
           .setRequestFocus(true)
-          .setRenderer(SimpleListCellRenderer.create((label, value, index) -> {
-            if (value != null) {
-              label.setText(value.getName());
-              label.setIcon(value.getIcon(0));
-            }
-          }))
+          .setRenderer(LcrJavaHelper.create(
+            "",
+            value -> new RendererPresentation(value.getIcon(0), value.getName())
+          ))
           .setItemChosenCallback((selectedValue) -> replaceWithAssignment(declaration, selectedValue, editor))
           .createPopup();
         if (ApplicationManager.getApplication().isHeadlessEnvironment()) {

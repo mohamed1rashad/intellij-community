@@ -7,7 +7,6 @@ import com.intellij.ide.util.scopeChooser.PackageSetChooserCombo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
-import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.packageDependencies.DependencyRule;
@@ -17,15 +16,27 @@ import com.intellij.psi.search.scope.packageSet.NamedScope;
 import com.intellij.psi.search.scope.packageSet.PackageSet;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.table.TableView;
-import com.intellij.util.ui.*;
-import org.jetbrains.annotations.NotNull;
+import com.intellij.util.ui.AbstractTableCellEditor;
+import com.intellij.util.ui.CellEditorComponentWithBrowseButton;
+import com.intellij.util.ui.ColumnInfo;
+import com.intellij.util.ui.EditableModel;
+import com.intellij.util.ui.GridBag;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.ListTableModel;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JCheckBox;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellEditor;
 import javax.swing.table.TableCellRenderer;
-import java.awt.*;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -278,16 +289,5 @@ public final class DependencyConfigurable implements Configurable, Configurable.
       newList.set(index2, r1);
       setItems(newList);
     }
-  }
-
-  /**
-   * @return a JButton to open a dialog to edit this configurable
-   */
-  public static JButton getConfigureButton(@NotNull Project project) {
-    var button = new JButton(CodeInsightBundle.message("jvm.inspections.dependency.configure.button.text"));
-    button.addActionListener(e -> {
-      ShowSettingsUtil.getInstance().editConfigurable(button, new DependencyConfigurable(project));
-    });
-    return button;
   }
 }

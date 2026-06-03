@@ -5,19 +5,31 @@ import com.intellij.configurationStore.saveSettings
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.platform.util.progress.withProgressText
-import com.intellij.settingsSync.core.SettingsSyncBridge.PushRequestMode.*
+import com.intellij.settingsSync.core.SettingsSyncBridge.PushRequestMode.FORCE_PUSH
+import com.intellij.settingsSync.core.SettingsSyncBridge.PushRequestMode.MUST_PUSH
+import com.intellij.settingsSync.core.SettingsSyncBridge.PushRequestMode.PUSH_IF_NEEDED
 import com.intellij.settingsSync.core.communicator.RemoteCommunicatorHolder
+import com.intellij.settingsSync.core.communicator.SettingsSyncUserData
 import com.intellij.settingsSync.core.statistics.SettingsSyncEventsStatistics
 import com.intellij.util.containers.ContainerUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Handles events about settings change both from the current IDE, and from the server, merges the settings, logs them,
@@ -38,6 +50,16 @@ class SettingsSyncBridge(
   private val remoteCommunicator: SettingsSyncRemoteCommunicator
     get() = RemoteCommunicatorHolder.getRemoteCommunicator() ?: DummyCommunicator
 
+  /**
+   * Executes a [SettingsSyncRemoteCommunicator] call on [Dispatchers.IO].
+   *
+   * Communicator methods are blocking (network I/O, `CompletableFuture.get()`).
+   * Running them on [Dispatchers.Default] risks starving its small thread pool on low-CPU machines,
+   * deadlocking startup. [Dispatchers.IO] has a much larger thread cap and is designed for blocking calls.
+   */
+  private suspend fun <T> withRemoteCommunicator(block: SettingsSyncRemoteCommunicator.() -> T): T =
+    withContext(Dispatchers.IO) { remoteCommunicator.block() }
+
   @Volatile
   private var queueJob: Job? = null
 
@@ -55,7 +77,11 @@ class SettingsSyncBridge(
     get() = queueJob != null
 
 
+  @TestOnly
+  val isAnyInitializePerformed: AtomicBoolean = AtomicBoolean()
+
   private val eventsMutex = Mutex()
+  private val initializationMutex = Mutex()
 
   private val settingsChangeListener = object : SettingsSyncEventListener {
     override fun settingChanged(event: SyncSettingsEvent) {
@@ -64,7 +90,7 @@ class SettingsSyncBridge(
         pendingExclusiveEvents.add(event)
         coroutineScope.launch {
           try {
-            withTimeoutOrNull(60_000) {
+            withTimeoutOrNull(60.seconds) {
               eventsMutex.withLock {
                 LOG.debug("Lock obtained for exclusive event")
                 processExclusiveEvent(event)
@@ -89,51 +115,67 @@ class SettingsSyncBridge(
 
   internal fun initialize(initMode: InitMode) {
     coroutineScope.launch {
-      withProgressText(SettingsSyncBundle.message(initMode.messageKey)) {
-        try {
-          // We only due it on `PushToServer` because  with other init modes this method can be called too early in the IDE initialization process
-          // and cause saving settings to fail — see fhttps://github.com/JetBrains/intellij-community/pull/2793#discussion_r1692737467 for context.
-          if (initMode == InitMode.PushToServer) {
-            // Flush settings explicitly – if this is not done before sending sync events, then remotely synced settings
-            // might not contain the most up–to–date settings state (e.g. sync settings will be stale).
-            saveIdeSettings()
-          }
-          settingsLog.initialize()
-
-          // the queue is not activated initially => events will be collected but not processed until we perform all initialization tasks
-          SettingsSyncEvents.getInstance().addListener(settingsChangeListener)
-          ideMediator.activateStreamProvider()
-
-          applyInitialChanges(initMode)
-
-          startQueue()
+      initializationMutex.withLock {
+        if (isInitialized) {
+          LOG.warn("Settings sync is already initialized, skipping initialization.")
+          return@withLock
         }
-        catch (ex: Exception) {
-          stopSyncingAndRollback(null, ex)
+        withProgressText(SettingsSyncBundle.message(initMode.messageKey)) {
+          try {
+            // We only due it on `PushToServer` because  with other init modes this method can be called too early in the IDE initialization process
+            // and cause saving settings to fail — see fhttps://github.com/JetBrains/intellij-community/pull/2793#discussion_r1692737467 for context.
+            if (initMode == InitMode.PushToServer) {
+              // Flush settings explicitly – if this is not done before sending sync events, then remotely synced settings
+              // might not contain the most up–to–date settings state (e.g. sync settings will be stale).
+              saveIdeSettings()
+            }
+            settingsLog.initialize()
+
+            // the queue is not activated initially => events will be collected but not processed until we perform all initialization tasks
+            SettingsSyncEvents.getInstance().addListener(settingsChangeListener)
+            ideMediator.activateStreamProvider()
+
+            applyInitialChanges(initMode)
+
+            if (SettingsSyncSettings.getInstance().syncEnabled) {
+              startQueue()
+            }
+          }
+          catch (ex: Exception) {
+            stopSyncingAndRollback(null, ex)
+          }
+          finally {
+            // only used in tests to check the first initialization
+            isAnyInitializePerformed.set(true)
+          }
         }
       }
     }
   }
 
   private fun startQueue() {
-    LOG.info("Starting settings sync queue")
+    LOG.debug("Starting settings sync queue")
     queueJob = coroutineScope.launch {
-      while (true) {
-        processPendingEvents()
-        if (!SettingsSyncSettings.getInstance().syncEnabled && pendingEvents.isEmpty() && pendingExclusiveEvents.isEmpty()) {
-          LOG.info("Sync disabled and no pending events. Stopping queue.")
-          break
-        }
-        try {
-          delay(1000)
-        }
-        catch (_: CancellationException) {
-          queueJob = null
-          LOG.info("queue processing was cancelled")
-          break;
+      try {
+        while (true) {
+          processPendingEvents()
+          if (!SettingsSyncSettings.getInstance().syncEnabled && pendingEvents.isEmpty() && pendingExclusiveEvents.isEmpty()) {
+            LOG.debug("Sync disabled and no pending events. Stopping queue.")
+            break
+          }
+          try {
+            delay(1000.milliseconds)
+          }
+          catch (_: CancellationException) {
+            LOG.debug("queue processing was cancelled")
+            break
+          }
         }
       }
-      LOG.info("Queue processing stopped")
+      finally {
+        queueJob = null
+        LOG.debug("Queue processing stopped, queueJob set to null")
+      }
     }
   }
 
@@ -149,14 +191,14 @@ class SettingsSyncBridge(
       // We need to create this remote file before the first sync, otherwise the settings value (even if persisted) will be overwritten by
       // the sync-server-side value when `com.intellij.settingsSync.AbstractServerCommunicator#currentSnapshotFilePath` applies
       // the remote config received in the first sync.
-      val fileExists = remoteCommunicator.isFileExists(CROSS_IDE_SYNC_MARKER_FILE)
+      val fileExists = withRemoteCommunicator { isFileExists(CROSS_IDE_SYNC_MARKER_FILE) }
       if (SettingsSyncLocalSettings.getInstance().isCrossIdeSyncEnabled) {
         if (!fileExists)
-          remoteCommunicator.createFile(CROSS_IDE_SYNC_MARKER_FILE, "")
+          withRemoteCommunicator { createFile(CROSS_IDE_SYNC_MARKER_FILE, "") }
       }
       else {
         if (fileExists)
-          remoteCommunicator.deleteFile(CROSS_IDE_SYNC_MARKER_FILE)
+          withRemoteCommunicator { deleteFile(CROSS_IDE_SYNC_MARKER_FILE) }
       }
       // we call updateOnSuccess, because the suspend methods below will be suspended on modality (if settings dialog is opened)
       // but we need to show the status in the configurable. By that time, we already know that communication was successful
@@ -196,12 +238,12 @@ class SettingsSyncBridge(
     val migrationSnapshot = migration.getLocalDataIfAvailable(appConfigPath)
     if (migrationSnapshot != null) {
       settingsLog.applyIdeState(migrationSnapshot, "Migrate from old settings sync")
-      LOG.info("Migration from old storage applied.")
+      LOG.debug("Migration from old storage applied.")
       var masterPosition = settingsLog.advanceMaster() // merge (preserve) 'ide' changes made by logging existing settings & by migration
 
-      when (val updateResult = remoteCommunicator.receiveUpdates()) {
+      when (val updateResult = withRemoteCommunicator { receiveUpdates() }) {
         is UpdateResult.Success -> {
-          LOG.info("There is a snapshot on the server => prefer server version over local migration data")
+          LOG.debug("There is a snapshot on the server => prefer server version over local migration data")
           val snapshot = updateResult.settingsSnapshot
           masterPosition = settingsLog.forceWriteToMaster(snapshot, "Remote changes to overwrite migration data by settings from cloud")
           settingsLog.setCloudPosition(masterPosition)
@@ -212,15 +254,15 @@ class SettingsSyncBridge(
         }
         is UpdateResult.FileDeletedFromServer -> {
           SettingsSyncSettings.getInstance().syncEnabled = false
-          LOG.info("Snapshot on the server has been deleted => not enabling settings sync after migration")
+          LOG.debug("Snapshot on the server has been deleted => not enabling settings sync after migration")
         }
         is UpdateResult.Error -> {
-          LOG.info("Error prevented checking server state: ${updateResult.message}")
+          LOG.debug("Error prevented checking server state: ${updateResult.message}")
           SettingsSyncSettings.getInstance().syncEnabled = false
           SettingsSyncStatusTracker.getInstance().updateOnError(updateResult.message)
         }
         UpdateResult.NoFileOnServer -> {
-          LOG.info("No snapshot file on the server yet => pushing the migrated data to the cloud")
+          LOG.debug("No snapshot file on the server yet => pushing the migrated data to the cloud")
           forcePushToCloud(masterPosition)
           settingsLog.setCloudPosition(masterPosition)
 
@@ -237,7 +279,7 @@ class SettingsSyncBridge(
     }
   }
 
-  private fun forcePushToCloud(masterPosition: SettingsLog.Position) {
+  private suspend fun forcePushToCloud(masterPosition: SettingsLog.Position) {
     pushAndHandleResult(true, masterPosition, onRejectedPush = {
       LOG.error("Reject shouldn't happen when force push is used")
       SettingsSyncStatusTracker.getInstance().updateOnError(SettingsSyncBundle.message("notification.title.push.error"))
@@ -261,12 +303,12 @@ class SettingsSyncBridge(
   private suspend fun processExclusiveEvent(event: SyncSettingsEvent.ExclusiveEvent) {
     when (event) {
       is SyncSettingsEvent.CrossIdeSyncStateChanged -> {
-        LOG.info("Cross-ide sync state changed to: " + event.isCrossIdeSyncEnabled)
+        LOG.debug("Cross-ide sync state changed to: " + event.isCrossIdeSyncEnabled)
         if (event.isCrossIdeSyncEnabled) {
-          remoteCommunicator.createFile(CROSS_IDE_SYNC_MARKER_FILE, "")
+          withRemoteCommunicator { createFile(CROSS_IDE_SYNC_MARKER_FILE, "") }
         }
         else {
-          remoteCommunicator.deleteFile(CROSS_IDE_SYNC_MARKER_FILE)
+          withRemoteCommunicator { deleteFile(CROSS_IDE_SYNC_MARKER_FILE) }
         }
         forcePushToCloud(settingsLog.getMasterPosition())
       }
@@ -289,7 +331,7 @@ class SettingsSyncBridge(
       return
     }
     if (force) {
-      withTimeoutOrNull(60_000) {
+      withTimeoutOrNull(60.seconds) {
         eventsMutex.withLock {
           processPendingEventsUnderLock()
         }
@@ -315,7 +357,7 @@ class SettingsSyncBridge(
         try {
           val event = pendingEvents.removeAt(0)
           eventProcessingFlag.set(true)
-          LOG.info("Processing event $event")
+          LOG.debug("Processing event $event")
           when (event) {
             is SyncSettingsEvent.IdeChange -> {
               settingsLog.applyIdeState(event.snapshot, "Local changes made in the IDE")
@@ -360,32 +402,20 @@ class SettingsSyncBridge(
   }
 
   private fun deleteServerData(afterDeleting: (DeleteServerDataResult) -> Unit) {
-    val deletionSnapshot = SettingsSnapshot(SettingsSnapshot.MetaInfo(Instant.now(), getLocalApplicationInfo(), isDeleted = true),
-                                            emptySet(), null, emptyMap(), emptySet())
-    val pushResult = pushToCloud(deletionSnapshot, force = true)
-    LOG.info("Deleting server data. Result: $pushResult")
-    when (pushResult) {
-      is SettingsSyncPushResult.Success -> {
-        afterDeleting(DeleteServerDataResult.Success)
-      }
-      is SettingsSyncPushResult.Error -> {
-        afterDeleting(DeleteServerDataResult.Error(pushResult.message))
-      }
-      SettingsSyncPushResult.Rejected -> {
-        afterDeleting(DeleteServerDataResult.Error("Deletion rejected by server"))
-      }
-    }
+    val userData = RemoteCommunicatorHolder.getCurrentUserData()
+                   ?: return afterDeleting(DeleteServerDataResult.Error("No user data"))
+    afterDeleting(removeRemoteData(userData))
   }
 
-  private fun checkServer() {
-    when (val result = remoteCommunicator.checkServerState()) {
+  private suspend fun checkServer() {
+    when (val result = withRemoteCommunicator { checkServerState() }) {
       is ServerState.UpdateNeeded -> {
-        LOG.info("Updating from server")
+        LOG.debug("Updating from server")
         updateChecker.scheduleUpdateFromServer()
         // the push will happen automatically after updating and merging (if there is anything to merge)
       }
       ServerState.FileNotExists -> {
-        LOG.info("No file on server, will push local settings")
+        LOG.debug("No file on server, will push local settings")
         SettingsSyncEvents.getInstance().fireSettingsChanged(SyncSettingsEvent.MustPushRequest)
       }
       ServerState.UpToDate -> {
@@ -424,7 +454,7 @@ class SettingsSyncBridge(
       SettingsSyncEventsStatistics.DISABLED_AUTOMATICALLY.log(SettingsSyncEventsStatistics.AutomaticDisableReason.EXCEPTION)
     }
     else {
-      LOG.info("Settings Sync is switched off. Rolling back.")
+      LOG.debug("Settings Sync is switched off. Rolling back.")
     }
     SettingsSyncSettings.getInstance().syncEnabled = false
     if (exception != null) {
@@ -440,6 +470,7 @@ class SettingsSyncBridge(
 
     // for tests it is important to have it the last statement, otherwise waitForAllExecuted can finish before rollback
     queueJob?.cancel()
+    queueJob = null // Mark as not initialized so it can be re-initialized
   }
 
   private fun rollback(previousState: CurrentState) {
@@ -496,9 +527,9 @@ class SettingsSyncBridge(
     }
   }
 
-  private fun pushAndHandleResult(force: Boolean, positionToSetCloudBranch: SettingsLog.Position, onRejectedPush: () -> Unit) {
+  private suspend fun pushAndHandleResult(force: Boolean, positionToSetCloudBranch: SettingsLog.Position, onRejectedPush: () -> Unit) {
     val pushResult: SettingsSyncPushResult = pushToCloud(settingsLog.collectCurrentSnapshot(), force)
-    LOG.info("Result of pushing settings to the cloud: $pushResult")
+    LOG.debug("Result of pushing settings to the cloud: $pushResult")
     when (pushResult) {
       is SettingsSyncPushResult.Success -> {
         settingsLog.setCloudPosition(positionToSetCloudBranch)
@@ -521,21 +552,21 @@ class SettingsSyncBridge(
     FORCE_PUSH
   }
 
-  private fun pushToCloud(settingsSnapshot: SettingsSnapshot, force: Boolean): SettingsSyncPushResult {
+  private suspend fun pushToCloud(settingsSnapshot: SettingsSnapshot, force: Boolean): SettingsSyncPushResult {
     val versionId = SettingsSyncLocalSettings.getInstance().knownAndAppliedServerId
     if (force) {
-      return remoteCommunicator.push(settingsSnapshot, force = true, versionId)
+      return withRemoteCommunicator { push(settingsSnapshot, force = true, versionId) }
     }
     else {
-      when (remoteCommunicator.checkServerState()) {
+      return when (withRemoteCommunicator { checkServerState() }) {
         is ServerState.UpdateNeeded -> {
-          return SettingsSyncPushResult.Rejected
+          SettingsSyncPushResult.Rejected
         }
         is ServerState.FileNotExists -> {
-          return remoteCommunicator.push(settingsSnapshot, force = true, versionId)
+          withRemoteCommunicator { push(settingsSnapshot, force = true, versionId) }
         }
         else -> {
-          return remoteCommunicator.push(settingsSnapshot, force = false, versionId)
+          withRemoteCommunicator { push(settingsSnapshot, force = false, versionId) }
         }
       }
     }
@@ -544,7 +575,7 @@ class SettingsSyncBridge(
   private suspend fun pushToIde(settingsSnapshot: SettingsSnapshot, targetPosition: SettingsLog.Position, syncSettings: SettingsSyncState?) {
     ideMediator.applyToIde(settingsSnapshot, syncSettings)
     settingsLog.setIdePosition(targetPosition)
-    LOG.info("Applied settings to the IDE.")
+    LOG.debug("Applied settings to the IDE.")
   }
 
   @TestOnly
@@ -552,7 +583,7 @@ class SettingsSyncBridge(
     processPendingEvents(force = true)
     val startTime = System.currentTimeMillis()
     while (System.currentTimeMillis() - startTime < 10000 && queueSize > 0) {
-      delay(10)
+      delay(10.milliseconds)
     }
     if (queueSize > 0) {
       LOG.warn("Queue size > 0 !!!!!!")
@@ -600,12 +631,31 @@ class SettingsSyncBridge(
 
     override fun isFileExists(filePath: String): Boolean {
       LOG.info("Cannot check if file '$filePath' exists - no communicator provided")
-      return false;
+      return false
     }
   }
 
 
   companion object {
     private val LOG = logger<SettingsSyncBridge>()
+
+    fun removeRemoteData(userData: SettingsSyncUserData): DeleteServerDataResult {
+      if (RemoteCommunicatorHolder.getCurrentUserData() != userData) {
+        return DeleteServerDataResult.Error("User account has changed")
+      }
+      val remoteCommunicator = RemoteCommunicatorHolder.getRemoteCommunicator()
+                               ?: return DeleteServerDataResult.Error("No remote communicator available")
+      val deletionSnapshot = SettingsSnapshot(SettingsSnapshot.MetaInfo(Instant.now(), getLocalApplicationInfo(), isDeleted = true),
+                                              emptySet(), null, emptyMap(), emptySet())
+
+      val versionId = SettingsSyncLocalSettings.getInstance().knownAndAppliedServerId
+      val pushResult = remoteCommunicator.push(deletionSnapshot, force = true, versionId)
+
+      return when (pushResult) {
+        is SettingsSyncPushResult.Success -> DeleteServerDataResult.Success
+        is SettingsSyncPushResult.Error -> DeleteServerDataResult.Error(pushResult.message)
+        SettingsSyncPushResult.Rejected -> DeleteServerDataResult.Error("Deletion rejected by server")
+      }
+    }
   }
 }

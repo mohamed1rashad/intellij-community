@@ -3,38 +3,39 @@ package com.intellij.platform.pluginManager.backend.rpc
 
 import com.intellij.ide.plugins.DynamicPlugins
 import com.intellij.ide.plugins.InstallFromDiskAction
-import com.intellij.ide.plugins.InstallPluginRequest
 import com.intellij.ide.plugins.InstalledPluginsTableModel
 import com.intellij.ide.plugins.PluginEnabler
 import com.intellij.ide.plugins.PluginInstaller
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.api.PluginDto
-import com.intellij.ide.plugins.*
-import com.intellij.ide.plugins.marketplace.*
-import com.intellij.ide.plugins.newui.BgProgressIndicator
+import com.intellij.ide.plugins.getMainDescriptor
+import com.intellij.ide.plugins.marketplace.ApplyPluginsStateResult
+import com.intellij.ide.plugins.marketplace.CheckErrorsResult
+import com.intellij.ide.plugins.marketplace.InstallPluginResult
+import com.intellij.ide.plugins.marketplace.PluginInstalledFromDiskResult
+import com.intellij.ide.plugins.marketplace.PrepareToUninstallResult
+import com.intellij.ide.plugins.marketplace.SetEnabledStateResult
 import com.intellij.ide.plugins.newui.DefaultUiPluginManagerController
 import com.intellij.ide.plugins.newui.PluginManagerSessionService
-import com.intellij.ide.plugins.newui.PluginUiModel
 import com.intellij.ide.plugins.newui.SessionStatePluginEnabler
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.extensions.PluginId
-import com.intellij.openapi.util.IntellijInternalApi
-import com.intellij.openapi.project.Project
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.FUSEventSource
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.platform.pluginManager.shared.rpc.PluginInstallerApi
 import com.intellij.platform.project.ProjectId
 import com.intellij.platform.project.findProjectOrNull
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.withContext
 import java.io.IOException
 
 internal class BackendPluginInstallerApi : PluginInstallerApi {
 
   override suspend fun unloadDynamicPlugin(pluginId: PluginId, isUpdate: Boolean): Boolean {
-    val pluginDescriptor = PluginManagerCore.findPlugin(pluginId) ?: return false
+    val pluginDescriptor = PluginManagerCore.findPlugin(pluginId)?.getMainDescriptor() ?: return false
     return PluginInstaller.unloadDynamicPlugin(null, pluginDescriptor, isUpdate)
   }
 
@@ -42,27 +43,26 @@ internal class BackendPluginInstallerApi : PluginInstallerApi {
     return DefaultUiPluginManagerController.resetSession(sessionId, removeSession)
   }
 
-  override suspend fun isModified(sessionId: String): Boolean {
-    return DefaultUiPluginManagerController.isModified(sessionId)
+  override suspend fun isModified(): Boolean {
+    return DefaultUiPluginManagerController.isModified()
   }
 
   override suspend fun setEnableStateForDependencies(sessionId: String, descriptorIds: Set<PluginId>, enable: Boolean): SetEnabledStateResult {
     return DefaultUiPluginManagerController.setEnableStateForDependencies(sessionId, descriptorIds, enable)
   }
 
-  override suspend fun installPluginFromDisk(projectId: ProjectId?): PluginInstalledFromDiskResult {
-    return withContext(Dispatchers.EDT) {
-      val project = projectId?.findProjectOrNull()
-      val deferred = CompletableDeferred<PluginInstalledFromDiskResult>()
-
-      InstallFromDiskAction.installPluginFromDisk(null, project, InstalledPluginsTableModel(project), PluginEnabler.HEADLESS, null) {
-        deferred.complete(PluginInstalledFromDiskResult(PluginDescriptorConverter.toPluginDto(it.pluginDescriptor), it.restartNeeded))
+  override suspend fun installPluginFromDisk(projectId: ProjectId?): Flow<PluginInstalledFromDiskResult> {
+    return channelFlow {
+      withContext(Dispatchers.EDT) {
+        val project = projectId?.findProjectOrNull()
+        InstallFromDiskAction.installPluginFromDisk(null, project, InstalledPluginsTableModel(project), PluginEnabler.HEADLESS, null) {
+          trySend(PluginInstalledFromDiskResult(PluginDescriptorConverter.toPluginDto(it.pluginDescriptor), it.restartNeeded))
+        }
       }
-      deferred.await()
     }
   }
 
-  override suspend fun installOrUpdatePlugin(sessionId: String, descriptor: PluginDto, updateDescriptor: PluginDto?, installSource: FUSEventSource?, customRepoPlugins: List<PluginDto>): InstallPluginResult {
+  override suspend fun installOrUpdatePlugin(sessionId: String, descriptor: PluginDto, updateDescriptor: PluginDto?, installSource: FUSEventSource?, customRepoPlugins: List<PluginDto>?): InstallPluginResult {
     return installPlugin(sessionId) { enabler ->
       DefaultUiPluginManagerController.installOrUpdatePlugin(sessionId,
                                                              null,
@@ -75,7 +75,7 @@ internal class BackendPluginInstallerApi : PluginInstallerApi {
     }
   }
 
-  override suspend fun continueInstallation(sessionId: String, pluginId: PluginId, enableRequiredPlugins: Boolean, allowInstallWithoutRestart: Boolean, customRepoPlugins: List<PluginDto>): InstallPluginResult {
+  override suspend fun continueInstallation(sessionId: String, pluginId: PluginId, enableRequiredPlugins: Boolean, allowInstallWithoutRestart: Boolean, customRepoPlugins: List<PluginDto>?): InstallPluginResult {
     return installPlugin(sessionId) { enabler ->
       DefaultUiPluginManagerController.continueInstallation(sessionId,
                                                             pluginId,
@@ -115,9 +115,9 @@ internal class BackendPluginInstallerApi : PluginInstallerApi {
     return DefaultUiPluginManagerController.updatePluginDependencies(sessionId)
   }
 
-  override suspend fun applyPluginSession(sessionId: String, projectId: ProjectId?): ApplyPluginsStateResult {
+  override suspend fun apply(projectId: ProjectId?): ApplyPluginsStateResult {
     return withContext(Dispatchers.EDT) {
-      DefaultUiPluginManagerController.applySession(sessionId, null, projectId?.findProjectOrNull())
+      DefaultUiPluginManagerController.apply(project = projectId?.findProjectOrNull())
     }
   }
 
@@ -134,12 +134,6 @@ internal class BackendPluginInstallerApi : PluginInstallerApi {
   override suspend fun allowLoadUnloadSynchronously(pluginId: PluginId): Boolean {
     val pluginDescriptor = PluginManagerCore.findPlugin(pluginId) ?: return false
     return DynamicPlugins.allowLoadUnloadSynchronously(pluginDescriptor)
-  }
-
-
-  override suspend fun allowLoadUnloadWithoutRestart(pluginId: String): Boolean {
-    val pluginDescriptor = PluginManagerCore.findPlugin(PluginId.getId(pluginId)) ?: return false
-    return DynamicPlugins.allowLoadUnloadWithoutRestart(pluginDescriptor)
   }
 }
 

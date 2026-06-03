@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.sh.python` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "python_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "python",
   module_name = "intellij.sh.python",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":python_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "//python/python-psi-api:psi",
     "//plugins/sh/core",
@@ -21,4 +16,26 @@ jvm_library(
     "//platform/backend",
   ]
 )
+
+jvm_library(
+  name = "python_test_lib",
+  testonly = True,
+  module_name = "intellij.sh.python",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":python",
+    "//python/python-psi-api:psi_test_lib",
+    "//plugins/sh/core:core_test_lib",
+    "//platform/util:util_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//platform/backend:backend_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.sh.python` end
+
+### auto-generated section `iml intellij.sh.python` start
+exports_files([
+  "intellij.sh.python.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.sh.python` end

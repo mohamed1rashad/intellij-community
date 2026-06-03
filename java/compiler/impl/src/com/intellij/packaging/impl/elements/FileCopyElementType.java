@@ -13,7 +13,7 @@ import com.intellij.packaging.elements.PackagingElementType;
 import com.intellij.packaging.ui.ArtifactEditorContext;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,7 +36,8 @@ public class FileCopyElementType extends PackagingElementType<FileCopyPackagingE
   @Override
   public @NotNull List<? extends FileCopyPackagingElement> chooseAndCreate(@NotNull ArtifactEditorContext context, @NotNull Artifact artifact,
                                                                            @NotNull CompositePackagingElement<?> parent) {
-    final FileChooserDescriptor descriptor = new FileChooserDescriptor(true, false, true, true, false, true);
+    final FileChooserDescriptor descriptor = new FileChooserDescriptor(true, false, true, true, false, true)
+      .withEnvironmentRestricted(true);
     final VirtualFile[] files = FileChooser.chooseFiles(descriptor, context.getProject(), null);
     final List<FileCopyPackagingElement> list = new ArrayList<>();
     for (VirtualFile file : files) {

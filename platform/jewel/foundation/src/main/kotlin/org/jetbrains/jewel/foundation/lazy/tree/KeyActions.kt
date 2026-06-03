@@ -84,6 +84,8 @@ public open class DefaultSelectableLazyColumnEventAction : PointerEventActions {
                 }
 
                 else -> {
+                    if (selectionMode == SelectionMode.None) return
+
                     selectableLazyListState.selectedKeys = setOf(key)
                     selectableLazyListState.lastActiveItemIndex = allKeys.indexOfFirst { it.key == key }
                 }
@@ -155,6 +157,8 @@ public open class DefaultTreeViewPointerEventAction(private val treeState: TreeS
         allKeys: List<SelectableLazyListKey>,
         key: Any,
     ) {
+        if (selectionMode == SelectionMode.None) return
+
         // When mouse is used, we're no longer in keyboard navigation mode
         selectableLazyListState.isKeyboardNavigating = false
 
@@ -174,6 +178,7 @@ public open class DefaultTreeViewPointerEventAction(private val treeState: TreeS
 
                 else -> {
                     selectableLazyListState.selectedKeys = setOf(key)
+                    selectableLazyListState.lastActiveItemIndex = allKeys.indexOfFirst { it.key == key }
                 }
             }
         }
@@ -352,4 +357,20 @@ public open class DefaultSelectableLazyColumnKeyActions(
             return true
         }
     }
+}
+
+@ApiStatus.Internal
+@InternalJewelApi
+public object NoopListKeyActions : KeyActions {
+    override val keybindings: SelectableColumnKeybindings
+        get() = DefaultSelectableColumnKeybindings
+
+    override val actions: SelectableColumnOnKeyEvent = DefaultSelectableOnKeyEvent(keybindings)
+
+    override fun handleOnKeyEvent(
+        event: KeyEvent,
+        keys: List<SelectableLazyListKey>,
+        state: SelectableLazyListState,
+        selectionMode: SelectionMode,
+    ): KeyEvent.() -> Boolean = { false }
 }

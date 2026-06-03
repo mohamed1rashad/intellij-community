@@ -9,7 +9,15 @@ import com.intellij.modcommand.ModCommandQuickFix;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
+import com.intellij.psi.PsiArrayInitializerMemberValue;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameValuePair;
+import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -60,7 +68,7 @@ class RemoveSuppressWarningAction extends ModCommandQuickFix {
       if (commentOwner != null) {
         PsiElement psiElement = JavaSuppressionUtil.getElementMemberSuppressedIn(commentOwner, myID);
         if (psiElement instanceof PsiAnnotation annotation) {
-          if (!ExternalAnnotationsManager.getInstance(annotation.getProject()).isExternalAnnotation(annotation)) {
+          if (!ExternalAnnotationsManager.isExternal(annotation)) {
             removeFromAnnotation(annotation);
           }
         }
@@ -200,7 +208,7 @@ class RemoveSuppressWarningAction extends ModCommandQuickFix {
     PsiModifierListOwner owner = PsiTreeUtil.getParentOfType(element, PsiModifierListOwner.class, false);
     if (owner == null) return ModCommand.nop();
     if (JavaSuppressionUtil.getElementMemberSuppressedIn(owner, myID) instanceof PsiAnnotation annotation &&
-        ExternalAnnotationsManager.getInstance(annotation.getProject()).isExternalAnnotation(annotation)) {
+        ExternalAnnotationsManager.isExternal(annotation)) {
       return removeFromAnnotationExternal(annotation, owner);
     }
     return ModCommand.nop();

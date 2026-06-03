@@ -272,6 +272,20 @@
       }
     },
 
+    "Banner": {
+      "errorBackground": "#800002",
+      "errorBorderColor": "#E6194B",
+
+      "warningBackground": "#804605",
+      "warningBorderColor": "#F58231",
+
+      "infoBackground": "#450073",
+      "infoBorderColor": "#e6e6e6",
+
+      "successBackground": "Actions.Green",
+      "successBorderColor": "#6FA574"
+    },
+
     "NotificationsToolwindow": {
       "newNotification.background": "#450073",
       "newNotification.hoverBackground": "#450073"
@@ -289,6 +303,13 @@
       "foreground": "#CCCCCC",
       "currentOverloadBackground": "#450073",
       "currentParameterForeground": "#FFFFFF"
+    },
+
+    "NuGet": {
+      "section": {
+        "background": "#000000",
+        "hoverBackground": "#464A4D"
+      }
     },
 
     "Plugins": {
@@ -487,8 +508,7 @@
         "selectedForeground": "#FFFFFF"
       }
     },
-
-
+    "Review.LineFrame.BorderColor": "#1AEBFF",
     "Tree.modifiedItemForeground": "#4FF0FF",
 
     "TrialWidget": {
@@ -597,7 +617,6 @@
         "pressedBackground": "#3333FF"
       },
       "Dropdown": {
-        "borderInsets": "12,6,12,6",
         "background": "#000000",
         "hoverBackground": "#3333FF",
         "pressedBackground": "#3333FF",
@@ -683,19 +702,46 @@
     },
     "LineProfiler" : {
       "Line" : {
-        "labelBackground" : "#43474A",
-        "foreground" : "#787878",
-        "hoverBackground" : "#4A4E52"
+        "labelBackground" : "#212326",
+        "foreground" : "#D1D3D9",
+        "hoverBackground" : "#33353B"
       },
       "HotLine" : {
-        "labelBackground" : "#593D41",
-        "foreground" : "#FF5261",
-        "hoverBackground" : "#704745"
+        "labelBackground" : "#3F1E21",
+        "foreground" : "#F57E84",
+        "hoverBackground" : "#56272B"
       },
       "IgnoredLine" : {
-        "labelBackground" : "#43474A",
-        "foreground" : "#5F5F5F"
+        "labelBackground" : "#33353B",
+        "foreground" : "#9FA2A8"
       }
+    },
+    "Recap": {
+      "ijnext": "#55339C",
+      "cardBackground": "#000000",
+      "cardBorderColor": "#E6E6E6",
+      "cardHeaderTitle": "#FFFFFF",
+      "cardHeaderLinkBackground": "#000000",
+      "cardHeaderSubtitle": "#D38B35",
+      "cardFooterForeground": "#CED0D6",
+      "chroniclesBackground": "#000000",
+      "chroniclesBorderColor": "#E6E6E6",
+      "chroniclesBackgroundHovered": "#42424E",
+      "chroniclesForeground": "#DFE1E5",
+      "chroniclesForegroundGreyed": "#D8F45C",
+      "errorBackground": "#000000",
+      "errorBorder": "#FF5261",
+      "errorForeground": "#FF5261"
+      
+    },
+
+    "OpenTelemetry": {
+      "Span.regularBounds": "#FFFFFF",
+      "Span.regularFillStart": "#7E00D9",
+      "Span.regularFillEnd": "#7E00D9",
+      "Span.selectedBounds": "#FFFFFF",
+      "Span.selectedFillStart": "#E0861F",
+      "Span.selectedFillEnd": "#E0861F"
     }
   },
 

@@ -10,12 +10,27 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.actions.QuickChangeLookAndFeel
 import com.intellij.ide.plugins.PluginManagerConfigurable
-import com.intellij.ide.ui.*
+import com.intellij.ide.ui.AntialiasingType
+import com.intellij.ide.ui.LafManager
+import com.intellij.ide.ui.LafManagerListener
+import com.intellij.ide.ui.LafReference
+import com.intellij.ide.ui.ThemeListProvider
+import com.intellij.ide.ui.UIDensity
+import com.intellij.ide.ui.UISettings
+import com.intellij.ide.ui.UISettingsListener
+import com.intellij.ide.ui.UISettingsUtils
+import com.intellij.ide.ui.UIThemeProvider
 import com.intellij.ide.ui.laf.SystemDarkThemeDetector.Companion.createParametrizedDetector
 import com.intellij.ide.ui.laf.darcula.DarculaLaf
 import com.intellij.ide.ui.laf.intellij.IdeaPopupMenuUI
 import com.intellij.ide.util.PropertiesComponent
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.impl.ActionMenu
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
 import com.intellij.openapi.application.ApplicationManager
@@ -24,7 +39,12 @@ import com.intellij.openapi.application.CoroutineSupport
 import com.intellij.openapi.application.ex.ApplicationInfoEx
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.ui
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
@@ -51,7 +71,14 @@ import com.intellij.openapi.wm.impl.IdeGlassPaneImpl
 import com.intellij.openapi.wm.impl.ToolWindowManagerImpl
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeFrame
 import com.intellij.platform.diagnostic.telemetry.impl.span
-import com.intellij.ui.*
+import com.intellij.ui.AppUIUtil
+import com.intellij.ui.CollectionComboBoxModel
+import com.intellij.ui.ColorUtil
+import com.intellij.ui.ComponentUtil
+import com.intellij.ui.ExperimentalUI
+import com.intellij.ui.JBColor
+import com.intellij.ui.ScreenUtil
+import com.intellij.ui.WindowRoundedCornersManager
 import com.intellij.ui.dsl.listCellRenderer.listCellRenderer
 import com.intellij.ui.icons.getDisabledIcon
 import com.intellij.ui.mac.MacFullScreenControlsManager
@@ -64,23 +91,54 @@ import com.intellij.ui.svg.setSelectionColorPatcherProvider
 import com.intellij.util.EventDispatcher
 import com.intellij.util.FontUtil
 import com.intellij.util.IJSwingUtilities
+import com.intellij.util.PlatformUtils
 import com.intellij.util.SVGLoader.colorPatcherProvider
 import com.intellij.util.concurrency.SynchronizedClearableLazy
-import com.intellij.util.ui.*
-import kotlinx.coroutines.*
+import com.intellij.util.ui.EDT
+import com.intellij.util.ui.JBDimension
+import com.intellij.util.ui.JBFont
+import com.intellij.util.ui.JBInsets
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.RawSwingDispatcher
+import com.intellij.util.ui.StartupUiUtil
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.TestOnly
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Dimension
+import java.awt.Font
+import java.awt.Frame
+import java.awt.Insets
+import java.awt.MouseInfo
+import java.awt.Point
+import java.awt.Rectangle
+import java.awt.RenderingHints
+import java.awt.Toolkit
+import java.awt.Window
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
-import java.util.*
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Function
 import java.util.function.Supplier
-import javax.swing.*
+import javax.swing.JComponent
+import javax.swing.JPopupMenu
+import javax.swing.JToolTip
+import javax.swing.ListCellRenderer
+import javax.swing.Popup
+import javax.swing.PopupFactory
+import javax.swing.RootPaneContainer
+import javax.swing.SwingUtilities
+import javax.swing.UIDefaults
+import javax.swing.UIManager
 import javax.swing.plaf.FontUIResource
 import javax.swing.plaf.UIResource
 
@@ -173,11 +231,6 @@ class LafManagerImpl(private val coroutineScope: CoroutineScope) : LafManager(),
   @Suppress("removal")
   override fun addLafManagerListener(listener: LafManagerListener) {
     eventDispatcher.addListener(listener)
-  }
-
-  @Suppress("removal")
-  override fun removeLafManagerListener(listener: LafManagerListener) {
-    eventDispatcher.removeListener(listener)
   }
 
   override fun initializeComponent() {
@@ -459,8 +512,10 @@ class LafManagerImpl(private val coroutineScope: CoroutineScope) : LafManager(),
 
   private fun Element.getThemeNameWithReplacingDeprecated(): String? {
     val currentTheme = this.getAttributeValue(ATTRIBUTE_THEME_NAME)
-    if (ExperimentalUI.isNewUI() && currentTheme == "JetBrainsLightTheme") {
-      val newThemeId = "ExperimentalLightWithLightHeader"
+    val isDeprecatedLightTheme = (currentTheme == "JetBrainsLightTheme")
+                                 || (PlatformUtils.isRider() && currentTheme == "RiderLight")
+    if (ExperimentalUI.isNewUI() && isDeprecatedLightTheme) {
+      val newThemeId = "Islands Light"
       this.setAttribute(ATTRIBUTE_THEME_NAME, newThemeId)
       return newThemeId
     }
@@ -510,8 +565,6 @@ class LafManagerImpl(private val coroutineScope: CoroutineScope) : LafManager(),
   }
 
   override fun getLookAndFeelCellRenderer(component: JComponent): ListCellRenderer<LafReference> {
-    val themeManager = UiThemeProviderListManager.getInstance()
-    val islandThemes = themeManager.getBundledThemeListForTargetUI(TargetUIType.ISLANDS)
     val welcomeMode = WelcomeFrame.getInstance() != null
 
     return listCellRenderer {
@@ -534,9 +587,6 @@ class LafManagerImpl(private val coroutineScope: CoroutineScope) : LafManager(),
             else if (!welcomeMode && value.themeId != currentTheme?.id && currentTheme?.isRestartRequired() == true) {
               icon(getDisabledIcon(AllIcons.Actions.Restart, null))
               toolTipText = IdeBundle.message("ide.restart.required.comment")
-            }
-            else if (islandThemes.contains(theme)) {
-              icon(AllIcons.General.Beta)
             }
             break
           }
@@ -909,6 +959,11 @@ class LafManagerImpl(private val coroutineScope: CoroutineScope) : LafManager(),
     return result
   }
 
+  @Internal
+  override fun getPreferredDarkThemeId(): String? {
+    return preferredDarkThemeId
+  }
+
   override fun setPreferredDarkLaf(value: UIThemeLookAndFeelInfo) {
     preferredDarkThemeId = value.id
   }
@@ -1014,7 +1069,7 @@ class LafManagerImpl(private val coroutineScope: CoroutineScope) : LafManager(),
     }
   }
 
-  private class GetMoreLafAction : DumbAwareAction(IdeBundle.message("link.get.more.themes")) {
+  internal class GetMoreLafAction : DumbAwareAction(IdeBundle.message("link.get.more.themes")) {
     override fun actionPerformed(e: AnActionEvent) {
       val themeTag = "/tag:Theme"
       val settings = Settings.KEY.getData(e.dataContext)
@@ -1204,6 +1259,13 @@ private class OurPopupFactory(private val delegate: PopupFactory) : PopupFactory
     // disable popup caching by runtime
     popup = HeavyWeightPopup(popup, window)
     val rootPane = (window as RootPaneContainer?)!!.rootPane
+
+
+    // In some environments, e.g. native Wayland, the default root and/or window background (white)
+    // may be displayed briefly, causing very noticeable flickering in dark themes (IJPL-222913, IJPL-241229).
+    window.setBackground(contents.getBackground())
+    rootPane.setBackground(contents.getBackground())
+
     rootPane.glassPane = IdeGlassPaneImpl(rootPane, false)
     rootPane.putClientProperty(WINDOW_ALPHA, 1.0f)
     window.addWindowListener(object : WindowAdapter() {
@@ -1494,7 +1556,7 @@ private sealed interface DefaultThemeStrategy {
 }
 
 private data object DefaultNewUiThemeStrategy : DefaultThemeStrategy {
-  override fun getPlatformDefaultId(isDark: Boolean) = if (isDark) "ExperimentalDark" else "ExperimentalLight"
+  override fun getPlatformDefaultId(isDark: Boolean) = if (isDark) "Islands Dark" else "Islands Light"
 
   override fun getProductDefaultId(isDark: Boolean, appInfo: ApplicationInfoEx): String? {
     return if (isDark) appInfo.defaultDarkLaf else appInfo.defaultLightLaf

@@ -1,6 +1,7 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework.common;
 
+import com.intellij.diagnostic.CoroutineDumperKt;
 import com.intellij.diagnostic.JVMResponsivenessMonitor;
 import com.intellij.diagnostic.PerformanceWatcher;
 import com.intellij.execution.process.ProcessIOExecutorService;
@@ -14,7 +15,6 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.FilePageCacheLockFree;
 import com.intellij.util.ui.EDT;
 import com.intellij.util.ui.UIUtil;
-import kotlin.Unit;
 import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
@@ -24,11 +24,19 @@ import org.jetbrains.io.NettyUtil;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.prefs.Preferences;
+
+import static com.intellij.diagnostic.CoroutineDumperKt.COROUTINE_DUMP_HEADER;
 
 @TestOnly
 @Internal
@@ -78,6 +86,7 @@ public final class ThreadLeakTracker {
       "Cleaner-0", // Thread[Cleaner-0,8,InnocuousThreadGroup], java.lang.ref.Cleaner in android layoutlib, Java9+
       "CompilerThread0",
       "Coroutines Debugger Cleaner", // kotlinx.coroutines.debug.internal.DebugProbesImpl.startWeakRefCleanerThread
+      "docker-java-stream", // com.github.dockerjava.core.DefaultInvocationBuilder.executeAndStream spawns this for every streaming command (events, logs, attach, pull, etc.)
       "dockerjava-netty",
       "embeddings-server",
       "EventQueueMonitor-ComponentEvtDispatch", // com.sun.java.accessibility.util.ComponentEvtDispatchThread
@@ -95,11 +104,13 @@ public final class ThreadLeakTracker {
       "InnocuousThreadGroup",
       "Java2D Disposer",
       "JNA Cleaner",
+      "Jndi-Dns-address-change-listener",
       "JobScheduler FJ pool ",
       "JPS thread pool",
       JVMResponsivenessMonitor.MONITOR_THREAD_NAME,
       "Keep-Alive-SocketCleaner", // Thread[Keep-Alive-SocketCleaner,8,InnocuousThreadGroup], JBR-11
       "Keep-Alive-Timer",
+      "LocalEventBusServerThread", // com.intellij.tools.ide.starter.bus.shared.server.LocalEventBusServer
       "main",
       "Monitor Ctrl-Break",
       "Netty ",
@@ -116,6 +127,7 @@ public final class ThreadLeakTracker {
       "qtp", // used in tests for mocking via WireMock in integration testing
       "rd throttler", // daemon thread created by com.jetbrains.rd.util.AdditionalApiKt.getTimer
       "Reference Handler",
+      "Rider.Backend", // ignore process + io threads because backend follows application lifecycle and can be started during the test
       "RMI GC Daemon",
       "RMI TCP ",
       "Save classpath indexes for file loader",
@@ -189,7 +201,6 @@ public final class ThreadLeakTracker {
       if (EDT.isCurrentThreadEdt()) {
         TestOnlyThreading.releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(() -> {
           UIUtil.dispatchAllInvocationEvents();
-          return Unit.INSTANCE;
         });
       }
       else {
@@ -217,11 +228,16 @@ public final class ThreadLeakTracker {
     Map<Thread, StackTraceElement[]> newStackTraces = new HashMap<>(stackTraces);
     newStackTraces.put(thread, stackTrace);
 
+    // null when kotlinx.coroutines DebugProbes is not installed (no coroutine info available)
+    String coroutineDump = CoroutineDumperKt.dumpCoroutines(null, true, true);
+    String coroutineSection = coroutineDump == null ? "" : "\n" + COROUTINE_DUMP_HEADER + "\n" + coroutineDump;
+
     throw new AssertionError(
       "Thread leaked: " + traceBefore + (trace.equals(traceBefore) ? "" : "(its trace after " + WAIT_SEC + " seconds wait:) " + trace) +
       internalDiagnostic +
       "\n\nLeaking threads dump:\n" + dumpThreadsToString(after, newStackTraces) +
-      "\n----\nAll other threads dump:\n" + dumpThreadsToString(all, otherStackTraces)
+      "\n----\nAll other threads dump:\n" + dumpThreadsToString(all, otherStackTraces) +
+      coroutineSection
     );
   }
 
@@ -251,6 +267,8 @@ public final class ThreadLeakTracker {
            || isStarterTestFramework(stackTrace)
            || isJMXRemoteCall(stackTrace)
            || isBuildLogCall(stackTrace)
+           || isVirtualThreadUnblocker(stackTrace)
+           || isJfrPeriodicTasks(stackTrace)
            || isIjentMediatorThread(stackTrace)
            || windowsCompletionPortLeakForDocker(stackTrace)
            || isSwingAccessibilityThread(stackTrace);
@@ -417,6 +435,32 @@ public final class ThreadLeakTracker {
 
     return ContainerUtil.exists(stackTrace, element -> element.getClassName().contains("org.jetbrains.intellij.build.ConsoleSpanExporter"));
   }
+
+  /**
+   * Virtual thread unblocker is a special physical thread that tries to unblock virtual threads that are stuck on monitor acquisition.
+   */
+  private static boolean isVirtualThreadUnblocker(StackTraceElement[] stackTrace) {
+    // at java.base/java.lang.VirtualThread.takeVirtualThreadListToUnblock(Native Method)
+    // at java.base/java.lang.VirtualThread.unblockVirtualThreads(VirtualThread.java:1507)
+    // at java.base/java.lang.Thread.run(Thread.java:1474)
+    // at java.base/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)
+    return stackTrace[0].getClassName().equals("java.lang.VirtualThread") && stackTrace[0].getMethodName().equals("takeVirtualThreadListToUnblock")
+      && stackTrace[1].getClassName().equals("java.lang.VirtualThread") && stackTrace[1].getMethodName().equals("unblockVirtualThreads");
+  }
+
+  /**
+   * JFR threads just sleep ignoring InterruptedException.
+   */
+  private static boolean isJfrPeriodicTasks(StackTraceElement[] stackTrace) {
+    // at java.base/java.lang.Object.wait0(Native Method)
+    // at java.base/java.lang.Object.wait(Object.java:366)
+    // at jdk.jfr/jdk.jfr.internal.PlatformRecorder.takeNap(PlatformRecorder.java:559)
+    // at jdk.jfr/jdk.jfr.internal.PlatformRecorder.periodicTask(PlatformRecorder.java:527)
+    // at jdk.jfr/jdk.jfr.internal.PlatformRecorder.lambda$startDiskMonitor$1(PlatformRecorder.java:446)
+    // at java.base/java.lang.Thread.run(Thread.java:1583)
+    return stackTrace.length >= 3 && stackTrace[2].getClassName().equals("jdk.jfr.internal.PlatformRecorder") && stackTrace[2].getMethodName().equals("takeNap");
+  }
+
 
   /**
    * We permit leaking IJent threads if IJent is intended to be shared for the whole application

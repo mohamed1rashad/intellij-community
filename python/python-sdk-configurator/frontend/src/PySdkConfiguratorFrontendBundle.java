@@ -2,6 +2,7 @@
 package com.intellij.python.sdkConfigurator.frontend;
 
 import com.intellij.DynamicBundle;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -9,7 +10,8 @@ import org.jetbrains.annotations.PropertyKey;
 
 import java.util.function.Supplier;
 
-final class PySdkConfiguratorFrontendBundle extends DynamicBundle {
+@ApiStatus.Internal
+public final class PySdkConfiguratorFrontendBundle extends DynamicBundle {
   public static final @NonNls String BUNDLE = "messages.PySdkConfiguratorFrontendBundle";
   public static final PySdkConfiguratorFrontendBundle INSTANCE = new PySdkConfiguratorFrontendBundle();
 

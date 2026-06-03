@@ -1,22 +1,19 @@
 package com.intellij.mcpserver
 
 import com.intellij.DynamicBundle
+import com.intellij.openapi.application.ApplicationNamesInfo
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.PropertyKey
-import java.util.function.Supplier
 
-const val PATH_TO_BUNDLE: @NonNls String = "messages.McpServerBundle"
+const val BUNDLE: @NonNls String = "messages.McpServerBundle"
 
-internal object McpServerBundle : DynamicBundle(McpServerBundle::class.java, PATH_TO_BUNDLE) {
-  fun message(key: @PropertyKey(resourceBundle = PATH_TO_BUNDLE) String, vararg params: Any): @Nls String {
-    return getMessage(key, *params)
-  }
+object McpServerBundle {
+  private val INSTANCE = DynamicBundle(McpServerBundle::class.java, BUNDLE)
 
-  fun messagePointer(
-    key: @PropertyKey(resourceBundle = PATH_TO_BUNDLE) String,
-    vararg params: Any
-  ): Supplier<String> {
-    return getLazyMessage(key, params)
-  }
+  @Nls
+  fun message(@PropertyKey(resourceBundle = BUNDLE) key: String, vararg params: Any): String = INSTANCE.getMessage(key, *params)
+
+  @Nls
+  fun ideDisplayName(): String = ApplicationNamesInfo.getInstance().fullProductName
 }

@@ -33,7 +33,8 @@ import org.jetbrains.annotations.TestOnly
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.security.SecureRandom
-import java.util.*
+import java.util.Locale
+import java.util.UUID
 import java.util.prefs.Preferences
 
 @ApiStatus.Internal
@@ -272,7 +273,7 @@ class EventLogRecorderConfiguration internal constructor(private val recorderId:
   }
 
   companion object {
-    private const val DEFAULT_MAX_FILES_TO_SEND = 5
+    private const val DEFAULT_MAX_FILES_TO_SEND = 10
     const val TOTAL_NUMBER_OF_BUCKETS = 256
   }
 }

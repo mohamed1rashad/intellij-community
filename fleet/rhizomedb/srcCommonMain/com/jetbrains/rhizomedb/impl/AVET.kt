@@ -1,8 +1,15 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.rhizomedb.impl
 
-import com.jetbrains.rhizomedb.*
-import fleet.util.radixTrie.*
+import com.jetbrains.rhizomedb.Attribute
+import com.jetbrains.rhizomedb.Datom
+import com.jetbrains.rhizomedb.EID
+import com.jetbrains.rhizomedb.TX
+import com.jetbrains.rhizomedb.VersionedEID
+import fleet.radixTrie.RadixTrie
+import fleet.radixTrie.forEach
+import fleet.radixTrie.put
+import fleet.radixTrie.remove
 import kotlin.jvm.JvmInline
 
 /**
@@ -69,4 +76,3 @@ internal value class AVET(private val trie: IntMapWithEditor<MapWithEditor<Any, 
       } as MapWithEditor<Any, Any>?
     }?.let { AVET(it) } ?: empty(editor)
 }
-

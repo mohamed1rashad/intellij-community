@@ -1,17 +1,42 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.execution.run;
 
-import com.intellij.build.*;
+import com.intellij.build.BuildDescriptor;
+import com.intellij.build.BuildTreeFilters;
+import com.intellij.build.BuildView;
+import com.intellij.build.BuildViewManager;
+import com.intellij.build.DefaultBuildDescriptor;
+import com.intellij.build.WeakFilterableSupplier;
 import com.intellij.build.events.BuildEvent;
 import com.intellij.build.events.StartBuildEvent;
 import com.intellij.build.events.impl.StartBuildEventImpl;
-import com.intellij.execution.*;
-import com.intellij.execution.configurations.*;
-import com.intellij.execution.process.*;
+import com.intellij.execution.CantRunException;
+import com.intellij.execution.DefaultExecutionResult;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.ExecutionResult;
+import com.intellij.execution.Executor;
+import com.intellij.execution.JavaRunConfigurationExtensionManager;
+import com.intellij.execution.Platform;
+import com.intellij.execution.configurations.JavaCommandLineState;
+import com.intellij.execution.configurations.JavaParameters;
+import com.intellij.execution.configurations.ParametersList;
+import com.intellij.execution.configurations.RemoteConnection;
+import com.intellij.execution.configurations.RemoteConnectionCreator;
+import com.intellij.execution.process.KillableColoredProcessHandler;
+import com.intellij.execution.process.LocalPtyOptions;
+import com.intellij.execution.process.OSProcessHandler;
+import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessTerminatedListener;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ProgramRunner;
-import com.intellij.execution.target.*;
 import com.intellij.execution.target.EelTargetEnvironmentRequest;
+import com.intellij.execution.target.LanguageRuntimeType;
+import com.intellij.execution.target.PtyOptions;
+import com.intellij.execution.target.TargetEnvironment;
+import com.intellij.execution.target.TargetEnvironmentRequest;
+import com.intellij.execution.target.TargetProgressIndicator;
+import com.intellij.execution.target.TargetedCommandLine;
+import com.intellij.execution.target.TargetedCommandLineBuilder;
 import com.intellij.execution.target.local.LocalTargetEnvironment;
 import com.intellij.execution.target.local.LocalTargetEnvironmentRequest;
 import com.intellij.execution.target.value.TargetEnvironmentFunctions;
@@ -36,7 +61,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.buildtool.BuildToolConsoleProcessAdapter;
 import org.jetbrains.idea.maven.buildtool.MavenBuildEventProcessor;
-import org.jetbrains.idea.maven.execution.*;
+import org.jetbrains.idea.maven.execution.MavenRebuildAction;
+import org.jetbrains.idea.maven.execution.MavenResumeAction;
+import org.jetbrains.idea.maven.execution.MavenRunConfiguration;
+import org.jetbrains.idea.maven.execution.MavenRunConfigurationType;
+import org.jetbrains.idea.maven.execution.RunnerBundle;
 import org.jetbrains.idea.maven.execution.target.MavenCommandLineSetup;
 import org.jetbrains.idea.maven.execution.target.MavenRuntimeTargetConfiguration;
 import org.jetbrains.idea.maven.execution.target.MavenRuntimeTypeConstants;
@@ -159,14 +188,13 @@ public class MavenCommandLineState extends JavaCommandLineState implements Remot
                                                 Function<String, String> targetFileMapper) throws ExecutionException {
     ConsoleView consoleView = createConsole(executor, processHandler, myConfiguration.getProject());
     BuildViewManager viewManager = getEnvironment().getProject().getService(BuildViewManager.class);
-    descriptor.withProcessHandler(new MavenBuildHandlerFilterSpyWrapper(processHandler, useMaven4(), false), null);
+    descriptor.withProcessHandler(new MavenBuildHandlerFilterSpyWrapper(processHandler, false), null);
     descriptor.withExecutionEnvironment(getEnvironment());
     StartBuildEventImpl startBuildEvent = new StartBuildEventImpl(descriptor, "");
     boolean withResumeAction = MavenResumeAction.isApplicable(getEnvironment().getProject(), getJavaParameters(), myConfiguration);
     MavenBuildEventProcessor eventProcessor =
       new MavenBuildEventProcessor(myConfiguration, viewManager, descriptor, taskId,
-                                   targetFileMapper, getStartBuildEventSupplier(runner, processHandler, startBuildEvent, withResumeAction),
-                                   useMaven4()
+                                   targetFileMapper, getStartBuildEventSupplier(runner, processHandler, startBuildEvent, withResumeAction)
       );
 
     processHandler.addProcessListener(new BuildToolConsoleProcessAdapter(eventProcessor));
@@ -188,14 +216,14 @@ public class MavenCommandLineState extends JavaCommandLineState implements Remot
     }
     MavenBuildEventProcessor eventProcessor =
       new MavenBuildEventProcessor(myConfiguration, buildView, descriptor, taskId, targetFileMapper, ctx ->
-        new StartBuildEventImpl(descriptor, ""), useMaven4());
+        new StartBuildEventImpl(descriptor, ""));
 
     processHandler.addProcessListener(new BuildToolConsoleProcessAdapter(eventProcessor));
     if (emulateTerminal()) {
       buildView.attachToProcess(processHandler);
     }
     else {
-      buildView.attachToProcess(new MavenHandlerFilterSpyWrapper(processHandler, useMaven4(), false));
+      buildView.attachToProcess(new MavenHandlerFilterSpyWrapper(processHandler, false));
     }
 
     AnAction[] actions = new AnAction[]{BuildTreeFilters.createFilteringActionsGroup(new WeakFilterableSupplier<>(buildView))};
@@ -210,12 +238,6 @@ public class MavenCommandLineState extends JavaCommandLineState implements Remot
     }
     res.setRestartActions(restartActions.toArray(AnAction.EMPTY_ARRAY));
     return res;
-  }
-
-  private boolean useMaven4() {
-    var mavenCache = MavenDistributionsCache.getInstance(myConfiguration.getProject());
-    var mavenDistribution = mavenCache.getMavenDistribution(myConfiguration.getRunnerParameters().getWorkingDirPath());
-    return isMaven4(mavenDistribution);
   }
 
   private @NotNull Function<MavenParsingContext, StartBuildEvent> getStartBuildEventSupplier(@NotNull ProgramRunner runner,
@@ -385,8 +407,7 @@ public class MavenCommandLineState extends JavaCommandLineState implements Remot
       return new MavenKillableProcessHandler(process,
                                              targetedCommandLine.getCommandPresentation(remoteEnvironment),
                                              targetedCommandLine.getCharset(),
-                                             targetedCommandLineBuilder.getFilesToDeleteOnTermination(),
-                                             useMaven4());
+                                             targetedCommandLineBuilder.getFilesToDeleteOnTermination());
     }
     else {
       return new KillableColoredProcessHandler.Silent(process,

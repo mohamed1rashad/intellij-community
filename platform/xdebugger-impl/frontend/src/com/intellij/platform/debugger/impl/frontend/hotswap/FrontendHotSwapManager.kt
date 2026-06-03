@@ -5,9 +5,14 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.platform.debugger.impl.frontend.durableWithStateReset
+import com.intellij.platform.debugger.impl.frontend.util.SequentialRpcRequestsExecutor
+import com.intellij.platform.debugger.impl.rpc.HotSwapSource
+import com.intellij.platform.debugger.impl.rpc.HotSwapVisibleStatus
+import com.intellij.platform.debugger.impl.rpc.XDebugHotSwapCurrentSessionStatus
+import com.intellij.platform.debugger.impl.rpc.XDebugHotSwapSessionId
+import com.intellij.platform.debugger.impl.rpc.XDebuggerHotSwapApi
 import com.intellij.platform.project.projectId
 import com.intellij.xdebugger.impl.hotswap.NOTIFICATION_TIME_SECONDS
-import com.intellij.xdebugger.impl.rpc.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -20,6 +25,7 @@ import kotlin.time.Duration.Companion.seconds
 @OptIn(ExperimentalCoroutinesApi::class)
 @Service(Service.Level.PROJECT)
 internal class FrontendHotSwapManager(private val project: Project, val coroutineScope: CoroutineScope) {
+  private val sequentialExecutor = SequentialRpcRequestsExecutor.create(coroutineScope)
   private val frontendStatusFlow = MutableStateFlow(null as XDebugHotSwapCurrentSessionStatus?).also { flow ->
     coroutineScope.launch {
       durableWithStateReset(block = {
@@ -41,7 +47,7 @@ internal class FrontendHotSwapManager(private val project: Project, val coroutin
   val currentStatus: XDebugHotSwapCurrentSessionStatus? get() = frontendStatusFlow.value
 
   fun performHotSwap(sessionId: XDebugHotSwapSessionId, source: HotSwapSource) {
-    coroutineScope.launch {
+    sequentialExecutor.execute {
       XDebuggerHotSwapApi.getInstance().performHotSwap(sessionId, source)
     }
   }
@@ -49,7 +55,7 @@ internal class FrontendHotSwapManager(private val project: Project, val coroutin
   fun notifyHidden() {
     // Hide locally
     frontendStatusFlow.value = null
-    coroutineScope.launch {
+    sequentialExecutor.execute {
       XDebuggerHotSwapApi.getInstance().hide(project.projectId())
     }
   }

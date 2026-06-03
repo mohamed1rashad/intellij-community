@@ -3,8 +3,18 @@ package com.jetbrains.python.psi.types;
 
 import com.intellij.codeInsight.completion.CompletionUtilCoreImpl;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
-import com.intellij.openapi.util.*;
-import com.intellij.psi.*;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.EmptyRunnable;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.RecursionManager;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.UserDataHolderBase;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiInvalidElementAccessException;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.ResolveState;
 import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.ArrayUtilRt;
@@ -18,10 +28,38 @@ import com.jetbrains.python.codeInsight.PyCustomMemberUtils;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
-import com.jetbrains.python.psi.*;
-import com.jetbrains.python.psi.impl.*;
+import com.jetbrains.python.psi.AccessDirection;
+import com.jetbrains.python.psi.Property;
+import com.jetbrains.python.psi.PyAnnotationOwner;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCallSiteExpression;
+import com.jetbrains.python.psi.PyCallSiteOwner;
+import com.jetbrains.python.psi.PyCallable;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyElsePart;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyIfStatement;
+import com.jetbrains.python.psi.PyImportedNameDefiner;
+import com.jetbrains.python.psi.PyPsiFacade;
+import com.jetbrains.python.psi.PyQualifiedNameOwner;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PyStatementPart;
+import com.jetbrains.python.psi.PyTargetExpression;
+import com.jetbrains.python.psi.PyTypeCommentOwner;
+import com.jetbrains.python.psi.PyTypeParameter;
+import com.jetbrains.python.psi.PyTypedElement;
+import com.jetbrains.python.psi.PyUtil;
+import com.jetbrains.python.psi.impl.PyBuiltinCache;
+import com.jetbrains.python.psi.impl.PyCallExpressionHelper;
+import com.jetbrains.python.psi.impl.PyResolveResultRater;
+import com.jetbrains.python.psi.impl.PyTypeProvider;
+import com.jetbrains.python.psi.impl.ResolveResultList;
 import com.jetbrains.python.psi.impl.references.PyReferenceImpl;
-import com.jetbrains.python.psi.resolve.*;
+import com.jetbrains.python.psi.resolve.CompletionVariantsProcessor;
+import com.jetbrains.python.psi.resolve.ImportedResolveResult;
+import com.jetbrains.python.psi.resolve.PyResolveContext;
+import com.jetbrains.python.psi.resolve.PyResolveProcessor;
+import com.jetbrains.python.psi.resolve.RatedResolveResult;
 import com.jetbrains.python.pyi.PyiUtil;
 import com.jetbrains.python.refactoring.PyDefUseUtil;
 import com.jetbrains.python.toolbox.Maybe;
@@ -30,7 +68,14 @@ import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -90,7 +135,7 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
   }
 
   @Override
-  public @NotNull PyClassLikeType toClass() {
+  public @NotNull PyClassType toClass() {
     return myIsDefinition ? this : new PyClassTypeImpl(myClass, true);
   }
 
@@ -142,7 +187,8 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
                                                                        boolean inherited) {
     final TypeEvalContext context = resolveContext.getTypeEvalContext();
     PsiElement classMember =
-      resolveByOverridingMembersProviders(this, name, location, resolveContext); //overriding members provers have priority to normal resolve
+      resolveByOverridingMembersProviders(this, name, location,
+                                          resolveContext); //overriding members provers have priority to normal resolve
     if (classMember != null) {
       return ResolveResultList.to(classMember);
     }
@@ -151,24 +197,6 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
       final Ref<ResolveResultList> resultRef = findProperty(name, direction, false, resolveContext.getTypeEvalContext());
       if (resultRef != null) {
         return resultRef.get();
-      }
-    }
-
-    if ("super".equals(getClassQName()) && isBuiltin() && location instanceof PyCallExpression) {
-      // methods of super() call are not of class super!
-      PyExpression first_arg = ((PyCallExpression)location).getArgument(0, PyExpression.class);
-      if (first_arg != null) { // the usual case: first arg is the derived class that super() is proxying for
-        PyType first_arg_type = context.getType(first_arg);
-        if (first_arg_type instanceof PyClassType) {
-          PyClass derived_class = ((PyClassType)first_arg_type).getPyClass();
-          final Iterator<PyClass> base_it = derived_class.getAncestorClasses(context).iterator();
-          if (base_it.hasNext()) {
-            return new PyClassTypeImpl(base_it.next(), true).resolveMember(name, location, direction, resolveContext);
-          }
-          else {
-            return null; // no base classes = super() cannot proxy anything meaningful from a base class
-          }
-        }
       }
     }
 
@@ -351,6 +379,12 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
       .orElse(null);
   }
 
+  @Override
+  public @Nullable PyCallableParameterVariadicType getParametersType(@NotNull TypeEvalContext context) {
+    List<PyCallableParameter> parameters = getParameters(context);
+    return parameters != null ? new PyCallableParameterListTypeImpl(parameters) : null;
+  }
+
   private static boolean isMethodType(@NotNull PyClassType type) {
     final PyBuiltinCache builtinCache = PyBuiltinCache.getInstance(type.getPyClass());
     return type.equals(builtinCache.getClassMethodType()) ||
@@ -364,13 +398,13 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
   }
 
   @Override
-  public @Nullable PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteExpression callSite) {
+  public @Nullable PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteOwner callSite) {
     return getPossibleCallType(context, callSite);
   }
 
-  private @Nullable PyType getPossibleCallType(@NotNull TypeEvalContext context, @Nullable PyCallSiteExpression callSite) {
+  private @Nullable PyType getPossibleCallType(@NotNull TypeEvalContext context, @Nullable PyCallSiteOwner callSite) {
     if (!isDefinition()) {
-      return PyUtil.getReturnTypeOfMember(this, PyNames.CALL, callSite, context);
+      return PyUtil.getReturnTypeOfMember(this, PyNames.CALL, callSite instanceof PyCallSiteExpression callSiteExpression ? callSiteExpression : null , context);
     }
     else {
       return withUserDataCopy(new PyClassTypeImpl(getPyClass(), false));
@@ -378,7 +412,7 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
   }
 
   @Override
-  public @NotNull List<PyClassLikeType> getAncestorTypes(final @NotNull TypeEvalContext context) {
+  public @NotNull List<@Nullable PyClassLikeType> getAncestorTypes(final @NotNull TypeEvalContext context) {
     return myClass.getAncestorTypes(context);
   }
 
@@ -746,7 +780,7 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
     }
   }
 
-  private @NotNull StreamEx<PyClassLikeType> prepareTypesForProcessingMembers(@NotNull List<PyClassLikeType> types) {
+  private @NotNull StreamEx<PyClassLikeType> prepareTypesForProcessingMembers(@NotNull List<@Nullable PyClassLikeType> types) {
     return StreamEx.of(types).nonNull().map(type -> isDefinition() ? type.toClass() : type.toInstance());
   }
 
@@ -833,13 +867,10 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
     final PyClass cls = getPyClass();
 
     if (isDefinition() || PyUtil.isObjectClass(cls)) return true;
+    if (cls.findProperty(name, true, context) != null) return true;
 
     final List<String> slots = cls.getSlots(context);
-    final Condition<PyTargetExpression> isDefinedTarget = target -> name.equals(target.getName()) && target.hasAssignedValue();
-
-    return slots == null ||
-           slots.contains(name) && !ContainerUtil.exists(cls.getClassAttributesInherited(context), isDefinedTarget) ||
-           cls.findProperty(name, true, context) != null;
+    return slots == null || slots.contains(name);
   }
 
   public static @Nullable PyClassTypeImpl createTypeByQName(final @NotNull PsiElement anchor,
@@ -903,7 +934,8 @@ public class PyClassTypeImpl extends UserDataHolderBase implements PyClassType {
       return p1 != p2;
     }
 
-    private static @Nullable PyStatementPart findIfStatementPartByElement(@NotNull PsiElement element, @NotNull List<PyStatementPart> parts) {
+    private static @Nullable PyStatementPart findIfStatementPartByElement(@NotNull PsiElement element,
+                                                                          @NotNull List<PyStatementPart> parts) {
       return ContainerUtil.find(parts, part -> PsiTreeUtil.isAncestor(part, element, true));
     }
 

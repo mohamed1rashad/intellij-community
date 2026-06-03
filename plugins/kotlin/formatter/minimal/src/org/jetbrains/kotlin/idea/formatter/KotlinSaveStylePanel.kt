@@ -6,12 +6,13 @@ import com.intellij.application.options.CodeStyleAbstractPanel
 import com.intellij.openapi.editor.colors.EditorColorsScheme
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.psi.codeStyle.CodeStyleSettings
-import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.panels.HorizontalLayout
 import com.intellij.ui.components.panels.VerticalLayout
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import org.jetbrains.annotations.Nls
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import java.awt.BorderLayout
@@ -27,11 +28,11 @@ internal class KotlinSaveStylePanel(settings: CodeStyleSettings) : CodeStyleAbst
 
     override fun getTabTitle(): String = KotlinBundle.message("formatter.title.load.save")
 
-    private data class SaveItem(val label: String, val id: String?)
+    private data class SaveItem(val label: @Nls String, val id: String?)
 
     private val saveDefaultsComboBox = ComboBox<SaveItem>()
     private val saveDefaultsItems = listOf(
-        SaveItem("<ide defaults>", null),
+        SaveItem(KotlinFormatterMinimalBundle.message("ide.defaults.title"), null),
         SaveItem(KotlinOfficialStyleGuide.CODE_STYLE_TITLE, KotlinOfficialStyleGuide.CODE_STYLE_ID),
         SaveItem(KotlinObsoleteStyleGuide.CODE_STYLE_TITLE, KotlinObsoleteStyleGuide.CODE_STYLE_ID),
     )
@@ -55,7 +56,7 @@ internal class KotlinSaveStylePanel(settings: CodeStyleSettings) : CodeStyleAbst
                             saveDefaultsComboBox.addItem(it)
                         }
 
-                        saveDefaultsComboBox.renderer = SimpleListCellRenderer.create("") {
+                        saveDefaultsComboBox.renderer = textListCellRenderer("") {
                             it.label
                         }
 

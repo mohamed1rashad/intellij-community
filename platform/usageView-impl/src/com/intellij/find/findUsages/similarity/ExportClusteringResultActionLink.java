@@ -1,11 +1,9 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.find.findUsages.similarity;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
 import com.intellij.ide.scratch.RootType;
 import com.intellij.ide.scratch.ScratchFileService;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
@@ -30,6 +28,9 @@ import com.intellij.usages.similarity.clustering.UsageCluster;
 import com.intellij.usages.similarity.usageAdapter.SimilarUsage;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import org.jetbrains.annotations.NotNull;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.core.ObjectWriteContext;
+import tools.jackson.core.json.JsonFactory;
 
 import java.io.IOException;
 import java.io.StringWriter;
@@ -79,7 +80,7 @@ class ExportClusteringResultActionLink extends ActionLink {
                                            @NotNull String fileName) throws IOException {
     int counter = 0;
     StringWriter stringWriter = new StringWriter();
-    JsonGenerator generator = new JsonFactory().createGenerator(stringWriter);
+    JsonGenerator generator = new JsonFactory().createGenerator(ObjectWriteContext.empty(), stringWriter);
     generator.writeStartArray();
     for (UsageCluster cluster : clusters) {
       indicator.setFraction(counter++ / (double)clusters.size());
@@ -89,13 +90,13 @@ class ExportClusteringResultActionLink extends ActionLink {
           indicator.checkCanceled();
           PsiElement element = getElement((UsageInfo2UsageAdapter)usage);
           generator.writeStartObject();
-          generator.writeStringField(FILENAME, getUsageId(element));
-          generator.writeStringField(SNIPPET, getUsageLineSnippet(project, element));
-          generator.writeNumberField(CLUSTER_NUMBER, counter);
-          generator.writeObjectFieldStart(FEATURES);
+          generator.writeStringProperty(FILENAME, getUsageId(element));
+          generator.writeStringProperty(SNIPPET, getUsageLineSnippet(project, element));
+          generator.writeNumberProperty(CLUSTER_NUMBER, counter);
+          generator.writeObjectPropertyStart(FEATURES);
           List<Object2IntMap.Entry<String>> sortedEntries = Stream.concat(getPrimaryFeatures(usage.getFeatures()), getStructuralFeatures(usage.getFeatures())).toList();
           for (Object2IntMap.Entry<String> entry : sortedEntries) {
-            generator.writeNumberField(entry.getKey(), entry.getIntValue());
+            generator.writeNumberProperty(entry.getKey(), entry.getIntValue());
           }
           generator.writeEndObject();
           generator.writeEndObject();
@@ -124,7 +125,7 @@ class ExportClusteringResultActionLink extends ActionLink {
 
   public static @NotNull PsiElement getElement(@NotNull UsageInfo2UsageAdapter usage) {
     Ref<PsiElement> elementRef = new Ref<>();
-    ApplicationManager.getApplication().runReadAction(() -> {
+    ReadAction.runBlocking(() -> {
       elementRef.set(usage.getElement());
     });
     return elementRef.get();
@@ -133,7 +134,7 @@ class ExportClusteringResultActionLink extends ActionLink {
   public static @NotNull String getUsageId(@NotNull PsiElement element) {
     Ref<String> fileNameRef = new Ref<>();
     Ref<TextRange> elementTextRange = new Ref<>();
-    ApplicationManager.getApplication().runReadAction(() -> {
+    ReadAction.runBlocking(() -> {
       VirtualFile containingVirtualFile = element.getContainingFile().getVirtualFile();
       assert containingVirtualFile != null;
       VirtualFile rootForFile = ProjectFileIndex.getInstance(element.getProject()).getSourceRootForFile(containingVirtualFile);
@@ -148,7 +149,7 @@ class ExportClusteringResultActionLink extends ActionLink {
 
   private static @NotNull String getUsageLineSnippet(@NotNull Project project, @NotNull PsiElement element) {
     Ref<String> usageLineSnippet = new Ref<>("");
-    ApplicationManager.getApplication().runReadAction(() -> {
+    ReadAction.runBlocking(() -> {
       PsiDocumentManager docManager = PsiDocumentManager.getInstance(project);
       Document doc = docManager.getDocument(element.getContainingFile());
       if (doc != null) {

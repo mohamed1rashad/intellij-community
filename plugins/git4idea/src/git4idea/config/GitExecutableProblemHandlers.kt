@@ -7,6 +7,7 @@ import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.platform.eel.provider.LocalEelDescriptor
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import git4idea.config.GitExecutableProblemsNotifier.getPrettyErrorMessage
@@ -18,7 +19,9 @@ import org.jetbrains.annotations.Nls.Capitalization.Title
 import org.jetbrains.annotations.NotNull
 
 fun findGitExecutableProblemHandler(project: Project): GitExecutableProblemHandler {
+  val nonLocalTarget = GitEelExecutableDetectionHelper.tryGetEelDescriptor(project, null).takeIf { it != LocalEelDescriptor }
   return when {
+    nonLocalTarget != null -> DefaultExecutableProblemHandler(project)
     SystemInfo.isWindows -> WindowsExecutableProblemHandler(project)
     SystemInfo.isMac -> MacExecutableProblemHandler(project)
     else -> DefaultExecutableProblemHandler(project)

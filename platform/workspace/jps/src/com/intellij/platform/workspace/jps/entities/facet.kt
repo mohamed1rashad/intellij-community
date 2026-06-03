@@ -3,10 +3,10 @@ package com.intellij.platform.workspace.jps.entities
 
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.EntityType
-import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.annotations.Parent
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
 
 data class FacetEntityTypeId(val name: @NonNls String)
@@ -29,8 +29,8 @@ interface FacetEntity : ModuleSettingsFacetBridgeEntity {
   val underlyingFacet: FacetEntity?
 
   //region generated code
-  @Deprecated(message = "Use ModifiableFacetEntity instead")
-  interface Builder : ModifiableFacetEntity {
+  @Deprecated(message = "Use FacetEntityBuilder instead")
+  interface Builder : FacetEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getModule(): ModuleEntity.Builder = module as ModuleEntity.Builder
 
@@ -60,23 +60,6 @@ interface FacetEntity : ModuleSettingsFacetBridgeEntity {
       entitySource: EntitySource,
       init: (Builder.() -> Unit)? = null,
     ): Builder = FacetEntityType.compatibilityInvoke(moduleId, name, typeId, entitySource, init)
-
-    //region compatibility generated code
-    @Deprecated(
-      message = "This method is deprecated and will be removed in next major release",
-      replaceWith = ReplaceWith("invoke(moduleId, name, typeId, entitySource, init)"),
-    )
-    @JvmOverloads
-    @JvmStatic
-    @JvmName("create")
-    fun create(
-      name: String,
-      moduleId: ModuleId,
-      typeId: FacetEntityTypeId,
-      entitySource: EntitySource,
-      init: (Builder.() -> Unit)? = null,
-    ): Builder = invoke(moduleId, name, typeId, entitySource, init)
-    //endregion compatibility generated code
   }
   //endregion
 }
@@ -92,9 +75,9 @@ fun MutableEntityStorage.modifyFacetEntity(
 
 @Deprecated(message = "Use new API instead")
 var FacetEntity.Builder.childrenFacets: List<FacetEntity.Builder>
-  get() = (this as ModifiableFacetEntity).childrenFacets as List<FacetEntity.Builder>
+  get() = (this as FacetEntityBuilder).childrenFacets as List<FacetEntity.Builder>
   set(value) {
-    (this as ModifiableFacetEntity).childrenFacets = value
+    (this as FacetEntityBuilder).childrenFacets = value
   }
 //endregion
 

@@ -6,18 +6,21 @@ import com.intellij.concurrency.captureThreadContext
 import com.intellij.find.impl.FindKey
 import com.intellij.ide.SelectInEditorManager
 import com.intellij.ide.ui.icons.icon
-import com.intellij.ide.ui.textChunk
 import com.intellij.ide.vfs.virtualFile
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.runAndLogException
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ex.DocumentEx
 import com.intellij.openapi.editor.ex.DocumentFullUpdateListener
-import com.intellij.openapi.fileEditor.*
+import com.intellij.openapi.fileEditor.FileEditorLocation
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.fileEditor.TextEditor
+import com.intellij.openapi.fileEditor.TextEditorLocation
 import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsContexts
@@ -26,7 +29,11 @@ import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.vfs.ContentPreloadable
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.findDocument
-import com.intellij.psi.*
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
+import com.intellij.psi.SmartPointerManager
+import com.intellij.psi.SmartPsiFileRange
 import com.intellij.usageView.UsageInfo
 import com.intellij.usages.ItemWithLazyContent
 import com.intellij.usages.TextChunk
@@ -302,7 +309,7 @@ internal class UsageInfoModel private constructor(val project: Project, val mode
   override fun getDocument(): Document? {
     document?.let { return it }
     return LOG.runAndLogException {
-      runReadAction {
+      runReadActionBlocking {
         val psiDoc = cachedPsiFile?.let { psiFile -> PsiDocumentManager.getInstance(project).getDocument(psiFile) }
         if (psiDoc == null) {
           LOG.warn("PsiFile is not yet loaded for path ${model.presentablePath}. Trying to get document from virtualFile")
@@ -322,7 +329,7 @@ internal class UsageInfoModel private constructor(val project: Project, val mode
   private class UsageInfoModelPresentation(val model: FindInFilesResult) : UsagePresentation {
     override fun getIcon(): Icon? = model.iconId?.icon()
 
-    override fun getText(): Array<out TextChunk> = model.presentation.map { it.textChunk() }.toTypedArray()
+    override fun getText(): Array<out TextChunk> = model.presentation.map { it.toTextChunk() }.toTypedArray()
 
     override fun getPlainText(): String = model.presentation.joinToString("") { it.text }
 

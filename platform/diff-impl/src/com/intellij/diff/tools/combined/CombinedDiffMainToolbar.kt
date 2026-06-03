@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.combined
 
 import com.intellij.diff.DiffContext
@@ -8,7 +8,12 @@ import com.intellij.diff.util.DiffUserDataKeys
 import com.intellij.diff.util.DiffUserDataKeysEx
 import com.intellij.diff.util.DiffUtil
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
 import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
 import com.intellij.ui.GuiUtils
@@ -24,18 +29,23 @@ import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Container
+import java.awt.Dimension
+import java.awt.LayoutManager2
+import java.awt.Rectangle
 import javax.swing.JComponent
 import javax.swing.JPanel
 import kotlin.math.max
 
 internal class CombinedDiffMainToolbar(
-  private val cs: CoroutineScope,
+  cs: CoroutineScope,
   private val uiState: CombinedDiffUIState,
   private val targetComponent: JComponent,
   private val diffToolChooser: DiffToolChooser,
-  private val goToChangeAction: AnAction?,
-  private val context: DiffContext
+  private val context: DiffContext,
+  private val goToChangeAction: AnAction,
 ) {
   private val searchPanel = Wrapper()
   private val diffInfoPanel = DiffInfoComponent()
@@ -140,8 +150,8 @@ internal class CombinedDiffMainToolbar(
     component.repaint()
   }
 
-  fun updateToolbar(blockState: BlockState, toolbarActions: List<AnAction>?) {
-    collectToolbarActions(blockState, toolbarActions)
+  fun updateToolbar(toolbarActions: List<AnAction>?) {
+    collectToolbarActions(toolbarActions)
     (leftToolbar as ActionToolbarImpl).reset()
     leftToolbar.updateActionsImmediately()
     DiffUtil.recursiveRegisterShortcutSet(leftToolbarGroup, targetComponent, null)
@@ -151,24 +161,23 @@ internal class CombinedDiffMainToolbar(
     DiffUtil.recursiveRegisterShortcutSet(rightToolbarGroup, targetComponent, null)
   }
 
-  private fun collectToolbarActions(blockState: BlockState, viewerActions: List<AnAction?>?) {
+  private fun collectToolbarActions(viewerActions: List<AnAction?>?) {
     leftToolbarGroup.removeAll()
-    val navigationActions = ArrayList<AnAction>(collectNavigationActions(blockState))
 
     rightToolbarGroup.add(diffToolChooser)
 
-    DiffUtil.addActionBlock(leftToolbarGroup, navigationActions)
+    DiffUtil.addActionBlock(leftToolbarGroup, collectNavigationActions())
 
     DiffUtil.addActionBlock(rightToolbarGroup, viewerActions, false)
     val contextActions = context.getUserData(DiffUserDataKeys.CONTEXT_ACTIONS)
     DiffUtil.addActionBlock(leftToolbarGroup, contextActions)
   }
 
-  private fun collectNavigationActions(blockState: BlockState): List<AnAction> {
+  private fun collectNavigationActions(): List<AnAction> {
     return listOfNotNull(
       CombinedPrevBlockAction(context),
       CombinedPrevDifferenceAction(context),
-      FilesLabelAction(goToChangeAction, leftToolbar.component, blockState),
+      goToChangeAction,
       CombinedNextDifferenceAction(context),
       CombinedNextBlockAction(context),
       openInEditorAction,

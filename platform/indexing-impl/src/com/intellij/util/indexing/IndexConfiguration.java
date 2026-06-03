@@ -12,7 +12,12 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @ApiStatus.Internal
 public final class IndexConfiguration {
@@ -78,7 +83,7 @@ public final class IndexConfiguration {
       Collection<FileType> associatedFileTypes = getAssociatedFileTypes(inputFilter);
       if (associatedFileTypes != null) {
         for (FileType fileType : associatedFileTypes) {
-          List<ID<?, ?>> ids = myFileType2IndicesWithFileTypeInfoMap.computeIfAbsent(fileType, __ -> new ArrayList<>(5));
+          List<ID<?, ?>> ids = myFileType2IndicesWithFileTypeInfoMap.computeIfAbsent(fileType, _ -> new ArrayList<>(5));
           ids.add(indexId);
         }
       }

@@ -27,6 +27,7 @@ import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.Weighted
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.IdeGlassPaneUtil
+import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.platform.ide.bootstrap.hasSplash
 import com.intellij.platform.ide.bootstrap.hideSplash
 import com.intellij.platform.ide.diagnostic.startUpPerformanceReporter.FUSProjectHotStartUpMeasurer
@@ -34,13 +35,45 @@ import com.intellij.ui.ClientProperty
 import com.intellij.ui.ComponentUtil
 import com.intellij.util.AwaitCancellationAndInvoke
 import com.intellij.util.awaitCancellationAndInvoke
-import com.intellij.util.ui.*
-import kotlinx.coroutines.*
+import com.intellij.util.ui.AnimatedIcon
+import com.intellij.util.ui.AsyncProcessIcon
+import com.intellij.util.ui.EdtInvocationManager
+import com.intellij.util.ui.MouseEventAdapter
+import com.intellij.util.ui.RawSwingDispatcher
+import com.intellij.util.ui.UIUtil
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
-import java.awt.event.*
-import java.util.*
-import javax.swing.*
+import java.awt.AWTEvent
+import java.awt.Component
+import java.awt.Container
+import java.awt.Cursor
+import java.awt.Graphics
+import java.awt.Point
+import java.awt.Toolkit
+import java.awt.Window
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
+import java.awt.event.MouseEvent
+import java.awt.event.MouseListener
+import java.awt.event.MouseMotionListener
+import java.awt.event.MouseWheelEvent
+import java.util.EventListener
+import java.util.TreeSet
+import javax.swing.JComponent
+import javax.swing.JEditorPane
+import javax.swing.JMenuItem
+import javax.swing.JPanel
+import javax.swing.JPopupMenu
+import javax.swing.JRootPane
+import javax.swing.JSeparator
+import javax.swing.JWindow
+import javax.swing.SwingUtilities
 import javax.swing.text.html.HTMLEditorKit
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -97,22 +130,37 @@ class IdeGlassPaneImpl : JComponent, IdeGlassPaneEx, IdeEventQueue.NonLockedEven
       hideSplash()
       FUSProjectHotStartUpMeasurer.reportFrameBecameInteractive()
     }
-    else if (hasSplash()) {
-      loadingState.done.invokeOnCompletion {
-        FUSProjectHotStartUpMeasurer.reportFrameBecameInteractive()
-        coroutineScope.launch(RawSwingDispatcher) {
-          hideSplash()
+    else {
+      trackFrameInteractiveWaiting(loadingState, coroutineScope)
+      if (hasSplash()) {
+        loadingState.done.invokeOnCompletion {
+          FUSProjectHotStartUpMeasurer.reportFrameBecameInteractive()
+          val startUpContextElementToPass = FUSProjectHotStartUpMeasurer.getStartUpContextElementToPass() ?: EmptyCoroutineContext
+          coroutineScope.launch(RawSwingDispatcher + startUpContextElementToPass + CoroutineName("hide splash")) {
+            span("hide splash") {
+              hideSplash()
+            }
+          }
         }
       }
-    }
-    else {
-      hideSplash()
-      loadingIndicator = IdePaneLoadingLayer(pane = this, loadingState, coroutineScope = coroutineScope) {
-        FUSProjectHotStartUpMeasurer.reportFrameBecameInteractive()
-        loadingIndicator = null
+      else {
+        hideSplash()
+        loadingIndicator = IdePaneLoadingLayer(pane = this, loadingState, coroutineScope = coroutineScope) {
+          FUSProjectHotStartUpMeasurer.reportFrameBecameInteractive()
+          loadingIndicator = null
+          applyActivationState()
+        }
         applyActivationState()
       }
-      applyActivationState()
+    }
+  }
+
+  private fun trackFrameInteractiveWaiting(loadingState: FrameLoadingState, coroutineScope: CoroutineScope) {
+    val startUpContextElementToPass = FUSProjectHotStartUpMeasurer.getStartUpContextElementToPass() ?: EmptyCoroutineContext
+    coroutineScope.launch(startUpContextElementToPass + CoroutineName("frame interactive waiting")) {
+      span("frame interactive waiting") {
+        loadingState.done.join()
+      }
     }
   }
 
@@ -142,7 +190,7 @@ class IdeGlassPaneImpl : JComponent, IdeGlassPaneEx, IdeEventQueue.NonLockedEven
 
   @ApiStatus.Experimental
   @ApiStatus.Internal
-  fun addFallbackBackgroundPainter(fallbackBackgroundPainter : Painter) {
+  fun addFallbackBackgroundPainter(fallbackBackgroundPainter: Painter) {
     installPainters()
     IdeBackgroundUtil.addFallbackBackgroundPainter(this, fallbackBackgroundPainter)
   }
@@ -540,10 +588,12 @@ class IdeGlassPaneImpl : JComponent, IdeGlassPaneEx, IdeEventQueue.NonLockedEven
   }
 }
 
-private class IdePaneLoadingLayer(pane: JComponent,
-                                  private val loadingState: FrameLoadingState,
-                                  private val coroutineScope: CoroutineScope,
-                                  private val onFinish: () -> Unit) {
+private class IdePaneLoadingLayer(
+  pane: JComponent,
+  private val loadingState: FrameLoadingState,
+  private val coroutineScope: CoroutineScope,
+  private val onFinish: () -> Unit,
+) {
   @JvmField
   val icon: AnimatedIcon = AsyncProcessIcon.createBig(coroutineScope)
 
@@ -553,9 +603,11 @@ private class IdePaneLoadingLayer(pane: JComponent,
 
     val startUpContextElementToPass = FUSProjectHotStartUpMeasurer.getStartUpContextElementToPass() ?: EmptyCoroutineContext
     loadingState.done.invokeOnCompletion {
-      coroutineScope.launch(RawSwingDispatcher + startUpContextElementToPass) {
+      coroutineScope.launch(RawSwingDispatcher + startUpContextElementToPass + CoroutineName("hide loading layer")) {
         try {
-          removeIcon(pane)
+          span("hide loading layer") {
+            removeIcon(pane)
+          }
         }
         finally {
           onFinish()

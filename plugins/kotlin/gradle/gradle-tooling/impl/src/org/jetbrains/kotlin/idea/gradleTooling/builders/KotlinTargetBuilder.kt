@@ -6,10 +6,18 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
-import org.jetbrains.kotlin.idea.gradleTooling.*
+import org.jetbrains.kotlin.idea.gradleTooling.IdeaKotlinExtras
+import org.jetbrains.kotlin.idea.gradleTooling.KotlinGradlePluginVersionKeyVersion
+import org.jetbrains.kotlin.idea.gradleTooling.KotlinNativeMainRunTaskImpl
+import org.jetbrains.kotlin.idea.gradleTooling.KotlinTargetImpl
+import org.jetbrains.kotlin.idea.gradleTooling.KotlinTargetJarImpl
+import org.jetbrains.kotlin.idea.gradleTooling.KotlinTestRunTaskImpl
+import org.jetbrains.kotlin.idea.gradleTooling.MultiplatformModelImportingContext
+import org.jetbrains.kotlin.idea.gradleTooling.getDeclaredMethodOrNull
+import org.jetbrains.kotlin.idea.gradleTooling.getMethodOrNull
 import org.jetbrains.kotlin.idea.gradleTooling.reflect.KotlinTargetJarReflection
 import org.jetbrains.kotlin.idea.gradleTooling.reflect.KotlinTargetReflection
-import org.jetbrains.kotlin.idea.gradleTooling.IdeaKotlinExtras
+import org.jetbrains.kotlin.idea.gradleTooling.toKotlinToolingVersion
 import org.jetbrains.kotlin.idea.projectModel.KotlinCompilation
 import org.jetbrains.kotlin.idea.projectModel.KotlinPlatform
 import org.jetbrains.kotlin.idea.projectModel.KotlinTarget
@@ -26,6 +34,7 @@ object KotlinTargetBuilder : KotlinMultiplatformComponentBuilder<KotlinTargetRef
         val platform = KotlinPlatform.byId(platformId) ?: return null
         val disambiguationClassifier = origin.disambiguationClassifier
         val targetPresetName: String? = origin.presetName
+        val isManagedByComAndroidLibraryPlugin = origin.isKotlinAndroidTargetClass
 
         val reflectionsByCompilations = origin.compilations?.associate { compilationReflection ->
             KotlinCompilationBuilder(platform, disambiguationClassifier).buildComponent(
@@ -83,6 +92,7 @@ object KotlinTargetBuilder : KotlinMultiplatformComponentBuilder<KotlinTargetRef
             targetPresetName,
             disambiguationClassifier,
             platform,
+            isManagedByComAndroidLibraryPlugin,
             compilations,
             testRunTasks,
             nativeMainRunTasks,
@@ -157,7 +167,7 @@ object KotlinTargetBuilder : KotlinMultiplatformComponentBuilder<KotlinTargetRef
             val androidUnitTestClass = gradleTarget.testTaskClass("com.android.build.gradle.tasks.factory.AndroidUnitTest")
                 ?: return emptyList()
 
-            return project.tasks.filter { androidUnitTestClass.isInstance(it) }.mapNotNull { task -> task.name }
+            return project.tasks.filter { androidUnitTestClass.isInstance(it) }.map { task -> task.name }
                 .map { KotlinTestRunTaskImpl(it, KotlinCompilation.TEST_COMPILATION_NAME) }
         }
 

@@ -5,15 +5,21 @@ import com.intellij.diff.tools.util.breadcrumbs.BreadcrumbsPlacement
 import com.intellij.diff.util.DiffPlaces
 import com.intellij.diff.util.DiffUtil
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diff.DiffBundle
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.util.EventDispatcher
 import com.intellij.util.xmlb.annotations.OptionTag
 import com.intellij.util.xmlb.annotations.Transient
 import com.intellij.util.xmlb.annotations.XMap
 import org.jetbrains.annotations.NonNls
-import java.util.*
+import java.util.EventListener
+import java.util.TreeMap
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KMutableProperty1
 import kotlin.reflect.KProperty
@@ -26,9 +32,6 @@ class TextDiffSettingsHolder : PersistentStateComponent<TextDiffSettingsHolder.S
   }
 
   data class SharedSettings(
-    // Fragments settings
-    var CONTEXT_RANGE: Int = 4,
-
     var MERGE_AUTO_APPLY_NON_CONFLICTED_CHANGES: Boolean = false,
     var MERGE_AUTO_RESOLVE_IMPORT_CONFLICTS: Boolean = false,
     var MERGE_LST_GUTTER_MARKERS: Boolean = true,
@@ -53,8 +56,9 @@ class TextDiffSettingsHolder : PersistentStateComponent<TextDiffSettingsHolder.S
     var BREADCRUMBS_PLACEMENT: BreadcrumbsPlacement = BreadcrumbsPlacement.HIDDEN,
 
     // Fragments settings
-    var EXPAND_BY_DEFAULT: Boolean = true
-  ) {
+    var EXPAND_BY_DEFAULT: Boolean = true,
+    var CONTEXT_RANGE: Int = 4,
+    ) {
     @Transient
     var ENABLE_SYNC_SCROLL: Boolean = true
 
@@ -115,7 +119,7 @@ class TextDiffSettingsHolder : PersistentStateComponent<TextDiffSettingsHolder.S
 
     var highlightingLevel: HighlightingLevel by placeDelegate(PlaceSettings::HIGHLIGHTING_LEVEL)
 
-    var contextRange: Int by sharedDelegate(SharedSettings::CONTEXT_RANGE) { foldingChanged() }
+    var contextRange: Int by placeDelegate(PlaceSettings::CONTEXT_RANGE) { foldingChanged() }
 
     var isExpandByDefault: Boolean by placeDelegate(PlaceSettings::EXPAND_BY_DEFAULT) { foldingChanged() }
 
@@ -207,6 +211,15 @@ class TextDiffSettingsHolder : PersistentStateComponent<TextDiffSettingsHolder.S
     }
     if (place == DiffPlaces.VCS_FILE_HISTORY_VIEW) {
       settings.EXPAND_BY_DEFAULT = false
+    }
+    if (place == DiffPlaces.INTENTION_PREVIEW) {
+      settings.EXPAND_BY_DEFAULT = false
+      settings.USE_SOFT_WRAPS = true
+      settings.SHOW_INDENT_LINES = false
+      settings.SHOW_WHITESPACES = true
+      settings.HIGHLIGHT_POLICY = HighlightPolicy.BY_LINE
+      settings.IGNORE_POLICY = IgnorePolicy.IGNORE_WHITESPACES
+      settings.CONTEXT_RANGE = 2
     }
     return settings
   }

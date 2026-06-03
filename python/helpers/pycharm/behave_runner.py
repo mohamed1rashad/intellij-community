@@ -25,6 +25,14 @@ from _jb_utils import VersionAgnosticUtils
 
 _MAX_STEPS_SEARCH_FEATURES = 5000  # Do not look for features in folder that has more that this number of children
 _FEATURES_FOLDER = 'features'  # "features" folder name.
+try:
+    # Python 3.3+
+    from importlib.machinery import EXTENSION_SUFFIXES as _EXTENSION_SUFFIXES
+    _EXT_SUFFIXES = tuple(_EXTENSION_SUFFIXES)  # .pyd, .so, ABI-tagged variants
+except ImportError:
+    # Python 2.7 fallback: imp.get_suffixes() yields (suffix, mode, type) tuples
+    import imp
+    _EXT_SUFFIXES = tuple(s for s, _, t in imp.get_suffixes() if t == imp.C_EXTENSION)
 
 __author__ = 'Ilya.Kazakevich'
 
@@ -122,9 +130,11 @@ class _RunnerWrapper(runner.Runner):
         self.hooks.clear()
         self.features = []
         if self.step_registry is None:
-            the_step_registry.clear()
+            if hasattr(the_step_registry, 'clear'):
+                the_step_registry.clear()
         else:
-            self.step_registry.clear()
+            if hasattr(self.step_registry, 'clear'):
+                self.step_registry.clear()
 
 
 class _BehaveRunner(_bdd_utils.BddRunner):
@@ -235,8 +245,26 @@ class _BehaveRunner(_bdd_utils.BddRunner):
         return isinstance(expected_tags, TagExpression) and expected_tags.check(scenario.tags)
 
     def _get_features_to_run(self):
+        old_modules = sys.modules.copy()
         self.__real_runner.dry_run = True
         self.__real_runner.run()
+        # During the dry run we can import some modules with steps in nested
+        # directories. And since we then clear step registry, there's no way to
+        # get those steps back without reimport. So we clear up the modules that
+        # were imported during the dry run to support such scenario.
+        # C-extension modules (.pyd / .so) must be skipped: their initializers
+        # register types in process-global registries (e.g. pybind11), so
+        # reimporting them raises "type X is already registered". Step decorators
+        # only live in pure-Python modules, so skipping extensions is safe.
+        new_modules = sys.modules.copy()
+        for module in new_modules.keys():
+            if module in old_modules:
+                continue
+            mod = sys.modules.get(module)
+            path = getattr(mod, '__file__', None)
+            if path and path.endswith(_EXT_SUFFIXES):
+                continue
+            del sys.modules[module]
         features_to_run = self.__real_runner.features
         self.__real_runner.clean()  # To make sure nothing left after dry run
 

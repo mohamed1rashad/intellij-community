@@ -1,7 +1,6 @@
 package fleet.codecache
 
 import fleet.bundles.Coordinates
-import fleet.bundles.CoordinatesResolution
 import fleet.bundles.ResolutionException
 import fleet.util.logging.KLoggers.logger
 import io.ktor.client.HttpClient
@@ -12,7 +11,14 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.jvm.javaio.copyTo
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.annotations.VisibleForTesting
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileAlreadyExistsException
@@ -26,6 +32,7 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.outputStream
 import kotlin.math.log10
 import kotlin.math.pow
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val MAX_LOCK_WAIT_MS = 60000L
 private const val LOCK_DELAY_MS = 100L
@@ -33,7 +40,7 @@ private const val LOCK_DELAY_MS = 100L
 data class CodeCachePath(val path: Path, val writable: Boolean)
 
 class CodeCache(
-  private val httpClientFn: suspend () -> HttpClient,
+  private val httpClientSource: HttpClientSource,
   private val paths: List<CodeCachePath>,
   private val lockDelay: Long = LOCK_DELAY_MS,
   private val maxLockWaitTime: Long = MAX_LOCK_WAIT_MS,
@@ -75,14 +82,16 @@ class CodeCache(
                                        tmpFile: Path,
                                        coord: Coordinates.Remote,
                                        queryParams: Map<String, String>): Boolean {
-    logger.debug("Downloading $coord to $targetFile")
+    logger.debug { "Downloading $coord to $targetFile" }
 
     ensureDirExists(targetFile.parent)
     ensureDirExists(tmpFile.parent)
 
     return withFileLock(tmpFile.parent, tmpFile.name, coord) {
       if (!targetFile.exists()) {
-        httpClientFn().downloadFile(coord.url, tmpFile, queryParams)
+        httpClientSource.use { httpClient ->
+          httpClient.downloadFile(coord.url, tmpFile, queryParams)
+        }
         val actualHash = hash(tmpFile)
         val hashesMatch = actualHash == coord.hash
         if (hashesMatch) {
@@ -145,9 +154,9 @@ class CodeCache(
     }
 
     try {
-      val success = withTimeoutOrNull(maxLockWaitTime) {
+      val success = withTimeoutOrNull(maxLockWaitTime.milliseconds) {
         while (!tryLock(lockFile)) {
-          delay(lockDelay)
+          delay(lockDelay.milliseconds)
         }
         true
       }

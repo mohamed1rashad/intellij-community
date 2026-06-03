@@ -10,7 +10,14 @@ import com.intellij.formatting.service.FormattingServiceUtil;
 import com.intellij.ide.lightEdit.LightEditCompatible;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.lang.LanguageFormatting;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehavior;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification;
 import com.intellij.openapi.application.ApplicationManager;
@@ -27,7 +34,12 @@ import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.platform.ide.core.permissions.Permission;
 import com.intellij.platform.ide.core.permissions.RequiresPermissions;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDirectoryContainer;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.ArrayUtil;
@@ -85,33 +97,47 @@ public class ReformatCodeAction extends AnAction implements DumbAware, LightEdit
     else if (files != null && containsOnlyFiles(files)) {
       final ReadonlyStatusHandler.OperationStatus operationStatus = ReadonlyStatusHandler.getInstance(project).ensureFilesWritable(Arrays.asList(files));
       if (!operationStatus.hasReadonlyFiles()) {
-        ReformatFilesOptions selectedFlags = getReformatFilesOptions(project, files);
-        if (selectedFlags == null)
-          return;
-
-        final boolean processOnlyChangedText = selectedFlags.getTextRangeType() == TextRangeType.VCS_CHANGED_TEXT;
-        final boolean shouldOptimizeImports = selectedFlags.isOptimizeImports() && !DumbService.getInstance(project).isDumb();
-
-        AbstractLayoutCodeProcessor processor = new ReformatCodeProcessor(project, convertToPsiFiles(files, project), null, processOnlyChangedText);
-        if (shouldOptimizeImports) {
-          processor = new OptimizeImportsProcessor(processor);
+        if (DumbService.getInstance(project).isDumb()) {
+          new ReformatCodeProcessor(project, convertToPsiFiles(files, project), null, false).run();
         }
-        if (selectedFlags.isRearrangeCode()) {
-          processor = new RearrangeCodeProcessor(processor);
-        }
-        if (selectedFlags.isCodeCleanup()) {
-          processor = new CodeCleanupCodeProcessor(processor);
-        }
+        else {
+          ReformatFilesOptions selectedFlags = getReformatFilesOptions(project, files);
+          if (selectedFlags == null)
+            return;
 
-        processor.run();
+          final boolean processOnlyChangedText = selectedFlags.getTextRangeType() == TextRangeType.VCS_CHANGED_TEXT;
+          final boolean shouldOptimizeImports = selectedFlags.isOptimizeImports() && !DumbService.getInstance(project).isDumb();
+
+          AbstractLayoutCodeProcessor processor = new ReformatCodeProcessor(project, convertToPsiFiles(files, project), null, processOnlyChangedText);
+          if (shouldOptimizeImports) {
+            processor = new OptimizeImportsProcessor(processor);
+          }
+          if (selectedFlags.isRearrangeCode()) {
+            processor = new RearrangeCodeProcessor(processor);
+          }
+          if (selectedFlags.isCodeCleanup()) {
+            processor = new CodeCleanupCodeProcessor(processor);
+          }
+
+          processor.run();
+        }
       }
       return;
     }
     else if (PlatformCoreDataKeys.PROJECT_CONTEXT.getData(dataContext) != null || LangDataKeys.MODULE_CONTEXT.getData(dataContext) != null) {
       Module moduleContext = LangDataKeys.MODULE_CONTEXT.getData(dataContext);
-      ReformatFilesOptions selectedFlags = getLayoutProjectOptions(project, moduleContext);
-      if (selectedFlags != null) {
-        reformatModule(project, moduleContext, selectedFlags);
+      if (DumbService.getInstance(project).isDumb()) {
+        PsiDocumentManager.getInstance(project).commitAllDocuments();
+        AbstractLayoutCodeProcessor processor = moduleContext != null
+          ? new ReformatCodeProcessor(project, moduleContext, false)
+          : new ReformatCodeProcessor(project, false);
+        processor.run();
+      }
+      else {
+        ReformatFilesOptions selectedFlags = getLayoutProjectOptions(project, moduleContext);
+        if (selectedFlags != null) {
+          reformatModule(project, moduleContext, selectedFlags);
+        }
       }
       return;
     }
@@ -132,9 +158,14 @@ public class ReformatCodeAction extends AnAction implements DumbAware, LightEdit
     }
 
     if (file == null && dir != null) {
-      DirectoryFormattingOptions options = getDirectoryFormattingOptions(project, dir);
-      if (options != null) {
-        reformatDirectory(project, dir, options);
+      if (DumbService.getInstance(project).isDumb()) {
+        new ReformatCodeProcessor(project, dir, true, false).run();
+      }
+      else {
+        DirectoryFormattingOptions options = getDirectoryFormattingOptions(project, dir);
+        if (options != null) {
+          reformatDirectory(project, dir, options);
+        }
       }
       return;
     }

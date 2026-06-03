@@ -13,17 +13,20 @@ import com.intellij.openapi.roots.OrderEnumerator;
 import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiPackage;
 import com.intellij.psi.util.CachedValueProvider.Result;
 import com.intellij.psi.util.CachedValuesManager;
 import com.intellij.util.concurrency.ThreadingAssertions;
 import de.plushnikov.intellij.plugin.LombokClassNames;
 import de.plushnikov.intellij.plugin.Version;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,6 +34,7 @@ import java.util.List;
 
 public final class LombokLibraryUtil {
 
+  private static final @NonNls String SOME_LOMBOK_CLASS_NAME = LombokClassNames.GETTER;
   private static final String LOMBOK_PACKAGE = "lombok.experimental";
 
   public static boolean hasLombokLibrary(@NotNull Project project) {
@@ -44,10 +48,15 @@ public final class LombokLibraryUtil {
   }
 
   public static boolean hasLombokClasses(@Nullable Module module) {
-    return JavaLibraryUtil.hasLibraryClass(module, LombokClassNames.GETTER);
+    return JavaLibraryUtil.hasLibraryClass(module, SOME_LOMBOK_CLASS_NAME);
+  }
+
+  public static boolean hasLombokClassesInScopeOfElement(@NotNull PsiElement psiElement) {
+    return JavaPsiFacade.getInstance(psiElement.getProject()).hasClass(SOME_LOMBOK_CLASS_NAME, psiElement.getResolveScope());
   }
 
   private static boolean detectLombokJarsSlow(Project project) {
+    if (!Registry.is("lombok.slow.jar.detection.enabled")) return false;
     // it is required for JARs attached directly from disk
     // or via build systems that do not supply Maven coordinates properly via LibraryWithMavenCoordinatesProperties
     return CachedValuesManager.getManager(project).getCachedValue(project, () -> {

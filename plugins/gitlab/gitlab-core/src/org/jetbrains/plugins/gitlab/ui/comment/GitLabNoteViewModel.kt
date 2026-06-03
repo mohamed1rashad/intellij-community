@@ -12,16 +12,26 @@ import com.intellij.util.asSafely
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import org.jetbrains.annotations.Nls
 import org.jetbrains.plugins.gitlab.api.GitLabId
 import org.jetbrains.plugins.gitlab.api.dto.GitLabUserDTO
-import org.jetbrains.plugins.gitlab.mergerequest.data.*
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequestDraftNote
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequestNote
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequestNotePositionMapping
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabNote
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabProject
+import org.jetbrains.plugins.gitlab.mergerequest.data.MutableGitLabNote
 import org.jetbrains.plugins.gitlab.mergerequest.ui.emoji.GitLabReactionsViewModel
 import org.jetbrains.plugins.gitlab.mergerequest.ui.emoji.GitLabReactionsViewModelImpl
-import org.jetbrains.plugins.gitlab.ui.GitLabUIUtil
+import org.jetbrains.plugins.gitlab.ui.GitLabMarkdownToHtmlConverter
+import org.jetbrains.plugins.gitlab.ui.GitLabViewModelWithTextCompletion
 import java.net.URL
-import java.util.*
+import java.util.Date
 
 interface GitLabNoteViewModel : CodeReviewTrackableItemViewModel, FocusableViewModel {
   val id: GitLabId
@@ -46,7 +56,9 @@ class GitLabNoteViewModelImpl(
   projectData: GitLabProject,
   note: GitLabNote,
   isMainNote: Flow<Boolean>,
-  currentUser: GitLabUserDTO
+  currentUser: GitLabUserDTO,
+  htmlConverter: GitLabMarkdownToHtmlConverter,
+  textCompletionViewModel: GitLabViewModelWithTextCompletion,
 ) : GitLabNoteViewModel {
   private val cs = parentCs.childScope(javaClass.name)
 
@@ -55,16 +67,16 @@ class GitLabNoteViewModelImpl(
   override val author: GitLabUserDTO = note.author
   override val createdAt: Date? = note.createdAt
   override val isDraft: Boolean = note is GitLabMergeRequestDraftNote
-  override val serverUrl: URL = projectData.projectMapping.repository.serverPath.toURL()
+  override val serverUrl: URL = projectData.projectCoordinates.serverPath.toURL()
 
   override val actionsVm: GitLabNoteAdminActionsViewModel? =
-    if (note is MutableGitLabNote && note.canAdmin) GitLabNoteAdminActionsViewModelImpl(cs, project, note) else null
+    if (note is MutableGitLabNote && note.canAdmin) GitLabNoteAdminActionsViewModelImpl(cs, project, projectData, note, textCompletionViewModel) else null
   override val reactionsVm: GitLabReactionsViewModel? =
     if (note is GitLabMergeRequestNote && note.canReact) GitLabReactionsViewModelImpl(cs, projectData, note, currentUser) else null
 
   override val body: StateFlow<String> = note.body
   override val bodyHtml: StateFlow<String> = body.mapStateInNow(cs) {
-    GitLabUIUtil.convertToHtml(project, projectData.projectMapping.gitRepository, projectData.projectMapping.repository.projectPath,it)
+    htmlConverter.convertToHtml(it)
   }
 
   override val discussionState: StateFlow<GitLabDiscussionStateContainer> = isMainNote.map {

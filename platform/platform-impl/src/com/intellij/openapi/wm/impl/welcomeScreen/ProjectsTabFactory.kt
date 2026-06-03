@@ -12,7 +12,15 @@ import com.intellij.ide.dnd.DnDSupport
 import com.intellij.ide.dnd.FileCopyPasteUtil
 import com.intellij.ide.impl.ProjectUtil.openOrImportFilesAsync
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionGroupWrapper
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ex.ActionButtonLook
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.impl.ActionButton
@@ -21,6 +29,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.service
 import com.intellij.openapi.progress.TaskInfo
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.wm.WelcomeScreenCustomization
 import com.intellij.openapi.wm.WelcomeScreenTab
 import com.intellij.openapi.wm.WelcomeTabFactory
@@ -34,18 +43,26 @@ import com.intellij.openapi.wm.impl.welcomeScreen.statistics.WelcomeScreenCounte
 import com.intellij.platform.ide.CoreUiCoroutineScopeHolder
 import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.ScrollPaneFactory
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.border.CustomLineBorder
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.DslComponentProperty
+import com.intellij.ui.dsl.builder.EmptySpacingConfiguration
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.ui.layout.ValueComponentPredicate
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.launch
+import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
+import java.awt.Insets
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Supplier
 import javax.swing.JComponent
+import javax.swing.JPanel
 import javax.swing.ScrollPaneConstants
-
 
 @Suppress("OVERRIDE_DEPRECATION")
 internal class ProjectsTabFactory : WelcomeTabFactory {
@@ -95,7 +112,10 @@ internal class ProjectsTab(private val parentDisposable: Disposable) : DefaultWe
           val placeholder = placeholder()
             .align(Align.FILL)
 
-          val recentProjectsPanel = createRecentProjectsPanel()
+          val recentProjectsPanel = when {
+            isStationWelcomeScreenPromoEnabled() -> createTwoRowRecentProjectsPanel()
+            else -> createRecentProjectsPanel()
+          }
           val emptyStatePanel = createEmptyStatePanel()
           isPanelEmptyPredicate.addListener { isEmpty ->
             placeholder.component = if (isEmpty) emptyStatePanel else recentProjectsPanel
@@ -140,6 +160,49 @@ internal class ProjectsTab(private val parentDisposable: Disposable) : DefaultWe
   }
 
   private fun createRecentProjectsPanel(): JComponent {
+    val recentProjectsPanel: JPanel = JBUI.Panels.simplePanel()
+      .withBorder(JBUI.Borders.empty(13, 12))
+      .withBackground(WelcomeScreenUIManager.getProjectsBackground())
+    val recentProjectTree = createComponent(
+      parentDisposable, ProjectCollectors.all
+    )
+    recentProjectTree.selectLastOpenedProject()
+
+    val treeComponent = recentProjectTree.component
+    val scrollPane = ScrollPaneFactory.createScrollPane(treeComponent, true)
+    scrollPane.horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+    scrollPane.isOpaque = false
+    val projectsPanel = JBUI.Panels.simplePanel(scrollPane)
+      .andTransparent()
+      .withBorder(JBUI.Borders.emptyTop(10))
+
+    val projectSearch = recentProjectTree.installSearchField()
+    if (ExperimentalUI.isNewUI()) {
+      projectSearch.textEditor.putClientProperty("JTextField.Search.Icon", AllIcons.Actions.Search)
+    }
+    val northPanel: JPanel = JBUI.Panels.simplePanel()
+      .andTransparent()
+      .withBorder(object : CustomLineBorder(WelcomeScreenUIManager.getSeparatorColor(), JBUI.insetsBottom(1)) {
+        override fun getBorderInsets(c: Component): Insets {
+          return JBUI.insetsBottom(12)
+        }
+      })
+    val actionsToolbar = createActionsToolbar()
+    actionsToolbar.targetComponent = scrollPane
+    val projectActionsPanel = actionsToolbar.component
+    northPanel.add(projectSearch, BorderLayout.CENTER)
+    northPanel.add(projectActionsPanel, BorderLayout.EAST)
+    recentProjectsPanel.add(northPanel, BorderLayout.NORTH)
+    recentProjectsPanel.add(projectsPanel, BorderLayout.CENTER)
+
+    initDnD(treeComponent)
+
+    recentProjectsPanel.putClientProperty(DslComponentProperty.VISUAL_PADDINGS, UnscaledGaps.EMPTY)
+
+    return recentProjectsPanel
+  }
+
+  private fun createTwoRowRecentProjectsPanel(): JComponent {
     val recentProjectTree = createComponent(
       parentDisposable, ProjectCollectors.all, disableSearchFieldBorder = false
     )
@@ -177,7 +240,7 @@ internal class ProjectsTab(private val parentDisposable: Disposable) : DefaultWe
     }.andTransparent()
       .apply {
         border = JBUI.Borders.empty(13, 12)
-        initDnD(this)
+        initDnD(treeComponent)
       }
   }
 

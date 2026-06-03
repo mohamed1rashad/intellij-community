@@ -21,7 +21,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 
 public class DirectoryCoverageViewExtension extends CoverageViewExtension {
   protected final CoverageAnnotator myAnnotator;
@@ -105,7 +109,7 @@ public class DirectoryCoverageViewExtension extends CoverageViewExtension {
       final Object val = node.getValue();
       if (val instanceof PsiFile || val == null) return Collections.emptyList();
       final PsiDirectory psiDirectory = (PsiDirectory)val;
-      final PsiDirectory[] subdirectories = ReadAction.compute(() -> psiDirectory.getSubdirectories());
+      final PsiDirectory[] subdirectories = ReadAction.computeBlocking(() -> psiDirectory.getSubdirectories());
       for (PsiDirectory subdirectory : subdirectories) {
         if (myAnnotator.getDirCoverageInformationString(subdirectory, mySuitesBundle, myCoverageDataManager) == null) continue;
         CoverageListNode e = new CoverageListNode(myProject, subdirectory, mySuitesBundle);
@@ -113,7 +117,7 @@ public class DirectoryCoverageViewExtension extends CoverageViewExtension {
           children.add(e);
         }
       }
-      final PsiFile[] psiFiles = ReadAction.compute(() -> psiDirectory.getFiles());
+      PsiFile[] psiFiles = ReadAction.computeBlocking(() -> psiDirectory.getFiles());
       for (PsiFile psiFile : psiFiles) {
         if (myAnnotator.getFileCoverageInformationString(psiFile, mySuitesBundle, myCoverageDataManager) == null) continue;
         CoverageListNode e = new CoverageListNode(myProject, psiFile, mySuitesBundle);

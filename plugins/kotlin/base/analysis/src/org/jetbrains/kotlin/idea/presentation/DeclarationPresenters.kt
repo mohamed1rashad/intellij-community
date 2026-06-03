@@ -17,7 +17,18 @@ import org.jetbrains.kotlin.idea.KotlinIconProvider
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtFunctionType
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNullableType
+import org.jetbrains.kotlin.psi.KtObjectLiteralExpression
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtTypeReference
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import javax.swing.Icon
 
@@ -34,8 +45,8 @@ open class KotlinDefaultNamedDeclarationPresentation(private val declaration: Kt
         val name = declaration.name
         if (declaration is KtCallableDeclaration && name != null) {
             declaration.receiverTypeReference?.getTypeText()?.let {
-              return StringUtil.getQualifiedName(StringUtil.getShortName(it), name)
-          }
+                return StringUtil.getQualifiedName(StringUtil.getShortName(it), name)
+            }
         }
         return name
     }
@@ -82,7 +93,8 @@ open class KotlinDefaultNamedDeclarationPresentation(private val declaration: Kt
 }
 
 class KtDefaultDeclarationPresenter : ItemPresentationProvider<KtNamedDeclaration> {
-    override fun getPresentation(item: KtNamedDeclaration) = KotlinDefaultNamedDeclarationPresentation(item)
+    override fun getPresentation(item: KtNamedDeclaration): KotlinDefaultNamedDeclarationPresentation =
+        KotlinDefaultNamedDeclarationPresentation(item)
 }
 
 open class KotlinFunctionPresentation(
@@ -100,28 +112,24 @@ open class KotlinFunctionPresentation(
 
             append("(")
             append(function.valueParameters.joinToString {
-                val typeReference = it.typeReference
-                (if (it.isVarArg) "vararg " else "") + getTrimmedTypeText(typeReference)
+                (if (it.isVarArg) "vararg " else "") + getTrimmedTypeText(it.typeReference)
             })
             append(")")
         }
     }
 
     private fun getTrimmedTypeText(typeReference: KtTypeReference?): String {
-        val typeElement = typeReference?.typeElement
-        val typeText = when (typeElement) {
-            null -> ""
-            is KtFunctionType -> typeReference.getShortTypeText()
-            else -> {
-                val stub = typeReference.stub
-                if (stub != null || typeElement is KtNullableType && typeElement.innerType is KtFunctionType) {
-                    typeReference.getShortTypeText()
-                } else {
-                   StringUtil.getShortName(typeReference.getTypeText())
-                }
-            }
-        }
-        return typeText
+        val typeElement = typeReference?.typeElement ?: return ""
+
+        val useShortTypeText = typeElement is KtFunctionType
+                || typeReference.stub != null
+                || (typeElement is KtNullableType && typeElement.innerType is KtFunctionType)
+        if (useShortTypeText) return typeReference.getShortTypeText()
+
+        val text = typeReference.getTypeText()
+        val splitAt = text.indexOfAny(charArrayOf('<', '(', '?', ' ', '&'))
+        if (splitAt < 0) return StringUtil.getShortName(text)
+        return StringUtil.getShortName(text.substring(0, splitAt)) + text.substring(splitAt)
     }
 
     override fun getLocationString(): String? {

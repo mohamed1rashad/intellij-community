@@ -17,7 +17,9 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.jetbrains.plugins.gradle.model.web.WebConfiguration.WarModel;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * @author Vladislav.Soroka
@@ -26,6 +28,39 @@ public class WebConfigurationBuilderImplTest extends AbstractModelBuilderTest {
 
   public WebConfigurationBuilderImplTest(@NotNull String gradleVersion) {
     super(gradleVersion);
+  }
+
+  @Test
+  public void testWarManifestContent() {
+    // Use a non-default charset (UTF-16) to verify custom encoding
+    createProjectFile("build.gradle", GradleBuildScriptBuilder.create(gradleVersion, false)
+      .applyPlugin("war")
+      .addPostfix(
+        "war {\n" +
+        "  manifestContentCharset = 'UTF-16'\n" +
+        "  manifest {\n" +
+        "    attributes 'Implementation-Title': 'Test Application'\n" +
+        "  }\n" +
+        "}"
+      )
+      .generate()
+    );
+
+    GradleIdeaModelHolder models = runBuildAction(WebConfiguration.class);
+
+    DomainObjectSet<? extends IdeaModule> ideaModules = models.getRootModel(IdeaProject.class).getModules();
+    assertEquals(1, ideaModules.size());
+    IdeaModule ideaModule = ideaModules.iterator().next();
+
+    WebConfiguration webConfiguration = models.getProjectModel(ideaModule, WebConfiguration.class);
+    assertNotNull(webConfiguration);
+    assertEquals(1, webConfiguration.getWarModels().size());
+    WarModel warModel = webConfiguration.getWarModels().get(0);
+
+    String manifestContent = warModel.getManifestContent();
+    assertNotNull("Manifest content should not be null", manifestContent);
+    assertTrue("Manifest content should contain the Implementation-Title attribute",
+               manifestContent.contains("Implementation-Title: Test Application"));
   }
 
   @Test

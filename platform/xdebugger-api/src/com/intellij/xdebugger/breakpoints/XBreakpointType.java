@@ -16,7 +16,8 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -236,6 +237,17 @@ public abstract class XBreakpointType<B extends XBreakpoint<P>, P extends XBreak
    */
   public @Nls String getShortText(B breakpoint) {
     return getDisplayText(breakpoint);
+  }
+
+  /**
+   * Returns true if the given breakpoint has an additional custom condition
+   * independent from {@link XBreakpoint#getConditionExpression()}.
+   * <p/>
+   * Breakpoints for which this method returns true get a question mark badge
+   * for their icon in the gutter.
+   */
+  public boolean hasCustomCondition(B breakpoint) {
+    return false;
   }
 
   public interface XBreakpointCreator<P extends XBreakpointProperties> {

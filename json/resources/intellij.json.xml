@@ -1,4 +1,9 @@
 <idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.json.syntax"/>
+  </dependencies>
+  <!-- endregion -->
   <extensionPoints>
     <extensionPoint qualifiedName="com.intellij.json.jsonLiteralChecker"
                     interface="com.intellij.json.codeinsight.JsonLiteralChecker"
@@ -19,12 +24,15 @@
               implementationClass="com.intellij.json.jsonLines.JsonLinesFileType" fieldName="INSTANCE"
               language="JSON Lines"/>
 
+    <registryKey defaultValue="true" description="Enable lazy parsing of JSON" key="json.lazy.parsing" restartRequired="true"/>
+
     <lang.parserDefinition language="JSON" implementationClass="com.intellij.json.JsonParserDefinition"/>
     <lang.parserDefinition language="JSON5" implementationClass="com.intellij.json.json5.Json5ParserDefinition"/>
     <lang.parserDefinition language="JSON Lines" implementationClass="com.intellij.json.jsonLines.JsonLinesParserDefinition"/>
     <syntax.elementTypeConverter language="JSON" implementationClass="com.intellij.json.psi.JsonElementTypeConverterFactory"/>
     <syntax.elementTypeConverter language="JSON" implementationClass="com.intellij.json.JsonFileTypeConverterFactory"/>
-    <syntax.syntaxDefinition language="JSON" implementationClass="com.intellij.json.JsonLanguageDefinition"/>
+    <syntax.syntaxDefinition language="JSON" implementationClass="com.intellij.json.syntax.JsonLanguageDefinition"/>
+    <syntax.syntaxDefinition language="JSON5" implementationClass="com.intellij.json.syntax.json5.Json5LanguageDefinition"/>
 
 
     <!-- Highlighting -->
@@ -43,7 +51,7 @@
     <applicationService serviceImplementation="com.intellij.json.editor.JsonEditorOptions"/>
     <applicationService serviceImplementation="com.intellij.json.editor.folding.JsonFoldingSettings"/>
     <applicationSettings service="com.intellij.json.editor.JsonEditorOptions"/>
-    <codeFoldingOptionsProvider instance="com.intellij.json.editor.folding.JsonFoldingOptionsProvider"/>
+    <codeFoldingOptionsProvider instance="com.intellij.json.editor.folding.JsonFoldingOptionsProvider" id="JSON" order="after Android,after C++,after Dart,after General,after Go,after Handlebars,after JAVA,after JavaScript,after JPAQL,after ObjectiveC"/>
     <rdct.remoteSettingProvider implementation="com.intellij.json.editor.JSONRemoteSettingInfoProvider"/>
 
     <editorSmartKeysConfigurable instance="com.intellij.json.editor.JsonSmartKeysConfigurable" id="editor.preferences.jsonOptions"/>
@@ -62,6 +70,7 @@
                                 implementationClass="com.intellij.codeInsight.editorActions.enter.EnterBetweenBracesAndBracketsDelegate"/>
     <quoteHandler fileType="JSON" className="com.intellij.json.JsonQuoteHandler"/>
     <quoteHandler fileType="JSON5" className="com.intellij.json.JsonQuoteHandler"/>
+    <quoteHandler fileType="JSON-lines" className="com.intellij.json.JsonQuoteHandler"/>
 
     <!-- Code style and formatting -->
     <codeStyleSettingsProvider implementation="com.intellij.json.formatter.JsonCodeStyleSettingsProvider"/>
@@ -72,5 +81,6 @@
 
     <!-- Various editor features -->
     <focusModeProvider language="JSON" implementationClass="com.intellij.json.editor.JsonFocusModeProvider"/>
+    <applicationSettings service="com.intellij.json.editor.folding.JsonFoldingSettings"/>
   </extensions>
 </idea-plugin>

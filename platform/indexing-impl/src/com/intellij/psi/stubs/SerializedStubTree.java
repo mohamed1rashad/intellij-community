@@ -15,7 +15,11 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @ApiStatus.Internal
 public final class SerializedStubTree {
@@ -53,8 +57,8 @@ public final class SerializedStubTree {
 
     synchronized void setRestoredMap(Map<StubIndexKey<?, ?>, Map<Object, StubIdList>> restoredMap) {
       if (myState == RestoreState.NOT_RESTORED || myState == RestoreState.INCOMPLETE) {
-        myState = RestoreState.RESTORED;
         myMap = Collections.unmodifiableMap(restoredMap);
+        myState = RestoreState.RESTORED;
       }
     }
 
@@ -63,8 +67,8 @@ public final class SerializedStubTree {
         return;
       }
       if (myState == RestoreState.NOT_RESTORED) {
-        myState = RestoreState.INCOMPLETE;
         myMap = new HashMap<>(1);
+        myState = RestoreState.INCOMPLETE;
       }
       Objects.requireNonNull(myMap).put(stubIndexKey, partialMap);
     }

@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.cyclicDependencies.ui;
 
 import com.intellij.CommonBundle;
@@ -8,34 +8,72 @@ import com.intellij.cyclicDependencies.actions.CyclicDependenciesHandler;
 import com.intellij.icons.AllIcons;
 import com.intellij.java.JavaBundle;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.CommonShortcuts;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.ToggleAction;
+import com.intellij.openapi.actionSystem.UiDataProvider;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Splitter;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.packageDependencies.DependenciesToolWindow;
 import com.intellij.packageDependencies.DependencyUISettings;
-import com.intellij.packageDependencies.ui.*;
+import com.intellij.packageDependencies.ui.DependenciesPanel;
+import com.intellij.packageDependencies.ui.DependenciesUsagesPanel;
+import com.intellij.packageDependencies.ui.FileNode;
+import com.intellij.packageDependencies.ui.ModuleNode;
+import com.intellij.packageDependencies.ui.PackageDependenciesNode;
+import com.intellij.packageDependencies.ui.PackageNode;
+import com.intellij.packageDependencies.ui.PackageTreeExpansionMonitor;
+import com.intellij.packageDependencies.ui.RootNode;
+import com.intellij.packageDependencies.ui.TreeExpansionMonitor;
+import com.intellij.packageDependencies.ui.TreeModel;
+import com.intellij.packageDependencies.ui.TreeModelBuilder;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiPackage;
-import com.intellij.ui.*;
+import com.intellij.ui.ColoredTreeCellRenderer;
+import com.intellij.ui.PopupHandler;
+import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.SmartExpander;
+import com.intellij.ui.TreeUIHelper;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.EditSourceOnDoubleClickHandler;
+import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JTree;
+import javax.swing.SwingUtilities;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
 import javax.swing.tree.TreeSelectionModel;
-import java.awt.*;
-import java.util.*;
+import java.awt.BorderLayout;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class CyclicDependenciesPanel extends JPanel implements Disposable, UiDataProvider {
   private static final Set<PsiFile> EMPTY_FILE_SET = new HashSet<>(0);
@@ -45,8 +83,8 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
   private final MyTree myRightTree = new MyTree();
   private final DependenciesUsagesPanel myUsagesPanel;
 
-  private final TreeExpansionMonitor myRightTreeExpansionMonitor;
-  private final TreeExpansionMonitor myLeftTreeExpansionMonitor;
+  private final TreeExpansionMonitor<PackageDependenciesNode> myRightTreeExpansionMonitor;
+  private final TreeExpansionMonitor<PackageDependenciesNode> myLeftTreeExpansionMonitor;
 
   private final Project myProject;
   private final CyclicDependenciesBuilder myBuilder;
@@ -83,13 +121,12 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
     updateLeftTreeModel();
     updateRightTreeModel();
 
-    myLeftTree.getSelectionModel().addTreeSelectionListener(__ -> {
+    myLeftTree.getSelectionModel().addTreeSelectionListener(_ -> {
       updateRightTreeModel();
       myUsagesPanel.setToInitialPosition();
     });
 
-    myRightTree.getSelectionModel().addTreeSelectionListener(__ -> SwingUtilities.invokeLater(() -> {
-      Set<PsiFile> searchIn = getSelectedScope(myRightTree);
+    myRightTree.getSelectionModel().addTreeSelectionListener(_ -> SwingUtilities.invokeLater(() -> {
       final PackageNode selectedPackageNode = getSelectedPackage(myRightTree);
       if (selectedPackageNode == null) {
         return;
@@ -102,16 +139,19 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
         searchFor.addAll(myBuilder.getDependentFilesInPackage((PsiPackage)packageNode.getPsiElement(),
                                                               (PsiPackage)nextPackageNode.getPsiElement()));
       }
-      if (searchIn.isEmpty() || searchFor.isEmpty()) {
-        myUsagesPanel.setToInitialPosition();
-      }
-      else {
-        String pack1Name = ((PsiPackage)nextPackageNode.getPsiElement()).getQualifiedName();
-        String pack2Name = ((PsiPackage)selectedPackageNode.getPsiElement()).getQualifiedName();
-        myBuilder.setRootNodeNameInUsageView(JavaBundle.message("cyclic.dependencies.usage.view.root.node.text",
-                                                                         pack1Name, pack2Name));
-        myUsagesPanel.findUsages(searchIn, searchFor);
-      }
+      ReadAction.nonBlocking(() -> getSelectedScope(myRightTree))
+        .finishOnUiThread(ModalityState.nonModal(), searchIn -> {
+          if (searchIn.isEmpty() || searchFor.isEmpty()) {
+            myUsagesPanel.setToInitialPosition();
+          }
+          else {
+            String pack1Name = ((PsiPackage)nextPackageNode.getPsiElement()).getQualifiedName();
+            String pack2Name = ((PsiPackage)selectedPackageNode.getPsiElement()).getQualifiedName();
+            myBuilder.setRootNodeNameInUsageView(JavaBundle.message("cyclic.dependencies.usage.view.root.node.text", pack1Name, pack2Name));
+            myUsagesPanel.findUsages(searchIn, searchFor);
+          }
+        })
+        .submit(AppExecutorUtil.getAppExecutorService());
     }));
 
     initTree(myLeftTree);
@@ -186,6 +226,7 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
     group.add(new GroupByScopeTypeAction());
 
     ActionToolbar toolbar = ActionManager.getInstance().createActionToolbar("CyclicDependencies", group, true);
+    toolbar.setTargetComponent(this);
     return toolbar.getComponent();
   }
 
@@ -208,23 +249,29 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
   }
 
   private void updateLeftTreeModel() {
-    final Set<PsiPackage> psiPackages = myDependencies.keySet();
-    final Set<PsiFile> psiFiles = new HashSet<>();
-    for (PsiPackage psiPackage : psiPackages) {
-      final Set<List<PsiPackage>> cycles = myDependencies.get(psiPackage);
-      if (!mySettings.UI_FILTER_OUT_OF_CYCLE_PACKAGES || cycles != null && !cycles.isEmpty()) {
-        psiFiles.addAll(getPackageFiles(psiPackage));
-      }
-    }
     boolean showFiles = mySettings.UI_SHOW_FILES; //do not show files in the left tree
     mySettings.UI_FLATTEN_PACKAGES = true;
     mySettings.UI_SHOW_FILES = false;
     myLeftTreeExpansionMonitor.freeze();
-    myLeftTree.setModel(TreeModelBuilder.createTreeModel(myProject, false, psiFiles, __ -> false, mySettings));
-    myLeftTreeExpansionMonitor.restore();
-    expandFirstLevel(myLeftTree);
-    mySettings.UI_SHOW_FILES = showFiles;
-    mySettings.UI_FLATTEN_PACKAGES = false;
+    ReadAction.nonBlocking(() -> {
+        final Set<PsiFile> psiFiles = new HashSet<>();
+        for (Map.Entry<PsiPackage, Set<List<PsiPackage>>> entry : myDependencies.entrySet()) {
+          final PsiPackage psiPackage = entry.getKey();
+          final Set<List<PsiPackage>> cycles = entry.getValue();
+          if (!mySettings.UI_FILTER_OUT_OF_CYCLE_PACKAGES || cycles != null && !cycles.isEmpty()) {
+            psiFiles.addAll(getPackageFiles(psiPackage));
+          }
+        }
+        return TreeModelBuilder.createTreeModel(myProject, false, psiFiles, _ -> false, mySettings);
+      })
+      .finishOnUiThread(ModalityState.any(), model -> {
+        myLeftTree.setModel(model);
+        myLeftTreeExpansionMonitor.restore();
+        expandFirstLevel(myLeftTree);
+        mySettings.UI_SHOW_FILES = showFiles;
+        mySettings.UI_FLATTEN_PACKAGES = false;
+      })
+      .submit(AppExecutorUtil.getAppExecutorService());
   }
 
   private static ActionGroup createTreePopupActions() {
@@ -235,45 +282,52 @@ public final class CyclicDependenciesPanel extends JPanel implements Disposable,
   }
 
   private void updateRightTreeModel() {
-    PackageDependenciesNode root = new RootNode(myProject);
     final PackageNode packageNode = getSelectedPackage(myLeftTree);
-    if (packageNode != null) {
-      boolean group = mySettings.UI_GROUP_BY_SCOPE_TYPE;
-      mySettings.UI_GROUP_BY_SCOPE_TYPE = false;
-      final PsiPackage aPackage = (PsiPackage)packageNode.getPsiElement();
-      final Set<List<PsiPackage>> cyclesOfPackages = myDependencies.get(aPackage);
-      for (List<PsiPackage> packCycle : cyclesOfPackages) {
-        PackageDependenciesNode[] nodes = new PackageDependenciesNode[packCycle.size()];
-        for (int i = packCycle.size() - 1; i >= 0; i--) {
-          final PsiPackage psiPackage = packCycle.get(i);
-          PsiPackage nextPackage = packCycle.get(i == 0 ? packCycle.size() - 1 : i - 1);
-          PsiPackage prevPackage = packCycle.get(i == packCycle.size() - 1 ? 0 : i + 1);
-          final Set<PsiFile> dependentFilesInPackage = myBuilder.getDependentFilesInPackage(prevPackage, psiPackage, nextPackage);
+    ReadAction.nonBlocking(() -> {
+        PackageDependenciesNode root = new RootNode(myProject);
+        if (packageNode != null) {
+          boolean group = mySettings.UI_GROUP_BY_SCOPE_TYPE;
+          mySettings.UI_GROUP_BY_SCOPE_TYPE = false;
+          final PsiPackage aPackage = (PsiPackage)packageNode.getPsiElement();
+          for (List<PsiPackage> packCycle : myDependencies.get(aPackage)) {
+            PackageDependenciesNode[] nodes = new PackageDependenciesNode[packCycle.size()];
+            for (int i = packCycle.size() - 1; i >= 0; i--) {
+              final PsiPackage psiPackage = packCycle.get(i);
+              PsiPackage nextPackage = packCycle.get(i == 0 ? packCycle.size() - 1 : i - 1);
+              PsiPackage prevPackage = packCycle.get(i == packCycle.size() - 1 ? 0 : i + 1);
+              final Set<PsiFile> dependentFilesInPackage = myBuilder.getDependentFilesInPackage(prevPackage, psiPackage, nextPackage);
 
-          final PackageDependenciesNode pack = (PackageDependenciesNode)TreeModelBuilder
-            .createTreeModel(myProject, false, dependentFilesInPackage, __ -> false, mySettings).getRoot();
-          nodes[i] = hideEmptyMiddlePackages((PackageDependenciesNode)pack.getChildAt(0), new StringBuffer());
-        }
+              final PackageDependenciesNode node = (PackageDependenciesNode)TreeModelBuilder
+                .createTreeModel(myProject, false, dependentFilesInPackage, _ -> false, mySettings).getRoot();
+              nodes[i] = hideEmptyMiddlePackages((PackageDependenciesNode)node.getChildAt(0), new StringBuffer());
+            }
 
-        PackageDependenciesNode cycleNode = new CycleNode(myProject);
-        for (PackageDependenciesNode node : nodes) {
-          node.setEquals(true);
-          cycleNode.insert(node, 0);
+            PackageDependenciesNode cycleNode = new CycleNode(myProject);
+            for (PackageDependenciesNode node : nodes) {
+              node.setEquals(true);
+              cycleNode.insert(node, 0);
+            }
+            root.add(cycleNode);
+          }
+
+          mySettings.UI_GROUP_BY_SCOPE_TYPE = group;
         }
-        root.add(cycleNode);
-      }
-      mySettings.UI_GROUP_BY_SCOPE_TYPE = group;
-    }
-    myRightTreeExpansionMonitor.freeze();
-    myRightTree.setModel(new TreeModel(root, -1, -1));
-    myRightTreeExpansionMonitor.restore();
-    expandFirstLevel(myRightTree);
+        return root;
+      })
+      .finishOnUiThread(ModalityState.nonModal(),
+                        root -> {
+                          myRightTreeExpansionMonitor.freeze();
+                          myRightTree.setModel(new TreeModel(root, -1, -1));
+                          myRightTreeExpansionMonitor.restore();
+                          expandFirstLevel(myRightTree);
+                        }
+      )
+      .submit(AppExecutorUtil.getAppExecutorService());
   }
 
   private HashSet<PsiFile> getPackageFiles(final PsiPackage psiPackage) {
     final HashSet<PsiFile> psiFiles = new HashSet<>();
-    final PsiClass[] classes = psiPackage.getClasses();
-    for (PsiClass aClass : classes) {
+    for (PsiClass aClass : psiPackage.getClasses()) {
       final PsiFile file = aClass.getContainingFile();
       if (myBuilder.getScope().contains(file)) {
         psiFiles.add(file);

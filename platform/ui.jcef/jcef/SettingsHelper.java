@@ -85,7 +85,7 @@ final class SettingsHelper {
           LOG.info("JCEF-sandbox was disabled because java-process initialized without sandbox");
           settings.no_sandbox = true;
         }
-      } else if (SystemInfoRt.isMac) {
+      } else if (SystemInfoRt.isMac && !config.isRemoteEnabled()) {
         ProcessHandle.Info i = ProcessHandle.current().info();
         Optional<String> processAppPath = i.command();
         String appBundlePath = getMacAppBundlePath();
@@ -113,6 +113,10 @@ final class SettingsHelper {
             settings.no_sandbox = true;
           }
         }
+      }
+      if (Registry.is("ide.browser.jcef.run-under-superuser.allowed")) {
+        LOG.warn("ide.browser.jcef.run-under-superuser.allowed applied, JCEF-sandbox is disabled");
+        settings.no_sandbox = true;
       }
     }
     return settings;
@@ -201,6 +205,9 @@ final class SettingsHelper {
     }
 
     args = ArrayUtil.mergeArrays(args, "--autoplay-policy=no-user-gesture-required", "--disable-component-update");
+    if (SystemInfoRt.isLinux && !StringUtil.isEmptyOrSpaces(System.getenv("DISPLAY"))) {
+      args = ArrayUtil.mergeArrays(args, "--ozone-platform=x11");
+    }
 
     return args;
   }

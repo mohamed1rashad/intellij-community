@@ -11,7 +11,13 @@ import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ApplicationNamesInfo;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.fileTypes.*;
+import com.intellij.openapi.fileTypes.FileNameMatcher;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.FileTypeRegistry;
+import com.intellij.openapi.fileTypes.FileTypes;
+import com.intellij.openapi.fileTypes.FileTypesBundle;
+import com.intellij.openapi.fileTypes.UserFileType;
 import com.intellij.openapi.fileTypes.impl.associate.OSAssociateFileTypesUtil;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.SearchableConfigurable;
@@ -25,7 +31,16 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.psi.templateLanguages.TemplateDataLanguagePatterns;
-import com.intellij.ui.*;
+import com.intellij.ui.ColoredListCellRenderer;
+import com.intellij.ui.DoubleClickListener;
+import com.intellij.ui.IdeBorderFactory;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.JBSplitter;
+import com.intellij.ui.ListUtil;
+import com.intellij.ui.ScrollingUtil;
+import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.SpeedSearchBase;
+import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBScrollPane;
@@ -38,11 +53,29 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.DefaultListModel;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ListSelectionModel;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Insets;
+import java.awt.Point;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
+import java.util.Set;
 
 import static com.intellij.openapi.util.Pair.pair;
 
@@ -83,12 +116,12 @@ public final class FileTypeConfigurable implements SearchableConfigurable, Confi
 
     myFileTypePanel.myUpperPanel.add(splitter, BorderLayout.CENTER);
 
-    myRecognizedFileType.myFileTypesList.addListSelectionListener(__ -> updateExtensionList());
+    myRecognizedFileType.myFileTypesList.addListSelectionListener(_ -> updateExtensionList());
     myFileTypePanel.myAssociatePanel.setVisible(OSAssociateFileTypesUtil.isAvailable());
     myFileTypePanel.myAssociatePanel.setBorder(JBUI.Borders.emptyTop(16));
     myFileTypePanel.myAssociateButton.setText(
       FileTypesBundle.message("filetype.associate.button", ApplicationNamesInfo.getInstance().getFullProductName()));
-    myFileTypePanel.myAssociateButton.addActionListener(__ -> OSAssociateFileTypesUtil.chooseAndAssociate(
+    myFileTypePanel.myAssociateButton.addActionListener(_ -> OSAssociateFileTypesUtil.chooseAndAssociate(
       new OSAssociateFileTypesUtil.Callback() {
         @Override
         public void beforeStart() {
@@ -463,9 +496,9 @@ public final class FileTypeConfigurable implements SearchableConfigurable, Confi
       ToolbarDecorator toolbarDecorator = ToolbarDecorator.createDecorator(myFileTypesList)
         .setScrollPaneBorder(JBUI.Borders.empty())
         .setPanelBorder(JBUI.Borders.customLine(JBColor.border(),1,1,0,1))
-        .setAddAction(__ -> addFileType())
-        .setRemoveAction(__ -> removeFileType())
-        .setEditAction(__ -> editFileType())
+        .setAddAction(_ -> addFileType())
+        .setRemoveAction(_ -> removeFileType())
+        .setEditAction(_ -> editFileType())
         .setEditActionUpdater(e -> selectedTypeCanBeModified())
         .setRemoveActionUpdater(e -> selectedTypeCanBeModified())
         .disableUpDownActions();
@@ -608,9 +641,9 @@ public final class FileTypeConfigurable implements SearchableConfigurable, Confi
       ToolbarDecorator decorator = ToolbarDecorator.createDecorator(myList)
         .setScrollPaneBorder(JBUI.Borders.empty())
         .setPanelBorder(JBUI.Borders.customLine(JBColor.border(),1,1,0,1))
-        .setAddAction(__ -> addPattern())
-        .setEditAction(__ -> editPattern())
-        .setRemoveAction(__ -> removePattern())
+        .setAddAction(_ -> addPattern())
+        .setEditAction(_ -> editPattern())
+        .setRemoveAction(_ -> removePattern())
         .disableUpDownActions();
       add(decorator.createPanel(), BorderLayout.NORTH);
       JScrollPane scrollPane = new JBScrollPane(myList);
@@ -672,10 +705,10 @@ public final class FileTypeConfigurable implements SearchableConfigurable, Confi
       ToolbarDecorator decorator = ToolbarDecorator.createDecorator(myList)
         .setScrollPaneBorder(JBUI.Borders.empty())
         .setPanelBorder(JBUI.Borders.customLine(JBColor.border(),1,1,0,1))
-        .setAddAction(__ -> editHashBang(null))
+        .setAddAction(_ -> editHashBang(null))
         .setAddActionName(LangBundle.message("action.HashBangPanel.add.hashbang.pattern.text"))
-        .setEditAction(__ -> editHashBang())
-        .setRemoveAction(__ -> removeHashBang())
+        .setEditAction(_ -> editHashBang())
+        .setRemoveAction(_ -> removeHashBang())
         .disableUpDownActions();
 
       add(decorator.createPanel(), BorderLayout.NORTH);

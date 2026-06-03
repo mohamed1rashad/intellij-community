@@ -108,19 +108,24 @@ print('Reachable')
                    """);
   }
 
-  // PY-81936
+  // PY-83344
   public void testUnreachableWithLangLevel() {
-    runWithLanguageLevel(LanguageLevel.PYTHON310, () -> doTestByText("""
-import sys
+    runWithLanguageLevel(LanguageLevel.PYTHON310, () -> doTestByText(
+      """
+        import sys
 
-if sys.version_info < (2, 7):
-    <warning descr="This code is unreachable">print("Unreachable")</warning>
-
-if sys.version_info > (3, 11):
-    <warning descr="This code is unreachable">print("Unreachable")</warning>
-                   """));
+        if sys.version_info < (2, 7):
+            print("Unreachable")
+        
+        if sys.version_info > (3, 11):
+            print("Unreachable")
+        
+        if sys.version_info < (3,) or sys.version_info >= (3, 11):
+            print("Unreachable")
+        """
+    ));
   }
-  
+
   // PY-81947
   public void testAnyOrNoneAfterIsNotNoneCast(){
     doTestByText("""
@@ -642,6 +647,22 @@ async def nosupAssertFalse(b):
     );
   }
 
+  // PY-83625
+  public void testNoUnreachableAfterIsBetweenLiteralUnionVariables() {
+    doTestByText(
+      """
+        from typing import Literal
+
+        Value = Literal[1, 2]
+
+        def f(t: Value, data: list[Value]):
+            for item in data:
+                if item is t:
+                    return
+                print("reachable")"""
+    );
+  }
+
   // PY-48760
   public void testContinueInCaseClause() {
     doTest();
@@ -700,6 +721,24 @@ async def nosupAssertFalse(b):
     runWithLanguageLevel(LanguageLevel.getLatest(), () -> {
       doTest();
     });
+  }
+
+  // PY-50642
+  public void testTypeChecking() {
+    doTestByText(
+      """
+        from typing import TYPE_CHECKING
+        
+        if TYPE_CHECKING:
+            x: int = 1
+        else:
+            x: str = "ab"
+        
+        if not TYPE_CHECKING:
+            y: list[int] = [1, 2]
+        else:
+            y: list[str] = ['a', 'b']"""
+    );
   }
 
   @NotNull

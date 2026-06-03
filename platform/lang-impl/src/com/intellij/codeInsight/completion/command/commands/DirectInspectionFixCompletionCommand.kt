@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion.command.commands
 
 import com.intellij.analysis.AnalysisBundle.message
@@ -32,7 +32,7 @@ import org.jetbrains.annotations.Nls
 import javax.swing.Icon
 
 class DirectInspectionFixCompletionCommand(
-  val inspectionId: String,
+  val inspectionIds: List<String>,
   override val presentableName: @Nls String,
   override val priority: Int?,
   override val icon: Icon?,
@@ -53,18 +53,22 @@ class DirectInspectionFixCompletionCommand(
     val action: IntentionAction? = runWithModalProgressBlocking(psiFile.project, message("scanning.scope.progress.title")) {
       val profileToUse = ProjectInspectionProfileManager.getInstance(psiFile.project).getCurrentProfile()
       val inspectionWrapper = InspectionProfileWrapper(profileToUse)
-      var inspectionTool = inspectionWrapper.inspectionProfile.getInspectionTool(inspectionId, psiFile.project)
-      if (inspectionTool == null) return@runWithModalProgressBlocking null
-      if (inspectionTool is GlobalInspectionToolWrapper) {
-        inspectionTool = inspectionTool.sharedLocalInspectionToolWrapper
+      val inspectionTools = mutableListOf<LocalInspectionToolWrapper>()
+      for (id in inspectionIds) {
+        var inspectionTool = inspectionWrapper.inspectionProfile.getInspectionTool(id, psiFile.project)
+        if (inspectionTool == null) return@runWithModalProgressBlocking null
+        if (inspectionTool is GlobalInspectionToolWrapper) {
+          inspectionTool = inspectionTool.sharedLocalInspectionToolWrapper
+        }
+        if (inspectionTool !is LocalInspectionToolWrapper) return@runWithModalProgressBlocking null
+        inspectionTools.add(inspectionTool)
       }
-      if (inspectionTool !is LocalInspectionToolWrapper) return@runWithModalProgressBlocking null
       val lineRange = getLineRange(topLevelFile, topLevelTargetOffset)
       val indicator = EmptyProgressIndicator()
       val inspectionResult = readAction {
         jobToIndicator(currentThreadContext().job, indicator) {
           if (!isInjected) {
-            inspectEx(listOf(inspectionTool), topLevelFile, lineRange, lineRange, true, false, true,
+            inspectEx(inspectionTools, topLevelFile, lineRange, lineRange, true, false, true,
                       indicator,
                       fun(_: LocalInspectionToolWrapper, _: ProblemDescriptor): Boolean {
                         return true
@@ -72,7 +76,7 @@ class DirectInspectionFixCompletionCommand(
           }
           else {
             val textRange = getLineRange(psiFile, targetOffset)
-            InspectionEngine.inspectElements(listOf(inspectionTool), psiFile, textRange, true, true, indicator,
+            InspectionEngine.inspectElements(inspectionTools, psiFile, textRange, true, true, indicator,
                                              PsiTreeUtil.collectElements(psiFile) { it.textRange.intersects(textRange) }.toList(), fun(_: LocalInspectionToolWrapper, _: ProblemDescriptor): Boolean {
               return true
             })
@@ -90,7 +94,8 @@ class DirectInspectionFixCompletionCommand(
             val fixes = descriptor.fixes ?: continue
             for (i in 0..fixes.size - 1) {
               val intentionAction = wrap(descriptor, i)
-              if (intentionAction.text == presentableName && availableFor(psiFile, editor, targetOffset, intentionAction)) {
+              if (availableFor(psiFile, editor, targetOffset, intentionAction) &&
+                  intentionAction.text == presentableName) {
                 return@readAction intentionAction
               }
             }

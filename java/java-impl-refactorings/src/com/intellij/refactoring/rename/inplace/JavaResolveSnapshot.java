@@ -4,16 +4,25 @@ package com.intellij.refactoring.rename.inplace;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaRecursiveElementWalkingVisitor;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.refactoring.rename.RenameJavaMemberProcessor;
 import com.intellij.refactoring.rename.ResolveSnapshotProvider;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
 
 class JavaResolveSnapshot extends ResolveSnapshotProvider.ResolveSnapshot {
-  private final Map<SmartPsiElementPointer<?>, SmartPsiElementPointer<?>> myReferencesMap = new HashMap<>();
+  private final Map<SmartPsiElementPointer<?>, SmartPsiElementPointer<?>> myReferencesMap = new IdentityHashMap<>();
   private final Project myProject;
   private final Document myDocument;
 
@@ -21,7 +30,7 @@ class JavaResolveSnapshot extends ResolveSnapshotProvider.ResolveSnapshot {
     myProject = scope.getProject();
     myDocument = FileDocumentManager.getInstance().getDocument(scope.getContainingFile().getViewProvider().getVirtualFile(), myProject);
     final SmartPointerManager pointerManager = SmartPointerManager.getInstance(myProject);
-    final Map<PsiElement, SmartPsiElementPointer<?>> pointers = new HashMap<>();
+    final Map<PsiElement, SmartPsiElementPointer<?>> pointers = new IdentityHashMap<>();
     scope.accept(new JavaRecursiveElementWalkingVisitor() {
       @Override public void visitReferenceExpression(@NotNull PsiReferenceExpression refExpr) {
         if (!refExpr.isQualified()) {

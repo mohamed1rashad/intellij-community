@@ -4,16 +4,17 @@ package com.intellij.ui.tree.ui
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.ui.treeStructure.CachingTreePath
+import com.intellij.util.concurrency.ThreadingAssertions
+import com.intellij.util.ui.EDT
 import com.intellij.util.ui.JBUI
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.VisibleForTesting
 import java.awt.Rectangle
-import java.util.*
+import java.util.Enumeration
 import javax.swing.event.TreeModelEvent
 import javax.swing.tree.AbstractLayoutCache
 import javax.swing.tree.TreeModel
 import javax.swing.tree.TreePath
-import kotlin.collections.ArrayDeque
 import kotlin.math.max
 
 @ApiStatus.Internal
@@ -225,18 +226,30 @@ class DefaultTreeLayoutCache(
     val changedValue = changedNode.userObject
     val changedChildIndexes = e?.childIndices ?: return
     val model = this.model ?: return
-    // We must do it in two passes: first remove all path mappings, then add the new ones.
-    // If we do it in one loop, we may end up in an inconsistent state
-    // if the new path of some child is equal to the old path of some other child.
-    // For example, when the children were sorted by the model.
-    for (i in changedChildIndexes) {
+    if (changedChildIndexes.size == 1) {
+      val i = changedChildIndexes[0]
       val changedChildNode = changedNode.getChildAt(i)
-      changedChildNode.removePathsRecursively()
-    }
-    for (i in changedChildIndexes) {
-      val changedChildNode = changedNode.getChildAt(i)
-      changedChildNode.addPathsRecursively(changedNode.path, model.getChild(changedValue, i))
+      val newUserObject = model.getChild(changedValue, i)
+      if (newUserObject !== changedChildNode.userObject) {
+        changedChildNode.removePathsRecursively()
+        changedChildNode.addPathsRecursively(changedNode.path, newUserObject)
+      }
       changedChildNode.invalidateSize()
+    }
+    else {
+      // We must do it in two passes: first remove all path mappings, then add the new ones.
+      // If we do it in one loop, we may end up in an inconsistent state
+      // if the new path of some child is equal to the old path of some other child.
+      // For example, when the children were sorted by the model.
+      for (i in changedChildIndexes) {
+        val changedChildNode = changedNode.getChildAt(i)
+        changedChildNode.removePathsRecursively()
+      }
+      for (i in changedChildIndexes) {
+        val changedChildNode = changedNode.getChildAt(i)
+        changedChildNode.addPathsRecursively(changedNode.path, model.getChild(changedValue, i))
+        changedChildNode.invalidateSize()
+      }
     }
     checkInvariants(Location("treeNodesChanged(value=%s, indices=%s)", changedValue, changedChildIndexes))
   }
@@ -711,14 +724,29 @@ class DefaultTreeLayoutCache(
 
     private val nodes = mutableListOf<Node>()
     private var minimumAffectedRow: Int = -1
+    
+    @Volatile private var isEdtAssertionEnabled = false
 
     override fun iterator(): Iterator<Node> = nodes.iterator()
 
     fun clear() {
+      assertCorrectThread()
       for (node in nodes) {
         node.row = -1
       }
       nodes.clear()
+    }
+    
+    private fun assertCorrectThread() {
+      // There are too many places where UI is created on a BGT by accident.
+      // Those are bad enough by themselves, but out of scope for this check.
+      // So we start asserting only after it's accessed for the first time from the EDT.
+      if (EDT.isCurrentThreadEdt()) {
+        isEdtAssertionEnabled = true
+      }
+      if (isEdtAssertionEnabled) {
+        ThreadingAssertions.softAssertEventDispatchThread()
+      }
     }
 
     inline fun update(update: () -> Unit) {
@@ -730,6 +758,7 @@ class DefaultTreeLayoutCache(
     }
 
     inline fun updateImpl(location: Location?, update: () -> Unit) {
+      assertCorrectThread()
       val reentry = minimumAffectedRow != -1
       if (reentry) { // Indirect recursion will update later up the stack.
         update()
@@ -901,6 +930,9 @@ class DefaultTreeLayoutCache(
     private val messages = mutableListOf<String>()
 
     fun checkInvariants() {
+      if (LOG.isTraceEnabled) {
+        dumpState()
+      }
       if (rows.isEmpty()) {
         checkEmptyTree()
         return
@@ -917,6 +949,24 @@ class DefaultTreeLayoutCache(
         }
         // Log as ERROR to get a notification, but it still only happens when DEBUG is enabled, for performance reasons.
         LOG.error(Exception(details.toString()))
+      }
+    }
+
+    private fun dumpState() {
+      LOG.trace("Rows:")
+      for ((index, node) in rows.withIndex()) {
+        LOG.trace("$index: ${node.path}")
+      }
+      LOG.trace("Nodes:")
+      dumpNodes(root, 0)
+    }
+
+    private fun dumpNodes(root: Node?, depth: Int) {
+      if (root == null) return
+      LOG.trace("${" ".repeat(depth)} ${root.path}")
+      if (!root.isExpanded) return
+      for (node in root.children ?: emptyList()) {
+        dumpNodes(node, depth + 1)
       }
     }
 

@@ -1,7 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.configurations.coverage;
 
-import com.intellij.coverage.*;
+import com.intellij.coverage.CoverageLogger;
+import com.intellij.coverage.CoverageRunner;
+import com.intellij.coverage.CoverageSuite;
+import com.intellij.coverage.IDEACoverageRunner;
+import com.intellij.coverage.JavaCoverageEngine;
+import com.intellij.coverage.JavaCoverageRunner;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.SimpleJavaParameters;
 import com.intellij.execution.target.TargetEnvironment;
@@ -19,7 +24,6 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -78,7 +82,7 @@ public final class JavaCoverageEnabledConfiguration extends CoverageEnabledConfi
       CoverageLogger.logStarted(runner, suite.isBranchCoverage(), suite.isCoverageByTestEnabled(),
                                 patterns == null ? 0 : patterns.length,
                                 excludePatterns == null ? 0 : excludePatterns.length);
-      javaCoverageRunner.appendCoverageArgument(new File(path).getAbsolutePath(),
+      javaCoverageRunner.appendCoverageArgument(Path.of(path).toAbsolutePath().toString(),
                                                 patterns,
                                                 excludePatterns,
                                                 javaParameters,

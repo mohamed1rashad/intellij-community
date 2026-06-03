@@ -2,11 +2,26 @@
 package com.intellij.copyright
 
 import com.intellij.concurrency.ConcurrentCollectionFactory
-import com.intellij.configurationStore.*
+import com.intellij.configurationStore.InitializedSchemeWrapper
+import com.intellij.configurationStore.LazySchemeProcessor
+import com.intellij.configurationStore.LazySchemeWrapper
+import com.intellij.configurationStore.OLD_NAME_CONVERTER
+import com.intellij.configurationStore.SchemeDataHolder
+import com.intellij.configurationStore.SchemeManagerIprProvider
+import com.intellij.configurationStore.SchemeWrapper
+import com.intellij.configurationStore.deserializeInto
+import com.intellij.configurationStore.unwrapState
+import com.intellij.configurationStore.wrapState
 import com.intellij.openapi.application.AppUIExecutor
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -36,6 +51,7 @@ import com.maddyhome.idea.copyright.options.LanguageOptions
 import com.maddyhome.idea.copyright.options.Options
 import com.maddyhome.idea.copyright.util.FileTypeUtil
 import org.jdom.Element
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.function.Function
@@ -263,6 +279,19 @@ class CopyrightManager @NonInjectable constructor(private val project: Project,
   }
 }
 
+private val copyrightUpdateDisabled = mutableSetOf<Project>()
+
+@ApiStatus.Internal
+suspend fun withCopyrightUpdateDisabled(project: Project, action: suspend () -> Unit) {
+  copyrightUpdateDisabled.add(project)
+  try {
+    action()
+  }
+  finally {
+    copyrightUpdateDisabled.remove(project)
+  }
+}
+
 private class CopyrightManagerDocumentListener : BulkFileListenerBackgroundable {
   private val newFilePaths = ConcurrentCollectionFactory.createConcurrentSet<String>()
 
@@ -297,7 +326,7 @@ private class CopyrightManagerDocumentListener : BulkFileListenerBackgroundable 
 
         val projectManager = serviceIfCreated<ProjectManager>() ?: return
         for (project in projectManager.openProjects) {
-          if (project.isDisposed) {
+          if (project.isDisposed || copyrightUpdateDisabled.contains(project)) {
             continue
           }
 

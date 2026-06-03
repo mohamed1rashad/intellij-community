@@ -3,28 +3,109 @@ package org.jetbrains.uast.java.generate
 
 import com.intellij.codeInsight.BlockUtils
 import com.intellij.codeInsight.intention.impl.AddOnDemandStaticImportAction
+import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.lang.Language
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.lang.jvm.JvmModifier
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.psi.*
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.PsiBinaryExpression
+import com.intellij.psi.PsiBlockStatement
+import com.intellij.psi.PsiClassType
+import com.intellij.psi.PsiCodeBlock
+import com.intellij.psi.PsiComment
+import com.intellij.psi.PsiDeclarationStatement
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiElementFactory
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiExpressionStatement
+import com.intellij.psi.PsiFileFactory
+import com.intellij.psi.PsiIdentifier
+import com.intellij.psi.PsiIfStatement
+import com.intellij.psi.PsiJavaFile
+import com.intellij.psi.PsiLambdaExpression
+import com.intellij.psi.PsiLocalVariable
+import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiMethodReferenceExpression
+import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiParenthesizedExpression
+import com.intellij.psi.PsiPolyadicExpression
+import com.intellij.psi.PsiPrefixExpression
+import com.intellij.psi.PsiReference
+import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiReturnStatement
+import com.intellij.psi.PsiStatement
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiVariable
+import com.intellij.psi.PsiWhiteSpace
+import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.codeStyle.JavaCodeStyleManager
 import com.intellij.psi.codeStyle.VariableKind
 import com.intellij.psi.impl.PsiDiamondTypeUtil
 import com.intellij.psi.impl.source.tree.CompositeElement
 import com.intellij.psi.impl.source.tree.ElementType
 import com.intellij.psi.impl.source.tree.java.PsiLiteralExpressionImpl
-import com.intellij.psi.util.*
+import com.intellij.psi.util.PsiTypesUtil
+import com.intellij.psi.util.PsiUtil
+import com.intellij.psi.util.childrenOfType
+import com.intellij.psi.util.elementType
+import com.intellij.psi.util.siblings
+import com.intellij.util.IncorrectOperationException
 import com.intellij.util.asSafely
 import com.siyeh.ig.psiutils.CommentTracker
 import com.siyeh.ig.psiutils.ParenthesesUtils
-import org.jetbrains.uast.*
+import org.jetbrains.uast.UBinaryExpression
+import org.jetbrains.uast.UBlockExpression
+import org.jetbrains.uast.UCallExpression
+import org.jetbrains.uast.UCallableReferenceExpression
+import org.jetbrains.uast.UClass
+import org.jetbrains.uast.UComment
+import org.jetbrains.uast.UDeclaration
+import org.jetbrains.uast.UDeclarationsExpression
+import org.jetbrains.uast.UElement
+import org.jetbrains.uast.UExpression
+import org.jetbrains.uast.UField
+import org.jetbrains.uast.UIfExpression
+import org.jetbrains.uast.ULambdaExpression
+import org.jetbrains.uast.ULiteralExpression
+import org.jetbrains.uast.ULocalVariable
+import org.jetbrains.uast.UMethod
+import org.jetbrains.uast.UParameter
+import org.jetbrains.uast.UParenthesizedExpression
+import org.jetbrains.uast.UPolyadicExpression
+import org.jetbrains.uast.UQualifiedReferenceExpression
+import org.jetbrains.uast.UReferenceExpression
+import org.jetbrains.uast.UReturnExpression
+import org.jetbrains.uast.USimpleNameReferenceExpression
+import org.jetbrains.uast.UVariable
+import org.jetbrains.uast.UastBinaryOperator
+import org.jetbrains.uast.UastCallKind
 import org.jetbrains.uast.generate.UParameterInfo
 import org.jetbrains.uast.generate.UastCodeGenerationPlugin
 import org.jetbrains.uast.generate.UastCommentSaver
 import org.jetbrains.uast.generate.UastElementFactory
-import org.jetbrains.uast.java.*
+import org.jetbrains.uast.getParentOfType
+import org.jetbrains.uast.java.JavaUBinaryExpression
+import org.jetbrains.uast.java.JavaUBlockExpression
+import org.jetbrains.uast.java.JavaUCallExpression
+import org.jetbrains.uast.java.JavaUCallableReferenceExpression
+import org.jetbrains.uast.java.JavaUDeclarationsExpression
+import org.jetbrains.uast.java.JavaUIfExpression
+import org.jetbrains.uast.java.JavaULambdaExpression
+import org.jetbrains.uast.java.JavaULiteralExpression
+import org.jetbrains.uast.java.JavaULocalVariable
+import org.jetbrains.uast.java.JavaUParenthesizedExpression
+import org.jetbrains.uast.java.JavaUPolyadicExpression
+import org.jetbrains.uast.java.JavaUPrefixExpression
+import org.jetbrains.uast.java.JavaUQualifiedReferenceExpression
+import org.jetbrains.uast.java.JavaUReturnExpression
+import org.jetbrains.uast.java.JavaUSimpleNameReferenceExpression
+import org.jetbrains.uast.toUElement
+import org.jetbrains.uast.toUElementOfExpectedTypes
+import org.jetbrains.uast.toUElementOfType
 
 internal class JavaUastCodeGenerationPlugin : UastCodeGenerationPlugin {
   override fun getElementFactory(project: Project): UastElementFactory = JavaUastElementFactory(project)
@@ -99,6 +180,12 @@ internal class JavaUastCodeGenerationPlugin : UastCodeGenerationPlugin {
 
   override fun shortenReference(reference: UReferenceExpression): UReferenceExpression? {
     val sourceReference = reference.sourcePsi ?: return null
+    val styleManager = JavaCodeStyleManager.getInstance(sourceReference.project)
+    return styleManager.shortenClassReferences(sourceReference).toUElementOfType()
+  }
+
+  override fun shortenReference(uDeclaration: UDeclaration): UDeclaration? {
+    val sourceReference = uDeclaration.sourcePsi ?: return null
     val styleManager = JavaCodeStyleManager.getInstance(sourceReference.project)
     return styleManager.shortenClassReferences(sourceReference).toUElementOfType()
   }
@@ -299,6 +386,13 @@ class JavaUastElementFactory(private val project: Project) : UastElementFactory 
     return JavaULiteralExpression(literalExpr, null)
   }
 
+  override fun createIntegerConstantExpression(integer: Int, context: PsiElement?): UExpression? {
+    return when (val literalExpr = psiFactory.createExpressionFromText("$integer", context)) {
+      is PsiLiteralExpressionImpl -> JavaULiteralExpression(literalExpr, null)
+      else -> null
+    }
+  }
+
   override fun createLongConstantExpression(long: Long, context: PsiElement?): UExpression? {
     return when (val literalExpr = psiFactory.createExpressionFromText(long.toString() + "L", context)) {
       is PsiLiteralExpressionImpl -> JavaULiteralExpression(literalExpr, null)
@@ -315,6 +409,35 @@ class JavaUastElementFactory(private val project: Project) : UastElementFactory 
 
   override fun createComment(text: String, context: PsiElement?): UComment {
     return psiFactory.createCommentFromText(text, context).toUElementOfType()!!
+  }
+
+  override fun createClass(className: String, extends: List<String>, implements: List<String>, context: PsiElement): UClass? {
+    val extendsPart = if (extends.isNotEmpty())
+      " extends " + extends.joinToString()
+    else
+      ""
+
+    val implementsPart = if (implements.isNotEmpty())
+      " implements " + implements.joinToString()
+    else
+      ""
+
+    val classText = """
+      class $className$extendsPart$implementsPart {
+      }
+    """.trimIndent()
+
+    val aFile = PsiFileFactory.getInstance(context.project)
+      .createFileFromText("_Dummy_." + JavaFileType.INSTANCE.defaultExtension,
+                          JavaFileType.INSTANCE,
+                          classText) as PsiJavaFile
+
+    val classes = aFile.getClasses()
+    if (classes.size != 1) {
+      throw IncorrectOperationException("Incorrect class '$classText'")
+    }
+
+    return classes[0].toUElement(UClass::class.java)
   }
 
   private class MethodCallUpgradeHelper(val project: Project, val methodCall: PsiMethodCallExpression, val expectedReturnType: PsiType) {

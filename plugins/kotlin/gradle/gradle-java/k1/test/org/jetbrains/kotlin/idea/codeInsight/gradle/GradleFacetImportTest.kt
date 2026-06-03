@@ -1,21 +1,17 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.codeInsight.gradle
 
-import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.runReadAction
-import com.intellij.openapi.application.runWriteActionAndWait
 import com.intellij.openapi.externalSystem.importing.ImportSpec
 import com.intellij.openapi.externalSystem.importing.ImportSpecBuilder
-import com.intellij.openapi.projectRoots.JavaSdk
-import com.intellij.openapi.projectRoots.ProjectJdkTable
+import com.intellij.openapi.projectRoots.JavaSdkVersion
 import com.intellij.openapi.roots.LibraryOrderEntry
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.roots.OrderRootType
-import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.roots.impl.libraries.LibraryEx
-import com.intellij.openapi.util.io.FileUtil
 import junit.framework.TestCase
+import junit.framework.TestCase.assertEquals
 import org.jetbrains.jps.model.java.JavaResourceRootType
 import org.jetbrains.jps.model.java.JavaSourceRootType
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType
@@ -23,7 +19,14 @@ import org.jetbrains.kotlin.caches.resolve.KotlinCacheService
 import org.jetbrains.kotlin.cli.common.arguments.K2JSCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.K2MetadataCompilerArguments
-import org.jetbrains.kotlin.config.*
+import org.jetbrains.kotlin.config.IKotlinFacetSettings
+import org.jetbrains.kotlin.config.LanguageFeature
+import org.jetbrains.kotlin.config.LanguageVersion
+import org.jetbrains.kotlin.config.ResourceKotlinRootType
+import org.jetbrains.kotlin.config.SourceKotlinRootType
+import org.jetbrains.kotlin.config.TestResourceKotlinRootType
+import org.jetbrains.kotlin.config.TestSourceKotlinRootType
+import org.jetbrains.kotlin.config.additionalArgumentsAsList
 import org.jetbrains.kotlin.idea.base.platforms.KotlinCommonLibraryKind
 import org.jetbrains.kotlin.idea.base.platforms.KotlinJavaScriptLibraryKind
 import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootMap
@@ -162,7 +165,7 @@ class GradleFacetImportTest8 : KotlinGradleImportingTestCase() {
     }
 
     @Test
-    @TargetVersions("6.0.1") // Gradle 4.9 isn't able to import 1.4 KGP
+    @TargetVersions("6.0.x") // Gradle 4.9 isn't able to import 1.4 KGP
     fun testJpsCompilerMultiModule() {
         configureByFiles()
         importProject()
@@ -412,7 +415,7 @@ class GradleFacetImportTest8 : KotlinGradleImportingTestCase() {
 
     @Ignore
     @Test
-    @TargetVersions("4.9")
+    @TargetVersions("4.9.x")
     fun testCommonImportByPlatformPlugin() {
         configureByFiles()
         importProject()
@@ -631,28 +634,12 @@ class GradleFacetImportTest8 : KotlinGradleImportingTestCase() {
 
     @Test
     fun testJDKImport() {
-        val mockJdkPath = FileUtil.toSystemDependentName("${PathManager.getHomePath()}/community/java/mockJDK-1.8")
-        runWriteActionAndWait {
-            val jdk = JavaSdk.getInstance().createJdk("myJDK", mockJdkPath)
-            runReadAction<ProjectJdkTable> { ProjectJdkTable.getInstance() }.addJdk(jdk)
-            ProjectRootManager.getInstance(myProject).projectSdk = jdk
-        }
+        configureByFiles()
+        importProject()
 
-        try {
-            configureByFiles()
-            importProject()
-
-            val moduleSDK = ModuleRootManager.getInstance(getModule("project.main")).sdk!!
-            assertTrue(moduleSDK.sdkType is JavaSdk)
-            assertEquals("myJDK", moduleSDK.name)
-            assertEquals(mockJdkPath, moduleSDK.homePath?.let(FileUtil::toSystemDependentName))
-        } finally {
-            runWriteActionAndWait {
-                val jdkTable = runReadAction<ProjectJdkTable> { ProjectJdkTable.getInstance() }
-                jdkTable.removeJdk(jdkTable.findJdk("myJDK")!!)
-                ProjectRootManager.getInstance(myProject).projectSdk = null
-            }
-        }
+        assertModuleSdk("project", JavaSdkVersion.JDK_17)
+        assertModuleSdk("project.main", JavaSdkVersion.JDK_17)
+        assertModuleSdk("project.test", JavaSdkVersion.JDK_17)
     }
 
     @Test
@@ -780,14 +767,14 @@ class GradleFacetImportTest8 : KotlinGradleImportingTestCase() {
         assertAllModulesConfigured()
     }
 
+    // kotlin-2js plugin
     @Test
     fun testStableModuleNameWhileUsingGradleJS() {
         configureByFiles()
         importProject()
 
-        checkStableModuleName("project.main", "project", JsPlatforms.defaultJsPlatform, isProduction = true)
-        // Note "_test" suffix: this is current behavior of K2JS Compiler
-        checkStableModuleName("project.test", "project_test", JsPlatforms.defaultJsPlatform, isProduction = false)
+        checkStableModuleName("project.main", "project.main", JsPlatforms.defaultJsPlatform, isProduction = true)
+        checkStableModuleName("project.test", "project.test", JsPlatforms.defaultJsPlatform, isProduction = false)
 
         assertAllModulesConfigured()
     }

@@ -3,22 +3,61 @@
 
 package com.intellij.execution.impl
 
-import com.intellij.configurationStore.*
+import com.intellij.configurationStore.OLD_NAME_CONVERTER
+import com.intellij.configurationStore.SchemeManagerIprProvider
 import com.intellij.configurationStore.SettingsSavingComponent
-import com.intellij.execution.*
+import com.intellij.configurationStore.StreamProvider
+import com.intellij.configurationStore.deserializeAndLoadState
+import com.intellij.configurationStore.serializeStateInto
+import com.intellij.execution.BeforeRunTask
+import com.intellij.execution.BeforeRunTaskProvider
+import com.intellij.execution.ExecutionBundle
+import com.intellij.execution.Executor
+import com.intellij.execution.RunManager
+import com.intellij.execution.RunManagerConfig
+import com.intellij.execution.RunManagerEx
+import com.intellij.execution.RunManagerListener
+import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.execution.actions.ChooseRunConfigurationPopup
-import com.intellij.execution.configurations.*
+import com.intellij.execution.configurations.ConfigurationCreationListener
+import com.intellij.execution.configurations.ConfigurationFactory
+import com.intellij.execution.configurations.ConfigurationType
+import com.intellij.execution.configurations.OngoingRunConfigurationProvider
+import com.intellij.execution.configurations.RunConfiguration
+import com.intellij.execution.configurations.RunProfile
+import com.intellij.execution.configurations.RuntimeConfigurationError
+import com.intellij.execution.configurations.RuntimeConfigurationException
+import com.intellij.execution.configurations.SimpleConfigurationType
+import com.intellij.execution.configurations.SyntheticConfigurationTypeProvider
+import com.intellij.execution.configurations.UnknownConfigurationType
+import com.intellij.execution.configurations.UnknownRunConfiguration
+import com.intellij.execution.configurations.WrappingRunConfiguration
 import com.intellij.execution.runToolbar.RunToolbarSlotManager
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ExecutionUtil
 import com.intellij.execution.runners.ProgramRunner
+import com.intellij.execution.ui.RunConfigurationStartHistory
+import com.intellij.ide.ActivityTracker
 import com.intellij.ide.plugins.DynamicPluginListener
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.*
-import com.intellij.openapi.components.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.runReadActionBlocking
+import com.intellij.openapi.components.ComponentManagerEx
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
 import com.intellij.openapi.components.impl.stores.stateStore
+import com.intellij.openapi.components.service
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.runAndLogException
@@ -33,7 +72,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.impl.ProjectManagerImpl
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.UnknownFeature
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.UnknownFeaturesCollector
-import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Condition
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.io.FileUtilRt
@@ -64,9 +102,13 @@ import com.intellij.util.text.UniqueNameGenerator
 import com.intellij.util.text.nullize
 import com.intellij.util.ui.EDT
 import com.intellij.util.ui.JBUI
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
@@ -419,9 +461,9 @@ open class RunManagerImpl @NonInjectable constructor(val project: Project, priva
     removeConfigurations(deletedRunConfigs, deleteFileIfStoredInArbitraryFile = false)
 
     for (filePath in updatedFilePaths) {
-      val deletedAndAddedRunConfigs = ApplicationManager.getApplication().runReadAction( Computable {
+      val deletedAndAddedRunConfigs = runReadActionBlocking {
         lock.read { rcInArbitraryFileManager.loadChangedRunConfigsFromFile(this, filePath) }
-      })
+      }
 
       for (runConfig in deletedAndAddedRunConfigs.addedRunConfigs) {
         addConfiguration(runConfig)
@@ -558,17 +600,18 @@ open class RunManagerImpl @NonInjectable constructor(val project: Project, priva
   }
 
   fun checkRecentsLimit() {
+    val pinnedIds = RunConfigurationStartHistory.getInstance(project).pinned()
     var removed: MutableList<RunnerAndConfigurationSettings>? = null
     lock.write {
       trimUsageListToLimit()
 
-      var excess = idToSettings.values.count { it.isTemporary } - config.recentsLimit
+      var excess = idToSettings.values.count { it.isTemporary && !pinnedIds.contains(it.uniqueID) } - config.recentsLimit
       if (excess <= 0) {
         return
       }
 
       for (settings in idToSettings.values) {
-        if (settings.isTemporary && !recentlyUsedTemporaries.contains(settings)) {
+        if (settings.isTemporary && !recentlyUsedTemporaries.contains(settings) && !pinnedIds.contains(settings.uniqueID)) {
           if (removed == null) {
             removed = ArrayList()
           }
@@ -618,6 +661,7 @@ open class RunManagerImpl @NonInjectable constructor(val project: Project, priva
       }
 
       eventPublisher.runConfigurationSelected(value)
+      ActivityTracker.getInstance().inc()
     }
 
   internal fun isFileContainsRunConfiguration(file: VirtualFile): Boolean {
@@ -1229,6 +1273,8 @@ open class RunManagerImpl @NonInjectable constructor(val project: Project, priva
           ExecutionUtil.withLiveIndicator(icon)
         runningDescriptors.size > 1 -> icon =
           if (ExperimentalUI.isNewUI()) newUiRunningIcon(icon) else IconUtil.addText(icon, runningDescriptors.size.toString())
+        OngoingRunConfigurationProvider.EP_NAME.extensionList.any { it.hasRunConfigurationRunning(project, settings) } -> icon =
+          ExecutionUtil.withLiveIndicator(icon)
       }
     }
     return icon

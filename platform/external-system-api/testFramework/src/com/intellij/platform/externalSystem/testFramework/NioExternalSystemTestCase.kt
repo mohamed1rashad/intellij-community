@@ -1,15 +1,11 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.externalSystem.testFramework
 
-import com.intellij.UtilBundle
-import com.intellij.execution.wsl.WSLDistribution
-import com.intellij.execution.wsl.WslDistributionManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.externalSystem.service.remote.ExternalSystemProgressNotificationManagerImpl
-import com.intellij.openapi.externalSystem.service.remote.ExternalSystemProgressNotificationManagerImpl.Companion.cleanupListeners
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager.Companion.getInstance
 import com.intellij.openapi.module.ModuleType
@@ -17,7 +13,10 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.getExternalConfigurationDir
 import com.intellij.openapi.util.Pair
 import com.intellij.openapi.util.ThrowableComputable
-import com.intellij.openapi.util.io.*
+import com.intellij.openapi.util.io.ByteArraySequence
+import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.util.io.FileUtilRt
+import com.intellij.openapi.util.io.toCanonicalPath
 import com.intellij.openapi.vfs.JarFileSystem
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -29,6 +28,7 @@ import com.intellij.testFramework.RunAll.Companion.runAll
 import com.intellij.testFramework.UsefulTestCase
 import com.intellij.testFramework.fixtures.IdeaProjectTestFixture
 import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory
+import com.intellij.testFramework.utils.io.deleteRecursively
 import com.intellij.util.ArrayUtilRt
 import com.intellij.util.PathUtil
 import com.intellij.util.ThrowableRunnable
@@ -62,20 +62,17 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
     get() = projectConfig!!
 
   private var projectRoot: VirtualFile? = null
-  val projectPath: String
-    get() = projectRoot!!.getPath()
-
   var myProjectRoot: VirtualFile
     get() = projectRoot!!
     set(value) {
       projectRoot = value
     }
+  val projectPath: String
+    get() = myProjectRoot.getPath()
+  val projectNioPath: Path
+    get() = myProjectRoot.toNioPath()
 
-  private var allConfigs: MutableList<VirtualFile?> = ArrayList<VirtualFile?>()
-
-  private var wslDistribution: WSLDistribution? = null
-  val myWSLDistribution: WSLDistribution?
-    get() = wslDistribution
+  private var allConfigs: MutableList<VirtualFile?> = ArrayList()
 
   private var testDir: Path? = null
   val myTestDir: Path
@@ -88,23 +85,15 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
       testFixture = value
     }
 
-  private var ourTempDir: Path? = null
-
   @Throws(Exception::class)
   override fun setUp() {
     super.setUp()
     setUpFixtures()
     project = myTestFixture.getProject()
+    testDir = Path.of(myProject.basePath!!)
 
-    setupWsl()
-    ensureTempDirCreated()
-
-    val testDirName = "testDir" + System.currentTimeMillis()
-    testDir = ourTempDir!!.resolve(testDirName)
-    testDir!!.ensureExists()
-
-    EdtTestUtil.runInEdtAndWait<RuntimeException?>(ThrowableRunnable {
-      ApplicationManager.getApplication().runWriteAction(Runnable {
+    EdtTestUtil.runInEdtAndWait<RuntimeException> {
+      ApplicationManager.getApplication().runWriteAction {
         try {
           setUpInWriteAction()
         }
@@ -117,8 +106,8 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
           }
           throw RuntimeException(e)
         }
-      })
-    })
+      }
+    }
 
     val allowedRoots: MutableList<String> = ArrayList()
     collectAllowedRoots(allowedRoots)
@@ -127,36 +116,13 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
     }
   }
 
-  protected fun setupWsl() {
-    val wslMsId = System.getProperty("wsl.distribution.name") ?: return
-    val distributions = WslDistributionManager.getInstance().getInstalledDistributions()
-    check(!distributions.isEmpty()) { "no WSL distributions configured!" }
-    wslDistribution = distributions.first { it: WSLDistribution? -> wslMsId == it!!.msId }
-                        ?: throw IllegalStateException("Distribution $wslMsId was not found")
-  }
-
   protected open fun collectAllowedRoots(roots: MutableList<String>): Unit = Unit
-
-  @Throws(IOException::class)
-  private fun ensureTempDirCreated() {
-    if (ourTempDir != null) return
-
-    if (wslDistribution == null) {
-      ourTempDir = Path.of(FileUtil.getTempDirectory()).resolve(getTestsTempDir())
-    }
-    else {
-      ourTempDir = Path.of(wslDistribution!!.getWindowsPath("/tmp")).resolve(getTestsTempDir())
-    }
-
-    ourTempDir!!.delete()
-    ourTempDir!!.ensureExists()
-  }
 
   protected abstract fun getTestsTempDir(): String?
 
   @Throws(Exception::class)
   protected open fun setUpFixtures() {
-    myTestFixture = IdeaTestFixtureFactory.getFixtureFactory().createFixtureBuilder(name, useDirectoryBasedStorageFormat()).getFixture()
+    myTestFixture = IdeaTestFixtureFactory.getFixtureFactory().createFixtureBuilder("test", useDirectoryBasedStorageFormat()).getFixture()
     myTestFixture.setUp()
   }
 
@@ -167,36 +133,35 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
 
   @Throws(Exception::class)
   protected fun setUpProjectRoot() {
-    val projectDir = testDir!!.resolve("project")
-    projectDir.ensureExists()
-    projectRoot = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectDir)
+    val projectRootPath = Path.of(myProject.basePath!!).resolve("project")
+    if (!projectRootPath.exists()) {
+      projectRootPath.createDirectories()
+    }
+    projectRoot = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(projectRootPath)
   }
 
   @Throws(Exception::class)
   public override fun tearDown() {
     RunAll(
-      ThrowableRunnable {
+      {
         if (project != null && !project!!.isDisposed()) {
           project!!.getExternalConfigurationDir().delete()
         }
       },
-      ThrowableRunnable { EdtTestUtil.runInEdtAndWait<RuntimeException?>(ThrowableRunnable { tearDownFixtures() }) },
-      ThrowableRunnable { project = null },
-      ThrowableRunnable {
-        if (testDir != null) {
-          NioFiles.deleteRecursively(testDir!!)
-        }
-      },
-      ThrowableRunnable { ExternalSystemProgressNotificationManagerImpl.assertListenersReleased() },
-      ThrowableRunnable { cleanupListeners() },
-      ThrowableRunnable { super.tearDown() },
-      ThrowableRunnable { resetClassFields(javaClass) }
+      { EdtTestUtil.runInEdtAndWait<RuntimeException?> { tearDownFixtures() } },
+      { project = null },
+      { testDir?.deleteRecursively() },
+      { testDir = null },
+      { ExternalSystemProgressNotificationManagerImpl.assertListenersReleased() },
+      { ExternalSystemProgressNotificationManagerImpl.cleanupListeners() },
+      { super.tearDown() },
+      { resetClassFields(javaClass) }
     ).run()
   }
 
   protected open fun tearDownFixtures() {
     runAll(
-      { myTestFixture.tearDown() },
+      { testFixture?.tearDown() },
       { testFixture = null }
     )
   }
@@ -363,14 +328,14 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
 
   fun setFileContent(file: VirtualFile, content: String, advanceStamps: Boolean) {
     try {
-      WriteAction.runAndWait<IOException?>(ThrowableRunnable {
+      WriteAction.runAndWait<IOException?> {
         if (advanceStamps) {
           file.setBinaryContent(content.toByteArray(StandardCharsets.UTF_8), -1, file.getTimeStamp() + 4000)
         }
         else {
           file.setBinaryContent(content.toByteArray(StandardCharsets.UTF_8), file.modificationStamp, file.getTimeStamp())
         }
-      })
+      }
     }
     catch (e: IOException) {
       throw RuntimeException(e)
@@ -404,17 +369,6 @@ abstract class NioExternalSystemTestCase : UsefulTestCase() {
           }
         }
       return roots
-    }
-  }
-
-  private fun Path.ensureExists() {
-    if (!exists()) {
-      try {
-        createDirectories()
-      }
-      catch (e: Exception) {
-        throw IOException(UtilBundle.message("exception.directory.can.not.create", this), e)
-      }
     }
   }
 }

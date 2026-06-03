@@ -14,6 +14,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Version
 import com.intellij.util.system.OS
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.plugins.terminal.agent.TerminalAgent
 import org.jetbrains.plugins.terminal.fus.TerminalShellInfoStatistics.KNOWN_SHELLS
 import org.jetbrains.plugins.terminal.fus.TerminalShellInfoStatistics.getShellNameForStat
 import kotlin.time.Duration
@@ -25,7 +26,7 @@ private const val GROUP_ID = "terminal"
 object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
   override fun getGroup(): EventLogGroup = GROUP
 
-  private val GROUP = EventLogGroup(GROUP_ID, 10)
+  private val GROUP = EventLogGroup(GROUP_ID, 16)
 
   private val OS_VERSION_FIELD = EventFields.StringValidatedByRegexpReference("os-version", "version")
   private val SHELL_STR_FIELD = EventFields.String("shell", KNOWN_SHELLS.toList())
@@ -35,6 +36,9 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
   private val TERMINAL_OPENING_WAY = EventFields.Enum<TerminalOpeningWay>("opening_way")
   private val TABS_COUNT = EventFields.Int("tab_count")
   private val FOCUS = StringEventField.ValidatedByCustomValidationRule("counterpart", TerminalFocusRule::class.java)
+  private val AGENT_WORKBENCH_PROVIDER_FIELD = EventFields.String("provider", listOf("codex", "claude"))
+  private val TERMINAL_AI_AGENT_FIELD = EventFields.Enum<FusTerminalAiAgent>("agent")
+  private val IS_INSTALL_FIELD = EventFields.Boolean("is_install")
 
   // Latency measurement related fields
   private val DURATION_FIELD = EventFields.createDurationField(DurationUnit.MILLISECONDS, "duration_ms")
@@ -44,29 +48,25 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
   private val THIRD_LARGEST_DURATION_FIELD = EventFields.createDurationField(DurationUnit.MILLISECONDS, "third_largest_duration_ms")
   private val TEXT_LENGTH_90_FIELD = EventFields.Int("text_length_90", "90% percentile")
 
-  private val tabOpenedEvent = GROUP.registerEvent("tab.opened", TABS_COUNT, "Tabs count includes the currently opened tab")
+  private val tabOpenedEvent = GROUP.registerEvent("tab.opened", TABS_COUNT)
 
   private val focusGainedEvent = GROUP.registerEvent("focus.gained", FOCUS)
 
   private val focusLostEvent = GROUP.registerEvent("focus.lost", FOCUS)
 
-  private val localShellStartedEvent = GROUP.registerEvent("local.exec",
-                                                           OS_VERSION_FIELD,
-                                                           SHELL_STR_FIELD)
+  private val localShellStartedEvent = GROUP.registerEvent("local.exec", OS_VERSION_FIELD, SHELL_STR_FIELD)
 
-  private val commandStartedEvent = GROUP.registerEvent("terminal.command.executed",
-                                                        TerminalCommandUsageStatistics.commandExecutableField,
-                                                        TerminalCommandUsageStatistics.subCommandField,
-                                                        "Fired each time when command is started")
+  private val commandStartedEvent = GROUP.registerEvent(
+    "terminal.command.executed",
+    TerminalCommandUsageStatistics.commandExecutableField, TerminalCommandUsageStatistics.subCommandField
+  )
 
-  private val commandFinishedEvent = GROUP.registerVarargEvent("terminal.command.finished",
-                                                               "Fired each time when command is finished",
-                                                               TerminalCommandUsageStatistics.commandExecutableField,
-                                                               TerminalCommandUsageStatistics.subCommandField,
-                                                               EXIT_CODE_FIELD,
-                                                               EXECUTION_TIME_FIELD)
+  private val commandFinishedEvent = GROUP.registerVarargEvent(
+    "terminal.command.finished",
+    TerminalCommandUsageStatistics.commandExecutableField, TerminalCommandUsageStatistics.subCommandField, EXIT_CODE_FIELD, EXECUTION_TIME_FIELD
+  )
 
-  private val sessionRestoredEvent = GROUP.registerEvent("session.restored", TABS_COUNT, "Terminal tabs were restored on first opening of the Terminal tool window after startup")
+  private val sessionRestoredEvent = GROUP.registerEvent("session.restored", TABS_COUNT)
 
   private val hyperlinkFollowedEvent = GROUP.registerEvent("hyperlink.followed", HYPERLINK_INFO_CLASS)
 
@@ -76,92 +76,80 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
 
   private val frontendTypingLatencyEvent = GROUP.registerVarargEvent(
     "frontend.typing.latency",
-    "From receiving the key event to sending it to the backend",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    SECOND_LARGEST_DURATION_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, SECOND_LARGEST_DURATION_FIELD, OS_VERSION_FIELD
   )
 
   private val backendTypingLatencyEvent = GROUP.registerVarargEvent(
     "backend.typing.latency",
-    "From receiving the event from the frontend to sending it to the shell process",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    SECOND_LARGEST_DURATION_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, SECOND_LARGEST_DURATION_FIELD, OS_VERSION_FIELD,
   )
 
   private val backendOutputLatencyEvent = GROUP.registerVarargEvent(
     "backend.output.latency",
-    "From reading bytes from the shell to sending the text update to the frontend",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    THIRD_LARGEST_DURATION_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, THIRD_LARGEST_DURATION_FIELD, OS_VERSION_FIELD,
   )
 
   private val frontendOutputLatencyEvent = GROUP.registerVarargEvent(
     "frontend.output.latency",
-    "From receiving the content update event from the backend to displaying the change in the terminal editor",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    THIRD_LARGEST_DURATION_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, THIRD_LARGEST_DURATION_FIELD, OS_VERSION_FIELD,
   )
 
   private val backendTextBufferCollectionLatencyEvent = GROUP.registerVarargEvent(
     "backend.text.buffer.collection.latency",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    THIRD_LARGEST_DURATION_FIELD,
-    TEXT_LENGTH_90_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, THIRD_LARGEST_DURATION_FIELD, TEXT_LENGTH_90_FIELD, OS_VERSION_FIELD,
   )
 
   private val backendDocumentUpdateLatencyEvent = GROUP.registerVarargEvent(
     "backend.document.update.latency",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    THIRD_LARGEST_DURATION_FIELD,
-    TEXT_LENGTH_90_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, THIRD_LARGEST_DURATION_FIELD, TEXT_LENGTH_90_FIELD, OS_VERSION_FIELD,
   )
 
   private val frontendDocumentUpdateLatencyEvent = GROUP.registerVarargEvent(
     "frontend.document.update.latency",
-    TOTAL_DURATION_FIELD,
-    DURATION_90_FIELD,
-    THIRD_LARGEST_DURATION_FIELD,
-    TEXT_LENGTH_90_FIELD,
-    OS_VERSION_FIELD,
+    TOTAL_DURATION_FIELD, DURATION_90_FIELD, THIRD_LARGEST_DURATION_FIELD, TEXT_LENGTH_90_FIELD, OS_VERSION_FIELD,
   )
 
   private val startupCursorShowingLatency = GROUP.registerVarargEvent(
     "startup.cursor.showing.latency",
-    "From the moment of UI interaction to showing the cursor in the terminal",
-    TERMINAL_OPENING_WAY,
-    DURATION_FIELD,
+    TERMINAL_OPENING_WAY, DURATION_FIELD,
   )
 
   private val startupShellStartingLatency = GROUP.registerVarargEvent(
     "startup.shell.starting.latency",
-    "From the moment of UI interaction to the moment when the shell process is started and can accept the input",
-    TERMINAL_OPENING_WAY,
-    DURATION_FIELD,
+    TERMINAL_OPENING_WAY, DURATION_FIELD,
   )
 
   private val startupFirstOutputLatency = GROUP.registerVarargEvent(
     "startup.first.output.latency",
-    "From the moment of UI interaction to showing the first meaningful output (any non-whitespace symbols)",
-    TERMINAL_OPENING_WAY,
-    DURATION_FIELD,
+    TERMINAL_OPENING_WAY, DURATION_FIELD,
   )
 
-  private val tabClosingCheckLatency = GROUP.registerVarargEvent(
-    "tab.closing.check.latency",
-    "From the moment of UI interaction to closing the terminal tab or showing the confirmation dialog (reported for all terminal engines)",
-    DURATION_FIELD,
+  private val tabClosingCheckLatency = GROUP.registerVarargEvent("tab.closing.check.latency", DURATION_FIELD)
+
+  private val agentWorkbenchPromoShownEvent = GROUP.registerEvent(
+    "agent.workbench.promo.shown",
+    AGENT_WORKBENCH_PROVIDER_FIELD,
+  )
+
+  private val agentWorkbenchPromoInstallClickedEvent = GROUP.registerEvent(
+    "agent.workbench.promo.install.clicked",
+    AGENT_WORKBENCH_PROVIDER_FIELD,
+  )
+
+  private val agentWorkbenchPromoActivationSucceededEvent = GROUP.registerEvent(
+    "agent.workbench.promo.activation.succeeded",
+    AGENT_WORKBENCH_PROVIDER_FIELD,
+  )
+
+  private val agentLaunchedEvent = GROUP.registerEvent(
+    "agent.launched",
+    TERMINAL_AI_AGENT_FIELD,
+    IS_INSTALL_FIELD,
+  )
+
+  private val agentInstalledEvent = GROUP.registerEvent(
+    "agent.installed",
+    TERMINAL_AI_AGENT_FIELD,
   )
 
   @JvmStatic
@@ -180,25 +168,25 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
   }
 
   @JvmStatic
-  fun logLocalShellStarted(project: Project, shellCommand: List<String>) {
-    localShellStartedEvent.log(project,
-                               osVersion,
-                               getShellNameForStat(shellCommand.firstOrNull()))
+  fun logLocalShellStarted(project: Project, shellCommand: String) {
+    localShellStartedEvent.log(project, osVersion, getShellNameForStat(shellCommand))
   }
 
   @JvmStatic
   fun logCommandStarted(project: Project, userCommandLine: String) {
     val commandData = TerminalCommandUsageStatistics.getLoggableCommandData(userCommandLine)
-    commandStartedEvent.log(project, commandData?.command, commandData?.subCommand)
+    commandStartedEvent.log(project, commandData.command, commandData.subCommand)
   }
 
   fun logCommandFinished(project: Project, userCommandLine: String, exitCode: Int, executionTime: Duration) {
     val commandData = TerminalCommandUsageStatistics.getLoggableCommandData(userCommandLine)
-    commandFinishedEvent.log(project,
-                             TerminalCommandUsageStatistics.commandExecutableField with commandData?.command,
-                             TerminalCommandUsageStatistics.subCommandField with commandData?.subCommand,
-                             EXIT_CODE_FIELD with exitCode,
-                             EXECUTION_TIME_FIELD with executionTime.inWholeMilliseconds)
+    commandFinishedEvent.log(
+      project,
+      TerminalCommandUsageStatistics.commandExecutableField with commandData.command,
+      TerminalCommandUsageStatistics.subCommandField with commandData.subCommand,
+      EXIT_CODE_FIELD with exitCode,
+      EXECUTION_TIME_FIELD with executionTime.inWholeMilliseconds
+    )
   }
 
   @JvmStatic
@@ -215,7 +203,6 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
     )
   }
 
-
   fun logBackendTypingLatency(totalDuration: Duration, duration90: Duration, secondLargestDuration: Duration) {
     backendTypingLatencyEvent.log(
       TOTAL_DURATION_FIELD with totalDuration,
@@ -224,7 +211,6 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
       OS_VERSION_FIELD with osVersion,
     )
   }
-
 
   fun logBackendOutputLatency(totalDuration: Duration, duration90: Duration, thirdLargestDuration: Duration) {
     backendOutputLatencyEvent.log(
@@ -302,6 +288,43 @@ object ReworkedTerminalUsageCollector : CounterUsagesCollector() {
   fun logTabClosingCheckLatency(duration: Duration) {
     tabClosingCheckLatency.log(DURATION_FIELD with duration)
   }
+
+  fun logAgentWorkbenchPromoShown(project: Project, provider: String) {
+    agentWorkbenchPromoShownEvent.log(project, provider)
+  }
+
+  fun logAgentWorkbenchPromoInstallClicked(project: Project, provider: String) {
+    agentWorkbenchPromoInstallClickedEvent.log(project, provider)
+  }
+
+  fun logAgentWorkbenchPromoActivationSucceeded(project: Project, provider: String) {
+    agentWorkbenchPromoActivationSucceededEvent.log(project, provider)
+  }
+
+  fun logAgentLaunched(project: Project, agentKey: TerminalAgent.AgentKey, isInstall: Boolean) {
+    agentLaunchedEvent.log(project, agentKey.toFusTerminalAiAgent(), isInstall)
+  }
+
+  fun logAgentInstalled(project: Project, agentKey: TerminalAgent.AgentKey) {
+    agentInstalledEvent.log(project, agentKey.toFusTerminalAiAgent())
+  }
+}
+
+internal enum class FusTerminalAiAgent {
+  NONE,
+  JUNIE,
+  CLAUDE_CODE,
+  CODEX,
+  OTHER,
+}
+
+internal fun TerminalAgent.AgentKey.toFusTerminalAiAgent(): FusTerminalAiAgent {
+  return when (this.key) {
+    "junie" -> FusTerminalAiAgent.JUNIE
+    "claude_code" -> FusTerminalAiAgent.CLAUDE_CODE
+    "codex" -> FusTerminalAiAgent.CODEX
+    else -> FusTerminalAiAgent.OTHER
+  }
 }
 
 @ApiStatus.Internal
@@ -322,7 +345,7 @@ internal class TerminalFocusRule : CustomValidationRule() {
       return ValidationResultType.ACCEPTED
     }
     else {
-      return toolWindowRule.validate(data, context)
+      return ValidationResultType.fromFusApiResultType(toolWindowRule.validate(data, context))
     }
   }
 }

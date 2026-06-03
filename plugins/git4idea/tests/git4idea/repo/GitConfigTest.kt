@@ -7,17 +7,32 @@ import com.intellij.openapi.vcs.Executor
 import com.intellij.openapi.vcs.Executor.touch
 import com.intellij.openapi.vcs.VcsTestUtil
 import com.intellij.openapi.vfs.LocalFileSystem
-import com.intellij.util.containers.ContainerUtil.getFirstItem
+import com.intellij.testFramework.UsefulTestCase.assertSameElements
 import git4idea.GitLocalBranch
 import git4idea.GitStandardRemoteBranch
-import git4idea.test.*
+import git4idea.commands.Git
+import git4idea.commands.GitCommand
+import git4idea.commands.GitLineHandler
+import git4idea.test.GitPlatformTest
+import git4idea.test.TestDataUtil
+import git4idea.test.createRepository
+import git4idea.test.git
+import git4idea.test.tac
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.assertNotNull
 import java.io.File
-import java.util.*
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.Locale
+import kotlin.test.assertContains
 
 class GitConfigTest : GitPlatformTest() {
   private val HOOK_FAILURE_MESSAGE = "IJ_TEST_GIT_HOOK_FAILED"
 
   fun testRemotes() {
+    createRepository()
+
     val objects = loadRemotes()
     for (spec in objects) {
       doTestRemotes(spec.name, spec.config, spec.result)
@@ -25,6 +40,8 @@ class GitConfigTest : GitPlatformTest() {
   }
 
   fun testBranches() {
+    createRepository()
+
     val objects = loadBranches()
     for (spec in objects) {
       doTestBranches(spec.name, spec.config, spec.result)
@@ -40,7 +57,7 @@ class GitConfigTest : GitPlatformTest() {
 
     val rootFile = File(projectPath)
     val gitFile = File(projectPath, ".git")
-    val config = GitConfig.read(File(gitFile, "config"))
+    val config = GitConfig.read(project, projectNioRoot)
     val rootDir = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(rootFile)
     val gitDir = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(gitFile)
     val reader = GitRepositoryReader(myProject, GitRepositoryFiles.createInstance(rootDir!!, gitDir!!))
@@ -74,7 +91,7 @@ class GitConfigTest : GitPlatformTest() {
     git("config remote.origin.pushurl $pushUrl")
 
     val config = readConfig()
-    val remote = getFirstItem(config.parseRemotes())
+    val remote = config.parseRemotes().firstOrNull()
     assertNotNull(remote)
     assertSameElements("pushurl parsed incorrectly", remote!!.pushUrls, listOf(pushUrl))
   }
@@ -88,13 +105,267 @@ class GitConfigTest : GitPlatformTest() {
     assertEquals(listOf("git@github.com::foo/bar.git"), remote.urls)
   }
 
+  fun `test insteadOf resolving when pushInsteadOf is specified`() {
+    createRepository()
+    addRemote("test:group/bar.git")
+    git("""config url.https://github.com/.insteadOf test:""")
+    git("""config url.git@github.com:.pushInsteadOf test:""")
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/group/bar.git"), listOf("git@github.com:group/bar.git"))
+  }
+
+  fun `test pushInsteadOf affects url substitution when declared before insteadOf`() {
+    createRepository()
+    addRemote("test:group/bar.git")
+    git("""config url.git@github.com:.pushInsteadOf test:""")
+    git("""config url.https://github.com/.insteadof test:""")
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/group/bar.git"), listOf("git@github.com:group/bar.git"))
+  }
+
+  fun `test pushInsteadOf with a placeholder doesn't affect URL-resolving of other placeholders`() {
+    createRepository()
+    addRemote("test:group/bar.git")
+    git("""config url.git@github.com:.pushInsteadOf notTest:""")
+    git("""config url.https://github.com/.insteadof test:""")
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    assertEquals(listOf("https://github.com/group/bar.git"), remote.urls)
+  }
+
+  fun `test explicit pushUrl is substituted only with insteadOf`() {
+    createRepository()
+    addRemote("test:group/bar.git")
+    git("""config remote.origin.pushurl test:group/push.git""")
+    git("""config url.https://github.com/.insteadOf test:""")
+    git("""config url.git@github.com:.pushInsteadOf test:""")
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/group/bar.git"), listOf("https://github.com/group/push.git"))
+  }
+
+  fun `test pushUrls not set and longest insteadOf and pushInsteadOf placeholders are applied to urls`() {
+    createRepository()
+    addRemote("test:group/bar.git")
+    git("""config url.https://github.com/.insteadOf test:""")
+    git("""config url.https://github.com/special/.insteadOf test:group/""")
+    git("""config url.https://github.com/gr/.insteadOf test:gr""")
+    git("""config url.git@github.com:.pushInsteadOf test:""")
+    git("""config url.ssh://git@github.com/push/group/.pushInsteadOf test:group/""")
+    git("""config url.ssh://git@github.com/other/.pushInsteadOf test:gr""")
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special/bar.git"), listOf("ssh://git@github.com/push/group/bar.git"))
+  }
+
+  fun `test many explicit pushUrls are substituted only with insteadOf`() {
+    val repo = createRepository()
+
+    addRemote("test:group/bar.git")
+    Executor.append(".git/config", """
+      [remote "origin"]
+        pushurl = test:group/push.git
+        pushurl = test:group/push2.git
+      [url "https://github.com/"]
+	      insteadOf = test:      
+      [url "https://github.com/special/"]
+	      insteadOf = test:group/      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special/bar.git"),
+                           listOf("https://github.com/special/push.git", "https://github.com/special/push2.git"))
+  }
+
+  fun `test many urls are substituted for urls and push urls`() {
+    val repo = createRepository()
+
+    addRemote("test:group/bar.git")
+    Executor.append(".git/config", """
+      [remote "origin"]
+        url = test:group/fetch2.git
+      [url "https://github.com/"]
+	      insteadOf = test:      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/group/bar.git", "https://github.com/group/fetch2.git"),
+                           listOf("git@github.com:group/bar.git", "git@github.com:group/fetch2.git"))
+  }
+
+  fun `test pushUrls not set and longest placeholders are not applied to push urls even if it is not pushInsteadOf`() {
+    val repo = createRepository()
+
+    addRemote("test:group/bar.git")
+    Executor.append(".git/config", """
+      [url "https://github.com/"]
+	      insteadOf = test:      
+      [url "https://github.com/special/"]
+	      insteadOf = test:group/      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special/bar.git"),
+                           listOf("git@github.com:group/bar.git"))
+  }
+
+  fun `test insteadOf empty value is applied if nothing more suitable is set`() {
+    val repo = createRepository()
+    addRemote("no/prefix/group/bar.git")
+    Executor.append(".git/config", """
+      [url "https://github.com/"]
+	      insteadOf =
+      [url "https://github.com/special/"]
+	      insteadOf = test:group/      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/no/prefix/group/bar.git"), listOf("no/prefix/group/bar.git"))
+  }
+
+  fun `test insteadOf empty value is not applied if somethings more suitable is set`() {
+    val repo = createRepository()
+
+    addRemote("test:group/bar.git")
+    Executor.append(".git/config", """
+      [url "https://github.com/"]
+	      insteadOf =
+      [url "https://github.com/special/"]
+	      insteadOf = test:group/      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special/bar.git"), listOf("git@github.com:group/bar.git"))
+  }
+
+  fun `test pushInsteadOf empty value is applied if nothing more suitable is set`() {
+    val repo = createRepository()
+
+    addRemote("no/prefix/group/bar.git")
+    Executor.append(".git/config", """
+      [url "https://github.com/"]
+	      pushInsteadOf =
+      [url "https://github.com/special/"]
+	      insteadOf = test:group/      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("no/prefix/group/bar.git"), listOf("https://github.com/no/prefix/group/bar.git"))
+  }
+
+  fun `test empty url section`() {
+    val repo = createRepository()
+
+    addRemote("test:group/bar.git")
+    Executor.append(".git/config", """
+      [url "empty"]
+
+      [url "https://github.com/special/"]
+	      insteadOf = test:group/      
+      [url "git@github.com:"]
+	      pushInsteadOf = test:
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special/bar.git"), listOf("git@github.com:group/bar.git"))
+  }
+
+  fun `test duplicated url entry - both used`() {
+    val repo = createRepository()
+
+    addRemote("test1:group/bar.git")
+    Executor.append(".git/config", """
+      [remote "origin"]
+        url = test2:group/fetch2.git
+      [url "https://github.com/special/"]
+	      insteadOf = test1:group/     
+      [url "https://github.com/special/"]
+	      insteadOf = test2:group/
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special/bar.git", "https://github.com/special/fetch2.git"),
+                           listOf("https://github.com/special/bar.git", "https://github.com/special/fetch2.git"))
+  }
+
+  fun `test duplicated insteadOf prefix, the first one will be used`() {
+    val repo = createRepository()
+
+    addRemote("test:group/bar.git")
+    Executor.append(".git/config", """
+      [remote "origin"]
+        url = test:group/fetch2.git
+      [url "https://github.com/special1/"]
+	      insteadOf = test:group/     
+      [url "https://github.com/special2/"]
+	      insteadOf = test:group/
+    """.trimIndent())
+    repo.update()
+
+    val config = readConfig()
+    val remote = config.parseRemotes().first()
+    remote.checkRemoteUrls(listOf("https://github.com/special1/bar.git", "https://github.com/special1/fetch2.git"),
+                           listOf("https://github.com/special1/bar.git", "https://github.com/special1/fetch2.git"))
+  }
+
+  private fun GitRemote.checkRemoteUrls(
+    expectedUrls: List<String>,
+    expectedPushUrls: List<String>,
+  ) {
+    val h = GitLineHandler(project, projectRoot, GitCommand.REMOTE);
+    h.isEnableInteractiveCallbacks = false;
+    h.setSilent(true);
+    h.addParameters("-v");
+    val output = Git.getInstance().runCommand(h).getOutputOrThrow();
+    assertContains(output, ("${expectedUrls.first()} (fetch)"))
+    expectedPushUrls.forEach { pushUrl -> assertContains(output, ("${pushUrl} (push)")) }
+
+    assertEquals(expectedUrls, urls)
+    assertEquals(expectedPushUrls, pushUrls)
+  }
+
   fun `test config values are case sensitive`() {
     createRepository()
     val url = "git@GITHUB.com:foo/bar.git"
     addRemote(url)
 
     val config = readConfig()
-    val remote = getFirstItem(config.parseRemotes())
+    val remote = config.parseRemotes().firstOrNull()
     assertNotNull(remote)
     assertSameElements(remote!!.urls, listOf(url))
   }
@@ -103,7 +374,7 @@ class GitConfigTest : GitPlatformTest() {
     createRepository()
     addRemote("git@github.com:foo/bar.git")
     val configFile = configFile()
-    FileUtil.writeToFile(configFile, FileUtil.loadFile(configFile).replace("remote", "REMOTE"))
+    FileUtil.writeToFile(configFile.toFile(), FileUtil.loadFile(configFile.toFile()).replace("remote", "REMOTE"))
 
     assertSingleRemoteInConfig()
   }
@@ -114,7 +385,7 @@ class GitConfigTest : GitPlatformTest() {
     addRemote(expectedName, "git@github.com:foo/bar.git")
 
     val config = readConfig()
-    val remote = getFirstItem(config.parseRemotes())
+    val remote = config.parseRemotes().firstOrNull()
     assertNotNull(remote)
     assertEquals("Remote name is incorrect", expectedName, remote!!.name)
   }
@@ -242,7 +513,7 @@ class GitConfigTest : GitPlatformTest() {
   }
 
   private fun readConfig(): GitConfig {
-    return GitConfig.read(configFile())
+    return GitConfig.read(project, projectNioRoot)
   }
 
   private fun assertSingleRemoteInConfig() {
@@ -250,22 +521,26 @@ class GitConfigTest : GitPlatformTest() {
     assertSingleRemote(remotes)
   }
 
-  private fun doTestRemotes(testName: String, configFile: File, resultFile: File) {
-    val config = GitConfig.read(configFile)
+  private fun doTestRemotes(testName: String, configFile: Path, resultFile: File) {
+    Files.copy(configFile, projectNioRoot.resolve(".git/config"), StandardCopyOption.REPLACE_EXISTING)
+
+    val config = GitConfig.read(project, projectNioRoot)
     VcsTestUtil.assertEqualCollections(testName, config.parseRemotes(), readRemoteResults(resultFile))
   }
 
-  private fun configFile(): File {
-    val gitDir = File(projectPath, ".git")
-    return File(gitDir, "config")
+  private fun configFile(): Path {
+    val gitDir = Path.of(projectPath, ".git")
+    return gitDir.resolve("config")
   }
 
-  private fun doTestBranches(testName: String, configFile: File, resultFile: File) {
+  private fun doTestBranches(testName: String, configFile: Path, resultFile: File) {
+    Files.copy(configFile, projectNioRoot.resolve(".git/config"), StandardCopyOption.REPLACE_EXISTING)
+
     val expectedInfos = readBranchResults(resultFile)
     val localBranches = expectedInfos.map { it.localBranch }
     val remoteBranches = expectedInfos.map { it.remoteBranch }
 
-    val trackInfos = GitConfig.read(configFile).parseTrackInfos(localBranches, remoteBranches)
+    val trackInfos = GitConfig.read(project, projectNioRoot).parseTrackInfos(localBranches, remoteBranches)
     VcsTestUtil.assertEqualCollections(testName, trackInfos, expectedInfos)
   }
 
@@ -273,7 +548,7 @@ class GitConfigTest : GitPlatformTest() {
 
   private fun loadBranches() = loadConfigData(getTestDataFolder("branch"))
 
-  private class TestSpec(internal var name: String, internal var config: File, internal var result: File)
+  private class TestSpec(var name: String, var config: Path, var result: File)
 
   private fun addRemote(url: String) {
     addRemote("origin", url)
@@ -285,7 +560,7 @@ class GitConfigTest : GitPlatformTest() {
 
   private fun assertSingleRemote(remotes: Collection<GitRemote>) {
     assertEquals("Number of remotes is incorrect", 1, remotes.size)
-    val remote = getFirstItem(remotes)
+    val remote = remotes.firstOrNull()
     assertNotNull(remote)
     assertEquals("origin", remote!!.name)
     assertEquals("git@github.com:foo/bar.git", remote.firstUrl)
@@ -317,7 +592,7 @@ class GitConfigTest : GitPlatformTest() {
 
       val testName = FileUtil.loadFile(descriptionFile!!).lines()[0] // description is in the first line of the desc-file
       if (!testName.lowercase(Locale.getDefault()).startsWith("ignore")) {
-        data.add(TestSpec(testName, configFile!!, resultFile!!))
+        data.add(TestSpec(testName, configFile!!.toPath(), resultFile!!))
       }
     }
     return data
@@ -328,14 +603,14 @@ class GitConfigTest : GitPlatformTest() {
     val remotes = ArrayList<GitBranchTrackInfo>()
     val remStrings = StringUtil.split(content, "BRANCH")
     for (remString in remStrings) {
-      if (StringUtil.isEmptyOrSpaces(remString)) {
+      if (remString.isNullOrBlank()) {
         continue
       }
       val info = StringUtil.splitByLines(remString.trim { it <= ' ' })
       val branch = info[0]
       val remote = getRemote(info[1])
       val remoteBranchAtRemote = info[2]
-      val remoteBranchHere = info[3]
+      // unused val remoteBranchHere = info[3]
       val merge = info[4] == "merge"
       remotes.add(GitBranchTrackInfo(GitLocalBranch(branch), GitStandardRemoteBranch(remote, remoteBranchAtRemote), merge))
     }
@@ -352,7 +627,7 @@ class GitConfigTest : GitPlatformTest() {
     val content = FileUtil.loadFile(resultFile)
     val remotes = mutableSetOf<GitRemote>()
     for (remString in content.split("REMOTE")) {
-      if (StringUtil.isEmptyOrSpaces(remString)) {
+      if (remString.isBlank()) {
         continue
       }
       val info = StringUtil.splitByLines(remString.trim { it <= ' ' })

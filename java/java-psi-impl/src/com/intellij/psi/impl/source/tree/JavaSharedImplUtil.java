@@ -2,13 +2,45 @@
 package com.intellij.psi.impl.source.tree;
 
 import com.intellij.codeInsight.AnnotationTargetUtil;
+import com.intellij.codeInsight.ExternalAnnotationsManager;
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiCaseLabelElementList;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiConditionalExpression;
+import com.intellij.psi.PsiConditionalLoopStatement;
+import com.intellij.psi.PsiDeconstructionList;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiEllipsisType;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiForeachStatementBase;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiIfStatement;
+import com.intellij.psi.PsiInstanceOfExpression;
+import com.intellij.psi.PsiLabeledStatement;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiParenthesizedExpression;
+import com.intellij.psi.PsiPattern;
+import com.intellij.psi.PsiPatternVariable;
+import com.intellij.psi.PsiPolyadicExpression;
+import com.intellij.psi.PsiPrefixExpression;
+import com.intellij.psi.PsiSwitchLabelStatementBase;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.TypeAnnotationProvider;
 import com.intellij.psi.impl.GeneratedMarkerVisitor;
 import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.impl.cache.TypeInfo;
+import com.intellij.psi.impl.source.PsiTypeElementImpl;
 import com.intellij.psi.impl.source.codeStyle.CodeEditUtil;
 import com.intellij.psi.impl.source.tree.java.AnnotationElement;
 import com.intellij.psi.tree.IElementType;
@@ -23,7 +55,8 @@ import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
 
 public final class JavaSharedImplUtil {
   private static final Logger LOG = Logger.getInstance(JavaSharedImplUtil.class);
@@ -43,7 +76,9 @@ public final class JavaSharedImplUtil {
     List<PsiAnnotation[]> allAnnotations = collectAnnotations(anchor, stopAt);
     if (allAnnotations == null) return null;
     for (int i = 0, size = allAnnotations.size(); i < size; i++) {
-      type = ((ellipsisType && i == size - 1) ? new PsiEllipsisType(type) : type.createArrayType())
+      type = ((ellipsisType && i == size - 1) ?
+              new PsiEllipsisType(type).withContainerNullability(PsiTypeElementImpl.findContainerNullabilityContext(typeElement) ) :
+              type.createArrayType().withContainerNullability(PsiTypeElementImpl.findContainerNullabilityContext(typeElement)))
         .annotate(TypeAnnotationProvider.Static.create(allAnnotations.get(i)));
     }
 
@@ -86,46 +121,15 @@ public final class JavaSharedImplUtil {
 
   public static @NotNull PsiType createTypeFromStub(@NotNull PsiModifierListOwner owner, @NotNull TypeInfo typeInfo) {
     String typeText = typeInfo.annotatedText();
-    PsiType type = JavaPsiFacade.getInstance(owner.getProject()).getParserFacade().createTypeFromText(typeText, owner);
-    return applyAnnotations(type, owner.getModifierList());
+    return JavaPsiFacade.getInstance(owner.getProject()).getParserFacade().createTypeElementFromText(typeText, owner).getType();
   }
 
-  public static @NotNull PsiType applyAnnotations(@NotNull PsiType type, @Nullable PsiModifierList modifierList) {
-    if (modifierList != null) {
-      PsiAnnotation[] annotations = modifierList.getAnnotations();
-      if (annotations.length > 0) {
-        if (type instanceof PsiArrayType) {
-          Deque<PsiArrayType> types = new ArrayDeque<>();
-          do {
-            types.push((PsiArrayType)type);
-            type = ((PsiArrayType)type).getComponentType();
-          }
-          while (type instanceof PsiArrayType);
-          type = annotate(type, modifierList, annotations);
-          while (!types.isEmpty()) {
-            PsiArrayType t = types.pop();
-            type = t instanceof PsiEllipsisType ? new PsiEllipsisType(type, t.getAnnotations()) : new PsiArrayType(type, t.getAnnotations());
-          }
-          return type;
-        }
-        else if (type instanceof PsiDisjunctionType) {
-          List<PsiType> components = new ArrayList<>(((PsiDisjunctionType)type).getDisjunctions());
-          components.set(0, annotate(components.get(0), modifierList, annotations));
-          return ((PsiDisjunctionType)type).newDisjunctionType(components);
-        }
-        else {
-          return annotate(type, modifierList, annotations);
-        }
-      }
-    }
-
-    return type;
-  }
-
-  private static @NotNull PsiType annotate(@NotNull PsiType type, @NotNull PsiModifierList modifierList, PsiAnnotation @NotNull [] annotations) {
+  public static @NotNull PsiType annotate(@NotNull PsiType type,
+                                          @NotNull PsiModifierList modifierList,
+                                          @NotNull TypeAnnotationProvider annotations) {
     TypeAnnotationProvider original =
       modifierList.getParent() instanceof PsiMethod ? type.getAnnotationProvider() : TypeAnnotationProvider.EMPTY;
-    TypeAnnotationProvider provider = new FilteringTypeAnnotationProvider(annotations, original);
+    TypeAnnotationProvider provider = filteringTypeAnnotationProvider(annotations, original);
     return type.annotate(provider);
   }
 
@@ -196,7 +200,7 @@ public final class JavaSharedImplUtil {
           anchor.rawInsertAfterMe(annotations.get(j));
         }
       }
-      newType.acceptTree(new GeneratedMarkerVisitor());
+      newType.acceptTree(new GeneratedMarkerVisitor(newType));
       newType.putUserData(CharTable.CHAR_TABLE_KEY, SharedImplUtil.findCharTableByTree(type));
       CodeEditUtil.replaceChild(variableElement, type, newType);
     }
@@ -283,23 +287,35 @@ public final class JavaSharedImplUtil {
     variable.addAfter(initializer, eq.getPsi());
   }
 
+  public static @NotNull TypeAnnotationProvider filteringTypeAnnotationProvider(@NotNull TypeAnnotationProvider candidatesProvider,
+                                                                                @NotNull TypeAnnotationProvider originalProvider) {
+    if (candidatesProvider == TypeAnnotationProvider.EMPTY) return originalProvider;
+    return new FilteringTypeAnnotationProvider(candidatesProvider, originalProvider);
+  }
+
   private static final class FilteringTypeAnnotationProvider implements TypeAnnotationProvider {
-    private final PsiAnnotation[] myCandidates;
+    private final @NotNull TypeAnnotationProvider myCandidatesProvider;
     private final TypeAnnotationProvider myOriginalProvider;
     private volatile PsiAnnotation[] myCache;
 
-    private FilteringTypeAnnotationProvider(PsiAnnotation @NotNull [] candidates, @NotNull TypeAnnotationProvider originalProvider) {
-      myCandidates = candidates;
+    private FilteringTypeAnnotationProvider(@NotNull TypeAnnotationProvider candidatesProvider, @NotNull TypeAnnotationProvider originalProvider) {
+      myCandidatesProvider = candidatesProvider;
       myOriginalProvider = originalProvider;
+    }
+
+    @Override
+    public boolean isValid() {
+      return myCandidatesProvider.isValid() && myOriginalProvider.isValid();
     }
 
     @Override
     public PsiAnnotation @NotNull [] getAnnotations() {
       PsiAnnotation[] result = myCache;
       if (result == null) {
-        List<PsiAnnotation> filtered = JBIterable.of(myCandidates)
+        List<PsiAnnotation> filtered = JBIterable.of(myCandidatesProvider.getAnnotations())
           .filter(annotation ->
                     !annotation.isValid() || // avoid exceptions in the next line, enable isValid checks at more specific call sites
+                    ExternalAnnotationsManager.isNonCodeTypeAnnotation(annotation) ||
                     AnnotationTargetUtil.isTypeAnnotation(annotation))
           .append(myOriginalProvider.getAnnotations())
           .toList();

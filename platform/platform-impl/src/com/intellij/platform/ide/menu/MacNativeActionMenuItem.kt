@@ -1,17 +1,30 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ide.menu
 
 import com.intellij.featureStatistics.FeatureUsageTracker
 import com.intellij.ide.IdeEventQueue
 import com.intellij.ide.ui.UISettings
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionUiKind
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.KeyboardShortcut
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
+import com.intellij.openapi.actionSystem.Presentation
+import com.intellij.openapi.actionSystem.Toggleable
 import com.intellij.openapi.actionSystem.ex.ActionUtil
-import com.intellij.openapi.actionSystem.impl.*
+import com.intellij.openapi.actionSystem.impl.ActionMenu
+import com.intellij.openapi.actionSystem.impl.ActionPresentationDecorator
+import com.intellij.openapi.actionSystem.impl.EMPTY_MENU_ACTION_ICON
+import com.intellij.openapi.actionSystem.impl.PoppedIcon
 import com.intellij.openapi.actionSystem.impl.actionholder.createActionRef
+import com.intellij.openapi.actionSystem.impl.isEnterKeyStroke
 import com.intellij.openapi.application.TransactionGuard
 import com.intellij.openapi.application.TransactionGuardImpl
 import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.keymap.KeymapUtil
+import com.intellij.openapi.keymap.getShortcutSetForDisplay
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.ui.icons.getMenuBarIcon
@@ -21,12 +34,14 @@ import java.awt.event.InputEvent
 import javax.swing.Icon
 import javax.swing.KeyStroke
 
-internal class MacNativeActionMenuItem(action: AnAction,
-                                       private val place: String,
-                                       private val context: DataContext,
-                                       private val isMnemonicEnabled: Boolean,
-                                       private val insideCheckedGroup: Boolean,
-                                       private val useDarkIcons: Boolean) {
+internal class MacNativeActionMenuItem(
+  action: AnAction,
+  private val place: String,
+  private val context: DataContext,
+  private val isMnemonicEnabled: Boolean,
+  private val insideCheckedGroup: Boolean,
+  private val useDarkIcons: Boolean,
+) {
   private val actionRef = createActionRef(action)
   // do not expose presentation
   private val presentation = Presentation.newTemplatePresentation()
@@ -62,8 +77,7 @@ internal class MacNativeActionMenuItem(action: AnAction,
 
     updateIcon(presentation, action, useDarkIcons, isToggleable, isToggled, insideCheckedGroup)
 
-    val id = ActionManager.getInstance().getId(action)
-    val shortcuts = if (id == null) action.shortcutSet.getShortcuts() else KeymapUtil.getActiveKeymapShortcuts(id).getShortcuts()
+    val shortcuts = getShortcutSetForDisplay(action).getShortcuts()
     var accelerator: KeyStroke? = null
     for (shortcut in shortcuts) {
       if (shortcut !is KeyboardShortcut) {
@@ -74,7 +88,7 @@ internal class MacNativeActionMenuItem(action: AnAction,
       // If the action has `Enter` shortcut, do not add it. Otherwise, user won't be able to choose any ActionMenuItem other than that
       if (!isEnterKeyStroke(firstKeyStroke)) {
         accelerator = firstKeyStroke
-        if (KeymapUtil.isSimplifiedMacShortcuts()) {
+        if (KeymapUtil.isSimplifiedMacShortcuts) {
           menuItemPeer.setAcceleratorText(KeymapUtil.getPreferredShortcutText(shortcuts))
         }
       }

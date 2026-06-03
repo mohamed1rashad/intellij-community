@@ -17,7 +17,11 @@ import com.intellij.psi.PsiField
 import com.intellij.util.xml.DomManager
 import org.jetbrains.idea.devkit.dom.Extension
 import org.jetbrains.idea.devkit.util.locateExtensionsByPsiClass
-import org.jetbrains.uast.*
+import org.jetbrains.uast.UAnnotation
+import org.jetbrains.uast.UCallExpression
+import org.jetbrains.uast.UClass
+import org.jetbrains.uast.UReferenceExpression
+import org.jetbrains.uast.tryResolve
 
 @IntellijInternalApi
 enum class LevelType {
@@ -122,6 +126,7 @@ private fun toLevelType(levels: Collection<Service.Level>): LevelType {
     levels.containsAll(setOf(Service.Level.APP, Service.Level.PROJECT)) -> LevelType.APP_AND_PROJECT
     levels.contains(Service.Level.APP) -> LevelType.APP
     levels.contains(Service.Level.PROJECT) -> LevelType.PROJECT
+    levels.isEmpty() -> LevelType.APP
     else -> LevelType.NOT_SPECIFIED
   }
 }

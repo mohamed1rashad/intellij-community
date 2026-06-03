@@ -7,29 +7,98 @@ import com.intellij.ide.util.PropertiesComponent
 import com.intellij.ide.util.treeView.NodeRenderer
 import com.intellij.internal.Module
 import com.intellij.internal.showSources
-import com.intellij.internal.ui.sandbox.components.*
-import com.intellij.internal.ui.sandbox.dsl.*
-import com.intellij.internal.ui.sandbox.dsl.listCellRenderer.LcrComboBoxPanel
-import com.intellij.internal.ui.sandbox.dsl.listCellRenderer.LcrListPanel
-import com.intellij.internal.ui.sandbox.dsl.listCellRenderer.LcrOthersPanel
-import com.intellij.internal.ui.sandbox.dsl.listCellRenderer.LcrSeparatorPanel
+import com.intellij.internal.ui.sandbox.components.BadgePanel
+import com.intellij.internal.ui.sandbox.components.ComboBoxPanel
+import com.intellij.internal.ui.sandbox.components.ComboBoxWithWidePopupPanel
+import com.intellij.internal.ui.sandbox.components.JBIntSpinnerPanel
+import com.intellij.internal.ui.sandbox.components.JBOptionButtonPanel
+import com.intellij.internal.ui.sandbox.components.JBPasswordFieldPanel
+import com.intellij.internal.ui.sandbox.components.JBTextAreaPanel
+import com.intellij.internal.ui.sandbox.components.JButtonPanel
+import com.intellij.internal.ui.sandbox.components.JCheckBoxPanel
+import com.intellij.internal.ui.sandbox.components.JComboBoxPanel
+import com.intellij.internal.ui.sandbox.components.JProgressBarPanel
+import com.intellij.internal.ui.sandbox.components.JRadioButtonPanel
+import com.intellij.internal.ui.sandbox.components.JSpinnerPanel
+import com.intellij.internal.ui.sandbox.components.JTextFieldPanel
+import com.intellij.internal.ui.sandbox.components.OnOffButtonPanel
+import com.intellij.internal.ui.sandbox.components.SearchTextFieldPanel
+import com.intellij.internal.ui.sandbox.components.ThreeStateCheckBoxPanel
+import com.intellij.internal.ui.sandbox.dsl.listCellRenderer.LcrExamplesPanel
 import com.intellij.internal.ui.sandbox.dsl.validation.CrossValidationPanel
 import com.intellij.internal.ui.sandbox.dsl.validation.ValidationPanel
-import com.intellij.internal.ui.sandbox.dsl.validation.ValidationRefactoringPanel
+import com.intellij.internal.ui.sandbox.screenshots.CaptureScreenshotsPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonAddValuePanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonBrowseButtonPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonCopyPasteCorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonCopyPasteIncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonExpandFieldPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonExpandedFieldPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonHelpInfoCorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonHelpInfoIncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonListValuesPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonWhenToUseCorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.builtInButton.BuiltInButtonWhenToUseIncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.button.ButtonTypesPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.CheckboxTypesPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.LabelOnTheRightCorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.LabelOnTheRightIncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.LongLabelInCheckboxCorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.LongLabelInCheckboxIncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.OneSelectedCheckboxPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.WhenNotToUseCheckboxes1CorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.WhenNotToUseCheckboxes1IncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.WhenNotToUseCheckboxes2CorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.WhenNotToUseCheckboxes2IncorrectPanel
+import com.intellij.internal.ui.sandbox.screenshots.checkbox.WhenToUseCheckboxesPanel
 import com.intellij.internal.ui.sandbox.tests.accessibility.AccessibilityFailedInspectionsPanel
+import com.intellij.internal.ui.sandbox.tests.components.JBTabsPanel
 import com.intellij.internal.ui.sandbox.tests.components.JBTextAreaTestPanel
 import com.intellij.internal.ui.sandbox.tests.components.JEditorPaneCopyableTestPanel
+import com.intellij.internal.ui.sandbox.tests.components.TreeWithComplexEditors
+import com.intellij.internal.ui.sandbox.tests.dsl.CellsWithSubPanelsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.CheckBoxRadioButtonPanel
 import com.intellij.internal.ui.sandbox.tests.dsl.CommentRightTestPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.CommentsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.ContextHelpTestPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.GroupsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.LabelsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.LongTextsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.OnChangePanel
+import com.intellij.internal.ui.sandbox.tests.dsl.OthersPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.PlaceholderPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.ResizableRowsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.SegmentedButtonPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.TextFieldsPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.TextMaxLinePanel
+import com.intellij.internal.ui.sandbox.tests.dsl.VisibleEnabledPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.listCellRenderer.LcrComboBoxTestPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.listCellRenderer.LcrListTestPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.listCellRenderer.LcrOthersTestPanel
 import com.intellij.internal.ui.sandbox.tests.dsl.listCellRenderer.LcrPerformanceTestPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.listCellRenderer.LcrSeparatorTestPanel
+import com.intellij.internal.ui.sandbox.tests.dsl.validation.ValidationRefactoringPanel
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.ui.DialogWrapper
-import com.intellij.ui.*
+import com.intellij.ui.DocumentAdapter
+import com.intellij.ui.OnePixelSplitter
+import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SearchTextField
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.ActionLink
+import com.intellij.ui.components.Badge
+import com.intellij.ui.components.Badge.ColorType
 import com.intellij.ui.components.breadcrumbs.Breadcrumbs
 import com.intellij.ui.components.breadcrumbs.Crumb
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.DslComponentProperty
+import com.intellij.ui.dsl.builder.Placeholder
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.ui.speedSearch.ElementFilter
 import com.intellij.ui.tree.FilteringTreeModel
 import com.intellij.ui.tree.ui.DefaultTreeUI
@@ -41,6 +110,7 @@ import com.intellij.util.Alarm
 import com.intellij.util.concurrency.Invoker
 import com.intellij.util.ui.JBDimension
 import com.intellij.util.ui.JBUI
+import java.awt.Dimension
 import java.awt.Font
 import java.awt.event.KeyEvent
 import java.util.function.Consumer
@@ -59,44 +129,68 @@ private const val TREE_ITEM_PATH_SEPARATOR = ">"
 internal class UISandboxDialog(private val project: Project?) : DialogWrapper(project, null, true, IdeModalityType.MODELESS, true) {
 
   private val treeContent: List<Any> = listOf(
+    createComponentsNode(),
+    createKotlinUIDSLNode(),
+    createTestsNode(),
+    createScreenshotsNode()
+  )
+
+  private fun createComponentsNode() = Group("Components", children = listOf(
+    BadgePanel(),
+    ComboBoxPanel(),
+    ComboBoxWithWidePopupPanel(),
+    JBIntSpinnerPanel(),
+    JButtonPanel(),
+    JBOptionButtonPanel(),
+    JBPasswordFieldPanel(),
+    JBTextAreaPanel(),
+    JCheckBoxPanel(),
+    JComboBoxPanel(),
+    JProgressBarPanel(),
+    JRadioButtonPanel(),
+    JSpinnerPanel(),
+    JTextFieldPanel(),
+    OnOffButtonPanel(),
+    SearchTextFieldPanel(),
+    ThreeStateCheckBoxPanel(),
+  ))
+
+  private fun createKotlinUIDSLNode() = Group("Kotlin UI DSL", children = listOf(
+    Group("ListCellRenderer", children = listOf(
+      LcrExamplesPanel(),
+    )),
+    Group("Validation", children = listOf(
+      CrossValidationPanel(),
+      ValidationPanel(),
+    )),
+  ))
+
+  private fun createTestsNode(): Group = Group("Tests", children = listOf(
+    Group("Accessibility", children = listOf(
+      AccessibilityFailedInspectionsPanel()
+    )),
     Group("Components", children = listOf(
-      ComboBoxPanel(),
-      ComboBoxWithWidePopupPanel(),
-      JBIntSpinnerPanel(),
-      JButtonPanel(),
-      JBOptionButtonPanel(),
-      JBPasswordFieldPanel(),
+      JEditorPaneCopyableTestPanel(),
       JBTabsPanel(),
-      JBTextAreaPanel(),
-      JCheckBoxPanel(),
-      JComboBoxPanel(),
-      JProgressBarPanel(),
-      JRadioButtonPanel(),
-      JSpinnerPanel(),
-      JTextFieldPanel(),
-      OnOffButtonPanel(),
-      SearchTextFieldPanel(),
-      ThreeStateCheckBoxPanel(),
+      JBTextAreaTestPanel(),
       TreeWithComplexEditors(),
     )),
-
     Group("Kotlin UI DSL", children = listOf(
       Group("ListCellRenderer", children = listOf(
-        LcrListPanel(),
-        LcrComboBoxPanel(),
-        LcrSeparatorPanel(),
-        LcrOthersPanel()
+        LcrComboBoxTestPanel(),
+        LcrListTestPanel(),
+        LcrOthersTestPanel(),
+        LcrPerformanceTestPanel(),
+        LcrSeparatorTestPanel(),
       )),
       Group("Validation", children = listOf(
-        CrossValidationPanel(),
-        ValidationPanel(),
         ValidationRefactoringPanel(),
       )),
-
       CellsWithSubPanelsPanel(),
       CheckBoxRadioButtonPanel(),
+      CommentRightTestPanel(),
       CommentsPanel(),
-      DeprecatedApiPanel(),
+      ContextHelpTestPanel(),
       GroupsPanel(),
       LabelsPanel(),
       LongTextsPanel(),
@@ -109,31 +203,106 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
       TextMaxLinePanel(),
       VisibleEnabledPanel()
     )),
+  ))
 
-    Group("Tests", children = listOf(
-      Group("Accessibility", children = listOf(
-        AccessibilityFailedInspectionsPanel()
-      )),
-      Group("Components", children = listOf(
-        JEditorPaneCopyableTestPanel(),
-        JBTextAreaTestPanel(),
-      )),
-      Group("Kotlin UI DSL", children = listOf(
-        Group("ListCellRenderer", children = listOf(
-          LcrPerformanceTestPanel(),
+  infix fun Int.x(h: Int): Dimension = Dimension(this, h)
+  private fun createScreenshotsNode(): Group = Group("For Screenshots", children = listOf(
+    CaptureScreenshotsPanel(),
+    Group("Buttons", children = listOf(
+      ButtonTypesPanel()
+    )),
+    Group("Checkboxes", children = listOf(
+      CheckboxTypesPanel(),
+      WhenToUseCheckboxesPanel(),
+
+      Group("When not to use", children = listOf(
+        Group("Example 1", children = listOf(
+          WhenNotToUseCheckboxes1IncorrectPanel(),
+          WhenNotToUseCheckboxes1CorrectPanel(),
         )),
-        CommentRightTestPanel(),
+        Group("Example 2", children = listOf(
+          WhenNotToUseCheckboxes2IncorrectPanel(),
+          WhenNotToUseCheckboxes2CorrectPanel(),
+        )),
       )),
-    ))
-  )
+
+      Group("How to use", children = listOf(
+        Group("Label on the right", children = listOf(
+          LabelOnTheRightIncorrectPanel(),
+          LabelOnTheRightCorrectPanel(),
+        )),
+        Group("Long labels", children = listOf(
+          LongLabelInCheckboxIncorrectPanel(),
+          LongLabelInCheckboxCorrectPanel(),
+        )),
+      )),
+
+      Group("Writing guidelines", children = listOf(
+        Group("Sentence-style capitalization", children = listOf(
+          OneSelectedCheckboxPanel(true, "Display icons in menu items", 756 x 256, "images/ui/checkbox/checkbox_writing_1_correct.png"),
+          OneSelectedCheckboxPanel(false, "Display icons in Menu Items", 756 x 256, "images/ui/checkbox/checkbox_writing_1_incorrect.png"),
+        )),
+        Group("Ending punctuation", children = listOf(
+          OneSelectedCheckboxPanel(true, "Sync theme with OS", 756 x 256, "images/ui/checkbox/checkbox_writing_2_correct.png"),
+          OneSelectedCheckboxPanel(false, "Sync theme with OS.", 756 x 256, "images/ui/checkbox/checkbox_writing_2_incorrect.png"),
+        )),
+        Group("Imperative form of verbs", children = listOf(
+          OneSelectedCheckboxPanel(true,
+                                   """<html>Use 'Next Error' action for high<br/>priority problems only</html>""",
+                                   756 x 288,
+                                   "images/ui/checkbox/checkbox_writing_3_correct.png"),
+          OneSelectedCheckboxPanel(false,
+                                   """<html>'Next Error' action goes to high<br/>priority problems only</html>""",
+                                   756 x 288,
+                                   "images/ui/checkbox/checkbox_writing_3_incorrect.png"),
+        )),
+        Group("Negation in labels", children = listOf(
+          OneSelectedCheckboxPanel(true, "Show mnemonics in menu", 756 x 256, "images/ui/checkbox/checkbox_writing_4_correct.png"),
+          OneSelectedCheckboxPanel(false,
+                                   "Do not show mnemonics in menu",
+                                   756 x 256,
+                                   "images/ui/checkbox/checkbox_writing_4_incorrect.png"),
+        )),
+      )),
+    )),
+
+    Group("Built-In Button", children = listOf(
+      Group("When to use", children = listOf(
+        BuiltInButtonWhenToUseCorrectPanel(),
+        BuiltInButtonWhenToUseIncorrectPanel(),
+        BuiltInButtonBrowseButtonPanel(),
+        BuiltInButtonExpandFieldPanel(),
+        BuiltInButtonExpandedFieldPanel(),
+        BuiltInButtonListValuesPanel(),
+        BuiltInButtonAddValuePanel(),
+      )),
+      Group("When not to use", children = listOf(
+        BuiltInButtonCopyPasteCorrectPanel(),
+        BuiltInButtonCopyPasteIncorrectPanel(),
+        BuiltInButtonHelpInfoCorrectPanel(),
+        BuiltInButtonHelpInfoIncorrectPanel(),
+      )),
+    )),
+  ))
+
 
   private val filter = ElementFilter<SandboxTreeNodeBase> {
     it.title.contains(activeFilterText, true)
   }
 
-  private val treeModel = FilteringTreeModel.createModel(SimpleTreeStructure.Impl(SandboxTreeGroup(null, myDisposable, "", treeContent)), filter, Invoker.forEventDispatchThread(myDisposable), myDisposable)
+  private val treeModel = FilteringTreeModel.createModel(SimpleTreeStructure.Impl(SandboxTreeGroup(null, myDisposable, "", treeContent)),
+                                                         filter,
+                                                         Invoker.forEventDispatchThread(myDisposable),
+                                                         myDisposable)
 
-  private val tree = SimpleTree().apply {
+  val tree = object : SimpleTree() {
+
+    override fun updateUI() {
+      super.updateUI()
+
+      //updateCachedNodes()
+    }
+  }.apply {
     selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
     isRootVisible = false
     setCellRenderer(SandboxTreeRenderer())
@@ -188,8 +357,9 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
     }
 
   private var selectedNode: SandboxTreeNodeBase? = null
+  internal lateinit var rightPanel: DialogPanel
 
-  private lateinit var placeholder: Placeholder
+  internal lateinit var placeholder: Placeholder
 
   private val breadcrumbs = object : Breadcrumbs() {
     override fun getFontStyle(crumb: Crumb): Int {
@@ -237,7 +407,7 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
       }.resizableRow()
     }
 
-    val rightPanel = panel {
+    rightPanel = panel {
       panel {
         row {
           cell(breadcrumbs)
@@ -259,7 +429,7 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
       firstComponent = leftPanel
       secondComponent = rightPanel
       minimumSize = JBDimension(400, 300)
-      preferredSize = JBDimension(800, 600)
+      preferredSize = JBDimension(1200, 800)
     }
 
     getPropertyComponent().getValue(SELECTED_TREE_ITEM)?.let {
@@ -268,7 +438,7 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
     return result
   }
 
-  private fun selectItem(path: List<String>) {
+  fun selectItem(path: List<String>) {
     var currentNode = treeModel.root
     for (item in path) {
       val children = treeModel.getChildren(currentNode)
@@ -303,9 +473,9 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
         }
       }
       is SandboxTreeLeaf -> {
-        val panel = node.panelCache.value
+        val panel = node.createContent()
         panel.prepareContent()
-        placeholder.component = if (node.isScrollbarNeeded()) ScrollPaneFactory.createScrollPane(panel, true) else panel
+        placeholder.component = if (node.sandboxPanel.isScrollbarNeeded) ScrollPaneFactory.createScrollPane(panel, true) else panel
       }
     }
 
@@ -335,6 +505,20 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
     }
   }
 
+  //private fun updateCachedNodes() {
+  //  TreeUtil.modelTraverser(treeModel).forEach {
+  //    val sandboxTreeNode = extractSandboxTreeNode(it)
+  //    (sandboxTreeNode as? SandboxTreeLeaf)?.let { sandboxTreeLeaf ->
+  //      if (sandboxTreeLeaf.panelCache.isInitialized()) {
+  //        val panel = sandboxTreeLeaf.panelCache.value
+  //        if (UIUtil.getParentOfType(Window::class.java, panel) == null) {
+  //          IJSwingUtilities.updateComponentTreeUI(panel)
+  //        }
+  //      }
+  //    }
+  //  }
+  //}
+
   private fun getNodePath(node: SandboxTreeNodeBase?): List<String> {
     val result = mutableListOf<String>()
     var currentNode = node
@@ -361,20 +545,19 @@ internal class UISandboxDialog(private val project: Project?) : DialogWrapper(pr
     return getNodePath(node).joinToString(TREE_ITEM_PATH_SEPARATOR)
   }
 
-  private fun extractSandboxTreeNode(node: Any): SandboxTreeNodeBase? {
-    return ((node as? DefaultMutableTreeNode)?.userObject as? FilteringTreeStructure.FilteringNode)?.delegate as? SandboxTreeNodeBase
-  }
-
   private fun showSources() {
     val leaf = selectedNode as? SandboxTreeLeaf ?: return
-    val src = "src/${leaf.sandboxPanel::class.java.name.replace('.', '/')}.kt"
-    showSources(project, Module.INTERNAL, src)
+    showSources(project, Module.INTERNAL, leaf.sandboxPanel::class.java)
   }
+}
+
+private fun extractSandboxTreeNode(node: Any): SandboxTreeNodeBase? {
+  return ((node as? DefaultMutableTreeNode)?.userObject as? FilteringTreeStructure.FilteringNode)?.delegate as? SandboxTreeNodeBase
 }
 
 private data class Group(val title: String, val children: List<Any>)
 
-private sealed class SandboxTreeNodeBase(parent: SimpleNode?) : SimpleNode(parent) {
+internal sealed class SandboxTreeNodeBase(parent: SimpleNode?) : SimpleNode(parent) {
 
   abstract val title: String
 
@@ -419,18 +602,12 @@ private class SandboxTreeGroup(parent: SimpleNode?, disposable: Disposable, over
   }
 }
 
-private class SandboxTreeLeaf(parent: SimpleNode?, disposable: Disposable, val sandboxPanel: UISandboxPanel) :
+internal class SandboxTreeLeaf(parent: SimpleNode?, val disposable: Disposable, val sandboxPanel: UISandboxPanel) :
   SandboxTreeNodeBase(parent) {
 
   override val title: String = sandboxPanel.title
 
-  val panelCache = lazy {
-    sandboxPanel.createContent(disposable)
-  }
-
-  fun isScrollbarNeeded(): Boolean {
-    return sandboxPanel.isScrollbarNeeded
-  }
+  fun createContent(): JComponent = sandboxPanel.createContent(disposable)
 
   override fun getChildren(): Array<SimpleNode> {
     return NO_CHILDREN
@@ -439,6 +616,8 @@ private class SandboxTreeLeaf(parent: SimpleNode?, disposable: Disposable, val s
 
 
 private class SandboxTreeRenderer : NodeRenderer() {
+
+  private val internalBadge = Badge("Internal", ColorType.PURPLE_SECONDARY)
 
   override fun customizeCellRenderer(
     tree: JTree,
@@ -450,5 +629,17 @@ private class SandboxTreeRenderer : NodeRenderer() {
     hasFocus: Boolean,
   ) {
     super.customizeCellRenderer(tree, value, selected, expanded, leaf, row, hasFocus)
+
+    isIconOnTheRight = true
+    iconTextGap = JBUIScale.scale(6)
+
+    if (value != null) {
+      val node = extractSandboxTreeNode(value)
+      if (node is SandboxTreeLeaf) {
+        if (node.sandboxPanel.isInternalApi) {
+          setIcon(internalBadge)
+        }
+      }
+    }
   }
 }

@@ -17,6 +17,8 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.logging.Level
+import java.util.logging.Logger
 import kotlin.io.path.isRegularFile
 import kotlin.io.path.readText
 import kotlin.jvm.optionals.getOrNull
@@ -27,6 +29,9 @@ internal data class CacheEntry(
   @JvmField val sha256: String,
 )
 
+/**
+ * @param isPrivate is set according to a heuristic, see [org.jetbrains.intellij.build.bazel.loadJarRepositories]
+ */
 internal data class JarRepository(val url: String, val isPrivate: Boolean) {
   init {
     check(!url.endsWith("/")) {
@@ -142,11 +147,11 @@ internal fun readModules(modulesBazel: List<Path>, repositories: List<JarReposit
 
       val matchedRepositories = repositories.filter { url.startsWith(it.urlWithSlash) }
       if (matchedRepositories.isEmpty()) {
-        warn("Cannot find repository for $url across all repositories: ${repositories.map { it.urlWithSlash }}")
+        warn("Cannot find repository for $url across all repositories: ${repositories.map { it.urlWithSlash }} in file: $modulesFile")
         continue
       }
       if (matchedRepositories.size > 1) {
-        warn("Multiple repositories match $url: ${matchedRepositories.map { it.urlWithSlash }}")
+        warn("Multiple repositories match $url: ${matchedRepositories.map { it.urlWithSlash }} in file: $modulesFile")
         continue
       }
       val repository = matchedRepositories.single()
@@ -174,7 +179,7 @@ internal fun readModules(modulesBazel: List<Path>, repositories: List<JarReposit
     }
   }
 
-  println("DEBUG: read ${map.size} existing entries from $modulesBazel")
+  LOG.log(Level.FINE, "DEBUG: read ${map.size} existing entries from $modulesBazel")
 
   return map
 }
@@ -212,7 +217,16 @@ internal class UrlCache(val modulesBazel: List<Path>, val repositories: List<Jar
       ?.followRedirectsIfNeeded()
     val statusCode = response?.statusCode()
     if (statusCode == 401) {
-      throw IllegalStateException("Not authorized: $url")
+      throw IllegalStateException(buildString {
+        append("Not authorized: $url")
+        if (!repo.isPrivate) {
+          append(
+            ". If that remote is intended to be private, " +
+            "please make sure that the corresponding <remote-repository> element " +
+            "in .idea/jarRepositories.xml has substring 'private' in its id"
+          )
+        }
+      })
     }
     return statusCode == 200
   }
@@ -298,3 +312,5 @@ fun InputStream.sha256(): String {
   }
   return digest.digest().joinToString("") { "%02x".format(it) }
 }
+
+private val LOG = Logger.getLogger("url-cache")

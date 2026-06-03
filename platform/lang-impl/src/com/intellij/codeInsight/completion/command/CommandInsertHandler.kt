@@ -1,9 +1,10 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion.command
 
 import com.intellij.codeInsight.completion.InsertHandler
 import com.intellij.codeInsight.completion.InsertionContext
 import com.intellij.codeInsight.lookup.LookupElement
+import com.intellij.featureStatistics.FeatureUsageTracker
 import com.intellij.injected.editor.DocumentWindow
 import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.openapi.application.ApplicationManager
@@ -13,16 +14,15 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.util.Disposer
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageEditorUtil
-import org.jetbrains.annotations.ApiStatus
 
 /**
  * A handler for managing the insertion of commands during code completion.
  * This class manages specific behaviors that occur when a command from the lookup
  * list is selected and inserted into the editor.
  */
-@ApiStatus.Internal
 internal class CommandInsertHandler(private val completionCommand: CompletionCommand) : InsertHandler<LookupElement?> {
   override fun handleInsert(context: InsertionContext, item: LookupElement) {
+    FeatureUsageTracker.getInstance().triggerFeatureUsed("editing.completion.command")
     var editor = context.editor
     val originalEditor = editor.getUserData(ORIGINAL_EDITOR)
     var startOffset: Int = -1
@@ -70,7 +70,7 @@ internal class CommandInsertHandler(private val completionCommand: CompletionCom
     if (completionType != null) {
       CommandCompletionCollector.called(completionCommand::class.java,
                                         context.file.language,
-                                        completionType::class.java)
+                                        completionType)
     }
 
     val actualIndex = findActualIndex(commandCompletionFactory.suffix().toString() + (commandCompletionFactory.filterSuffix() ?: ""),

@@ -1,46 +1,42 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Abstract
-import com.intellij.platform.workspace.storage.annotations.Parent
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.extractOneToAbstractOneChild
-import com.intellij.platform.workspace.storage.impl.updateOneToAbstractOneChildOfParent
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.AbstractChildWithLinkToParentEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableAbstractChildWithLinkToParentEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableParentWithLinkToAbstractChild
+import com.intellij.platform.workspace.storage.testEntities.entities.AbstractChildWithLinkToParentEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.ParentWithLinkToAbstractChild
+import com.intellij.platform.workspace.storage.testEntities.entities.ParentWithLinkToAbstractChildBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentWithLinkToAbstractChildData) : ParentWithLinkToAbstractChild, WorkspaceEntityBase(
-  dataSource) {
+internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentWithLinkToAbstractChildData) : ParentWithLinkToAbstractChild,
+                                                                                                              WorkspaceEntityBase(dataSource) {
 
   private companion object {
     internal val CHILD_CONNECTION_ID: ConnectionId = ConnectionId.create(ParentWithLinkToAbstractChild::class.java,
                                                                          AbstractChildWithLinkToParentEntity::class.java,
-                                                                         ConnectionId.ConnectionType.ABSTRACT_ONE_TO_ONE, true)
-
-    private val connections = listOf<ConnectionId>(
-      CHILD_CONNECTION_ID,
-    )
+                                                                         ConnectionId.ConnectionType.ABSTRACT_ONE_TO_ONE,
+                                                                         true)
+    private val connections = listOf<ConnectionId>(CHILD_CONNECTION_ID)
 
   }
 
@@ -49,9 +45,8 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
       readField("data")
       return dataSource.data
     }
-
   override val child: AbstractChildWithLinkToParentEntity?
-    get() = snapshot.extractOneToAbstractOneChild(CHILD_CONNECTION_ID, this)
+    get() = snapshot.instrumentation.getOneChild(CHILD_CONNECTION_ID, this) as? AbstractChildWithLinkToParentEntity
 
   override val entitySource: EntitySource
     get() {
@@ -64,8 +59,9 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
   }
 
 
-  internal class Builder(result: ParentWithLinkToAbstractChildData?) : ModifiableWorkspaceEntityBase<ParentWithLinkToAbstractChild, ParentWithLinkToAbstractChildData>(
-    result), ModifiableParentWithLinkToAbstractChild {
+  internal class Builder(result: ParentWithLinkToAbstractChildData?) :
+    ModifiableWorkspaceEntityBase<ParentWithLinkToAbstractChild, ParentWithLinkToAbstractChildData>(result),
+    ParentWithLinkToAbstractChildBuilder {
     internal constructor() : this(ParentWithLinkToAbstractChildData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -78,15 +74,13 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
           error("Entity ParentWithLinkToAbstractChild is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -122,7 +116,6 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
         changedProperty.add("entitySource")
 
       }
-
     override var data: String
       get() = getEntityData().data
       set(value) {
@@ -130,20 +123,18 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
         getEntityData(true).data = value
         changedProperty.add("data")
       }
-
-    override var child: ModifiableAbstractChildWithLinkToParentEntity<out AbstractChildWithLinkToParentEntity>?
+    override var child: AbstractChildWithLinkToParentEntityBuilder<out AbstractChildWithLinkToParentEntity>?
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
           ((_diff as MutableEntityStorageInstrumentation).getOneChildBuilder(CHILD_CONNECTION_ID,
-                                                                             this) as? ModifiableAbstractChildWithLinkToParentEntity<out AbstractChildWithLinkToParentEntity>)
+                                                                             this) as? AbstractChildWithLinkToParentEntityBuilder<out AbstractChildWithLinkToParentEntity>)
           ?: (this.entityLinks[EntityLink(true,
-                                          CHILD_CONNECTION_ID)] as? ModifiableAbstractChildWithLinkToParentEntity<out AbstractChildWithLinkToParentEntity>)
+                                          CHILD_CONNECTION_ID)] as? AbstractChildWithLinkToParentEntityBuilder<out AbstractChildWithLinkToParentEntity>)
         }
         else {
-          this.entityLinks[EntityLink(true,
-                                      CHILD_CONNECTION_ID)] as? ModifiableAbstractChildWithLinkToParentEntity<out AbstractChildWithLinkToParentEntity>
+          (this.entityLinks[EntityLink(true,
+                                       CHILD_CONNECTION_ID)] as? AbstractChildWithLinkToParentEntityBuilder<out AbstractChildWithLinkToParentEntity>)
         }
       }
       set(value) {
@@ -153,18 +144,17 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(false, CHILD_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToAbstractOneChildOfParent(CHILD_CONNECTION_ID, this, value)
+          _diff.instrumentation.replaceChildren(CHILD_CONNECTION_ID, this, listOfNotNull(value))
         }
         else {
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(false, CHILD_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(true, CHILD_CONNECTION_ID)] = value
         }
         changedProperty.add("child")
@@ -172,6 +162,7 @@ internal class ParentWithLinkToAbstractChildImpl(private val dataSource: ParentW
 
     override fun getEntityClass(): Class<ParentWithLinkToAbstractChild> = ParentWithLinkToAbstractChild::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -180,14 +171,13 @@ internal class ParentWithLinkToAbstractChildData : WorkspaceEntityData<ParentWit
 
   internal fun isDataInitialized(): Boolean = ::data.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ParentWithLinkToAbstractChild> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ParentWithLinkToAbstractChild> {
     val modifiable = ParentWithLinkToAbstractChildImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ParentWithLinkToAbstractChild {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -199,17 +189,15 @@ internal class ParentWithLinkToAbstractChildData : WorkspaceEntityData<ParentWit
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.ParentWithLinkToAbstractChild") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.ParentWithLinkToAbstractChild") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return ParentWithLinkToAbstractChild::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ParentWithLinkToAbstractChild(data, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ParentWithLinkToAbstractChild(data, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -220,9 +208,7 @@ internal class ParentWithLinkToAbstractChildData : WorkspaceEntityData<ParentWit
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ParentWithLinkToAbstractChildData
-
     if (this.entitySource != other.entitySource) return false
     if (this.data != other.data) return false
     return true
@@ -231,9 +217,7 @@ internal class ParentWithLinkToAbstractChildData : WorkspaceEntityData<ParentWit
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ParentWithLinkToAbstractChildData
-
     if (this.data != other.data) return false
     return true
   }

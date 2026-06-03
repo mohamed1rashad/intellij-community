@@ -53,7 +53,8 @@ class GradleIdeaModelHolder(
   }
 
   fun <T> getRootModel(modelClazz: Class<T>): T? {
-    return getBuildModel(getRootBuild(), modelClazz)
+    return getModel(getRootModelId(modelClazz), modelClazz)
+           ?: rootBuild?.let { getBuildModel(it, modelClazz) }
   }
 
   fun <T> getBuildModel(buildModel: BuildModel, modelClass: Class<T>): T? {
@@ -99,6 +100,7 @@ class GradleIdeaModelHolder(
     }
   }
 
+  @ApiStatus.Internal
   private fun <T : Any> deserializeModel(model: Any, modelId: GradleModelId, modelClass: Class<T>): T? {
     if (model !is ByteArray) {
       return null
@@ -164,6 +166,10 @@ class GradleIdeaModelHolder(
   private fun applyBuildIdMapping(modelId: GradleModelId): GradleModelId {
     val originalBuildId = buildIdMapping[modelId.buildId] ?: return modelId
     return GradleModelId(modelId.classId, originalBuildId, modelId.projectId)
+  }
+
+  private fun getRootModelId(modelClass: Class<*>): GradleModelId {
+    return GradleModelId.createRootModelId(modelClass)
   }
 
   private fun getBuildModelId(buildModel: BuildModel, modelClass: Class<*>): GradleModelId {

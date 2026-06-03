@@ -1,5 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.actions;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -8,6 +7,9 @@ import com.intellij.formatting.service.FormattingService;
 import com.intellij.formatting.service.FormattingServiceUtil;
 import com.intellij.lang.ImportOptimizer;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.command.UndoConfirmationPolicy;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.impl.ImaginaryEditor;
@@ -17,11 +19,21 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsContexts.HintText;
-import com.intellij.psi.*;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiCompiledElement;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.codeStyle.CoreCodeStyleUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -71,6 +83,70 @@ public class OptimizeImportsProcessor extends AbstractLayoutCodeProcessor {
     super(previousProcessor, getCommandName(), getProgressText());
   }
 
+  /**
+   * Honours {@link ImportOptimizer#getActionMode} for the file:
+   * <ul>
+   *   <li>if every applicable {@link ImportOptimizer} returns the default
+   *   {@link ImportOptimizer.ActionMode#WRITE_COMMAND_ACTION}, the call delegates to
+   *   {@link #runUnderDefaultWriteCommandAction} — behaviour identical to the base
+   *   {@link AbstractLayoutCodeProcessor};</li>
+   *   <li>if any optimizer requests {@link ImportOptimizer.ActionMode#EDT}, the platform
+   *   opens only the undo command (no write action). The {@code modifyTask} (i.e. the {@code Runnable} produced by
+   *   {@link ImportOptimizer#processFile}) is then expected to enter a write action itself, e.g. via
+   *   {@link com.intellij.openapi.application.ex.ApplicationEx#runWriteActionWithCancellableProgressInDispatchThread},
+   *   so a long unambiguous auto-import resolve can be cancelled instead of freezing EDT (IDEA-388816).</li>
+   * </ul>
+   */
+  @ApiStatus.Experimental
+  @Override
+  protected void runTask(@NotNull VirtualFile virtualFile,
+                         @NotNull @NlsContexts.Command String commandName,
+                         @NotNull String groupId,
+                         boolean processAllFilesAsSingleUndoStep,
+                         @NotNull Runnable modifyTask) {
+    if (anyOptimizerRequiresDefaultWriteAction(virtualFile, myProject)) {
+      runUnderDefaultWriteCommandAction(myProject, commandName, groupId, processAllFilesAsSingleUndoStep, modifyTask);
+      return;
+    }
+    ApplicationManager.getApplication().invokeAndWait(() -> {
+      CommandProcessor.getInstance().executeCommand(
+        myProject, modifyTask, commandName, groupId,
+        UndoConfirmationPolicy.DO_NOT_REQUEST_CONFIRMATION,
+        processAllFilesAsSingleUndoStep);
+    });
+  }
+
+  /**
+   * Decides whether the platform must open a {@link com.intellij.openapi.command.WriteCommandAction} around
+   * the {@code Runnable} produced by {@link ImportOptimizer#processFile} (the default {@code AbstractLayoutCodeProcessor}
+   * behaviour), or whether it must only open an undo command and let the {@code Runnable} enter its own write action
+   * on EDT (the {@link ImportOptimizer.ActionMode#EDT} path).
+   * @return {@code true} if at least one applicable optimizer/importer requests
+   * {@link ImportOptimizer.ActionMode#WRITE_COMMAND_ACTION}, or the file is not resolvable.
+   */
+  private static boolean anyOptimizerRequiresDefaultWriteAction(@NotNull VirtualFile virtualFile,
+                                                                @NotNull Project project) {
+    return ReadAction.nonBlocking(() -> {
+      PsiFile file = PsiManager.getInstance(project).findFile(virtualFile);
+      if (file == null) return true;
+      FormattingService service = FormattingServiceUtil.findImportsOptimizingService(file);
+      for (ImportOptimizer optimizer : service.getImportOptimizers(file)) {
+        for (PsiFile psi : file.getViewProvider().getAllFiles()) {
+          if (optimizer.supports(psi) && optimizer.getActionMode() == ImportOptimizer.ActionMode.WRITE_COMMAND_ACTION) {
+            return true;
+          }
+        }
+      }
+      for (ReferenceImporter importer : ReferenceImporter.EP_NAME.getExtensionList()) {
+        if (importer.isAddUnambiguousImportsOnTheFlyEnabled(file) &&
+            importer.getActionMode() == ImportOptimizer.ActionMode.WRITE_COMMAND_ACTION) {
+          return true;
+        }
+      }
+      return false;
+    }).executeSynchronously();
+  }
+
   @Override
   protected @NotNull FutureTask<Boolean> prepareTask(@NotNull PsiFile psiFile, boolean processChangedTextOnly) {
     ApplicationManager.getApplication().assertReadAccessAllowed();
@@ -79,7 +155,6 @@ public class OptimizeImportsProcessor extends AbstractLayoutCodeProcessor {
     }
 
     List<Runnable> runnables = collectOptimizers(psiFile);
-
     if (runnables.isEmpty()) {
       return emptyTask();
     }
@@ -154,7 +229,7 @@ public class OptimizeImportsProcessor extends AbstractLayoutCodeProcessor {
 
   static @NotNull List<Runnable> collectOptimizers(@NotNull PsiFile file) {
     FormattingService service = FormattingServiceUtil.findImportsOptimizingService(file);
-    List<Runnable> runnables = new ArrayList<>();
+    List<Runnable> runnables = new SmartList<>();
     List<PsiFile> files = file.getViewProvider().getAllFiles();
     for (ImportOptimizer optimizer : service.getImportOptimizers(file)) {
       for (PsiFile psiFile : files) {
@@ -167,8 +242,8 @@ public class OptimizeImportsProcessor extends AbstractLayoutCodeProcessor {
   }
 
   private static @NotNull NotificationInfo getNotificationInfo(@NotNull Runnable runnable) {
-    if (runnable instanceof ImportOptimizer.CollectingInfoRunnable) {
-      String optimizerMessage = ((ImportOptimizer.CollectingInfoRunnable)runnable).getUserNotificationInfo();
+    if (runnable instanceof ImportOptimizer.CollectingInfoRunnable infoRunnable) {
+      String optimizerMessage = infoRunnable.getUserNotificationInfo();
       return optimizerMessage == null ? NOTHING_CHANGED_NOTIFICATION : new NotificationInfo(optimizerMessage);
     }
     if (runnable == EmptyRunnable.getInstance()) {

@@ -4,8 +4,19 @@ package com.intellij.diff;
 import com.intellij.diff.contents.DiffContent;
 import com.intellij.diff.contents.DocumentContent;
 import com.intellij.diff.contents.FileContent;
-import com.intellij.diff.merge.*;
-import com.intellij.diff.requests.*;
+import com.intellij.diff.merge.ConflictType;
+import com.intellij.diff.merge.MergeCallback;
+import com.intellij.diff.merge.MergeRequest;
+import com.intellij.diff.merge.MergeResult;
+import com.intellij.diff.merge.TextMergeRequest;
+import com.intellij.diff.requests.BinaryMergeRequestImpl;
+import com.intellij.diff.requests.ContentDiffRequest;
+import com.intellij.diff.requests.DiffRequest;
+import com.intellij.diff.requests.LoadingDiffRequest;
+import com.intellij.diff.requests.NoDiffRequest;
+import com.intellij.diff.requests.OperationCanceledDiffRequest;
+import com.intellij.diff.requests.SimpleDiffRequest;
+import com.intellij.diff.requests.TextMergeRequestImpl;
 import com.intellij.diff.util.DiffUtil;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diff.DiffBundle;
@@ -19,7 +30,11 @@ import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.LocalFilePath;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -309,7 +324,7 @@ public class DiffRequestFactoryImpl extends DiffRequestFactory {
     if (byteContents.size() != 3) throw new IllegalArgumentException();
     if (contentTitles.size() != 3) throw new IllegalArgumentException();
 
-    final Document outputDocument = ReadAction.compute(() -> FileDocumentManager.getInstance().getDocument(output));
+    Document outputDocument = ReadAction.computeBlocking(() -> FileDocumentManager.getInstance().getDocument(output));
     if (outputDocument == null) throw new InvalidDiffRequestException("Can't get output document: " + output.getPresentableUrl());
     if (!DiffUtil.canMakeWritable(outputDocument)) throw new InvalidDiffRequestException("Output is read only: " + output.getPresentableUrl());
 
@@ -343,7 +358,7 @@ public class DiffRequestFactoryImpl extends DiffRequestFactory {
     try {
       FileContent outputContent = myContentFactory.createFile(project, output);
       if (outputContent == null) throw new InvalidDiffRequestException("Can't process file: " + output);
-      byte[] originalContent = ReadAction.compute(() -> output.contentsToByteArray());
+      byte[] originalContent = ReadAction.computeBlocking(() -> output.contentsToByteArray());
 
       List<DiffContent> contents = new ArrayList<>(3);
       for (byte[] bytes : byteContents) {
@@ -397,7 +412,7 @@ public class DiffRequestFactoryImpl extends DiffRequestFactory {
     List<byte[]> byteContents = new ArrayList<>(3);
     for (VirtualFile file : fileContents) {
       try {
-        byteContents.add(ReadAction.compute(() -> file.contentsToByteArray()));
+        byteContents.add(ReadAction.computeBlocking(() -> file.contentsToByteArray()));
       }
       catch (IOException e) {
         throw new InvalidDiffRequestException("Can't read from file: " + file.getPresentableUrl(), e);
@@ -420,7 +435,7 @@ public class DiffRequestFactoryImpl extends DiffRequestFactory {
     try {
       FileContent outputContent = myContentFactory.createFile(project, output);
       if (outputContent == null) throw new InvalidDiffRequestException("Can't process file: " + output.getPresentableUrl());
-      byte[] originalContent = ReadAction.compute(() -> output.contentsToByteArray());
+      byte[] originalContent = ReadAction.computeBlocking(() -> output.contentsToByteArray());
 
       List<DiffContent> contents = new ArrayList<>(3);
       List<byte[]> byteContents = new ArrayList<>(3);
@@ -428,7 +443,7 @@ public class DiffRequestFactoryImpl extends DiffRequestFactory {
         FileContent content = myContentFactory.createFile(project, file);
         if (content == null) throw new InvalidDiffRequestException("Can't process file: " + file.getPresentableUrl());
         contents.add(content);
-        byteContents.add(ReadAction.compute(() -> file.contentsToByteArray())); // TODO: we can read contents from file when needed
+        byteContents.add(ReadAction.computeBlocking(() -> file.contentsToByteArray())); // TODO: we can read contents from file when needed
       }
 
       BinaryMergeRequestImpl request = new BinaryMergeRequestImpl(project, outputContent, originalContent, contents, byteContents,

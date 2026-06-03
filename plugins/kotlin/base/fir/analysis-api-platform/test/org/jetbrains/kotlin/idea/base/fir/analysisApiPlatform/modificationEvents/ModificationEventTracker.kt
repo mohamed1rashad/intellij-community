@@ -5,7 +5,18 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import org.jetbrains.kotlin.analysis.api.platform.analysisMessageBus
-import org.jetbrains.kotlin.analysis.api.platform.modification.*
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinCodeFragmentContextModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinGlobalModuleStateModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinGlobalScriptModuleStateModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinGlobalSourceModuleStateModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinGlobalSourceOutOfBlockModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModificationEventKind
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModificationEventListener
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModuleOutOfBlockModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModuleStateModificationEvent
+import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModuleStateModificationKind
+import org.jetbrains.kotlin.analysis.api.platform.modification.isModuleLevel
 import org.jetbrains.kotlin.analysis.api.projectStructure.KaModule
 import org.junit.Assert
 
@@ -14,7 +25,7 @@ import org.junit.Assert
  * [expectedEventKind] -- that is, the modification tracker primarily checks if a modification event with that exact kind was or was not
  * received.
  *
- * [allowedEventKinds] can be additionally specified as "side effect" events which are expected to be , such as a global out-of-block
+ * [allowedEventKinds] can be additionally specified as "side effect" events which might be published, such as a global out-of-block
  * modification event after a module roots change. The modification event tracker understands **all** other event kinds as *forbidden* and
  * will fail the test if such an event is encountered.
  */
@@ -30,6 +41,11 @@ open class ModificationEventTracker(
         val module: KaModule? = null,
         val isRemoval: Boolean = false,
     ) {
+        private val stackTrace: String = Thread.currentThread().stackTrace
+            .drop(1) // Drop `getStackTrace` itself.
+            .takeWhile { !it.className.startsWith("junit.framework.") } // Stop at JUnit frames.
+            .joinToString("\n") { "  at $it" }
+
         override fun toString(): String = buildString {
             append(kind)
             if (module != null) {
@@ -38,6 +54,14 @@ open class ModificationEventTracker(
             if (isRemoval) {
                 append(" (removal)")
             }
+        }
+
+        fun toStringWithStackTrace(): String = buildString {
+            appendLine(this@ReceivedEvent.toString())
+            appendLine("--------")
+            appendLine("Event stack trace:")
+            appendLine(stackTrace)
+            appendLine("--------")
         }
     }
 
@@ -102,10 +126,12 @@ open class ModificationEventTracker(
     private val expectedEventName: String get() = expectedEventKind.name
 
     fun assertNotModified() {
-        Assert.assertTrue(
-            "`$expectedEventName` events for $label should not have been published, but ${expectedEvents.size} events were received.",
-            expectedEvents.isEmpty(),
-        )
+        if (expectedEvents.isNotEmpty()) {
+            val eventsWithStackTraces = expectedEvents.joinToString("\n\n") { it.toStringWithStackTrace() }
+            Assert.fail(
+                "`$expectedEventName` events for $label should not have been published, but ${expectedEvents.size} events were received:\n\n$eventsWithStackTraces"
+            )
+        }
         checkForbiddenEvents()
     }
 
@@ -119,10 +145,20 @@ open class ModificationEventTracker(
     }
 
     fun assertModifiedOnce(shouldBeRemoval: Boolean = false) {
-        Assert.assertTrue(
-            "A single `$expectedEventName` event for $label should have been published, but ${expectedEvents.size} events were received.",
-            expectedEvents.size == 1,
-        )
+        assertModifiedExactly(times = 1, shouldBeRemoval = shouldBeRemoval)
+    }
+
+    fun assertModifiedExactly(times: Int, shouldBeRemoval: Boolean = false) {
+        if (expectedEvents.size != times) {
+            val numberText = if (times == 1) "A single" else "Exactly $times"
+            val eventsText = if (times == 1) "event" else "events"
+
+            Assert.fail(
+                "$numberText `$expectedEventName` $eventsText for $label should have been published," +
+                        " but ${expectedEvents.size} events were received.",
+            )
+        }
+
         checkShouldBeRemoval(shouldBeRemoval)
         checkForbiddenEvents()
     }
@@ -130,18 +166,20 @@ open class ModificationEventTracker(
     private fun checkShouldBeRemoval(shouldBeRemoval: Boolean) {
         val shouldOrShouldNot = if (shouldBeRemoval) "should" else "should not"
         expectedEvents.forEachIndexed { index, receivedEvent ->
-            Assert.assertTrue(
-                "The `$expectedEventName` event #$index for $label $shouldOrShouldNot be a removal event.",
-                receivedEvent.isRemoval == shouldBeRemoval,
-            )
+            if (receivedEvent.isRemoval != shouldBeRemoval) {
+                Assert.fail(
+                    "The `$expectedEventName` event #$index for $label $shouldOrShouldNot be a removal event:\n\n${receivedEvent.toStringWithStackTrace()}"
+                )
+            }
         }
     }
 
     private fun checkForbiddenEvents() {
         if (forbiddenEvents.isEmpty()) return
 
+        val eventsWithStackTraces = forbiddenEvents.joinToString("\n\n") { it.toStringWithStackTrace() }
         Assert.fail(
-            "The following forbidden events for '$label' should not have been published:\n- ${forbiddenEvents.joinToString("\n -")}"
+            "The following forbidden events for '$label' should not have been published:\n\n$eventsWithStackTraces"
         )
     }
 

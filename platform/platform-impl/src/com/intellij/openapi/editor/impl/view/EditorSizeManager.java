@@ -5,29 +5,45 @@ import com.intellij.diagnostic.Dumpable;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Caret;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.CustomFoldRegion;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorSettings;
+import com.intellij.openapi.editor.FoldRegion;
+import com.intellij.openapi.editor.Inlay;
+import com.intellij.openapi.editor.InlayModel;
+import com.intellij.openapi.editor.ScrollingModel;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.FoldingListener;
 import com.intellij.openapi.editor.ex.InlayModelEx;
 import com.intellij.openapi.editor.ex.PrioritizedDocumentListener;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
-import com.intellij.openapi.editor.impl.*;
+import com.intellij.openapi.editor.impl.CaretImpl;
+import com.intellij.openapi.editor.impl.CaretModelImpl;
+import com.intellij.openapi.editor.impl.EditorDocumentPriorities;
+import com.intellij.openapi.editor.impl.EditorImpl;
+import com.intellij.openapi.editor.impl.FoldingModelInternal;
+import com.intellij.openapi.editor.impl.SoftWrapModelImpl;
 import com.intellij.openapi.editor.impl.softwrap.SoftWrapDrawingType;
+import com.intellij.openapi.editor.impl.softwrap.SoftWrapEx;
 import com.intellij.openapi.editor.impl.softwrap.mapping.IncrementalCacheUpdateEvent;
-import com.intellij.openapi.editor.impl.softwrap.mapping.SoftWrapAwareDocumentParsingListenerAdapter;
+import com.intellij.openapi.editor.impl.softwrap.mapping.SoftWrapParsingListener;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.util.DocumentEventUtil;
 import com.intellij.util.DocumentUtil;
 import com.intellij.util.IntPair;
+import com.intellij.util.ui.JBUI;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.awt.*;
+import java.awt.Dimension;
+import java.awt.Insets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -82,9 +98,9 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
 
   private long myDocumentStamp = Long.MIN_VALUE;
 
-  private final SoftWrapAwareDocumentParsingListenerAdapter mySoftWrapChangeListener = new SoftWrapAwareDocumentParsingListenerAdapter() {
+  private final SoftWrapParsingListener mySoftWrapParsingListener = new SoftWrapParsingListener() {
     @Override
-    public void onRecalculationEnd(@NotNull IncrementalCacheUpdateEvent event) {
+    public void onRegionReparseEnd(@NotNull IncrementalCacheUpdateEvent event) {
       onSoftWrapRecalculationEnd(event);
     }
   };
@@ -100,13 +116,13 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
     myScrollingModel = view.getScrollingModel();
     myDocument.addDocumentListener(this, this);
     myFoldingModel.addListener(this, this);
-    mySoftWrapModel.getApplianceManager().addListener(mySoftWrapChangeListener);
+    mySoftWrapModel.addSoftWrapParsingListener(mySoftWrapParsingListener);
     myInlayModel.addListener(this, this);
   }
 
   @Override
   public void dispose() {
-    mySoftWrapModel.getApplianceManager().removeListener(mySoftWrapChangeListener);
+    mySoftWrapModel.removeSoftWrapParsingListener(mySoftWrapParsingListener);
     invalidateCachedBlockInlayWidth();
   }
 
@@ -331,6 +347,8 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
     return width + insets.right;
   }
 
+
+
   int getPreferredHeight() {
     resetIfOutdated(false);
 
@@ -355,8 +373,8 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
       size += settings.getAdditionalLinesCount() * lineHeight;
     }
 
-    Insets insets = myView.getInsets();
-    return size + insets.top + insets.bottom;
+    Insets insets = myEditor.getShouldIgnoreViewportInsets() ? JBUI.emptyInsets() : myView.getInsets();
+    return size + insets.top + insets.bottom + myEditor.getAdditionalSizeForMeasure();
   }
 
   private boolean shouldRespectAdditionalColumns(int widthWithoutCaret) {
@@ -418,7 +436,7 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
 
   private void validateMaxLineWithExtension() {
     if (myMaxLineWithExtensionWidth > 0) {
-      boolean hasNoExtensions = myEditor.processLineExtensions(myWidestLineWithExtension, __ -> false);
+      boolean hasNoExtensions = myEditor.processLineExtensions(myWidestLineWithExtension, _ -> false);
       if (hasNoExtensions) {
         myMaxLineWithExtensionWidth = 0;
       }
@@ -491,7 +509,8 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
       x = fragment.getEndX() - leftInset;
       maxOffset = Math.max(maxOffset, fragment.getMaxOffset());
     }
-    if (mySoftWrapModel.getSoftWrap(maxOffset) != null) {
+    SoftWrapEx lineEndWrap = mySoftWrapModel.getSoftWrapEx(maxOffset);
+    if (lineEndWrap != null && lineEndWrap.isPaintable()) {
       x += mySoftWrapModel.getMinDrawingWidthInPixels(SoftWrapDrawingType.BEFORE_SOFT_WRAP_LINE_FEED);
     }
     else {
@@ -549,6 +568,14 @@ final class EditorSizeManager implements PrioritizedDocumentListener, Disposable
     if (checkDirty()) return;
     int startVisualLine = myView.offsetToVisualLine(startOffset, false);
     int endVisualLine = myView.offsetToVisualLine(endOffset, true);
+    if (startVisualLine > endVisualLine) {
+      // If startOffset == endOffset and there's a soft-wrap at this offset, startVisualLine > endVisualLine.
+      // In this case, we need to invalidate both of the visual lines.
+      int swap = startVisualLine;
+      startVisualLine = endVisualLine;
+      endVisualLine = swap;
+    }
+
     int lineDiff = myView.getVisibleLineCount() - myLineWidths.size();
     invalidateWidth(lineDiff == 0 && startVisualLine == endVisualLine, startVisualLine);
     if (lineDiff > 0) {

@@ -1,5 +1,6 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:JvmName("StartupUtil")
+@file:OptIn(LowLevelLocalMachineAccess::class)
 package com.intellij.platform.ide.bootstrap
 
 import com.intellij.BundleBase
@@ -9,11 +10,18 @@ import com.intellij.ide.CliResult
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.bootstrap.InitAppContext
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.startup.StartupActionScriptManager
 import com.intellij.idea.AppExitCodes
 import com.intellij.idea.AppMode
+import com.intellij.idea.ApplicationStartArguments
 import com.intellij.idea.LoggerFactory
 import com.intellij.jna.JnaLoader
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationInfo
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ApplicationNamesInfo
+import com.intellij.openapi.application.InitialConfigImportState
+import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.PluginAutoUpdater
 import com.intellij.openapi.application.ex.ApplicationInfoEx
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.impl.ApplicationImpl
@@ -38,10 +46,23 @@ import com.intellij.util.ShellEnvironmentReader
 import com.intellij.util.containers.Java11Shim
 import com.intellij.util.lang.ZipFilePool
 import com.intellij.util.singleProduct.migrateCommunityToSingleProductIfNeeded
+import com.intellij.util.system.LowLevelLocalMachineAccess
 import com.intellij.util.system.OS
 import com.jetbrains.JBR
 import kotlinx.collections.immutable.toImmutableMap
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.awt.Toolkit
 import java.lang.invoke.MethodHandles
@@ -51,8 +72,10 @@ import java.nio.charset.Charset
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.util.*
+import java.util.Locale
+import java.util.Random
 import java.util.concurrent.ForkJoinPool
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.BiConsumer
@@ -100,7 +123,7 @@ fun startApplication(
   val appInfoDeferred = scope.async {
     mainClassLoaderDeferred?.await()
     coroutineScope {
-      // required for log essential info about IDE, Wayland app id
+      // required for logging essential info about the IDE
       async(CoroutineName("app name info")) {
         ApplicationNamesInfo.getInstance()
       }
@@ -202,7 +225,10 @@ fun startApplication(
     logDeferred.join()
     span("environment loading", Dispatchers.IO) {
       val log = logger<AppStarter>()
-      if (shouldLoadShellEnv(log)) loadEnvironment(coroutineContext.job, log) else null
+      if (shouldLoadShellEnv(log)) {
+        loadEnvironment(coroutineContext.job, log)
+      }
+      else null
     }
   }
 
@@ -210,14 +236,15 @@ fun startApplication(
 
   val euaDocumentDeferred = scope.async { loadEuaDocument(appInfoDeferred) }
 
-  val configImportDeferred: Deferred<Job?> = scope.async {
+  val configImportDeferred = scope.async {
     importConfigIfNeeded(
       scope, isHeadless, configImportNeededDeferred, lockSystemDirsJob, logDeferred, args, customTargetDirectoryToImportConfig,
-      appStarterDeferred, euaDocumentDeferred, initLafJob)
+      appStarterDeferred, euaDocumentDeferred, initLafJob
+    )
   }
 
   configImportDeferred.invokeOnCompletion {
-    // In case of patch update from Community Edition to Single Product we need to rename IDE folder on MacOS and rename Desktop shortcuts on Windows.
+    // after updating from a Community Edition to a single product, we need to rename the macOS app bundle
     migrateCommunityToSingleProductIfNeeded(args)
   }
 
@@ -229,16 +256,30 @@ fun startApplication(
     // AppStarter.prepareStart might need to prevent some plugins from loading
     appStartPreparedJob.join()
 
-    if (!PluginAutoUpdater.shouldSkipAutoUpdate()) {
-      span("plugin auto update") {
-        PluginAutoUpdater.applyPluginUpdates(logDeferred)
+    // action.script and auto-update data are located in the system directory, it must be first locked before accessing
+    lockSystemDirsJob.join()
+    // command line starters should opt in to apply plugin updates
+    if (!AppMode.isCommandLine() || System.getProperty(AppMode.FORCE_PLUGIN_UPDATES).toBoolean()) {
+      span("run action.script") {
+        // Consider following steps:
+        // - user opens settings, and installs some plugins;
+        // - the plugins are downloaded and saved somewhere;
+        // - IDE prompts for restart;
+        // - after restart, the plugins are moved to proper directories ("installed") by the next line.
+        // TODO get rid of this: plugins should be installed before restarting the IDE
+        runActionScript()
+      }
+      if (!PluginAutoUpdater.shouldSkipAutoUpdate()) {
+        span("plugin auto update") {
+          PluginAutoUpdater.applyPluginUpdates(logDeferred)
+        }
       }
     }
 
     PluginManagerCore.scheduleDescriptorLoading(coroutineScope = this, zipPoolDeferred, mainClassLoaderDeferred, logDeferred)
   }
 
-  val isInternal = java.lang.Boolean.getBoolean(ApplicationManagerEx.IS_INTERNAL_PROPERTY)
+  val isInternal = System.getProperty(ApplicationManagerEx.IS_INTERNAL_PROPERTY).toBoolean()
   if (isInternal) {
     scope.launch(CoroutineName("assert on missed keys enabling")) {
       BundleBase.assertOnMissedKeys(true)
@@ -280,7 +321,7 @@ fun startApplication(
       ApplicationImpl(CoroutineScope(mainScope.coroutineContext.job + kernelStarted.await().coroutineContext).childScope("Application"), isInternal)
     }
 
-    val args = args.filterNot { CommandLineArgs.isKnownArgument(it) }
+    val args = ApplicationStartArguments.stripKnownArguments(args)
     loadApp(app, pluginSetDeferred, appInfoDeferred, euaDocumentDeferred, scope, initLafJob, logDeferred, appRegisteredJob, args, initEventQueueJob)
   }
 
@@ -295,7 +336,7 @@ fun startApplication(
     // must be scheduled before preparing app start
     configImportDeferred.join()
 
-    withContext(mainScope.coroutineContext + CoroutineName("appStarter set")) {
+    withContext(@Suppress("CoroutineContextWithJob") mainScope.coroutineContext + CoroutineName("appStarter set")) {
       appStarter.prepareStart(args)
       appStartPreparedJob.complete(Unit)
     }
@@ -334,6 +375,7 @@ fun startApplication(
         }.getOrLogException(log)
       }
 
+      ClassicUiToIslandsMigration.migrateSchemeAndUiSettingsIfNeeded()
       applyIslandsTheme(afterImportSettings = false)
       executeApplicationStarter(starter, args)
     }
@@ -421,7 +463,7 @@ private fun checkDirectories(scope: CoroutineScope, lockSystemDirJob: Job): Job 
   val homePath = PathManager.getHomeDir().toString()
   val configPath = PathManager.getConfigDir()
   val systemPath = PathManager.getSystemDir()
-  if (!span("system dirs checking") { checkDirectories(homePath = homePath, configPath = configPath, systemPath = systemPath) }) {
+  if (!span("system dirs checking") { checkDirectories(homePath, configPath, systemPath) }) {
     exitProcess(AppExitCodes.DIR_CHECK_FAILED)
   }
 }
@@ -444,8 +486,8 @@ private suspend fun checkDirectories(homePath: String, configPath: Path, systemP
   }
 
   return withContext(Dispatchers.IO) {
-    val logPath = Path.of(PathManager.getLogPath()).normalize()
-    val tempPath = Path.of(PathManager.getTempPath()).normalize()
+    val logPath = PathManager.getLogDir().normalize()
+    val tempPath = PathManager.getTempDir().normalize()
     // directories might be nested, hence should be checked sequentially
     checkDirectory(configPath, kind = 0, property = PathManager.PROPERTY_CONFIG_PATH) &&
     checkDirectory(systemPath, kind = 1, property = PathManager.PROPERTY_SYSTEM_PATH) &&
@@ -454,26 +496,26 @@ private suspend fun checkDirectories(homePath: String, configPath: Path, systemP
   }
 }
 
-private fun checkDirectory(directory: Path, kind: Int, property: String): Boolean {
+private fun checkDirectory(dir: Path, kind: Int, property: String): Boolean {
   try {
-    Files.createDirectories(directory)
+    Files.createDirectories(dir)
   }
   catch (e: Exception) {
     val title = BootstrapBundle.message("bootstrap.error.title.invalid.directory", kind)
     val problem = BootstrapBundle.message("bootstrap.error.problem.dir")
-    val message = BootstrapBundle.message("bootstrap.error.message.dir.problem", problem, property, directory, e.javaClass.name, e.message)
+    val message = BootstrapBundle.message("bootstrap.error.message.dir.problem", problem, property, dir, e.javaClass.name, e.message)
     StartupErrorReporter.showError(title, message)
     return false
   }
 
-  val tempFile = directory.resolve("ij${Random().nextInt(Int.MAX_VALUE)}.tmp")
+  val tempFile = dir.resolve("ij${Random().nextInt(Int.MAX_VALUE)}.tmp")
   try {
     Files.writeString(tempFile, "-", StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
   }
   catch (e: Exception) {
     val title = BootstrapBundle.message("bootstrap.error.title.invalid.directory", kind)
     val problem = BootstrapBundle.message("bootstrap.error.problem.file")
-    val message = BootstrapBundle.message("bootstrap.error.message.dir.problem", problem, property, directory, e.javaClass.name, e.message)
+    val message = BootstrapBundle.message("bootstrap.error.message.dir.problem", problem, property, dir, e.javaClass.name, e.message)
     StartupErrorReporter.showError(title, message)
     return false
   }
@@ -545,7 +587,7 @@ private fun setupLogger(scope: CoroutineScope, consoleLoggerJob: Job, checkSyste
     val log = logger<AppStarter>()
     log.info(IDE_STARTED)
     ShutDownTracker.getInstance().registerShutdownTask { log.info(IDE_SHUTDOWN) }
-    if (java.lang.Boolean.parseBoolean(System.getProperty("intellij.log.stdout", "true"))) {
+    if (System.getProperty("intellij.log.stdout", "true").toBoolean()) {
       System.setOut(PrintStreamLogger("STDOUT", System.out))
       System.setErr(PrintStreamLogger("STDERR", System.err))
     }
@@ -555,11 +597,13 @@ private fun setupLogger(scope: CoroutineScope, consoleLoggerJob: Job, checkSyste
 
 fun logEssentialInfoAboutIde(log: Logger, appInfo: ApplicationInfo, args: List<String>) {
   val buildTimeString = DateTimeFormatter.RFC_1123_DATE_TIME.format(appInfo.buildTime)
+  val launchDateTime = ZonedDateTime.now()
   log.info("IDE: ${ApplicationNamesInfo.getInstance().fullProductName} (build #${appInfo.build.asString()}, $buildTimeString)")
   log.info("OS: ${OS.CURRENT.name} (${OS.CURRENT.version()})")
   log.info("JRE: ${System.getProperty("java.runtime.version", "-")}, ${System.getProperty("os.arch")} (${System.getProperty("java.vendor", "-")})")
   log.info("JVM: ${System.getProperty("java.vm.version", "-")} (${System.getProperty("java.vm.name", "-")})")
   log.info("PID: ${ProcessHandle.current().pid()}")
+  log.info("Timezone: ${launchDateTime.zone.id} (${launchDateTime.offset})")
   if (OS.isGenericUnix()) {
     log.info("desktop: ${System.getenv("XDG_CURRENT_DESKTOP")}")
     log.info("toolkit: ${Toolkit.getDefaultToolkit().javaClass.name}")
@@ -575,17 +619,23 @@ fun logEssentialInfoAboutIde(log: Logger, appInfo: ApplicationInfo, args: List<S
   log.info("args: ${args.joinToString(separator = " ")}")
   log.info("library path: ${System.getProperty("java.library.path")}")
   log.info("boot library path: ${System.getProperty("sun.boot.library.path")}")
-  logEnvVar(log, "_JAVA_OPTIONS")
-  logEnvVar(log, "JDK_JAVA_OPTIONS")
-  logEnvVar(log, "JAVA_TOOL_OPTIONS")
+  if (System.getProperty("ide.native.launcher").toBoolean()) {
+    logEnvVar(log, "IJ_JAVA_OPTIONS")
+  }
+  else {
+    logEnvVar(log, "_JAVA_OPTIONS")
+    logEnvVar(log, "JDK_JAVA_OPTIONS")
+    logEnvVar(log, "JAVA_TOOL_OPTIONS")
+  }
   @Suppress("SystemGetProperty")
   log.info(
     """locale=${Locale.getDefault()} JNU=${System.getProperty("sun.jnu.encoding")} file.encoding=${System.getProperty("file.encoding")}
-    ${PathManager.PROPERTY_HOME_PATH}=${logPath(PathManager.getHomePath())}
-    ${PathManager.PROPERTY_CONFIG_PATH}=${logPath(PathManager.getConfigPath())}
-    ${PathManager.PROPERTY_SYSTEM_PATH}=${logPath(PathManager.getSystemPath())}
-    ${PathManager.PROPERTY_PLUGINS_PATH}=${logPath(PathManager.getPluginsPath())}
-    ${PathManager.PROPERTY_LOG_PATH}=${logPath(PathManager.getLogPath())}""")
+    ${PathManager.PROPERTY_HOME_PATH}=${logPath(PathManager.getHomeDir())}
+    ${PathManager.PROPERTY_CONFIG_PATH}=${logPath(PathManager.getConfigDir())}
+    ${PathManager.PROPERTY_SYSTEM_PATH}=${logPath(PathManager.getSystemDir())}
+    ${PathManager.PROPERTY_PLUGINS_PATH}=${logPath(PathManager.getPluginsDir())}
+    ${PathManager.PROPERTY_LOG_PATH}=${logPath(PathManager.getLogDir())}"""
+  )
   val cores = Runtime.getRuntime().availableProcessors()
   val pool = ForkJoinPool.commonPool()
   log.info("CPU cores: $cores; ForkJoinPool.commonPool: $pool; factory: ${pool.factory}")
@@ -597,11 +647,10 @@ private fun logEnvVar(log: Logger, variable: String) {
   }
 }
 
-private fun logPath(path: String): String {
+private fun logPath(path: Path): String {
   try {
-    val configured = Path.of(path)
-    val real = configured.toRealPath()
-    return if (configured == real) path else "$path -> $real"
+    val real = path.toRealPath()
+    return if (path == real) path.toString() else "$path -> $real"
   }
   catch (e: Exception) {
     return "$path -> ${e.javaClass.name}: ${e.message}"
@@ -620,9 +669,13 @@ private fun shouldLoadShellEnv(log: Logger): Boolean {
   }
 
   val shLvl = System.getenv("SHLVL")
-  @Suppress("RemoveUnnecessaryParentheses")
   if (shLvl != null && (shLvl.toIntOrNull() ?: 1) > 0) {
     log.info("skipping shell environment: the IDE is likely launched from a terminal (SHLVL=${shLvl})")
+    return false
+  }
+
+  if (AppMode.isRunningFromDevBuild()) {
+    log.info("skipping shell environment: dev mode")
     return false
   }
 
@@ -636,9 +689,9 @@ private fun loadEnvironment(parentJob: Job, log: Logger): Boolean {
   try {
     val timeoutMillis = System.getProperty(LOAD_SHELL_ENV_TIMEOUT_PROPERTY)?.toLongOrNull() ?: 0
     val env = ShellEnvironmentReader.readEnvironment(ShellEnvironmentReader.shellCommand(null, null, null), timeoutMillis).first
-    if ("LANG" !in env && "LC_ALL" !in env && "LC_CTYPE" !in env) {
+    if ("LANG" !in env && "LC_ALL" !in env && @Suppress("SpellCheckingInspection") "LC_CTYPE" !in env) {
       val value = EnvironmentUtil.setLocaleEnv(env, Charset.defaultCharset())
-      log.info("LC_CTYPE=${value}")
+      log.info(@Suppress("SpellCheckingInspection") "LC_CTYPE=${value}")
     }
     envFuture.complete(env.toImmutableMap())
     return true
@@ -661,4 +714,17 @@ interface AppStarter {
 
   /* called from IDE init thread */
   fun importFinished(newConfigDir: Path) {}
+}
+
+/** action script file contains commands for plugin (un-)installation/updates; may contain third-party commands */
+private fun runActionScript() {
+  try {
+    val scriptFile = PathManager.getStartupScriptDir().resolve(StartupActionScriptManager.ACTION_SCRIPT_FILE)
+    if (Files.isRegularFile(scriptFile)) {
+      StartupActionScriptManager.executeActionScript()
+    }
+  }
+  catch (e: Throwable) {
+    StartupErrorReporter.pluginInstallationProblem(e)
+  }
 }

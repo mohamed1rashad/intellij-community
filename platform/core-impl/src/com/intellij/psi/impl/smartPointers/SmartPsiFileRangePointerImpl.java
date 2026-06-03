@@ -1,20 +1,31 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.smartPointers;
 
 import com.intellij.lang.Language;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ProperTextRange;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
+import com.intellij.psi.SmartPsiFileRange;
 import com.intellij.psi.impl.FreeThreadedFileViewProvider;
 import org.jetbrains.annotations.NotNull;
 
 class SmartPsiFileRangePointerImpl extends SmartPsiElementPointerImpl<PsiFile> implements SmartPsiFileRange {
-  SmartPsiFileRangePointerImpl(@NotNull SmartPointerManagerImpl manager, @NotNull PsiFile containingFile, @NotNull ProperTextRange range, boolean forInjected) {
-    super(manager, containingFile, createElementInfo(containingFile, range, forInjected));
+  SmartPsiFileRangePointerImpl(@NotNull SmartPointerManagerEx manager,
+                               @NotNull PsiFile containingFile,
+                               @NotNull ProperTextRange range,
+                               boolean forInjected) {
+    super(manager, containingFile, createElementInfo(containingFile, range, forInjected, manager));
   }
 
-  private static @NotNull SmartPointerElementInfo createElementInfo(@NotNull PsiFile containingFile, @NotNull ProperTextRange range, boolean forInjected) {
+  private static @NotNull SmartPointerElementInfo createElementInfo(@NotNull PsiFile containingFile,
+                                                                    @NotNull ProperTextRange range,
+                                                                    boolean forInjected,
+                                                                    @NotNull SmartPointerManagerEx manager) {
     Project project = containingFile.getProject();
     if (containingFile.getViewProvider() instanceof FreeThreadedFileViewProvider) {
       PsiLanguageInjectionHost host = InjectedLanguageManager.getInstance(project).getInjectionHost(containingFile);
@@ -23,8 +34,8 @@ class SmartPsiFileRangePointerImpl extends SmartPsiElementPointerImpl<PsiFile> i
         return new InjectedSelfElementInfo(project, containingFile, range, containingFile, hostPointer);
       }
     }
-    if (!forInjected && range.equals(containingFile.getTextRange())) return new FileElementInfo(containingFile);
-    return new SelfElementInfo(range, Identikit.fromTypes(PsiElement.class, null, Language.ANY), containingFile, forInjected);
+    if (!forInjected && range.equals(containingFile.getTextRange())) return new FileElementInfo(containingFile, manager);
+    return new SelfElementInfo(range, Identikit.fromTypes(PsiElement.class, null, Language.ANY), containingFile, forInjected, manager);
   }
 
   @Override

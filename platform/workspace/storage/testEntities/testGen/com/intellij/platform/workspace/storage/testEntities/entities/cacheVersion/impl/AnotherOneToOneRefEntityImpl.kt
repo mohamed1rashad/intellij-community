@@ -1,45 +1,42 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Parent
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.extractOneToOneParent
-import com.intellij.platform.workspace.storage.impl.updateOneToOneParentOfChild
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.AnotherOneToOneRefEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableAnotherOneToOneRefEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableOneToOneRefEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.AnotherOneToOneRefEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.OneToOneRefEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.OneToOneRefEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneToOneRefEntityData) : AnotherOneToOneRefEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneToOneRefEntityData) : AnotherOneToOneRefEntity,
+                                                                                                    WorkspaceEntityBase(dataSource) {
 
   private companion object {
     internal val PARENTENTITY_CONNECTION_ID: ConnectionId = ConnectionId.create(OneToOneRefEntity::class.java,
                                                                                 AnotherOneToOneRefEntity::class.java,
-                                                                                ConnectionId.ConnectionType.ONE_TO_ONE, false)
-
-    private val connections = listOf<ConnectionId>(
-      PARENTENTITY_CONNECTION_ID,
-    )
+                                                                                ConnectionId.ConnectionType.ONE_TO_ONE,
+                                                                                false)
+    private val connections = listOf<ConnectionId>(PARENTENTITY_CONNECTION_ID)
 
   }
 
@@ -48,14 +45,14 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
       readField("someString")
       return dataSource.someString
     }
-
   override val boolean: Boolean
     get() {
       readField("boolean")
       return dataSource.boolean
     }
   override val parentEntity: OneToOneRefEntity
-    get() = snapshot.extractOneToOneParent(PARENTENTITY_CONNECTION_ID, this)!!
+    get() = snapshot.instrumentation.getParent(PARENTENTITY_CONNECTION_ID, this) as? OneToOneRefEntity
+            ?: error("Parent parentEntity not found for AnotherOneToOneRefEntity")
 
   override val entitySource: EntitySource
     get() {
@@ -68,8 +65,8 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
   }
 
 
-  internal class Builder(result: AnotherOneToOneRefEntityData?) : ModifiableWorkspaceEntityBase<AnotherOneToOneRefEntity, AnotherOneToOneRefEntityData>(
-    result), ModifiableAnotherOneToOneRefEntity {
+  internal class Builder(result: AnotherOneToOneRefEntityData?) :
+    ModifiableWorkspaceEntityBase<AnotherOneToOneRefEntity, AnotherOneToOneRefEntityData>(result), AnotherOneToOneRefEntityBuilder {
     internal constructor() : this(AnotherOneToOneRefEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -82,15 +79,13 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
           error("Entity AnotherOneToOneRefEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -104,7 +99,7 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
         error("Field AnotherOneToOneRefEntity#someString should be initialized")
       }
       if (_diff != null) {
-        if (_diff.extractOneToOneParent<WorkspaceEntityBase>(PARENTENTITY_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(PARENTENTITY_CONNECTION_ID, this) == null) {
           error("Field AnotherOneToOneRefEntity#parentEntity should be initialized")
         }
       }
@@ -137,7 +132,6 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
         changedProperty.add("entitySource")
 
       }
-
     override var someString: String
       get() = getEntityData().someString
       set(value) {
@@ -145,7 +139,6 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
         getEntityData(true).someString = value
         changedProperty.add("someString")
       }
-
     override var boolean: Boolean
       get() = getEntityData().boolean
       set(value) {
@@ -153,18 +146,17 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
         getEntityData(true).boolean = value
         changedProperty.add("boolean")
       }
-
-    override var parentEntity: ModifiableOneToOneRefEntity
+    override var parentEntity: OneToOneRefEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(PARENTENTITY_CONNECTION_ID,
-                                                                           this) as? ModifiableOneToOneRefEntity)
-          ?: (this.entityLinks[EntityLink(false, PARENTENTITY_CONNECTION_ID)]!! as ModifiableOneToOneRefEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(PARENTENTITY_CONNECTION_ID, this) as? OneToOneRefEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, PARENTENTITY_CONNECTION_ID)] as? OneToOneRefEntityBuilder)
+          ?: error("parentEntity is null for AnotherOneToOneRefEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, PARENTENTITY_CONNECTION_ID)]!! as ModifiableOneToOneRefEntity
+          (this.entityLinks[EntityLink(false, PARENTENTITY_CONNECTION_ID)] as? OneToOneRefEntityBuilder)
+          ?: error("parentEntity is null for AnotherOneToOneRefEntity")
         }
       }
       set(value) {
@@ -174,18 +166,17 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(true, PARENTENTITY_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToOneParentOfChild(PARENTENTITY_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(PARENTENTITY_CONNECTION_ID, value, this)
         }
         else {
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(true, PARENTENTITY_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, PARENTENTITY_CONNECTION_ID)] = value
         }
         changedProperty.add("parentEntity")
@@ -193,6 +184,7 @@ internal class AnotherOneToOneRefEntityImpl(private val dataSource: AnotherOneTo
 
     override fun getEntityClass(): Class<AnotherOneToOneRefEntity> = AnotherOneToOneRefEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -203,14 +195,13 @@ internal class AnotherOneToOneRefEntityData : WorkspaceEntityData<AnotherOneToOn
   internal fun isSomeStringInitialized(): Boolean = ::someString.isInitialized
 
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<AnotherOneToOneRefEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<AnotherOneToOneRefEntity> {
     val modifiable = AnotherOneToOneRefEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): AnotherOneToOneRefEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -222,17 +213,16 @@ internal class AnotherOneToOneRefEntityData : WorkspaceEntityData<AnotherOneToOn
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.AnotherOneToOneRefEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.AnotherOneToOneRefEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return AnotherOneToOneRefEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return AnotherOneToOneRefEntity(someString, boolean, entitySource) {
-      parents.filterIsInstance<ModifiableOneToOneRefEntity>().singleOrNull()?.let { this.parentEntity = it }
+      parents.filterIsInstance<OneToOneRefEntityBuilder>().singleOrNull()?.let { this.parentEntity = it }
     }
   }
 
@@ -245,9 +235,7 @@ internal class AnotherOneToOneRefEntityData : WorkspaceEntityData<AnotherOneToOn
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as AnotherOneToOneRefEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.someString != other.someString) return false
     if (this.boolean != other.boolean) return false
@@ -257,9 +245,7 @@ internal class AnotherOneToOneRefEntityData : WorkspaceEntityData<AnotherOneToOn
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as AnotherOneToOneRefEntityData
-
     if (this.someString != other.someString) return false
     if (this.boolean != other.boolean) return false
     return true

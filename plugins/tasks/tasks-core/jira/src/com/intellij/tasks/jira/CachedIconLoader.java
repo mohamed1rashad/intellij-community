@@ -16,7 +16,8 @@
 
 package com.intellij.tasks.jira;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.ImageIcon;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Map;
@@ -26,19 +27,6 @@ public final class CachedIconLoader {
 	private static final Map<String, Icon> icons = new ConcurrentHashMap<>();
 
 	private CachedIconLoader() {
-	}
-
-	public static Icon getIcon(URL url) {
-		if (url != null) {
-			String key = url.toString();
-			if (!icons.containsKey(key)) {
-				Icon i = new ImageIcon(url);
-				icons.put(key, i);
-			}
-			return icons.get(key);
-		} else {
-			return null;
-		}
 	}
 
 	public static Icon getIcon(String urlString) {

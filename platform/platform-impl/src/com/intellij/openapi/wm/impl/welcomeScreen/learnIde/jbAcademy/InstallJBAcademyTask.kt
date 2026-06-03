@@ -1,7 +1,14 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl.welcomeScreen.learnIde.jbAcademy
 
-import com.intellij.ide.plugins.*
+import com.intellij.ide.plugins.IdeaPluginDescriptor
+import com.intellij.ide.plugins.PluginEnabler
+import com.intellij.ide.plugins.PluginInstallOperation
+import com.intellij.ide.plugins.PluginInstaller
+import com.intellij.ide.plugins.PluginManagementPolicy
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.plugins.PluginNode
+import com.intellij.ide.plugins.RepositoryHelper
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.extensions.PluginId
@@ -20,7 +27,7 @@ import org.jetbrains.annotations.ApiStatus
 @ApiStatus.Internal
 object InstallJBAcademyTask {
   val JB_ACADEMY_PLUGIN_ID: PluginId = PluginId.getId("com.jetbrains.edu")
-  
+
   suspend fun install(): Unit = reportSequentialProgress { reporter ->
     val descriptors = reporter.nextStep(endFraction = 20) {
       val marketplacePlugins = MarketplaceRequests.loadLastCompatiblePluginDescriptors(setOf(JB_ACADEMY_PLUGIN_ID))
@@ -38,7 +45,8 @@ object InstallJBAcademyTask {
     }
 
     val plugins: List<PluginNode> = reporter.nextStep(endFraction = 40) {
-      val downloader = PluginDownloader.createDownloader(descriptors.first())
+      val pluginToInstall = descriptors.firstOrNull() ?: return@nextStep emptyList()
+      val downloader = PluginDownloader.createDownloader(pluginToInstall)
       val nodes = mutableListOf<PluginNode>()
       val plugin = downloader.descriptor
       if (plugin.isEnabled) {

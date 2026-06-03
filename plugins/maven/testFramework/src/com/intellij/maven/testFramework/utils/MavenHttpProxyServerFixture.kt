@@ -15,7 +15,8 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
-import java.util.*
+import java.util.Base64
+import java.util.Queue
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executor
 import kotlin.jvm.optionals.getOrDefault
@@ -32,6 +33,7 @@ class MavenHttpProxyServerFixture(
   private var proxyUsername: String? = null
   private var proxyPassword: String? = null
   val requestedFiles: Queue<String> = ConcurrentLinkedQueue()
+  val requestedFilesWithCorrectAuth: Queue<String> = ConcurrentLinkedQueue()
   val port: Int
     get() = serverSocket.localPort
 
@@ -123,6 +125,7 @@ class MavenHttpProxyServerFixture(
     try {
       val headers = emptyReader(reader)
       if (isAuthInfoCorrect(headers)) {
+        requestedFilesWithCorrectAuth.add(tempUri.path)
         val serverResponse = makeHttpCall(clientUri)
         writeClientResponse(os, serverResponse)
       }

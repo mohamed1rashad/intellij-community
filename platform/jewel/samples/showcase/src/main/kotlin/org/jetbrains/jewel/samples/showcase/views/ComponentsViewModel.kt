@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import org.jetbrains.jewel.samples.showcase.ShowcaseIcons
+import org.jetbrains.jewel.samples.showcase.components.Badges
 import org.jetbrains.jewel.samples.showcase.components.Banners
 import org.jetbrains.jewel.samples.showcase.components.Borders
 import org.jetbrains.jewel.samples.showcase.components.BrushesShowcase
@@ -17,11 +18,13 @@ import org.jetbrains.jewel.samples.showcase.components.ChipsAndTrees
 import org.jetbrains.jewel.samples.showcase.components.ComboBoxes
 import org.jetbrains.jewel.samples.showcase.components.Icons
 import org.jetbrains.jewel.samples.showcase.components.Links
+import org.jetbrains.jewel.samples.showcase.components.Menus
 import org.jetbrains.jewel.samples.showcase.components.ProgressBar
 import org.jetbrains.jewel.samples.showcase.components.RadioButtons
 import org.jetbrains.jewel.samples.showcase.components.Scrollbars
 import org.jetbrains.jewel.samples.showcase.components.SegmentedControls
 import org.jetbrains.jewel.samples.showcase.components.Sliders
+import org.jetbrains.jewel.samples.showcase.components.SpeedSearches
 import org.jetbrains.jewel.samples.showcase.components.SplitLayouts
 import org.jetbrains.jewel.samples.showcase.components.Tabs
 import org.jetbrains.jewel.samples.showcase.components.TextAreas
@@ -51,6 +54,7 @@ public class ComponentsViewModel(
             ),
             ViewInfo(title = "Checkboxes", iconKey = ShowcaseIcons.Components.checkbox, content = { Checkboxes() }),
             ViewInfo(title = "Combo Boxes", iconKey = ShowcaseIcons.Components.comboBox, content = { ComboBoxes() }),
+            ViewInfo(title = "Menus", iconKey = ShowcaseIcons.Components.menu, content = { Menus() }),
             ViewInfo(title = "Chips and trees", iconKey = ShowcaseIcons.Components.tree, content = { ChipsAndTrees() }),
             ViewInfo(
                 title = "Progressbar",
@@ -103,6 +107,12 @@ public class ComponentsViewModel(
                 content = { TypographyShowcase() },
             ),
             ViewInfo(title = "Brushes", iconKey = ShowcaseIcons.Components.brush, content = { BrushesShowcase() }),
+            ViewInfo(
+                title = "Speed Search",
+                iconKey = ShowcaseIcons.Components.speedSearch,
+                content = { SpeedSearches() },
+            ),
+            ViewInfo(title = "Badges", iconKey = ShowcaseIcons.Components.badge, content = { Badges() }),
         )
 
     private var _currentView: ViewInfo by mutableStateOf(views.first())

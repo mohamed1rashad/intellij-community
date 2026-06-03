@@ -20,8 +20,13 @@ import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JList;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.FontMetrics;
+import java.awt.Insets;
+import java.awt.Rectangle;
 
 /**
 * @author Konstantin Bulenkov
@@ -32,7 +37,7 @@ public class SearchEverywherePsiRenderer extends PsiElementListCellRenderer<PsiE
   public SearchEverywherePsiRenderer(Disposable parent) {
     setLayout(new SELayout());
 
-    ApplicationManager.getApplication().getMessageBus().connect(parent).subscribe(LafManagerListener.TOPIC, __ -> {
+    ApplicationManager.getApplication().getMessageBus().connect(parent).subscribe(LafManagerListener.TOPIC, _ -> {
       scheme = EditorColorsManager.getInstance().getSchemeForCurrentUITheme();
     });
   }

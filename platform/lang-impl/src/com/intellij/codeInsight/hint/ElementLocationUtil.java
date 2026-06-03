@@ -5,29 +5,23 @@ package com.intellij.codeInsight.hint;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.JdkOrderEntry;
+import com.intellij.openapi.roots.LibraryOrderEntry;
+import com.intellij.openapi.roots.OrderEntry;
+import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.List;
 
 public final class ElementLocationUtil {
 
   private ElementLocationUtil() {
-  }
-
-  /**
-   * @deprecated use {@link #renderElementLocation(PsiElement, Ref)}
-   */
-  @Deprecated(forRemoval = true)
-  public static void customizeElementLabel(final PsiElement element, final JLabel label) {
-    Ref<Icon> ref = new Ref<>();
-    label.setText(renderElementLocation(element, ref));
-    label.setIcon(ref.get());
   }
 
   public static @NlsSafe String renderElementLocation(final PsiElement element, final Ref<? super Icon> icon) {

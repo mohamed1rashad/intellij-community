@@ -5,11 +5,18 @@ package org.jetbrains.uast.kotlin.generate
 import com.intellij.lang.Language
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.psi.*
+import com.intellij.psi.GenericsUtil
+import com.intellij.psi.PsiArrayType
+import com.intellij.psi.PsiClassType
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypes
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.builtins.jvm.JavaToKotlinClassMap
 import org.jetbrains.kotlin.idea.KotlinLanguage
+import org.jetbrains.kotlin.idea.base.psi.getOrCreateBody
 import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -17,14 +24,91 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.*
-import org.jetbrains.uast.*
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtConstantExpression
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtExpressionCodeFragment
+import org.jetbrains.kotlin.psi.KtLabeledExpression
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtParenthesizedExpression
+import org.jetbrains.kotlin.psi.KtPrefixExpression
+import org.jetbrains.kotlin.psi.KtPrimaryConstructor
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtReturnExpression
+import org.jetbrains.kotlin.psi.KtSafeQualifiedExpression
+import org.jetbrains.kotlin.psi.KtSecondaryConstructor
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.KtStringTemplateEntry
+import org.jetbrains.kotlin.psi.KtStringTemplateExpression
+import org.jetbrains.kotlin.psi.KtVariableDeclaration
+import org.jetbrains.kotlin.psi.buildExpression
+import org.jetbrains.kotlin.psi.psiUtil.addTypeArgument
+import org.jetbrains.kotlin.psi.psiUtil.getCallNameExpression
+import org.jetbrains.kotlin.psi.psiUtil.getNonStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.getPossiblyQualifiedCallExpression
+import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.quoteIfNeeded
+import org.jetbrains.kotlin.psi.unpackFunctionLiteral
+import org.jetbrains.uast.UBinaryExpression
+import org.jetbrains.uast.UBlockExpression
+import org.jetbrains.uast.UCallExpression
+import org.jetbrains.uast.UCallableReferenceExpression
+import org.jetbrains.uast.UClass
+import org.jetbrains.uast.UComment
+import org.jetbrains.uast.UDeclaration
+import org.jetbrains.uast.UDeclarationsExpression
+import org.jetbrains.uast.UElement
+import org.jetbrains.uast.UExpression
+import org.jetbrains.uast.UField
+import org.jetbrains.uast.UIfExpression
+import org.jetbrains.uast.ULambdaExpression
+import org.jetbrains.uast.ULiteralExpression
+import org.jetbrains.uast.ULocalVariable
+import org.jetbrains.uast.UMethod
+import org.jetbrains.uast.UParameter
+import org.jetbrains.uast.UParenthesizedExpression
+import org.jetbrains.uast.UPolyadicExpression
+import org.jetbrains.uast.UQualifiedReferenceExpression
+import org.jetbrains.uast.UReferenceExpression
+import org.jetbrains.uast.UReturnExpression
+import org.jetbrains.uast.USimpleNameReferenceExpression
+import org.jetbrains.uast.UVariable
+import org.jetbrains.uast.UastBinaryOperator
+import org.jetbrains.uast.UastCallKind
 import org.jetbrains.uast.generate.UParameterInfo
 import org.jetbrains.uast.generate.UastCodeGenerationPlugin
 import org.jetbrains.uast.generate.UastElementFactory
-import org.jetbrains.uast.kotlin.*
+import org.jetbrains.uast.getParentOfType
+import org.jetbrains.uast.kotlin.KotlinStringTemplateUPolyadicExpression
+import org.jetbrains.uast.kotlin.KotlinUBinaryExpression
+import org.jetbrains.uast.kotlin.KotlinUBlockExpression
+import org.jetbrains.uast.kotlin.KotlinUCallableReferenceExpression
+import org.jetbrains.uast.kotlin.KotlinUDeclarationsExpression
+import org.jetbrains.uast.kotlin.KotlinUFunctionCallExpression
+import org.jetbrains.uast.kotlin.KotlinUIfExpression
+import org.jetbrains.uast.kotlin.KotlinUImplicitReturnExpression
+import org.jetbrains.uast.kotlin.KotlinULiteralExpression
+import org.jetbrains.uast.kotlin.KotlinUParenthesizedExpression
+import org.jetbrains.uast.kotlin.KotlinUPrefixExpression
+import org.jetbrains.uast.kotlin.KotlinUQualifiedReferenceExpression
+import org.jetbrains.uast.kotlin.KotlinUReturnExpression
+import org.jetbrains.uast.kotlin.KotlinUSafeQualifiedExpression
+import org.jetbrains.uast.kotlin.KotlinUSimpleReferenceExpression
 import org.jetbrains.uast.kotlin.internal.KotlinFakeUElement
+import org.jetbrains.uast.kotlin.parentAs
+import org.jetbrains.uast.kotlin.toSourcePsiFakeAndCommentsAware
+import org.jetbrains.uast.kotlin.toSourcePsiFakeAware
+import org.jetbrains.uast.toUElement
+import org.jetbrains.uast.toUElementOfExpectedTypes
+import org.jetbrains.uast.toUElementOfType
 
 abstract class KotlinUastBaseCodeGenerationPlugin : UastCodeGenerationPlugin {
     override val language: Language
@@ -79,6 +163,12 @@ abstract class KotlinUastBaseCodeGenerationPlugin : UastCodeGenerationPlugin {
         return shortenReference(sourcePsi).toUElementOfType()
     }
 
+    override fun shortenReference(uDeclaration: UDeclaration): UDeclaration? {
+        val sourcePsi = uDeclaration.sourcePsi ?: return null
+        if (sourcePsi !is KtElement) return null
+        return shortenReference(sourcePsi).toUElementOfType()
+    }
+
     abstract fun shortenReference(sourcePsi: KtElement): PsiElement?
 
     override fun importMemberOnDemand(reference: UQualifiedReferenceExpression): UExpression? {
@@ -115,7 +205,8 @@ abstract class KotlinUastBaseCodeGenerationPlugin : UastCodeGenerationPlugin {
             }
         }
 
-        val body = (sourcePsi as? KtDeclarationWithBody)?.bodyBlockExpression ?: return null
+        val body = (sourcePsi as? KtDeclarationWithBody)?.bodyBlockExpression
+            ?: (sourcePsi as? KtSecondaryConstructor)?.getOrCreateBody() ?: return null
         val ktPsiFactory = KtPsiFactory(sourcePsi.project, true)
         val assignmentExpression = ktPsiFactory.buildExpression {
             if (uField.name == uParameter.name) {
@@ -185,7 +276,6 @@ abstract class KotlinUastElementFactory(project: Project) : UastElementFactory {
         }
     }
 
-    @OptIn(KaAllowAnalysisOnEdt::class)
     protected abstract fun moveLambdaOutsideParenthesis(methodCall: KtCallExpression)
 
     override fun createQualifiedReference(qualifiedName: String, context: PsiElement?): UQualifiedReferenceExpression? {
@@ -264,8 +354,9 @@ abstract class KotlinUastElementFactory(project: Project) : UastElementFactory {
     }
 
     private fun KtPsiFactory.getAnalyzableMethodCall(methodCall: KtCallExpression, context: KtElement): KtCallExpression {
-        val analyzableElement = ((createExpressionCodeFragment("(null)", context).copy() as KtExpressionCodeFragment)
-            .getContentElement()!! as KtParenthesizedExpression).expression!!
+        // call .copy() to get non-physical code fragment which allows modifications without WA
+        val nonPhysicalCodeFragment = createExpressionCodeFragment("(null)", context).copy() as KtExpressionCodeFragment
+        val analyzableElement = (nonPhysicalCodeFragment.getContentElement()!! as KtParenthesizedExpression).expression!!
 
         val isQualified = methodCall.parent is KtQualifiedExpression
         return if (isQualified) {
@@ -296,6 +387,16 @@ abstract class KotlinUastElementFactory(project: Project) : UastElementFactory {
         return stringBuilder.toString()
     }
 
+    override fun createIntegerConstantExpression(
+        integer: Int,
+        context: PsiElement?
+    ): UExpression? {
+        return when (val literalExpr = psiFactory(context).createExpression("$integer")) {
+            is KtConstantExpression -> KotlinULiteralExpression(literalExpr, null)
+            else -> null
+        }
+    }
+
     override fun createLongConstantExpression(long: Long, context: PsiElement?): UExpression? {
         return when (val literalExpr = psiFactory(context).createExpression(long.toString() + "L")) {
             is KtConstantExpression -> KotlinULiteralExpression(literalExpr, null)
@@ -310,6 +411,21 @@ abstract class KotlinUastElementFactory(project: Project) : UastElementFactory {
 
     override fun createComment(text: String, context: PsiElement?): UComment {
         return psiFactory(context).createComment(text).toUElementOfType()!!
+    }
+
+    override fun createClass(className: String, extends: List<String>, implements: List<String>, context: PsiElement): UClass? {
+        val extendsPart = if (extends.size + implements.size >= 1)
+            (extends + implements).joinToString(", ", " : ")
+        else
+            ""
+
+        val classText = """
+            class $className$extendsPart {
+            }
+        """.trimIndent()
+
+        val ktClass = psiFactory(context).createClass(classText)
+        return ktClass.toUElement(UClass::class.java)
     }
 
     /*override*/ fun createIntLiteral(value: Int, context: PsiElement?): ULiteralExpression {

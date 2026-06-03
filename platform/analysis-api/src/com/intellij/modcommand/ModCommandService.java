@@ -6,10 +6,12 @@ import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.LocalQuickFixAndIntentionActionOnPsiElement;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -39,8 +41,6 @@ public interface ModCommandService {
    */
   @NotNull LocalQuickFix wrapToQuickFix(@NotNull ModCommandAction action);
 
-  @NotNull LocalQuickFix wrapToQuickFix(@NotNull ModCommandAction action, boolean availableInBatchMode);
-
   /**
    * @param fix {@link LocalQuickFix}
    * @return a {@link ModCommandAction} which is wrapped inside the supplied quick-fix; null if the supplied quick-fix
@@ -49,9 +49,15 @@ public interface ModCommandService {
   @Nullable ModCommandAction unwrap(@NotNull LocalQuickFix fix);
 
   /**
+   * Implementation of ModCommand.insertText; should not be used directly. 
+   */
+  @NotNull ModCommand insertText(@NotNull ActionContext context, @NotNull String text, boolean moveAfter);
+
+  /**
    * Implementation of ModCommand.psiUpdate; should not be used directly.
    */
   @NotNull ModCommand psiUpdate(@NotNull ActionContext context,
+                                @NotNull Consumer<@NotNull Document> copyCleaner, 
                                 @NotNull Consumer<@NotNull ModPsiUpdater> updater);
 
   /**
@@ -82,5 +88,24 @@ public interface ModCommandService {
    */
   static @NotNull ModCommandService getInstance() {
     return ApplicationManager.getApplication().getService(ModCommandService.class);
+  }
+
+
+  /**
+   * An internal interface introduced to handle ModCommand-related PSI file copying operations.
+   * This interface is intended to represent an abstraction for creating a copy of a given {@link PsiFile}.
+   * Implementations of this interface define the behavior for copying PSI files while preserving their
+   * specific properties and context.
+   */
+  @ApiStatus.Internal
+  interface ModCommandPsiCopyHandler {
+
+    /**
+     * Creates a copy of the given PSI file while preserving its specific properties and context.
+     * @param file the PSI file to copy
+     * @return the copied PSI file, or null if this handler does not support copying this type of files
+     */
+    @Nullable
+    PsiFile createCopy(@NotNull PsiFile file);
   }
 }

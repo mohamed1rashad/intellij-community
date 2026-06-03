@@ -1,11 +1,20 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.java.psi.codeStyle.arrangement;
 
 import java.util.List;
 
-import static com.intellij.psi.codeStyle.arrangement.AbstractRearrangerTest.*;
-import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.*;
-import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.*;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.CLASS;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.CONSTRUCTOR;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.ENUM;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.FIELD;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.INIT_BLOCK;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.INTERFACE;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.EntryType.METHOD;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.OVERRIDDEN;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.PRIVATE;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.PROTECTED;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.PUBLIC;
+import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Modifier.STATIC;
 import static com.intellij.psi.codeStyle.arrangement.std.StdArrangementTokens.Order.BY_NAME;
 
 public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
@@ -20,27 +29,26 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
     doTest("""
              class Test {
                public void test() {}
-                private int i;
+               private int i;
              }
              class Test2 {
-             public void test() {
-             }
-                 private int i;
+               public void test() {}
+               private int i;
                private int j;
              }""", """
              class Test {
-                private int i;
+               private int i;
                public void test() {}
              }
              class Test2 {
-                 private int i;
+               private int i;
                private int j;
-             public void test() {
-             }
+               public void test() {}
              }""", List.of(rule(FIELD)));
   }
 
   public void test_anonymous_class_at_field_initializer() {
+    //noinspection override
     doTest("""
              class Test {
                private Object first = new Object() {
@@ -81,6 +89,7 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
   }
 
   public void test_anonymous_class_at_method() {
+    //noinspection MethodMayBeStatic
     doTest("""
              class Test {
                 void declaration() {
@@ -280,7 +289,7 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
                    }
                    private int field;
                  }
-               };
+               }
              }""", """
              class Test {
                void test() {
@@ -296,7 +305,7 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
                      return 1;
                    }
                  }
-               };
+               }
              }""",
            List.of(rule(FIELD), rule(METHOD)));
   }
@@ -322,7 +331,6 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
 
   public void test_IDEA_124077_Enum_code_reformat_destroys_enum() {
     doTest("""
-
              public enum ErrorResponse {
 
                  UNHANDLED_EXCEPTION,
@@ -337,7 +345,6 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
                  private void q() {}
              }
              """, """
-
              public enum ErrorResponse {
 
                  UNHANDLED_EXCEPTION,
@@ -355,6 +362,7 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
   }
 
   public void test_parameterized_class() {
+    //noinspection Convert2Diamond
     doTest("""
              public class Seq<T> {
 
@@ -393,6 +401,7 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
   }
 
   public void test_overridden_method_is_matched_by_overridden_rule() {
+    //noinspection RedundantMethodOverride
     doTest("""
              class A {
                public void test() {}
@@ -434,11 +443,11 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
                public void run() {}
 
              }
-             """, List.of(rule(PUBLIC, METHOD), rule(PRIVATE, METHOD),
-                          rule(OVERRIDDEN)));
+             """, List.of(rule(PUBLIC, METHOD), rule(PRIVATE, METHOD), rule(OVERRIDDEN)));
   }
 
   public void test_overridden_method_is_matched_by_method_rule_if_no_overridden_rule_found() {
+    //noinspection RedundantMethodOverride
     doTest("""
              class A {
                public void test() {}
@@ -552,7 +561,6 @@ public class JavaRearrangerByTypeTest extends AbstractJavaRearrangerTest {
                  }
 
              }
-             """, List.of(rule(STATIC, FIELD), rule(STATIC, INIT_BLOCK),
-                          rule(FIELD), rule(INIT_BLOCK)));
+             """, List.of(rule(STATIC, FIELD), rule(STATIC, INIT_BLOCK), rule(FIELD), rule(INIT_BLOCK)));
   }
 }

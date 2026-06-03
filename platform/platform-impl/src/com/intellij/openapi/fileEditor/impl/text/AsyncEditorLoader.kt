@@ -7,7 +7,12 @@ import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx
 import com.intellij.concurrency.ContextAwareRunnable
 import com.intellij.concurrency.captureThreadContext
 import com.intellij.concurrency.resetThreadContext
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.CoroutineSupport
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.ui
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
@@ -19,6 +24,7 @@ import com.intellij.openapi.fileEditor.FileEditorStateLevel
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
+import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.ui.EditorNotifications
 import com.intellij.util.ArrayUtil
 import com.intellij.util.AwaitCancellationAndInvoke
@@ -27,7 +33,18 @@ import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.ui.AnimatedIcon
 import com.intellij.util.ui.AsyncProcessIcon
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JComponent
@@ -39,7 +56,7 @@ import kotlin.time.Duration.Companion.milliseconds
 private val LOG: Logger = logger<AsyncEditorLoader>()
 
 @Internal
-class  AsyncEditorLoader internal constructor(
+class AsyncEditorLoader internal constructor(
   private val project: Project,
   private val provider: TextEditorProvider,
   @JvmField val coroutineScope: CoroutineScope,
@@ -137,14 +154,16 @@ class  AsyncEditorLoader internal constructor(
       )
       // await instead of join to get errors here
       try {
-        task.await()
+        span("editor: doc load await") {
+          task.await()
+        }
         LOG.trace { "async editor task finished for $editorFileName" }
       }
       finally {
         indicatorJob.cancel()
       }
 
-      withContext(Dispatchers.EDT + CoroutineName("execute delayed actions")) {
+      span("async editor delayed actions", Dispatchers.EDT) {
         // mark as loaded before daemonCodeAnalyzer restart,
         // does it from EDT to avoid execution of any following scroll requests before already scheduled delayedActions
         textEditor.editor.putUserData(ASYNC_LOADER, null)
@@ -158,7 +177,9 @@ class  AsyncEditorLoader internal constructor(
           scrollingModel.enableAnimation()
         }
       }
-      project.serviceAsync<EditorNotifications>().scheduleUpdateNotifications(textEditor)
+      span("editor notifications schedule") {
+        project.serviceAsync<EditorNotifications>().scheduleUpdateNotifications(textEditor)
+      }
     }
       .invokeOnCompletion {
         // make sure that async loaded marked as completed

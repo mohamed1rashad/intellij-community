@@ -1,5 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:ApiStatus.Experimental
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:JvmName("TokenListUtil")
 
 package com.intellij.platform.syntax.lexer
@@ -10,7 +9,6 @@ import com.intellij.platform.syntax.SyntaxElementType
 import com.intellij.platform.syntax.SyntaxElementTypeSet
 import com.intellij.platform.syntax.impl.builder.DIAGNOSTICS
 import kotlin.jvm.JvmName
-import org.jetbrains.annotations.ApiStatus
 
 /**
  * This interface represents the result of lexing: text and the tokens produced from it by some lexer.
@@ -20,7 +18,6 @@ import org.jetbrains.annotations.ApiStatus
  * @see performLexing
  * @see tokenListLexer
  */
-@ApiStatus.Experimental
 interface TokenList {
   /**
    * @return the number of tokens inside

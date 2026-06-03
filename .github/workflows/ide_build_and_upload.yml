@@ -11,71 +11,69 @@ on:
         description: 'artifacts directory'
         type: string
         required: true
+      system_properties:
+        default: ''
+        description: 'any custom system properties'
+        type: string
+        required: false
+      upload_artifacts:
+        default: true
+        description: 'whether to make artifacts available for download'
+        type: boolean
 
 jobs:
-  build-linux:
+  distributions:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v6.0.2
       - uses: ./.github/actions/build_ide
+        with:
+          product: ${{inputs.product}}
+          system_properties: ${{inputs.system_properties}}
+      - name: upload-linux-x64
+        uses: ./.github/actions/upload_ide
+        if: ${{inputs.upload_artifacts}}
         with:
           os: linux
-          extension: tar.gz
-          product: ${{inputs.product}}
-      - uses: ./.github/actions/upload_ide
-        with:
-          os: linux
-          extension: tar.gz
+          suffix: .tar.gz
           artifacts_dir: ${{inputs.artifacts_dir}}
-  build-windows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: ./.github/actions/build_ide
+      - name: upload-windows-x64
+        uses: ./.github/actions/upload_ide
+        if: ${{inputs.upload_artifacts}}
         with:
           os: windows
-          extension: exe
-          product: ${{inputs.product}}
-      - uses: ./.github/actions/upload_ide
-        with:
-          os: windows
-          extension: exe
+          suffix: .exe
           artifacts_dir: ${{inputs.artifacts_dir}}
-  build-macos:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: ./.github/actions/build_ide
+      - name: upload-mac-aarch64
+        uses: ./.github/actions/upload_ide
+        if: ${{inputs.upload_artifacts}}
         with:
           os: mac
-          extension: sit
-          product: ${{inputs.product}}
-      - uses: ./.github/actions/upload_ide
-        with:
-          os: mac
-          extension: sit
+          suffix: -aarch64.sit
           artifacts_dir: ${{inputs.artifacts_dir}}
       - name: Upload .dmg build scripts
-        uses: actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@v6.0.0
+        if: ${{inputs.upload_artifacts}}
         with:
           name: dmg-build-scripts
           if-no-files-found: 'error'
           retention-days: 1
           path: ${{inputs.artifacts_dir}}/macos-dmg-build/
-  build-dmg:
+  dmg:
     runs-on: macos-latest
-    needs: build-macos
+    needs: distributions
+    if: ${{inputs.upload_artifacts}}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v6.0.2
       - name: Download .dmg build scripts
-        uses: actions/download-artifact@v4.1.8
+        uses: actions/download-artifact@v7.0.0
         with:
           name: dmg-build-scripts
-      - name: Download .sit
-        uses: actions/download-artifact@v4.1.8
+      - name: Download aarch64.sit
+        uses: actions/download-artifact@v7.0.0
         with:
-          name: mac-sit-unsigned
-      - name: Build .dmg
+          name: mac-aarch64.sit-unsigned
+      - name: Build aarch64.dmg
         shell: bash
         # language=bash
         run: /bin/bash ./build.sh
@@ -83,5 +81,5 @@ jobs:
         uses: ./.github/actions/upload_ide
         with:
           os: mac
-          extension: dmg
+          suffix: -aarch64.dmg
           artifacts_dir: .

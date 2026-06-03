@@ -17,8 +17,34 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.platform.workspace.jps.JpsFileEntitySource
-import com.intellij.platform.workspace.jps.entities.*
-import com.intellij.platform.workspace.jps.serialization.impl.*
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.DependencyScope
+import com.intellij.platform.workspace.jps.entities.InheritedSdkDependency
+import com.intellij.platform.workspace.jps.entities.LibraryDependency
+import com.intellij.platform.workspace.jps.entities.LibraryEntity
+import com.intellij.platform.workspace.jps.entities.LibraryEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryId
+import com.intellij.platform.workspace.jps.entities.LibraryRoot
+import com.intellij.platform.workspace.jps.entities.LibraryRootTypeId
+import com.intellij.platform.workspace.jps.entities.LibraryTableId
+import com.intellij.platform.workspace.jps.entities.ModuleDependency
+import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ModuleId
+import com.intellij.platform.workspace.jps.entities.ModuleSourceDependency
+import com.intellij.platform.workspace.jps.entities.SdkDependency
+import com.intellij.platform.workspace.jps.entities.SdkId
+import com.intellij.platform.workspace.jps.entities.SourceRootEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootOrderEntity
+import com.intellij.platform.workspace.jps.serialization.impl.CustomModuleRootsSerializer
+import com.intellij.platform.workspace.jps.serialization.impl.ErrorReporter
+import com.intellij.platform.workspace.jps.serialization.impl.JpsFileContentReader
+import com.intellij.platform.workspace.jps.serialization.impl.JpsFileContentWriter
+import com.intellij.platform.workspace.jps.serialization.impl.JpsModuleListSerializer
+import com.intellij.platform.workspace.jps.serialization.impl.createSourceRootsOrder
+import com.intellij.platform.workspace.jps.serialization.impl.getSourceRootsComparator
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.EntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
@@ -73,14 +99,14 @@ internal class EclipseModuleRootsSerializer : CustomModuleRootsSerializer, Stora
     return EclipseProjectFile(classpathUrl, internalEntitySource)
   }
 
-  override fun loadRoots(moduleEntity: ModifiableModuleEntity,
+  override fun loadRoots(moduleEntity: ModuleEntityBuilder,
                          reader: JpsFileContentReader,
                          customDir: String?,
                          imlFileUrl: VirtualFileUrl,
                          internalModuleListSerializer: JpsModuleListSerializer?,
                          errorReporter: ErrorReporter,
                          virtualFileManager: VirtualFileUrlManager,
-                         moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>) {
+                         moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>) {
     val storageRootUrl = getStorageRoot(imlFileUrl, customDir, virtualFileManager)
     val entitySource = moduleEntity.entitySource as EclipseProjectFile
     val contentRootEntity = ContentRootEntity(storageRootUrl, emptyList(), entitySource) {
@@ -122,14 +148,14 @@ internal class EclipseModuleRootsSerializer : CustomModuleRootsSerializer, Stora
   private fun getEmlFileUrl(imlFileUrl: VirtualFileUrl) = imlFileUrl.url.removeSuffix(".iml") + EclipseXml.IDEA_SETTINGS_POSTFIX
 
   private fun loadClasspathTags(classpathTag: Element,
-                                contentRootEntity: ModifiableContentRootEntity,
+                                contentRootEntity: ContentRootEntityBuilder,
                                 storageRootUrl: VirtualFileUrl,
                                 reader: JpsFileContentReader,
                                 relativePathResolver: ModuleRelativePathResolver,
                                 errorReporter: ErrorReporter,
                                 imlFileUrl: VirtualFileUrl,
                                 virtualUrlManager: VirtualFileUrlManager,
-                                moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>) {
+                                moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>) {
     fun reportError(message: @Nls String) {
       errorReporter.reportError(message, storageRootUrl.append(EclipseXml.CLASSPATH_FILE))
     }
@@ -138,7 +164,7 @@ internal class EclipseModuleRootsSerializer : CustomModuleRootsSerializer, Stora
     }
 
     val moduleEntity = contentRootEntity.module
-    fun editEclipseProperties(action: (ModifiableEclipseProjectPropertiesEntity) -> Unit) {
+    fun editEclipseProperties(action: (EclipseProjectPropertiesEntityBuilder) -> Unit) {
       val eclipseProperties = moduleEntity.eclipseProperties
                               ?: EclipseProjectPropertiesEntity(LinkedHashMap(),
                                                                 ArrayList(), ArrayList(),
@@ -147,7 +173,7 @@ internal class EclipseModuleRootsSerializer : CustomModuleRootsSerializer, Stora
                                                                 moduleEntity.entitySource) {
                                 this.module = moduleEntity
                               }
-      action((eclipseProperties as ModifiableEclipseProjectPropertiesEntity))
+      action((eclipseProperties as EclipseProjectPropertiesEntityBuilder))
     }
 
     val storageRootPath = JpsPathUtil.urlToPath(storageRootUrl.url)
@@ -374,7 +400,7 @@ internal class EclipseModuleRootsSerializer : CustomModuleRootsSerializer, Stora
       (sourceRootsOrder as SourceRootOrderEntity.Builder).contentRootEntity = contentRootEntity
     }
 
-    (moduleEntity as ModifiableModuleEntity).dependencies = dependencies
+    (moduleEntity as ModuleEntityBuilder).dependencies = dependencies
   }
 
   private fun findGlobalLibraryLevel(libraryName: String): String? {
@@ -395,7 +421,7 @@ internal class EclipseModuleRootsSerializer : CustomModuleRootsSerializer, Stora
                                  srcUrl: VirtualFileUrl?,
                                  nativeRoot: VirtualFileUrl?,
                                  entryTag: Element,
-                                 moduleEntity: ModifiableModuleEntity,
+                                 moduleEntity: ModuleEntityBuilder,
                                  relativePathResolver: ModuleRelativePathResolver,
                                  virtualUrlManager: VirtualFileUrlManager): ArrayList<LibraryRoot> {
     val roots = ArrayList<LibraryRoot>()

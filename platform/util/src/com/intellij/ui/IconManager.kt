@@ -11,7 +11,11 @@ import com.intellij.ui.icons.RowIcon
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Paint
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.util.concurrent.atomic.AtomicBoolean
@@ -72,6 +76,9 @@ interface IconManager {
 
   fun createLayered(vararg icons: Icon): Icon
 
+  @ApiStatus.Experimental
+  fun createIconWithOverlay(mainIcon: Icon, overlayIcon: Icon): Icon = mainIcon
+
   fun colorize(g: Graphics2D, source: Icon, color: Color): Icon = source
 
   /**
@@ -88,7 +95,7 @@ interface IconManager {
 
   fun createRowIcon(vararg icons: Icon): RowIcon
 
-  fun registerIconLayer(flagMask: Int, icon: Icon)
+  fun registerIconLayer(flagMask: Int, icon: Icon?)
 
   fun tooltipOnlyIfComposite(icon: Icon): Icon
 
@@ -131,7 +138,7 @@ private object DummyIconManager : IconManager {
     return DummyRowIcon(icons)
   }
 
-  override fun registerIconLayer(flagMask: Int, icon: Icon) {
+  override fun registerIconLayer(flagMask: Int, icon: Icon?) {
   }
 
   override fun tooltipOnlyIfComposite(icon: Icon): Icon = icon

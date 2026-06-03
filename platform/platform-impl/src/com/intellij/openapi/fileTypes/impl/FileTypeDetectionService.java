@@ -5,8 +5,10 @@ import com.intellij.ide.scratch.ScratchUtil;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.extensions.impl.ExtensionComponentAdapter;
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
@@ -21,12 +23,24 @@ import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.StringUtilRt;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.AsyncFileListener;
+import com.intellij.openapi.vfs.DiskQueryRelay;
+import com.intellij.openapi.vfs.VFileProperty;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.openapi.vfs.newvfs.FileAttribute;
 import com.intellij.openapi.vfs.newvfs.FileSystemInterface;
-import com.intellij.openapi.vfs.newvfs.events.*;
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent;
 import com.intellij.testFramework.LightVirtualFile;
-import com.intellij.util.*;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.BitUtil;
+import com.intellij.util.FileContentUtilCore;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.AppJavaExecutorUtil;
 import com.intellij.util.concurrency.CoroutineDispatcherBackedExecutor;
@@ -37,12 +51,29 @@ import com.intellij.util.xmlb.Constants;
 import kotlinx.coroutines.CoroutineScope;
 import kotlinx.coroutines.JobKt;
 import org.jdom.Element;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -97,7 +128,7 @@ public final class FileTypeDetectionService {
     myFileTypeManager = fileTypeManager;
     scope = coroutineScope;
 
-    JobKt.getJob(coroutineScope.getCoroutineContext()).invokeOnCompletion(throwable -> {
+    JobKt.getJob(coroutineScope.getCoroutineContext()).invokeOnCompletion(_ -> {
       LOG.info(String.format("%s auto-detected files. Detection took %s ms", counterAutoDetect, elapsedAutoDetect));
       return null;
     });
@@ -117,7 +148,9 @@ public final class FileTypeDetectionService {
     reDetectExecutor = AppJavaExecutorUtil.createBoundedTaskExecutor("FileTypeManager Redetect", coroutineScope);
   }
 
-  @Nullable AsyncFileListener.ChangeApplier prepareChange(@NotNull List<? extends @NotNull VFileEvent> events) {
+  @ApiStatus.Internal
+  @VisibleForTesting
+  public @Nullable AsyncFileListener.ChangeApplier prepareChange(@NotNull List<? extends @NotNull VFileEvent> events) {
     Collection<VirtualFile> files = ContainerUtil.map2SetNotNull(events, event -> {
       if (event instanceof VFileContentChangeEvent changeEvent) {
         VirtualFile file = changeEvent.getFile();
@@ -454,8 +487,8 @@ public final class FileTypeDetectionService {
       if (toLog()) {
         log("F: reDetect(" + file.getName() + ") " + file.getName());
       }
-      int id = ((VirtualFileWithId)file).getId();
-      long flags = packedFlags.get(id);
+      int id = file instanceof VirtualFileWithId ? ((VirtualFileWithId)file).getId() : -1;
+      long flags = id == -1 ? 0 : packedFlags.get(id);
 
       FileType before = ObjectUtils.notNull(textOrBinaryFromCachedFlags(flags),
                                             ObjectUtils.notNull(getFileTypeDetectedFromContent(file), PlainTextFileType.INSTANCE));
@@ -485,7 +518,9 @@ public final class FileTypeDetectionService {
         // detected by conventional methods, no need to run detect-from-content
         file.putUserData(DETECTED_FROM_CONTENT_FILE_TYPE_KEY, null);
         flags = 0;
-        packedFlags.set(id, flags);
+        if (id != -1) {
+          packedFlags.set(id, flags);
+        }
       }
       if (toLog()) {
         log("F: reDetect(" + file.getName() + ") before: " + before.getName() + "; after: " + after.getName() +
@@ -521,6 +556,13 @@ public final class FileTypeDetectionService {
 
   private @NotNull FileType detectFromContentAndCache(@NotNull VirtualFile file, byte @Nullable [] content, @Nullable FileType fileTypeByName) throws IOException {
     long start = System.currentTimeMillis();
+    if (content == null) {
+      Document document = FileDocumentManager.getInstance().getCachedDocument(file);
+      if (document != null) {
+        content = document.getText().getBytes(file.getCharset());
+      }
+    }
+
     ByteArraySequence bytes = getFirstBytes(file, content);
     FileType fileType = detectFromContent(file, bytes, fileTypeByName);
     cacheAutoDetectedFileType(file, fileType);
@@ -535,13 +577,12 @@ public final class FileTypeDetectionService {
     int n = stream.read(buffer, 0, length);
     if (n <= 0) {
       // maybe locked because someone else is writing to it
-      // repeat inside read action to guarantee all writes are finished
       if (toLog()) {
-        log("F: readSafely(): inputStream.read(" +length+ ") returned "+n+"; retrying with read action. stream="+ streamInfo(stream));
+        log("F: readSafely(): inputStream.read(" +length+ ") returned "+n+"; retrying. stream="+ streamInfo(stream));
       }
       n = stream.read(buffer, 0, length);
       if (toLog()) {
-        log("F: readSafely(): under read action inputStream.read(" +length+ ") returned "+n+"; stream="+ streamInfo(stream));
+        log("F: readSafely(): 2nd inputStream.read(" +length+ ") returned "+n+"; stream="+ streamInfo(stream));
       }
     }
     return n;

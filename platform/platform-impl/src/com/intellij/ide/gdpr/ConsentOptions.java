@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.gdpr;
 
+import com.intellij.diagnostic.ExceptionAutoReportUtil;
 import com.intellij.diagnostic.LoadingState;
 import com.intellij.idea.AppMode;
 import com.intellij.l10n.LocalizationUtil;
@@ -11,15 +12,32 @@ import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.concurrency.annotations.RequiresReadLockAbsence;
 import kotlin.Pair;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.StringTokenizer;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -30,14 +48,15 @@ import java.util.stream.Stream;
 public final class ConsentOptions implements ModificationTracker {
   private static final Logger LOG = Logger.getInstance(ConsentOptions.class);
 
-  private static final String CONSENTS_CONFIRMATION_PROPERTY = "jb.consents.confirmation.enabled";
-  private static final String RECONFIRM_CONSENTS_PROPERTY = "test.force.reconfirm.consents";
+  public static final String CONSENTS_CONFIRMATION_PROPERTY = "jb.consents.confirmation.enabled";
+  public static final String RECONFIRM_CONSENTS_PROPERTY = "test.force.reconfirm.consents";
   private static final String STATISTICS_OPTION_ID = "rsch.send.usage.stat";
   private static final String EAP_FEEDBACK_OPTION_ID = "eap";
   private static final String AI_DATA_COLLECTION_OPTION_ID = "ai.data.collection.and.use.policy";
   private static final String TRACE_DATA_COLLECTION_NON_COM_OPTION_ID = "ai.trace.data.collection.and.use.noncom.policy";
   private static final String TRACE_DATA_COLLECTION_COM_OPTION_ID = "ai.trace.data.collection.and.use.com.policy";
   private static final String TRACE_DATA_COLLECTION_OPTION_ID = "ai.trace.data.collection.and.use.policy";
+  private static final String EA_AUTO_REPORT_OPTION_ID = "ea.auto.report";
   private static final Set<String> PER_PRODUCT_CONSENTS = Set.of(EAP_FEEDBACK_OPTION_ID);
 
   private final BooleanSupplier myIsEap;
@@ -56,81 +75,90 @@ public final class ConsentOptions implements ModificationTracker {
       .resolve("consentOptions/cached");
   }
 
-  private static Path getConfirmedConsentsFile() {
+  public static Path getConfirmedConsentsFile() {
     return PathManager.getCommonDataPath().resolve("consentOptions/accepted");
   }
 
-  private static Locale getCurrentLocale() {
+  public static Locale getCurrentLocale() {
     return LocalizationUtil.INSTANCE.getLocale();
   }
   
-  private static Locale getDefaultLocale() {
+  public static Locale getDefaultLocale() {
     return LocalizationUtil.INSTANCE.getDefaultLocale();
   }
 
-  private static final class InstanceHolder {
-    static final ConsentOptions ourInstance = new ConsentOptions(new IOBackend() {
-      @Override
-      public void writeDefaultConsents(@NotNull String data) throws IOException {
-        var defaultConsentsFile = getDefaultConsentsFile();
-        Files.createDirectories(defaultConsentsFile.getParent());
-        Files.writeString(defaultConsentsFile, data);
-      }
+  public static class IOBackendImpl implements IOBackend {
+    private final String myBundledResourcePath;
+    private final Path myConfirmedConsentsFile;
 
-      @Override
-      public @NotNull String readDefaultConsents() throws IOException {
-        return loadText(Files.newInputStream(getDefaultConsentsFile()));
-      }
+    public IOBackendImpl(String bundledResourcePath, Path confirmedConsentsFile) {
+      myBundledResourcePath = bundledResourcePath;
+      myConfirmedConsentsFile = confirmedConsentsFile;
+    }
 
-      @Override
-      public @NotNull String readBundledConsents() {
-        return loadText(ConsentOptions.class.getClassLoader().getResourceAsStream(getBundledResourcePath()));
-      }
+    @Override
+    public void writeDefaultConsents(@NotNull String data) throws IOException {
+      var defaultConsentsFile = getDefaultConsentsFile();
+      Files.createDirectories(defaultConsentsFile.getParent());
+      Files.writeString(defaultConsentsFile, data);
+    }
 
-      @Override
-      public @Nullable String readLocalizedBundledConsents() {
-        if (getCurrentLocale() == getDefaultLocale()) {
-          return null;
-        }
+    @Override
+    public @NotNull String readDefaultConsents() throws IOException {
+      return loadText(Files.newInputStream(getDefaultConsentsFile()));
+    }
 
-        for (var localizedPath : LocalizationUtil.INSTANCE.getLocalizedPaths(getBundledResourcePath(), getCurrentLocale())) {
-          var loadedText = loadText(ConsentOptions.class.getClassLoader().getResourceAsStream(localizedPath));
-          if (!loadedText.isEmpty()) {
-            return loadedText;
-          }
-        }
+    @Override
+    public @NotNull String readBundledConsents() {
+      return loadText(ConsentOptions.class.getClassLoader().getResourceAsStream(myBundledResourcePath));
+    }
+
+    @Override
+    public @Nullable String readLocalizedBundledConsents() {
+      if (getCurrentLocale() == getDefaultLocale()) {
         return null;
       }
 
-      @Override
-      public void writeConfirmedConsents(@NotNull String data) throws IOException {
-        var confirmedConsentsFile = getConfirmedConsentsFile();
-        Files.createDirectories(confirmedConsentsFile.getParent());
-        Files.writeString(confirmedConsentsFile, data);
-        if (LoadingState.COMPONENTS_REGISTERED.isOccurred()) {
-          ApplicationManager.getApplication().getMessageBus()
-            .syncPublisher(DataSharingSettingsChangeListener.TOPIC)
-            .consentWritten();
+      for (var localizedPath : LocalizationUtil.INSTANCE.getLocalizedPaths(myBundledResourcePath, getCurrentLocale())) {
+        var loadedText = loadText(ConsentOptions.class.getClassLoader().getResourceAsStream(localizedPath));
+        if (!loadedText.isEmpty()) {
+          return loadedText;
         }
       }
+      return null;
+    }
 
-      @Override
-      public @NotNull String readConfirmedConsents() throws IOException {
-        return loadText(Files.newInputStream(getConfirmedConsentsFile()));
+    @Override
+    public void writeConfirmedConsents(@NotNull String data) throws IOException {
+      Files.createDirectories(myConfirmedConsentsFile.getParent());
+      Files.writeString(myConfirmedConsentsFile, data);
+      if (LoadingState.COMPONENTS_REGISTERED.isOccurred()) {
+        ApplicationManager.getApplication().getMessageBus()
+          .syncPublisher(DataSharingSettingsChangeListener.TOPIC)
+          .consentWritten();
       }
+    }
 
-      private static String loadText(InputStream stream) {
-        if (stream != null) {
-          try (var inputStream = CharsetToolkit.inputStreamSkippingBOM(stream)) {
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-          }
-          catch (IOException e) {
-            LOG.info(e);
-          }
+    @Override
+    public @NotNull String readConfirmedConsents() throws IOException {
+      return loadText(Files.newInputStream(myConfirmedConsentsFile));
+    }
+
+    private static String loadText(InputStream stream) {
+      if (stream != null) {
+        try (var inputStream = CharsetToolkit.inputStreamSkippingBOM(stream)) {
+          return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
         }
-        return "";
+        catch (IOException e) {
+          LOG.info(e);
+        }
       }
-    });
+      return "";
+    }
+  }
+
+  private static final class InstanceHolder {
+    static final ConsentOptions ourInstance = new ConsentOptions(new IOBackendImpl(getBundledResourcePath(), getConfirmedConsentsFile()));
 
     private static String getBundledResourcePath() {
       if ("JetBrains".equals(System.getProperty("idea.vendor.name"))) {
@@ -188,6 +216,10 @@ public final class ConsentOptions implements ModificationTracker {
     return getDefaultConsent(STATISTICS_OPTION_ID);
   }
 
+  public @Nullable Consent getDefaultErrorAutoReportConsent() {
+    return getDefaultConsent(EA_AUTO_REPORT_OPTION_ID);
+  }
+
   public static @NotNull Predicate<Consent> condUsageStatsConsent() {
     return consent -> STATISTICS_OPTION_ID.equals(consent.getId());
   }
@@ -200,19 +232,29 @@ public final class ConsentOptions implements ModificationTracker {
     return consent -> AI_DATA_COLLECTION_OPTION_ID.equals(consent.getId());
   }
 
+  /**
+   * Should only be used to limit the visibility of the outdated TRACE consent in the settings.
+   */
   public static @NotNull Predicate<Consent> condTraceDataCollectionNonComConsent() {
     return consent -> TRACE_DATA_COLLECTION_NON_COM_OPTION_ID.equals(consent.getId());
   }
 
+  /**
+   * Should only be used to limit the visibility of the outdated TRACE consent in the settings.
+   */
   public static @NotNull Predicate<Consent> condTraceDataCollectionComConsent() {
     return consent -> TRACE_DATA_COLLECTION_COM_OPTION_ID.equals(consent.getId());
   }
 
   /**
-   * Should only be used to limit the visibility of the outdated TRACE content in the settings.
+   * Should only be used to limit the visibility of the outdated TRACE consent in the settings.
    */
   public static @NotNull Predicate<Consent> condTraceDataCollectionConsent() {
     return consent -> TRACE_DATA_COLLECTION_OPTION_ID.equals(consent.getId());
+  }
+
+  public static @NotNull Predicate<Consent> condEAAutoReportConsent() {
+    return consent -> EA_AUTO_REPORT_OPTION_ID.equals(consent.getId());
   }
 
   /**
@@ -240,20 +282,8 @@ public final class ConsentOptions implements ModificationTracker {
     setPermission(AI_DATA_COLLECTION_OPTION_ID, permitted);
   }
 
-  public @NotNull Permission getTraceDataCollectionNonComPermission() {
-    return getPermission(TRACE_DATA_COLLECTION_NON_COM_OPTION_ID);
-  }
-
-  public void setTraceDataCollectionNonComPermission(boolean permitted) {
-    setPermission(TRACE_DATA_COLLECTION_NON_COM_OPTION_ID, permitted);
-  }
-
-  public @NotNull Permission getTraceDataCollectionComPermission() {
-    return getPermission(TRACE_DATA_COLLECTION_COM_OPTION_ID);
-  }
-
-  public void setTraceDataCollectionComPermission(boolean permitted) {
-    setPermission(TRACE_DATA_COLLECTION_COM_OPTION_ID, permitted);
+  public void setEAAutoReportAllowed(boolean permitted) {
+    setPermission(EA_AUTO_REPORT_OPTION_ID, permitted);
   }
 
   private Permission getPermission(String consentId) {
@@ -325,19 +355,29 @@ public final class ConsentOptions implements ModificationTracker {
     }
   }
 
+  @RequiresReadLockAbsence(generateAssertion = false)
+  @RequiresBackgroundThread(generateAssertion = false)
   public @NotNull Pair<List<Consent>, Boolean> getConsents() {
-    return getConsents(consent -> true);
+    return getConsents(_ -> true);
   }
 
+  @RequiresReadLockAbsence(generateAssertion = false)
+  @RequiresBackgroundThread(generateAssertion = false)
   public @NotNull Pair<List<Consent>, Boolean> getConsents(@NotNull Predicate<? super Consent> filter) {
     var allDefaults = loadDefaultConsents();
     if (isEAP()) {
       // for EA builds there is a different option for statistics sending management
       allDefaults.remove(STATISTICS_OPTION_ID);
+      // auto reporting exceptions in EAPs is controlled in `ExceptionEAPAutoReportManager`
+      allDefaults.remove(EA_AUTO_REPORT_OPTION_ID);
     }
     else {
       // EAP feedback consent is relevant to EA builds only
       allDefaults.remove(lookupConsentID(EAP_FEEDBACK_OPTION_ID));
+    }
+
+    if (!ExceptionAutoReportUtil.isConsentAllowedToBeVisible()) {
+      allDefaults.remove(EA_AUTO_REPORT_OPTION_ID);
     }
 
     for (var it = allDefaults.entrySet().iterator(); it.hasNext(); ) {
@@ -389,6 +429,8 @@ public final class ConsentOptions implements ModificationTracker {
   private @Nullable Consent getDefaultConsent(String consentId) {
     var defaultConsents = loadDefaultConsents();
     var consentMap = defaultConsents.get(consentId);
+    if (consentMap == null) return null;
+
     var defaultConsent = consentMap.get(getDefaultLocale());
     if (defaultConsent == null) return null;
     var localizedConsent = consentMap.get(getCurrentLocale());
@@ -586,6 +628,10 @@ public final class ConsentOptions implements ModificationTracker {
 
   private void notifyConsentsUpdated() {
     myModificationCount.incrementAndGet();
+    updateConsentListeners();
+  }
+
+  public static void updateConsentListeners() {
     if (LoadingState.COMPONENTS_REGISTERED.isOccurred()) {
       ApplicationManager.getApplication().getMessageBus().syncPublisher(DataSharingSettingsChangeListener.TOPIC).consentsUpdated();
     }

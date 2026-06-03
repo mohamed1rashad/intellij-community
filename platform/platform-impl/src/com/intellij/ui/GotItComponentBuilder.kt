@@ -23,10 +23,6 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.GotItComponentBuilder.Companion.EXTENDED_MAX_WIDTH
 import com.intellij.ui.GotItComponentBuilder.Companion.MAX_LINES_COUNT
 import com.intellij.ui.GotItComponentBuilder.Companion.MAX_WIDTH
-import com.intellij.ui.InlineCodeExtension.Companion.getStyles
-import com.intellij.ui.InlineCodeExtension.Companion.patchCodeTags
-import com.intellij.ui.ShortcutExtension.Companion.getStyles
-import com.intellij.ui.ShortcutExtension.Companion.patchShortcutTags
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.labels.LinkLabel
@@ -39,25 +35,64 @@ import com.intellij.ui.paint.RectanglePainter2D
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.ui.svg.SvgAttributePatcher
 import com.intellij.util.SVGLoader
-import com.intellij.util.ui.*
+import com.intellij.util.ui.ExtendableHTMLViewFactory
+import com.intellij.util.ui.GridBag
+import com.intellij.util.ui.HTMLEditorKitBuilder
+import com.intellij.util.ui.JBEmptyBorder
+import com.intellij.util.ui.JBFont
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Container
+import java.awt.Dimension
+import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
+import java.awt.Insets
+import java.awt.Rectangle
+import java.awt.RenderingHints
+import java.awt.Shape
 import java.awt.event.KeyEvent
 import java.awt.geom.Path2D
 import java.awt.geom.RoundRectangle2D
 import java.io.StringReader
 import java.net.URL
-import javax.swing.*
+import java.util.concurrent.ConcurrentHashMap
+import javax.swing.Box
+import javax.swing.BoxLayout
+import javax.swing.Icon
+import javax.swing.JButton
+import javax.swing.JComponent
+import javax.swing.JEditorPane
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.KeyStroke
+import javax.swing.SortingFocusTraversalPolicy
+import javax.swing.SwingConstants
 import javax.swing.border.Border
 import javax.swing.border.EmptyBorder
 import javax.swing.event.HyperlinkEvent
 import javax.swing.plaf.TextUI
-import javax.swing.text.*
+import javax.swing.text.AttributeSet
+import javax.swing.text.BadLocationException
+import javax.swing.text.Element
+import javax.swing.text.Position
+import javax.swing.text.StyleConstants
+import javax.swing.text.StyledDocument
+import javax.swing.text.View
 import javax.swing.text.View.X_AXIS
 import javax.swing.text.View.Y_AXIS
-import javax.swing.text.html.*
+import javax.swing.text.html.CSS
+import javax.swing.text.html.HTML
+import javax.swing.text.html.HTMLEditorKit
+import javax.swing.text.html.InlineView
 import javax.swing.text.html.ParagraphView
+import javax.swing.text.html.StyleSheet
 import kotlin.math.min
 
 private sealed interface GotItPromoContent {
@@ -73,7 +108,7 @@ private data class GotItPromoHtmlPage(val htmlText: String, val htmlPageSize: Di
 }
 
 private data class GotItPromoComponent(val component: JComponent): GotItPromoContent {
-  override val width: Int? get() = component.preferredSize.width
+  override val width: Int get() = component.preferredSize.width
 }
 
 @ApiStatus.Internal
@@ -504,7 +539,7 @@ class GotItComponentBuilder(textSupplier: GotItTextBuilder.() -> @Nls String) {
     icon?.let {
       val adjusted = adjustIcon(it, useContrastColors)
       iconOrStepLabel = JLabel(adjusted)
-      panel.add(iconOrStepLabel!!, gc.nextLine().next().anchor(GridBagConstraints.BASELINE))
+      panel.add(iconOrStepLabel, gc.nextLine().next().anchor(GridBagConstraints.BASELINE))
     }
 
     stepText?.let { step ->
@@ -513,7 +548,7 @@ class GotItComponentBuilder(textSupplier: GotItTextBuilder.() -> @Nls String) {
         foreground = JBUI.CurrentTheme.GotItTooltip.stepForeground(useContrastColors)
         font = EditorColorsManager.getInstance().globalScheme.getFont(EditorFontType.PLAIN).deriveFont(JBFont.label().size.toFloat())
       }
-      panel.add(iconOrStepLabel!!, gc.nextLine().next().anchor(GridBagConstraints.BASELINE))
+      panel.add(iconOrStepLabel, gc.nextLine().next().anchor(GridBagConstraints.BASELINE))
     }
 
     if (header.isNotEmpty()) {
@@ -808,9 +843,8 @@ private class LimitedWidthEditorPane(
 class ShortcutExtension : ExtendableHTMLViewFactory.Extension {
   override fun invoke(elem: Element, defaultView: View): View? {
     val tagAttributes = elem.attributes.getAttribute(HTML.Tag.SPAN) as? AttributeSet
-    return if (tagAttributes?.getAttribute(HTML.Attribute.CLASS) == "shortcut") {
-      return ShortcutView(elem)
-    }
+    return if (tagAttributes?.getAttribute(HTML.Attribute.CLASS) == "shortcut")
+      ShortcutView(elem)
     else null
   }
 
@@ -938,8 +972,7 @@ class ShortcutExtension : ExtendableHTMLViewFactory.Extension {
         }
         return rectangles
       }
-      catch (ex: BadLocationException) {
-        // ignore
+      catch (_: BadLocationException) {
         null
       }
     }
@@ -967,9 +1000,8 @@ class ShortcutExtension : ExtendableHTMLViewFactory.Extension {
 private class InlineCodeExtension : ExtendableHTMLViewFactory.Extension {
   override fun invoke(elem: Element, defaultView: View): View? {
     val tagAttributes = elem.attributes.getAttribute(HTML.Tag.SPAN) as? AttributeSet
-    return if (tagAttributes?.getAttribute(HTML.Attribute.CLASS) == "code") {
-      return InlineCodeView(elem)
-    }
+    return if (tagAttributes?.getAttribute(HTML.Attribute.CLASS) == "code")
+      InlineCodeView(elem)
     else null
   }
 
@@ -1095,28 +1127,66 @@ private fun View.getFloatAttribute(key: Any, defaultValue: Float): Float {
 private val InlineView.borderColorAttr: Color? get() =
   attributes.getAttribute(CSS.Attribute.BORDER_TOP_COLOR)?.toString()?.let { ColorUtil.fromHex(it) }
 
+private object SvgCustomAttributes {
+
+  enum class ColorType {
+    STROKE,
+    FILL
+  }
+
+  private const val COLOR_STROKE_KEY_ATTR = "color-stroke-key"
+  private const val COLOR_FILL_KEY_ATTR = "color-fill-key"
+
+  private val log = thisLogger()
+  private val unknownAttrColorTypes = ConcurrentHashMap.newKeySet<String>()
+
+  fun getFillColorType(attributes: Map<String, String>): ColorType? {
+    return getColorType(COLOR_FILL_KEY_ATTR, attributes)
+  }
+
+  fun getStrokeColorType(attributes: Map<String, String>): ColorType? {
+    return getColorType(COLOR_STROKE_KEY_ATTR, attributes)
+  }
+
+  private fun getColorType(attribute: String, attributes: Map<String, String>): ColorType? {
+    val value = attributes[attribute] ?: return null
+
+    return when {
+      value.endsWith("-stroke") -> ColorType.STROKE
+      value.endsWith("-fill") -> ColorType.FILL
+
+      else -> {
+        if (unknownAttrColorTypes.add(value)) {
+          log.warn("Invalid $attribute attribute format: $value. Should end with '-stroke' or '-fill'")
+        }
+
+        null
+      }
+    }
+  }
+}
+
 private fun Icon.colorizeIfPossible(fillColor: Color, borderColor: Color = fillColor): Icon =
   (this as? CachedImageIcon)?.createWithPatcher(colorPatcher = object : SVGLoader.SvgElementColorPatcherProvider, SvgAttributePatcher {
-    private var lastColor = Int.MIN_VALUE
-    private var lastDigest: LongArray? = null
+
+    private val digest = longArrayOf(0L, 440413911775177385)
 
     override fun digest(): LongArray {
-      val color = fillColor.rgb / 2 + borderColor.rgb / 2
-      if (color == lastColor) {
-        lastDigest?.let {
-          return it
-        }
-      }
-
-      val digest = longArrayOf(color.toLong(), 440413911775177385)
-      lastColor = color
-      lastDigest = digest
+      digest[0] = toLong(fillColor.rgb, borderColor.rgb)
       return digest
     }
 
     override fun patchColors(attributes: MutableMap<String, String>) {
-      setAttribute(attributes, "fill", fillColor)
-      setAttribute(attributes, "stroke", borderColor)
+      val effectiveFill = if (SvgCustomAttributes.getFillColorType(attributes) == SvgCustomAttributes.ColorType.STROKE)
+        borderColor
+      else fillColor
+
+      val effectiveStroke = if (SvgCustomAttributes.getStrokeColorType(attributes) == SvgCustomAttributes.ColorType.FILL)
+        fillColor
+      else borderColor
+
+      setAttribute(attributes, "fill", effectiveFill)
+      setAttribute(attributes, "stroke", effectiveStroke)
     }
 
     override fun attributeForPath(path: String) = this
@@ -1130,5 +1200,9 @@ private fun Icon.colorizeIfPossible(fillColor: Color, borderColor: Color = fillC
       if (alpha != 255) {
         attributes["$key-opacity"] = "${alpha / 255f}"
       }
+    }
+
+    private fun toLong(high: Int, low: Int): Long {
+      return (high.toLong() shl 32) or (low.toLong() and 0xFFFFFFFFL)
     }
   }) ?: this

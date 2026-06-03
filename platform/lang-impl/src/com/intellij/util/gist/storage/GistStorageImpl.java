@@ -30,11 +30,19 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
 
-import java.io.*;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
@@ -104,7 +112,7 @@ public final class GistStorageImpl extends GistStorage {
     @SuppressWarnings("unchecked")
     GistImpl<Data> gist = (GistImpl<Data>)knownGists.computeIfAbsent(
       id,
-      __ -> new GistImpl<>(id, version, externalizer)
+      _ -> new GistImpl<>(id, version, externalizer)
     );
 
     if (gist.version() != version) {

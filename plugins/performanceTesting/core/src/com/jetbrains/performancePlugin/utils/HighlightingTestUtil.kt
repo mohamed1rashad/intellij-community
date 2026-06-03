@@ -2,15 +2,20 @@
 package com.jetbrains.performancePlugin.utils
 
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
-import com.intellij.platform.diagnostic.telemetry.Scope
-import com.intellij.platform.diagnostic.telemetry.TelemetryManager
-import java.util.concurrent.TimeUnit
 import com.intellij.openapi.util.Pair
 import com.intellij.openapi.util.Ref
+import com.intellij.platform.diagnostic.telemetry.Scope
+import com.intellij.platform.diagnostic.telemetry.TelemetryManager
 import com.jetbrains.performancePlugin.commands.CodeAnalysisStateListener
 import io.opentelemetry.api.trace.Span
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -36,10 +41,10 @@ class HighlightingTestUtil {
     }
 
     @JvmStatic
-    suspend fun waitForAnalysisWithNewApproach(project: Project, span: Span?, timeout: Long, suppressErrors: Boolean) {
-      val timeoutDuration = if (timeout == 0L) 5.minutes else timeout.seconds
+    suspend fun waitForAnalysisWithNewApproach(project: Project, span: Span?, timeoutSeconds: Long?, suppressErrors: Boolean?) {
+      val timeoutDuration = if (timeoutSeconds == 0L || timeoutSeconds == null) 5.minutes else timeoutSeconds.seconds
       try {
-        project.service<CodeAnalysisStateListener>().waitAnalysisToFinish(timeoutDuration, !suppressErrors)
+        project.service<CodeAnalysisStateListener>().waitAnalysisToFinish(timeoutDuration, !(suppressErrors ?: true))
       }
       catch (e: TimeoutException) {
         span?.setAttribute("timeout", "true")
@@ -47,6 +52,31 @@ class HighlightingTestUtil {
       finally {
         span?.end()
       }
+    }
+
+    suspend fun waitForCondition(checkInterval: Long = 500, condition: suspend () -> Boolean) {
+      while (true) {
+        if (condition()) return
+        delay(checkInterval)
+      }
+    }
+
+    suspend fun <T> waitForCondition(
+      checkInterval: Long = 500,
+      timeout: Duration = 30_000.milliseconds,
+      timeoutReason: String? = null,
+      condition: suspend () -> T?,
+    ): T {
+      timeoutReason?.let { logger<HighlightingTestUtil>().info(it) }
+      val result = withTimeoutOrNull(timeout) {
+        while (true) {
+          val value = condition()
+          if (value != null) return@withTimeoutOrNull value
+          delay(checkInterval)
+        }
+      }
+      @Suppress("UNCHECKED_CAST")
+      return result as? T ?: error("Timeout after $timeout${timeoutReason?.let { ": $it" } ?: ""}")
     }
   }
 

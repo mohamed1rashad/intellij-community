@@ -7,9 +7,12 @@ import com.intellij.ide.HelpTooltip;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.internal.inspector.UiInspectorActionUtil;
 import com.intellij.internal.inspector.UiInspectorUtil;
-import com.intellij.internal.statistic.eventLog.events.EventFields;
 import com.intellij.lang.Language;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionPopupMenu;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationActivationListener;
 import com.intellij.openapi.application.ApplicationManager;
@@ -30,10 +33,12 @@ import it.unimi.dsi.fastutil.ints.IntSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JPopupMenu;
 import javax.swing.event.PopupMenuEvent;
 import javax.swing.event.PopupMenuListener;
-import java.awt.*;
+import java.awt.Component;
+import java.awt.Point;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -111,12 +116,12 @@ final class ActionPopupMenuImpl implements ActionPopupMenu, ApplicationActivatio
     }
 
     @Override
-    public void show(@NotNull Component component, int x, int y) {
+    public void show(@NotNull Component component, int x, int y) throws MenuCancelledControlFlowException {
       if (!component.isShowing()) {
         throw new IllegalArgumentException("component must be shown on the screen (" + component + ")");
       }
       myPopupTriggeredNanos = IdeEventQueue.getInstance().getPopupTriggerTime();
-      Utils.showPopupElapsedMillisIfConfigured(myPopupTriggeredNanos, this);
+      PopupShowingTimeTracker.showElapsedMillisIfConfigured(myPopupTriggeredNanos, this);
 
       int x2 = Math.max(0, Math.min(x, component.getWidth() - 1)); // fit x into [0, width-1]
       int y2 = Math.max(0, Math.min(y, component.getHeight() - 1)); // fit y into [0, height-1]
@@ -153,10 +158,7 @@ final class ActionPopupMenuImpl implements ActionPopupMenu, ApplicationActivatio
       PsiFile psiFile = CommonDataKeys.PSI_FILE.getData(Utils.getCachedOnlyDataContext(myContext));
       Language language = psiFile == null ? null : psiFile.getLanguage();
       boolean coldStart = SEEN_ACTION_GROUPS.add(Objects.hash(myGroup, language));
-      UILatencyLogger.ACTION_POPUP_LATENCY.log(EventFields.DurationMs.with(time),
-                                               EventFields.ActionPlace.with(myPlace),
-                                               UILatencyLogger.COLD_START.with(coldStart),
-                                               EventFields.Language.with(language));
+      UILatencyLogger.logActionPopupLatency(time, myPlace, coldStart, language);
     }
 
     @Override
@@ -165,7 +167,7 @@ final class ActionPopupMenuImpl implements ActionPopupMenu, ApplicationActivatio
       if (!b) ReflectionUtil.resetField(this, "invoker");
     }
 
-    private void updateChildren(@Nullable RelativePoint point) {
+    private void updateChildren(@Nullable RelativePoint point) throws MenuCancelledControlFlowException {
       removeAll();
       Utils.INSTANCE.fillPopupMenu(new ActualActionUiKind.Menu(this, false), myGroup, myPresentationFactory, myContext, myPlace, point);
     }
@@ -199,7 +201,7 @@ final class ActionPopupMenuImpl implements ActionPopupMenu, ApplicationActivatio
       }
 
       @Override
-      public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
+      public void popupMenuWillBecomeVisible(PopupMenuEvent e) throws MenuCancelledControlFlowException {
         HelpTooltip.disableTooltip(targetComponent);
         if (getComponentCount() == 0) {
           updateChildren(null);

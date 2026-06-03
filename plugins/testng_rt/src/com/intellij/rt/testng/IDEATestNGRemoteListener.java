@@ -1,9 +1,14 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.rt.testng;
 
 import com.intellij.rt.execution.junit.ComparisonFailureData;
 import com.intellij.rt.execution.junit.MapSerializerUtil;
-import org.testng.*;
+import org.testng.IClass;
+import org.testng.IInvokedMethod;
+import org.testng.ISuite;
+import org.testng.ITestContext;
+import org.testng.ITestNGMethod;
+import org.testng.ITestResult;
 import org.testng.annotations.Test;
 import org.testng.internal.ConstructorOrMethod;
 import org.testng.xml.XmlClass;
@@ -15,12 +20,23 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class IDEATestNGRemoteListener {
 
+  public static final String SUITE_DURATION = "test.use.suite.duration";
+
   private final PrintStream myPrintStream;
+  private final boolean myUseSuiteDuration;
   private final List<String> myCurrentSuites = new ArrayList<>();
+  private final Map<String, Long> mySuiteStartNanos = new ConcurrentHashMap<>();
   private final Map<String, Integer> myInvocationCounts = new HashMap<>();
   private final Map<ExposedTestResult, String> myParamsMap = new HashMap<>();
   private final Map<ExposedTestResult, DelegatedResult> myResults = new HashMap<>();
@@ -32,6 +48,7 @@ public class IDEATestNGRemoteListener {
 
   public IDEATestNGRemoteListener(PrintStream printStream) {
     myPrintStream = printStream;
+    myUseSuiteDuration = Boolean.parseBoolean(System.getProperty(SUITE_DURATION, "true"));
     myPrintStream.println("##teamcity[enteredTheMatrix]");
   }
 
@@ -182,7 +199,7 @@ public class IDEATestNGRemoteListener {
 
     for (int i = myCurrentSuites.size() - 1; i >= idx; i--) {
       currentClass = myCurrentSuites.remove(i);
-      myPrintStream.println("##teamcity[testSuiteFinished name='" + escapeName(currentClass) + "']");
+      onSuiteFinish(currentClass);
     }
 
     for (int i = idx; i < parentsHierarchy.size(); i++) {
@@ -201,12 +218,23 @@ public class IDEATestNGRemoteListener {
       myPrintStream.println("##teamcity[testSuiteStarted name ='" + escapeName(currentClassName) +
                             (provideLocation ? "' locationHint = '" + location : "") + "']");
       myCurrentSuites.add(currentClassName);
+      if (myUseSuiteDuration) {
+        mySuiteStartNanos.put(currentClassName, System.nanoTime());
+      }
     }
     return false;
   }
 
   public void onSuiteFinish(String suiteName) {
-    myPrintStream.println("##teamcity[testSuiteFinished name='" + escapeName(suiteName) + "']");
+    String durationAttr = "";
+    if (myUseSuiteDuration) {
+      Long start = mySuiteStartNanos.remove(suiteName);
+      if (start != null) {
+        long durationMs = (System.nanoTime() - start) / 1_000_000L;
+        if (durationMs > 0) durationAttr = " duration='" + durationMs + "'";
+      }
+    }
+    myPrintStream.println("##teamcity[testSuiteFinished name='" + escapeName(suiteName) + "'" + durationAttr + "]");
   }
 
   private void onTestStart(ExposedTestResult result, String paramString, Integer invocationCount, boolean config) {
@@ -376,19 +404,24 @@ public class IDEATestNGRemoteListener {
         return name;
       }
       ITestNGMethod method = myResult.getMethod();
-      ConstructorOrMethod constructorOrMethod = method.getConstructorOrMethod();
-      AccessibleObject member = null;
-      if (constructorOrMethod.getMethod() != null) {
-        member = constructorOrMethod.getMethod();
+      try {
+        ConstructorOrMethod constructorOrMethod = method.getConstructorOrMethod();
+        AccessibleObject member = null;
+        if (constructorOrMethod.getMethod() != null) {
+          member = constructorOrMethod.getMethod();
+        }
+        if (constructorOrMethod.getConstructor() != null) {
+          member = constructorOrMethod.getConstructor();
+        }
+        if (member == null) return method.getMethodName();
+        Test annotation = member.getAnnotation(Test.class);
+        if (annotation == null) return method.getMethodName();
+        String testNameFromAnnotation = annotation.testName();
+        return testNameFromAnnotation == null || testNameFromAnnotation.isEmpty() ? method.getMethodName() : testNameFromAnnotation;
       }
-      if (constructorOrMethod.getConstructor() != null) {
-        member = constructorOrMethod.getConstructor();
+      catch (NoSuchMethodError ignored) {
+        return method.getMethodName();
       }
-      if (member == null) return method.getMethodName();
-      Test annotation = member.getAnnotation(Test.class);
-      if (annotation == null) return method.getMethodName();
-      String testNameFromAnnotation = annotation.testName();
-      return testNameFromAnnotation == null || testNameFromAnnotation.isEmpty() ? method.getMethodName() : testNameFromAnnotation;
     }
 
     @Override

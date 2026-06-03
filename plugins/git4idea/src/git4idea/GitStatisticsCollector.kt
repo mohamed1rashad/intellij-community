@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package git4idea
 
 import com.google.common.collect.HashMultiset
@@ -15,22 +15,31 @@ import com.intellij.internal.statistic.eventLog.events.PrimitiveEventField
 import com.intellij.internal.statistic.eventLog.events.VarargEventId
 import com.intellij.internal.statistic.service.fus.collectors.ProjectUsagesCollector
 import com.intellij.internal.statistic.utils.StatisticsUtil
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.getProjectCacheFileName
-import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.vcs.VcsException
 import com.intellij.util.io.URLUtil
 import com.intellij.vcs.log.impl.VcsLogApplicationSettings
+import com.intellij.vcs.log.impl.VcsLogManager
 import com.intellij.vcs.log.impl.VcsLogProjectTabsProperties
 import com.intellij.vcs.log.impl.VcsLogUiProperties
-import com.intellij.vcs.log.impl.VcsProjectLog
-import com.intellij.vcs.log.ui.MainVcsLogUi
 import com.intellij.vcsUtil.VcsUtil
+import git4idea.GitOperationsCollector.REMOTE_CHECK_STRATEGY
 import git4idea.branch.GitBranchUtil
-import git4idea.config.*
+import git4idea.commands.Git
+import git4idea.commands.GitCommand
+import git4idea.commands.GitLineHandler
+import git4idea.config.GitConfigUtil
+import git4idea.config.GitExecutableManager
+import git4idea.config.GitSaveChangesPolicy
+import git4idea.config.GitVcsApplicationSettings
+import git4idea.config.GitVcsSettings
+import git4idea.config.GitVersion
+import git4idea.config.UpdateMethod
 import git4idea.index.getStatus
 import git4idea.repo.GitCommitTemplateTracker
 import git4idea.repo.GitRemote
@@ -39,8 +48,8 @@ import git4idea.statistics.GitAvailabilityChecker
 import git4idea.statistics.GitCommitterCounter
 import git4idea.statistics.RepositoryAvailability
 import git4idea.ui.branch.dashboard.CHANGE_LOG_FILTER_ON_BRANCH_SELECTION_PROPERTY
+import git4idea.ui.branch.dashboard.NAVIGATE_LOG_TO_BRANCH_ON_BRANCH_SELECTION_PROPERTY
 import git4idea.ui.branch.dashboard.SHOW_GIT_BRANCHES_LOG_PROPERTY
-import org.jetbrains.annotations.NonNls
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Period
@@ -49,7 +58,7 @@ import kotlin.io.path.isDirectory
 import kotlin.io.path.isRegularFile
 
 internal class GitStatisticsCollector : ProjectUsagesCollector() {
-  private val GROUP = EventLogGroup("git.configuration", 20)
+  private val GROUP = EventLogGroup("git.configuration", 27)
 
   override fun getGroup(): EventLogGroup = GROUP
 
@@ -68,6 +77,8 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
     addIfDiffers(set, settings, defaultSettings, { it.syncSetting }, REPO_SYNC, REPO_SYNC_VALUE)
     addIfDiffers(set, settings, defaultSettings, { it.updateMethod }, UPDATE_TYPE, UPDATE_TYPE_VALUE)
     addIfDiffers(set, settings, defaultSettings, { it.saveChangesPolicy }, SAVE_POLICY, SAVE_POLICY_VALUE)
+    addIfDiffers(set, settings, defaultSettings, { it.incomingCommitsCheckStrategy }, INCOMING_COMMITS_CHECK_STRATEGY,
+                 REMOTE_CHECK_STRATEGY)
 
     addBoolIfDiffers(set, settings, defaultSettings, { it.autoUpdateIfPushRejected() }, PUSH_AUTO_UPDATE)
     addBoolIfDiffers(set, settings, defaultSettings, { it.warnAboutCrlf() }, WARN_CRLF)
@@ -86,19 +97,25 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
     reportVersion(project, set)
     val counter = GitCommitterCounter(listOf(Period.ofMonths(1), Period.ofMonths(3), Period.ofYears(1)),
                                       additionalGitParameters = listOf("--all"))
-    val executable = GitExecutableManager.getInstance().getExecutable(null)
 
     for (repository in repositories) {
       val repoStatus = repositoryChecker.checkRepoStatus(repository)
       val branches = repository.branches
+      val objectFormats = repository.detectObjectFormats()
       val repositoryMetric = REPOSITORY.metric(
         REPO_ID with project.getProjectCacheFileName() + repository.root.name,
         LOCAL_BRANCHES with branches.localBranches.size,
         REMOTE_BRANCHES with branches.remoteBranches.size,
+        TAGS with getTagsSize(repository),
         RECENT_CHECKOUT_BRANCHES with branches.recentCheckoutBranches.size,
         REMOTES with repository.remotes.size,
         IS_WORKTREE_USED with repository.isWorkTreeUsed(),
         FS_MONITOR with repository.detectFsMonitor(),
+        REF_FORMAT with repository.detectRefFormat(),
+        OBJECT_FORMAT_STORAGE with objectFormats.storage,
+        OBJECT_FORMAT_INPUT with objectFormats.input,
+        OBJECT_FORMAT_OUTPUT with objectFormats.output,
+        OBJECT_FORMAT_COMPAT with objectFormats.compat,
 
         REMOTES_AVAILABILITY with repoStatus,
       )
@@ -121,7 +138,7 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
       }
       set.add(repositoryMetric)
 
-      for (configDirName in ALL_IDE_CONFIG_NAMES) {
+      for (configDirName in ALL_STORED_CONFIG_NAMES) {
         getConfigFileStatus(repository, configDirName)?.let { status ->
           set.add(SHARED_IDE_CONFIG.metric(
             IDE_CONFIG_NAME.with(configDirName),
@@ -141,6 +158,8 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
 
     return set
   }
+
+  private fun getTagsSize(repository: GitRepository): Int = GitBranchUtil.getAllTags(repository.project, repository.root).size
 
   private fun reportVersion(project: Project, set: MutableSet<MetricEvent>) {
     val executableManager = GitExecutableManager.getInstance()
@@ -188,25 +207,39 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
   }
 
   private fun addGitLogMetrics(project: Project, metrics: MutableSet<MetricEvent>) {
-    val projectLog = project.serviceIfCreated<VcsProjectLog>() ?: return
-    val ui = projectLog.mainUi ?: return
-
-    addPropertyMetricIfDiffers(metrics, ui, SHOW_GIT_BRANCHES_LOG_PROPERTY, SHOW_GIT_BRANCHES_IN_LOG)
-    addPropertyMetricIfDiffers(metrics, ui, CHANGE_LOG_FILTER_ON_BRANCH_SELECTION_PROPERTY, UPDATE_BRANCH_FILTERS_ON_SELECTION)
+    addMainTabPropertyMetricIfDiffers(metrics, project, SHOW_GIT_BRANCHES_LOG_PROPERTY, SHOW_GIT_BRANCHES_IN_LOG)
+    addAppPropertyMetricIfDiffers(metrics, CHANGE_LOG_FILTER_ON_BRANCH_SELECTION_PROPERTY, UPDATE_BRANCH_FILTERS_ON_SELECTION)
+    addAppPropertyMetricIfDiffers(metrics, NAVIGATE_LOG_TO_BRANCH_ON_BRANCH_SELECTION_PROPERTY, NAVIGATE_LOG_TO_BRANCH_ON_SELECTION)
   }
 
-  private fun addPropertyMetricIfDiffers(
+  private fun addMainTabPropertyMetricIfDiffers(
     metrics: MutableSet<MetricEvent>,
-    ui: MainVcsLogUi,
+    project: Project,
     property: VcsLogUiProperties.VcsLogUiProperty<Boolean>,
     eventId: VarargEventId,
   ) {
-    val defaultValue = (property as? VcsLogProjectTabsProperties.CustomBooleanTabProperty)?.defaultValue(ui.id)
-                       ?: (property as? VcsLogApplicationSettings.CustomBooleanProperty)?.defaultValue() ?: return
-    val properties = ui.properties
-    val value = if (properties.exists(property)) properties[property] else defaultValue
+    if (property !is VcsLogProjectTabsProperties.CustomBooleanTabProperty) return
+    val tabsProperties = project.serviceIfCreated<VcsLogProjectTabsProperties>() ?: return
+    val tabStates = tabsProperties.state.tabStates[VcsLogManager.MAIN_LOG_ID] ?: return
+    val defaultValue = property.defaultValue(VcsLogManager.MAIN_LOG_ID)
+    val value = tabStates.customBooleanProperties[property.name] ?: return
 
-    if (!Comparing.equal(value, defaultValue)) {
+    if (value != defaultValue) {
+      metrics.add(eventId.metric(EventFields.Enabled with value))
+    }
+  }
+
+  private fun addAppPropertyMetricIfDiffers(
+    metrics: MutableSet<MetricEvent>,
+    property: VcsLogUiProperties.VcsLogUiProperty<Boolean>,
+    eventId: VarargEventId,
+  ) {
+    val defaultValue = if (property is VcsLogApplicationSettings.CustomBooleanProperty) property.defaultValue() else return
+    val properties = ApplicationManager.getApplication().serviceIfCreated<VcsLogApplicationSettings>() ?: return
+    if (!properties.exists(property)) return
+    val value = properties[property]
+
+    if (value != defaultValue) {
       metrics.add(eventId.metric(EventFields.Enabled with value))
     }
   }
@@ -219,6 +252,8 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
 
   private val SAVE_POLICY_VALUE = EventFields.Enum("value", GitSaveChangesPolicy::class.java) { it.name.lowercase() }
   private val SAVE_POLICY = GROUP.registerVarargEvent("save.policy", SAVE_POLICY_VALUE)
+
+  private val INCOMING_COMMITS_CHECK_STRATEGY = GROUP.registerVarargEvent("incoming_commits_check_strategy", REMOTE_CHECK_STRATEGY)
 
   private val PUSH_AUTO_UPDATE = GROUP.registerVarargEvent("push.autoupdate", EventFields.Enabled)
 
@@ -247,11 +282,27 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
 
   private val LOCAL_BRANCHES = EventFields.RoundedInt("local_branches")
   private val REMOTE_BRANCHES = EventFields.RoundedInt("remote_branches")
+  private val TAGS = EventFields.RoundedInt("tags")
   private val RECENT_CHECKOUT_BRANCHES = EventFields.RoundedInt("recent_checkout_branches")
   private val REMOTES = EventFields.RoundedInt("remotes")
   private val IS_WORKTREE_USED = EventFields.Boolean("is_worktree_used")
 
   private val FS_MONITOR = EventFields.Enum<FsMonitor>("fs_monitor")
+  private val REF_FORMAT = EventFields.Enum<RefFormat>("ref_format", "--ref-format")
+
+  /** Object format used for repository storage inside the `.git` directory. */
+  private val OBJECT_FORMAT_STORAGE = EventFields.Enum<ObjectFormat>("object_format_storage", "--show-object-format=storage")
+
+  /** Object formats accepted as input; Git may print multiple algorithms space-separated. */
+  private val OBJECT_FORMAT_INPUT = EventFields.EnumList<ObjectFormat>("object_format_input", "--show-object-format=input")
+
+  /** Object format used for output. */
+  private val OBJECT_FORMAT_OUTPUT = EventFields.Enum<ObjectFormat>("object_format_output", "--show-object-format=output")
+
+  /** Compatibility object format; Git prints an empty line when no compatibility algorithm is enabled. */
+  private val OBJECT_FORMAT_COMPAT = EventFields.NullableEnum<ObjectFormat>("object_format_compat", nullValue = "NONE",
+                                                                            description = "--show-object-format=compat")
+
   private val remoteTypes = setOf("github", "gitlab", "bitbucket", "gitee",
                                   "github_custom", "gitlab_custom", "bitbucket_custom", "gitee_custom",
                                   "other")
@@ -264,10 +315,16 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
                                                      REPO_ID,
                                                      LOCAL_BRANCHES,
                                                      REMOTE_BRANCHES,
+                                                     TAGS,
                                                      RECENT_CHECKOUT_BRANCHES,
                                                      REMOTES,
                                                      IS_WORKTREE_USED,
                                                      FS_MONITOR,
+                                                     REF_FORMAT,
+                                                     OBJECT_FORMAT_STORAGE,
+                                                     OBJECT_FORMAT_INPUT,
+                                                     OBJECT_FORMAT_OUTPUT,
+                                                     OBJECT_FORMAT_COMPAT,
                                                      COMMITERS_LAST_MONTH,
                                                      COMMITERS_HALF_YEAR,
                                                      COMMITERS_LAST_YEAR,
@@ -281,6 +338,7 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
 
   private val SHOW_GIT_BRANCHES_IN_LOG = GROUP.registerVarargEvent("showGitBranchesInLog", EventFields.Enabled)
   private val UPDATE_BRANCH_FILTERS_ON_SELECTION = GROUP.registerVarargEvent("updateBranchesFilterInLogOnSelection", EventFields.Enabled)
+  private val NAVIGATE_LOG_TO_BRANCH_ON_SELECTION = GROUP.registerVarargEvent("navigateLogToBranchOnSelection", EventFields.Enabled)
 
   private val MAX_LOCAL_BRANCHES = EventFields.RoundedInt("max_local_branches")
   private val SHOW_RECENT_BRANCHES = GROUP.registerVarargEvent("showRecentBranches", EventFields.Enabled, MAX_LOCAL_BRANCHES)
@@ -288,15 +346,20 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
   private val FILTER_BY_ACTION_IN_POPUP = GROUP.registerVarargEvent("filterByActionInPopup", EventFields.Enabled)
   private val FILTER_BY_REPOSITORY_IN_POPUP = GROUP.registerVarargEvent("filterByRepositoryInPopup", EventFields.Enabled)
 
-  private val ALL_IDE_CONFIG_NAMES = listOf(
+  private val ALL_STORED_CONFIG_NAMES = listOf(
     ".air",
+    ".claude",
+    ".codex",
+    ".cursor",
     ".fleet",
     ".idea",
+    ".junie",
+    ".opencode",
     ".project",
     ".settings",
     ".vscode",
   )
-  private val IDE_CONFIG_NAME = EventFields.String("name", ALL_IDE_CONFIG_NAMES)
+  private val IDE_CONFIG_NAME = EventFields.String("name", ALL_STORED_CONFIG_NAMES)
   private val IDE_CONFIG_STATUS = EventFields.Enum("status", ConfigStatus::class.java)
   private val SHARED_IDE_CONFIG = GROUP.registerVarargEvent("ide.config", IDE_CONFIG_NAME, IDE_CONFIG_STATUS)
 
@@ -320,9 +383,9 @@ internal class GitStatisticsCollector : ProjectUsagesCollector() {
 /**
  * Checks that worktree is used in [GitRepository]
  *
- * worktree usage will be detected when:
- * repo_root/.git is a file
- * or repo_root/.git/worktrees is not empty
+ * Worktree usage will be detected when:
+ * - Path "repo_root/.git" is a file
+ * - Path "repo_root/.git/worktrees" is not empty
  */
 private fun GitRepository.isWorkTreeUsed(): Boolean {
   return try {
@@ -389,11 +452,98 @@ private fun GitRepository.detectFsMonitor(): FsMonitor {
   return FsMonitor.NONE
 }
 
-private data class RoundedUserCountEventField(
-  override val name: String,
-  @NonNls override val description: String? = null,
-) : PrimitiveEventField<Int>() {
+internal enum class RefFormat { UNKNOWN, FILES, REFTABLE }
 
+private fun GitRepository.detectRefFormat(): RefFormat {
+  try {
+    val handler = GitLineHandler(project, root, GitCommand.REV_PARSE)
+    handler.addParameters("--show-ref-format")
+    handler.setSilent(true)
+
+    val result = Git.getInstance().runCommand(handler)
+
+    if (result.success()) {
+      return when (result.outputAsJoinedString.trim().lowercase()) {
+        "files" -> RefFormat.FILES
+        "reftable" -> RefFormat.REFTABLE
+        else -> RefFormat.UNKNOWN
+      }
+    }
+  }
+  catch (_: Exception) {
+  }
+
+  return RefFormat.UNKNOWN
+}
+
+internal enum class ObjectFormat {
+  UNKNOWN,
+  SHA1,
+  SHA256,
+}
+
+private data class DetectedObjectFormats(
+  val storage: ObjectFormat,
+  val input: List<ObjectFormat>,
+  val output: ObjectFormat,
+  val compat: ObjectFormat?,
+)
+
+private fun GitRepository.detectObjectFormats(): DetectedObjectFormats = DetectedObjectFormats(
+  storage = detectObjectFormat("storage"),
+  input = detectObjectFormatInput(),
+  output = detectObjectFormat("output"),
+  compat = detectObjectFormatCompat(),
+)
+
+private fun GitRepository.detectObjectFormat(kind: String): ObjectFormat {
+  val output = getObjectFormatOutput(kind) ?: return ObjectFormat.UNKNOWN
+  return parseObjectFormat(output)
+}
+
+private fun GitRepository.detectObjectFormatInput(): List<ObjectFormat> {
+  val output = getObjectFormatOutput("input") ?: return listOf(ObjectFormat.UNKNOWN)
+  val formats = output.splitToSequence(' ', '\n', '\t', '\r')
+    .filter { it.isNotBlank() }
+    .map { parseObjectFormat(it) }
+    .distinct()
+    .toList()
+  return formats.ifEmpty { listOf(ObjectFormat.UNKNOWN) }
+}
+
+private fun GitRepository.detectObjectFormatCompat(): ObjectFormat? {
+  val output = getObjectFormatOutput("compat") ?: return ObjectFormat.UNKNOWN
+  if (output.isBlank()) return null
+  return parseObjectFormat(output)
+}
+
+private fun GitRepository.getObjectFormatOutput(kind: String): String? {
+  try {
+    val handler = GitLineHandler(project, root, GitCommand.REV_PARSE)
+    handler.addParameters("--show-object-format=$kind")
+    handler.setSilent(true)
+
+    val result = Git.getInstance().runCommand(handler)
+
+    if (result.success()) {
+      return result.outputAsJoinedString
+    }
+  }
+  catch (_: Exception) {
+  }
+
+  return null
+}
+
+private fun parseObjectFormat(value: String): ObjectFormat {
+  return when (value.trim().lowercase()) {
+    "sha1" -> ObjectFormat.SHA1
+    "sha256" -> ObjectFormat.SHA256
+    else -> ObjectFormat.UNKNOWN
+  }
+}
+
+private data class RoundedUserCountEventField(override val name: String) : PrimitiveEventField<Int>() {
   override val validationRule: List<String>
     get() = listOf("{regexp#integer}")
 

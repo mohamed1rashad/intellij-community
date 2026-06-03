@@ -3,6 +3,7 @@ package com.intellij.openapi.progress;
 
 import com.intellij.concurrency.ThreadContext;
 import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.util.IntellijInternalApi;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.util.DebugAttachDetectorArgs;
 import com.intellij.util.progress.JfrCancellationEventsCallbackHolder;
@@ -11,22 +12,19 @@ import kotlinx.coroutines.Job;
 import kotlinx.coroutines.JobKt;
 import kotlinx.coroutines.NonCancellable;
 import org.jetbrains.annotations.ApiStatus;
-import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.VisibleForTesting;
 
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-
-@Internal
+@ApiStatus.Internal
 public final class Cancellation {
 
   private Cancellation() { }
 
-  @VisibleForTesting
+  @IntellijInternalApi // requires opt-in in Kotlin, must not be used in applied code
   public static @Nullable Job currentJob() {
     return ThreadContext.currentThreadContext().get(Job.Key);
   }
@@ -54,12 +52,14 @@ public final class Cancellation {
    * It is <b>internal method</b>, it is made public to be called from different legacy variants of checkCancelled()
    * (from ProgressIndicator, etc.) without duplicating isInNonCancelableSection() call.
    */
-  @Internal
+  @ApiStatus.Internal
   public static void ensureActive() {
     ThreadContext.warnAccidentalCancellation();
 
     Job currentJob = currentJob();
-    if (currentJob != null) {
+    // sometimes it is possible to violate structured concurrency and obtain the successfully completed Job in the context, like in the completion handler of `Job`s.
+    // We shall not check cancellation in this case
+    if (currentJob != null && !(isJobCompletedSuccessfully(currentJob))) {
       try {
         JobKt.ensureActive(currentJob);
       }
@@ -70,6 +70,10 @@ public final class Cancellation {
         throw new CeProcessCanceledException(e);
       }
     }
+  }
+
+  private static boolean isJobCompletedSuccessfully(@NotNull Job job) {
+    return job.isCompleted() && !job.isCancelled();
   }
 
   /**
@@ -186,7 +190,7 @@ public final class Cancellation {
    * This method will throw an error in coming releases.
    * <a href="https://youtrack.jetbrains.com/issue/IJPL-1045">YouTrack issue.</a>
    */
-  @Internal
+  @ApiStatus.Internal
   @Deprecated
   public static <T> T forceNonCancellableSectionInClassInitializer(@NotNull Supplier<T> computable) {
     return computeInNonCancelableSection(computable::get);

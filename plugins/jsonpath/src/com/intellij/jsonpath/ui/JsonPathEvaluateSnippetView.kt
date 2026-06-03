@@ -3,6 +3,7 @@ package com.intellij.jsonpath.ui
 
 import com.intellij.json.psi.JsonFile
 import com.intellij.jsonpath.JsonPathBundle
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
@@ -18,15 +19,21 @@ import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.components.BorderLayoutPanel
-import com.intellij.util.ui.update.MergingUpdateQueue
-import com.intellij.util.ui.update.Update
+import com.intellij.util.ui.update.DebouncedUpdates
+import com.intellij.util.ui.update.UpdateQueue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import java.awt.KeyboardFocusManager
 import java.awt.event.KeyEvent
-import javax.swing.FocusManager
 import javax.swing.KeyStroke
 import javax.swing.SwingUtilities
+import kotlin.time.Duration.Companion.milliseconds
 
-internal class JsonPathEvaluateSnippetView(project: Project) : JsonPathEvaluateView(project) {
-  private val expressionHighlightingQueue: MergingUpdateQueue = MergingUpdateQueue("JSONPATH_EVALUATE", 1000, true, null, this)
+internal class JsonPathEvaluateSnippetView(project: Project, scope: CoroutineScope) : JsonPathEvaluateView(project) {
+  private val expressionHighlightingQueue: UpdateQueue<Unit> = DebouncedUpdates.forScope<Unit>(scope, "JSONPATH_EVALUATE", 1000.milliseconds)
+    .withContext(Dispatchers.EDT)
+    .runLatest { resetExpressionHighlighting() }
+    .cancelOnDispose(this)
   private val sourceEditor: Editor = initJsonEditor("source.json", false, EditorKind.UNTYPED)
 
   init {
@@ -51,11 +58,9 @@ internal class JsonPathEvaluateSnippetView(project: Project) : JsonPathEvaluateV
     sourceEditor.component.border = JBUI.Borders.customLine(JBColor.border(), 1, 0, 0, 0)
     sourceEditor.document.addDocumentListener(object : DocumentListener {
       override fun documentChanged(event: DocumentEvent) {
-        expressionHighlightingQueue.queue(Update.create(this@JsonPathEvaluateSnippetView) {
-          resetExpressionHighlighting()
-        })
+        expressionHighlightingQueue.queue(Unit)
       }
-    })
+    }, this)
 
     val messageBusConnection = this.project.messageBus.connect(this)
     messageBusConnection.subscribe(ToolWindowManagerListener.TOPIC, object : ToolWindowManagerListener {
@@ -82,7 +87,7 @@ internal class JsonPathEvaluateSnippetView(project: Project) : JsonPathEvaluateV
 
   override fun processKeyBinding(ks: KeyStroke?, e: KeyEvent?, condition: Int, pressed: Boolean): Boolean {
     if (pressed && e?.keyCode == KeyEvent.VK_ESCAPE) {
-      val focusOwner = FocusManager.getCurrentManager().focusOwner
+      val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
 
       if (SwingUtilities.isDescendingFrom(focusOwner, sourceEditor.component)) {
         searchTextField.requestFocus()

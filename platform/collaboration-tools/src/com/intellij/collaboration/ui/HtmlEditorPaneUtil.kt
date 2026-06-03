@@ -22,7 +22,11 @@ import javax.swing.event.HyperlinkEvent
 import javax.swing.text.DefaultCaret
 import javax.swing.text.Element
 import javax.swing.text.View
-import javax.swing.text.html.*
+import javax.swing.text.html.HTML
+import javax.swing.text.html.HTMLDocument
+import javax.swing.text.html.ImageView
+import javax.swing.text.html.InlineView
+import javax.swing.text.html.StyleSheet
 
 /**
  * Read-only editor pane intended to display simple HTML snippet
@@ -30,6 +34,7 @@ import javax.swing.text.html.*
 @Suppress("FunctionName")
 fun SimpleHtmlPane(
   additionalStyleSheet: StyleSheet? = null,
+  additionalStyleSheetProvider: ((JBHtmlPane) -> StyleSheet)? = null,
   addBrowserListener: Boolean = true,
   customImageLoader: AsyncHtmlImageLoader? = null,
   baseUrl: URL? = null,
@@ -42,8 +47,12 @@ fun SimpleHtmlPane(
         p {
             padding: 0 0 0 0;
         }
+        p.custom_image {
+            padding: 4px 0 4px 0;
+        }
       """.trimIndent())
       .customStyleSheetProvider { additionalStyleSheet ?: StyleSheet() }
+      .customStyleSheetProvider { pane -> additionalStyleSheetProvider?.invoke(pane) ?: StyleSheet() }
       .extensions(ExtendableHTMLViewFactory.Extensions.WORD_WRAP,
                   HtmlEditorPaneUtil.CONTENT_TOOLTIP,
                   HtmlEditorPaneUtil.inlineIconExtension(aClass),
@@ -69,6 +78,15 @@ fun SimpleHtmlPane(
 
     name = "Simple HTML Pane"
   }
+
+@Suppress("FunctionName")
+fun SimpleHtmlPane(
+  additionalStyleSheet: StyleSheet? = null,
+  addBrowserListener: Boolean = true,
+  customImageLoader: AsyncHtmlImageLoader? = null,
+  baseUrl: URL? = null,
+  aClass: Class<*> = HtmlEditorPaneUtil::class.java,
+): JEditorPane = SimpleHtmlPane(additionalStyleSheet, null, addBrowserListener, customImageLoader, baseUrl, aClass)
 
 /**
  * Read-only editor pane intended to display simple HTML snippet

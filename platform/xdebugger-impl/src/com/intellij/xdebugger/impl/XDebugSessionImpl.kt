@@ -1,10 +1,10 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger.impl
 
+import com.intellij.diagnostic.logging.LogFilesManager
 import com.intellij.execution.Executor
 import com.intellij.execution.RunContentDescriptorIdImpl
 import com.intellij.execution.configurations.RunConfiguration
-import com.intellij.execution.configurations.RunConfigurationBase
 import com.intellij.execution.configurations.RunProfile
 import com.intellij.execution.filters.HyperlinkInfo
 import com.intellij.execution.filters.OpenFileHyperlinkInfo
@@ -24,36 +24,58 @@ import com.intellij.execution.ui.RunnerLayoutUi
 import com.intellij.icons.AllIcons
 import com.intellij.ide.DataManager
 import com.intellij.ide.ui.icons.rpcId
-import com.intellij.notification.Notification
+import com.intellij.idea.AppMode
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationListener
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.MessageType
 import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Ref
-import com.intellij.openapi.util.ThrowableComputable
+import com.intellij.platform.debugger.impl.rpc.XDebugSessionDataId
+import com.intellij.platform.debugger.impl.rpc.XDebugSessionId
+import com.intellij.platform.debugger.impl.rpc.XDebugSessionPausedInfo
+import com.intellij.platform.debugger.impl.rpc.XDebugTabLayouterDto
+import com.intellij.platform.debugger.impl.rpc.XDebuggerSessionTabAbstractInfo
+import com.intellij.platform.debugger.impl.rpc.XDebuggerSessionTabInfo
+import com.intellij.platform.debugger.impl.rpc.XDebuggerSessionTabInfoNoInit
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugManagerProxy
+import com.intellij.platform.debugger.impl.shared.proxy.XDebugSessionProxy
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.ui.AppUIUtil.invokeLaterIfProjectAlive
 import com.intellij.ui.AppUIUtil.invokeOnEdt
+import com.intellij.util.AwaitCancellationAndInvoke
 import com.intellij.util.EventDispatcher
 import com.intellij.util.SmartList
-import com.intellij.util.ThrowableRunnable
-import com.intellij.util.concurrency.annotations.RequiresReadLock
-import com.intellij.xdebugger.*
-import com.intellij.xdebugger.breakpoints.*
+import com.intellij.util.application
+import com.intellij.util.asDisposable
+import com.intellij.util.progress.withLockMaybeCancellable
+import com.intellij.xdebugger.DapMode
+import com.intellij.xdebugger.SplitDebuggerMode
+import com.intellij.xdebugger.XAlternativeSourceHandler
+import com.intellij.xdebugger.XDebugProcess
+import com.intellij.xdebugger.XDebugProcessDebuggeeInForeground
+import com.intellij.xdebugger.XDebugSession
+import com.intellij.xdebugger.XDebugSessionListener
+import com.intellij.xdebugger.XDebuggerBundle
+import com.intellij.xdebugger.XDebuggerManager
+import com.intellij.xdebugger.XDebuggerUtil
+import com.intellij.xdebugger.XSourcePosition
+import com.intellij.xdebugger.breakpoints.SuspendPolicy
+import com.intellij.xdebugger.breakpoints.XBreakpoint
+import com.intellij.xdebugger.breakpoints.XBreakpointHandler
+import com.intellij.xdebugger.breakpoints.XBreakpointListener
+import com.intellij.xdebugger.breakpoints.XBreakpointType
+import com.intellij.xdebugger.breakpoints.XLineBreakpoint
 import com.intellij.xdebugger.frame.XExecutionStack
 import com.intellij.xdebugger.frame.XStackFrame
 import com.intellij.xdebugger.frame.XSuspendContext
 import com.intellij.xdebugger.impl.XDebuggerPerformanceCollector.logBreakpointReached
-import com.intellij.xdebugger.impl.XDebuggerSuspendScopeProvider.provideSuspendScope
 import com.intellij.xdebugger.impl.actions.XDebuggerActions
 import com.intellij.xdebugger.impl.breakpoints.BreakpointsUsageCollector.reportBreakpointVerified
 import com.intellij.xdebugger.impl.breakpoints.CustomizedBreakpointPresentation
@@ -62,29 +84,56 @@ import com.intellij.xdebugger.impl.breakpoints.XBreakpointUtil.getShortText
 import com.intellij.xdebugger.impl.breakpoints.XDependentBreakpointListener
 import com.intellij.xdebugger.impl.breakpoints.XLineBreakpointImpl
 import com.intellij.xdebugger.impl.evaluate.ValueLookupManagerController
-import com.intellij.xdebugger.impl.frame.*
+import com.intellij.xdebugger.impl.frame.XValueMarkers
 import com.intellij.xdebugger.impl.inline.DebuggerInlayListener
 import com.intellij.xdebugger.impl.inline.InlineDebugRenderer
 import com.intellij.xdebugger.impl.mixedmode.XMixedModeCombinedDebugProcess
-import com.intellij.xdebugger.impl.rpc.*
+import com.intellij.xdebugger.impl.proxy.asProxy
+import com.intellij.xdebugger.impl.rpc.models.RunnerLayoutUiBridge
+import com.intellij.xdebugger.impl.rpc.models.XDebugSessionAdditionalTabComponentManager
+import com.intellij.xdebugger.impl.rpc.models.XDebugTabLayouterModel
+import com.intellij.xdebugger.impl.rpc.models.XSuspendContextModel
 import com.intellij.xdebugger.impl.rpc.models.storeGlobally
 import com.intellij.xdebugger.impl.settings.XDebuggerSettingManagerImpl
-import com.intellij.xdebugger.impl.ui.*
+import com.intellij.xdebugger.impl.ui.XDebugSessionData
+import com.intellij.xdebugger.impl.ui.XDebugSessionTab
+import com.intellij.xdebugger.impl.ui.allowFramesViewCustomization
+import com.intellij.xdebugger.impl.ui.forceShowNewDebuggerUi
+import com.intellij.xdebugger.impl.ui.getDefaultFramesViewKey
+import com.intellij.xdebugger.impl.util.createEdtDisposable
 import com.intellij.xdebugger.impl.util.start
 import com.intellij.xdebugger.stepping.XSmartStepIntoHandler
 import com.intellij.xdebugger.stepping.XSmartStepIntoVariant
-import kotlinx.coroutines.*
+import com.intellij.xdebugger.ui.IXDebuggerSessionTab
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
-import java.util.*
+import java.util.Collections
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 import java.util.function.Consumer
 import javax.swing.Icon
 import javax.swing.event.HyperlinkEvent
 import javax.swing.event.HyperlinkListener
 import kotlin.concurrent.Volatile
-import kotlin.coroutines.EmptyCoroutineContext
 
 @ApiStatus.Internal
 class XDebugSessionImpl @JvmOverloads constructor(
@@ -95,35 +144,34 @@ class XDebugSessionImpl @JvmOverloads constructor(
   showToolWindowOnSuspendOnly: Boolean = false,
   contentToReuse: RunContentDescriptor? = null,
 ) : XDebugSession {
-  @ApiStatus.Internal
-  val coroutineScope: CoroutineScope = debuggerManager.coroutineScope.childScope("XDebugSession $sessionName", EmptyCoroutineContext, true)
-
-  @ApiStatus.Internal
+  val coroutineScope: CoroutineScope = debuggerManager.coroutineScope.childScope("XDebugSession $sessionName")
   val tabCoroutineScope: CoroutineScope = debuggerManager.coroutineScope.childScope("XDebugger session tab $sessionName")
 
   val id: XDebugSessionId = storeGlobally(coroutineScope)
+  private val myLock = ReentrantLock()
 
   private var myDebugProcess: XDebugProcess? = null
-  private val myRegisteredBreakpoints: MutableMap<XBreakpoint<*>?, CustomizedBreakpointPresentation?> = HashMap<XBreakpoint<*>?, CustomizedBreakpointPresentation?>()
-  private val myInactiveSlaveBreakpoints: MutableSet<XBreakpoint<*>?> = Collections.synchronizedSet<XBreakpoint<*>?>(HashSet())
+
+  // protected with this
+  private val myRegisteredBreakpoints: MutableMap<XBreakpoint<*>, CustomizedBreakpointPresentation?> = HashMap()
+  private val myInactiveSlaveBreakpoints: MutableSet<XBreakpoint<*>> = Collections.synchronizedSet(HashSet())
+
+  // protected with myLock
   private var myBreakpointsDisabled = false
-  private val myDebuggerManager: XDebuggerManagerImpl = debuggerManager
+
+  // protected with myLock
   private var myBreakpointListenerDisposable: Disposable? = null
 
-  @get:ApiStatus.Internal
-  var currentSuspendCoroutineScope: CoroutineScope? = null
-    private set
   private var myAlternativeSourceHandler: XAlternativeSourceHandler? = null
   private var myIsTopFrame = false
 
   private val myPaused = MutableStateFlow(false)
   private var myValueMarkers: XValueMarkers<*, *>? = null
   private val mySessionName: @Nls String = sessionName
-  private val mySessionTab = CompletableDeferred<XDebugSessionTab>()
+  private val mySessionTab = CompletableDeferred<XDebugSessionTab?>()
   private var myMockRunContentDescriptor: RunContentDescriptor? = null
   val sessionData: XDebugSessionData
 
-  @ApiStatus.Internal
   val sessionDataId: XDebugSessionDataId
 
   private val myActiveNonLineBreakpointAndPositionFlow = MutableStateFlow<Pair<XBreakpoint<*>, XSourcePosition?>?>(null)
@@ -140,6 +188,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
   private val myStepOverActionAllowed = MutableStateFlow(true)
   private val myStepOutActionAllowed = MutableStateFlow(true)
   private val myRunToCursorActionAllowed = MutableStateFlow(true)
+  private val myForceStepIntoActionAllowed = MutableStateFlow(true)
 
   private val myShowToolWindowOnSuspendOnly: Boolean = showToolWindowOnSuspendOnly
   private val myTabInitDataFlow = MutableStateFlow<XDebuggerSessionTabAbstractInfo?>(null)
@@ -155,15 +204,13 @@ class XDebugSessionImpl @JvmOverloads constructor(
   // Ref is used to prevent StateFlow's equals checks
   private val topStackFrame = MutableStateFlow<Ref<XStackFrame>?>(null)
 
-  @get:ApiStatus.Internal
-  val fileColorsComputer: FileColorsComputer = FileColorsComputer(project, coroutineScope)
-
   var currentExecutionStack: XExecutionStack? = null
-  private val suspendContextFlow = MutableStateFlow<XSuspendContext?>(null)
+  private val suspendContextModel = AtomicReference<XSuspendContextModel?>(null)
   private val sessionInitializedDeferred = CompletableDeferred<Unit>()
 
-  @Volatile
+  // protected with myLock
   private var breakpointsInitialized = false
+
   private var myUserRequestStart: Long = 0
   private var myUserRequestAction: String? = null
 
@@ -179,7 +226,10 @@ class XDebugSessionImpl @JvmOverloads constructor(
   init {
     var contentToReuse = contentToReuse
     ValueLookupManagerController.getInstance(myProject).startListening()
-    DebuggerInlayListener.getInstance(myProject).startListening()
+
+    if (!DapMode.isDap()) {
+      DebuggerInlayListener.getInstance(myProject).startListening()
+    }
 
     var oldSessionData: XDebugSessionData? = null
     if (contentToReuse == null) {
@@ -194,7 +244,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
 
     val currentConfigurationName = computeConfigurationName()
     if (oldSessionData == null || oldSessionData.configurationName != currentConfigurationName) {
-      oldSessionData = XDebugSessionData(myProject, currentConfigurationName)
+      oldSessionData = XDebugSessionData(currentConfigurationName)
     }
     this.sessionData = oldSessionData
     this.sessionDataId = sessionData.storeGlobally(tabCoroutineScope, this)
@@ -204,15 +254,18 @@ class XDebugSessionImpl @JvmOverloads constructor(
     return mySessionName
   }
 
-  @get:ApiStatus.Internal
   val tabInitDataFlow: Flow<XDebuggerSessionTabAbstractInfo>
     get() = myTabInitDataFlow.filterNotNull()
 
+  @Deprecated("Deprecated in Java")
   override fun getRunContentDescriptor(): RunContentDescriptor {
-    if (SplitDebuggerMode.showSplitWarnings()) {
-      LOG.error("RunContentDescriptor should not be used in split mode from XDebugSession")
+    if (!application.isUnitTestMode && SplitDebuggerMode.showSplitWarnings()) {
+      LOG.error("[Split debugger] RunContentDescriptor should not be used in split mode from XDebugSession. " +
+                "XDebugSession.getRunContentDescriptor is deprecated, see the javadoc for details")
     }
-    return getMockRunContentDescriptor()
+    val descriptor = getMockRunContentDescriptorIfInitialized()
+    LOG.assertTrue(descriptor != null, "Run content descriptor is not initialized yet!")
+    return descriptor!!
   }
 
   /**
@@ -220,36 +273,29 @@ class XDebugSessionImpl @JvmOverloads constructor(
    * The descriptor returned from this method is not registered in the [com.intellij.execution.ui.RunContentManagerImpl] and is not shown in the UI.
    * To access the UI-visible [RunContentDescriptor], use [XDebugSessionProxy.sessionTab] instead.
    */
-  @ApiStatus.Internal
-  fun getMockRunContentDescriptor(): RunContentDescriptor {
-    val descriptor = getMockRunContentDescriptorIfInitialized()
-    LOG.assertTrue(descriptor != null, "Run content descriptor is not initialized yet!")
-    return descriptor!!
-  }
-
-  /**
-   * @see getMockRunContentDescriptor
-   */
-  @ApiStatus.Internal
   fun getMockRunContentDescriptorIfInitialized(): RunContentDescriptor? {
     return myMockRunContentDescriptor
   }
 
+  val hasSessionTab: Boolean get() = mySessionTab.isCompleted
 
   private val isTabInitialized: Boolean
-    get() = myTabInitDataFlow.value != null && (SplitDebuggerMode.isSplitDebugger() || mySessionTab.isCompleted)
+    get() = myTabInitDataFlow.value != null && (SplitDebuggerMode.isSplitDebugger() || hasSessionTab)
 
   private fun assertSessionTabInitialized() {
-    if (myShowToolWindowOnSuspendOnly && !this.isTabInitialized) {
-      LOG.error("Debug tool window isn't shown yet because debug process isn't suspended")
+    val initialized = isTabInitialized
+    if (myShowToolWindowOnSuspendOnly) {
+      LOG.assertTrue(initialized, "Debug tool window isn't shown yet because debug process isn't suspended")
     }
     else {
-      LOG.assertTrue(this.isTabInitialized, "Debug tool window not initialized yet!")
+      LOG.assertTrue(initialized, "Debug tool window not initialized yet!")
     }
   }
 
   override fun setPauseActionSupported(isSupported: Boolean) {
+    if (sessionData.isPauseSupported == isSupported) return
     sessionData.isPauseSupported = isSupported
+    myDispatcher.getMulticaster().settingsChanged()
   }
 
   var isReadOnly: Boolean
@@ -258,50 +304,64 @@ class XDebugSessionImpl @JvmOverloads constructor(
       myReadOnly.value = readOnly
     }
 
-  @get:ApiStatus.Internal
-  @set:ApiStatus.Internal
   var isStepOverActionAllowed: Boolean
     get() = myStepOverActionAllowed.value
     set(value) {
       myStepOverActionAllowed.value = value
     }
 
-  @get:ApiStatus.Internal
-  @set:ApiStatus.Internal
   var isStepOutActionAllowed: Boolean
     get() = myStepOutActionAllowed.value
     set(value) {
       myStepOutActionAllowed.value = value
     }
 
-  @get:ApiStatus.Internal
-  @set:ApiStatus.Internal
   var isRunToCursorActionAllowed: Boolean
     get() = myRunToCursorActionAllowed.value
     set(value) {
       myRunToCursorActionAllowed.value = value
     }
 
-  fun addRestartActions(vararg restartActions: AnAction?) {
-    Collections.addAll<AnAction?>(this.restartActions, *restartActions)
+  var isForceStepIntoActionAllowed: Boolean
+    get() = myForceStepIntoActionAllowed.value
+    set(value) {
+      myForceStepIntoActionAllowed.value = value
+    }
+
+  fun addRestartActions(vararg restartActions: AnAction) {
+    safeAddAll(this.restartActions, *restartActions)
   }
 
-  fun addExtraActions(vararg extraActions: AnAction?) {
-    Collections.addAll<AnAction?>(this.extraActions, *extraActions)
+  fun addExtraActions(vararg extraActions: AnAction) {
+    safeAddAll(this.extraActions, *extraActions)
   }
 
   // used externally
   @Suppress("unused")
-  fun addExtraStopActions(vararg extraStopActions: AnAction?) {
-    Collections.addAll<AnAction?>(this.extraStopActions, *extraStopActions)
+  fun addExtraStopActions(vararg extraStopActions: AnAction) {
+    safeAddAll(this.extraStopActions, *extraStopActions)
+  }
+
+  private fun <T> safeAddAll(collection: MutableList<T>, vararg elements: T) {
+    for (e in elements) {
+      if (e == null) {
+        LOG.error("Null element found in safeAddAll: ${elements.toList()}")
+        continue
+      }
+      collection.add(e)
+    }
   }
 
   override fun rebuildViews() {
     myDispatcher.getMulticaster().settingsChanged()
   }
 
+  fun frontendUpdate() {
+    myDispatcher.getMulticaster().settingsChangedFromFrontend()
+  }
+
   override fun getRunProfile(): RunProfile? {
-    return if (this.executionEnvironment != null) executionEnvironment.runProfile else null
+    return executionEnvironment?.runProfile
   }
 
   @JvmName("isPauseActionSupported")
@@ -310,7 +370,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   override fun getProject(): Project {
-    return myDebuggerManager.project
+    return debuggerManager.project
   }
 
   override fun getDebugProcess(): XDebugProcess {
@@ -321,7 +381,6 @@ class XDebugSessionImpl @JvmOverloads constructor(
     return isPaused && suspendContext != null
   }
 
-  @ApiStatus.Internal
   fun getPausedEventsFlow(): Flow<XDebugSessionPausedInfo> {
     return myPausedEvents
   }
@@ -330,7 +389,6 @@ class XDebugSessionImpl @JvmOverloads constructor(
     return myPaused.value
   }
 
-  @ApiStatus.Internal
   fun sessionInitializedDeferred(): Deferred<Unit> {
     return sessionInitializedDeferred
   }
@@ -340,7 +398,16 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   override fun getSuspendContext(): XSuspendContext? {
-    return suspendContextFlow.value
+    return suspendContextModel.get()?.suspendContext
+  }
+
+  /**
+   * Returns the current [XSuspendContextModel], or `null` if the session is not suspended.
+   *
+   * [XSuspendContextModel] provides [CoroutineScope] that is attached to the current suspension context and [id].
+   */
+  fun getSuspendContextModel(): XSuspendContextModel? {
+    return suspendContextModel.get()
   }
 
   override fun getCurrentPosition(): XSourcePosition? {
@@ -359,8 +426,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     if (frame == null) return null
     return when (sourceKind) {
       XSourceKind.MAIN -> frame.sourcePosition
-      XSourceKind.ALTERNATIVE -> if (myAlternativeSourceHandler != null) myAlternativeSourceHandler!!.getAlternativePosition(frame)
-      else null
+      XSourceKind.ALTERNATIVE -> myAlternativeSourceHandler?.getAlternativePosition(frame)
     }
   }
 
@@ -371,7 +437,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     }
 
   val alternativeSourceKindState: StateFlow<Boolean>
-    get() = if (myAlternativeSourceHandler != null) myAlternativeSourceHandler!!.getAlternativeSourceKindState() else ALWAYS_FALSE_STATE
+    get() = myAlternativeSourceHandler?.getAlternativeSourceKindState() ?: ALWAYS_FALSE_STATE
 
   fun init(process: XDebugProcess, contentToReuse: RunContentDescriptor?) {
     LOG.assertTrue(myDebugProcess == null)
@@ -380,7 +446,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     XDebugManagerProxy.getInstance().getDebuggerExecutionPointManager(project)?.alternativeSourceKindFlow = this.alternativeSourceKindState
 
     if (process.checkCanInitBreakpoints()) {
-      ReadAction.run<RuntimeException?>(ThrowableRunnable { initBreakpoints() })
+      initBreakpoints()
     }
     if (process is XDebugProcessDebuggeeInForeground &&
         process.isBringingToForegroundApplicable()
@@ -395,67 +461,117 @@ class XDebugSessionImpl @JvmOverloads constructor(
       }
     })
     //todo make 'createConsole()' method return ConsoleView
-    myConsoleView = process.createConsole() as ConsoleView
-    if (!myShowToolWindowOnSuspendOnly) {
-      initSessionTab(contentToReuse, false)
+    if (!DapMode.isDap()) {
+      myConsoleView = process.createConsole() as ConsoleView
+      if (!myShowToolWindowOnSuspendOnly) {
+        initSessionTab(contentToReuse, false)
+      }
     }
     sessionInitializedDeferred.complete(Unit)
   }
 
   fun reset() {
-    breakpointsInitialized = false
+    myLock.withLockMaybeCancellable {
+      breakpointsInitialized = false
+    }
     removeBreakpointListeners()
     myPaused.value = false
     clearPausedData()
     rebuildViews()
   }
 
-  @RequiresReadLock
   override fun initBreakpoints() {
-    LOG.assertTrue(!breakpointsInitialized)
-    breakpointsInitialized = true
+    myLock.withLockMaybeCancellable {
+      LOG.assertTrue(!breakpointsInitialized)
+      breakpointsInitialized = true
+      var breakpointListenerDisposable = myBreakpointListenerDisposable
+      if (breakpointListenerDisposable == null) {
+        breakpointListenerDisposable = Disposer.newDisposable()
+        myBreakpointListenerDisposable = breakpointListenerDisposable
+        Disposer.register(myProject, breakpointListenerDisposable)
+        val busConnection = myProject.getMessageBus().connect(breakpointListenerDisposable)
+        busConnection.subscribe(XBreakpointListener.TOPIC, MyBreakpointListener())
+        busConnection.subscribe(XDependentBreakpointListener.TOPIC, MyDependentBreakpointListener())
+      }
+    }
 
     disableSlaveBreakpoints()
     processAllBreakpoints(true, false)
-
-    if (myBreakpointListenerDisposable == null) {
-      myBreakpointListenerDisposable = Disposer.newDisposable()
-      Disposer.register(myProject, myBreakpointListenerDisposable!!)
-      val busConnection = myProject.getMessageBus().connect(myBreakpointListenerDisposable!!)
-      busConnection.subscribe<XBreakpointListener<*>>(XBreakpointListener.TOPIC, MyBreakpointListener())
-      busConnection.subscribe<XDependentBreakpointListener>(XDependentBreakpointListener.TOPIC, MyDependentBreakpointListener())
-    }
   }
 
   override fun getConsoleView(): ConsoleView? {
     return myConsoleView
   }
 
-  @OptIn(ExperimentalCoroutinesApi::class)
+  /**
+   * Use [runWhenTabReady] to avoid races.
+   */
   val sessionTab: XDebugSessionTab?
+    @ApiStatus.Obsolete
     get() {
       if (SplitDebuggerMode.showSplitWarnings()) {
-        // See "TODO [Debugger.sessionTab]" to see usages which are not yet properly migrated.
-        LOG.error("Debug tab should not be used in split mode from XDebugSession")
+        LOG.error("[Split debugger] Debug tab should not be used in split mode from XDebugSession")
       }
-      return if (mySessionTab.isCompleted) mySessionTab.getCompleted() else null
+      return getSessionTabInternal()
     }
 
-  val sessionTabDeferred: Deferred<XDebugSessionTab>
+  val sessionTabIfInitialized: XDebugSessionTab?
     @ApiStatus.Internal
-    get() = mySessionTab
+    get() = getSessionTabInternal()
 
-  override fun getUI(): RunnerLayoutUi? {
-    return if (SplitDebuggerMode.isSplitDebugger()) {
-      // See "TODO [Debugger.RunnerLayoutUi]" to see usages which are not yet properly migrated.
+  /**
+   * Calls [block] in EDT when the tab is ready.
+   */
+  @ApiStatus.Obsolete
+  fun runWhenTabReady(block: (XDebugSessionTab?) -> Unit) {
+    if (AppMode.isRemoteDevHost() && SplitDebuggerMode.isSplitDebugger()) {
       if (SplitDebuggerMode.showSplitWarnings()) {
-        LOG.error("RunnerLayoutUi should not be used in split mode from XDebugSession")
+        LOG.error("[Split debugger] Debugger tab is not accessible in RemDev on backend")
       }
-      null
+      return
+    }
+    assertSessionTabInitialized()
+    tabCoroutineScope.launch(Dispatchers.EDT) {
+      val tab = mySessionTab.await()
+      block(tab)
+    }
+  }
+
+  @OptIn(ExperimentalCoroutinesApi::class)
+  private fun getSessionTabInternal(): XDebugSessionTab? = if (mySessionTab.isCompleted) mySessionTab.getCompleted() else null
+
+  /**
+   * Use [runWhenUiReady] to avoid races.
+   *
+   * See [XDebugSession.getUI] doc for proper migration steps.
+   */
+  @ApiStatus.Obsolete
+  override fun getUI(): RunnerLayoutUi? {
+    assertSessionTabInitialized()
+    if (SplitDebuggerMode.showSplitWarnings()) {
+      // See "TODO [Debugger.RunnerLayoutUi]" to see usages which are not yet properly migrated.
+      LOG.warn("[Split debugger] RunnerLayoutUi should not be used in split mode from XDebugSession")
+    }
+    return if (SplitDebuggerMode.isSplitDebugger() && AppMode.isRemoteDevHost()) {
+      getMockRunContentDescriptorIfInitialized()?.runnerLayoutUi
     }
     else {
+      getSessionTabInternal()?.ui
+    }
+  }
+
+  override fun runWhenUiReady(block: Consumer<RunnerLayoutUi>) {
+    tabCoroutineScope.launch(Dispatchers.EDT) {
       assertSessionTabInitialized()
-      sessionTab!!.ui
+      val ui = if (SplitDebuggerMode.isSplitDebugger() && AppMode.isRemoteDevHost()) {
+        getMockRunContentDescriptorIfInitialized()?.runnerLayoutUi
+      }
+      else {
+        mySessionTab.await()?.ui
+      }
+      if (ui != null) {
+        block.accept(ui)
+      }
     }
   }
 
@@ -466,6 +582,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
   /**
    * TODO When we move to RD-first approach, @RequiresEdt requirements in [XDebuggerManager] can be removed
    */
+  @OptIn(AwaitCancellationAndInvoke::class)
   private fun initSessionTab(contentToReuse: RunContentDescriptor?, shouldShowTab: Boolean) {
     val forceNewDebuggerUi = debugProcess.forceShowNewDebuggerUi()
     val withFramesCustomization = debugProcess.allowFramesViewCustomization()
@@ -479,13 +596,14 @@ class XDebugSessionImpl @JvmOverloads constructor(
       val tabClosedChannel = Channel<Unit>()
       val additionalTabComponentManager = XDebugSessionAdditionalTabComponentManager(localTabScope)
       val runContentDescriptorId = CompletableDeferred<RunContentDescriptorIdImpl>()
+      val tabLayouterDto = CompletableDeferred<XDebugTabLayouterDto>()
       val executionEnvironmentId = executionEnvironment?.storeGlobally(localTabScope)
+
       val tabInfo = XDebuggerSessionTabInfo(myIcon?.rpcId(), forceNewDebuggerUi, withFramesCustomization, defaultFramesViewKey,
                                             executionEnvironmentId, executionEnvironment?.toDto(localTabScope),
                                             additionalTabComponentManager.id, tabClosedChannel,
-                                            runContentDescriptorId, myShowTabDeferred)
+                                            runContentDescriptorId, myShowTabDeferred, tabLayouterDto, contentToReuse)
       if (myTabInitDataFlow.compareAndSet(null, tabInfo)) {
-        addAdditionalTabsToManager(additionalTabComponentManager)
         // This is a mock tab used in backend only
         // Using a RunTab as a mock component let us reuse context reusing,
         // e.g. execution environment is present in the context of the mock descriptor
@@ -499,38 +617,61 @@ class XDebugSessionImpl @JvmOverloads constructor(
           }
 
           val component get() = myUi.component
+          val ui get() = myUi
+
+          val consoleManger by lazy { createLogConsoleManager(additionalTabComponentManager) { debugProcess.processHandler } }
         }
+        val disposable = createEdtDisposable(localTabScope.asDisposable())
+
+        val remoteDevHost = AppMode.isRemoteDevHost()
+        val layoutBridge = RunnerLayoutUiBridge(project, disposable)
         // This is a mock descriptor used in backend only
         val mockDescriptor = object : RunContentDescriptor(myConsoleView, debugProcess.getProcessHandler(), runTab.component,
                                                            sessionName, myIcon, null) {
+          init {
+            runnerLayoutUi = if (remoteDevHost) layoutBridge else runTab.ui
+          }
+
           override fun isHiddenContent(): Boolean = true
         }
-        Disposer.register(mockDescriptor, runTab)
+        Disposer.register(disposable, runTab)
+        Disposer.register(disposable, mockDescriptor)
         val descriptorId = mockDescriptor.storeGlobally(localTabScope)
         runContentDescriptorId.complete(descriptorId)
         mockDescriptor.id = descriptorId
-        debuggerManager.coroutineScope.launch(Dispatchers.EDT, CoroutineStart.ATOMIC) {
+
+        val runConfiguration = executionEnvironment?.runProfile
+        if (remoteDevHost && runConfiguration != null) {
+          val logFilesManager = LogFilesManager(project, runTab.consoleManger, disposable)
+          RunTab.configureLogConsoles(runConfiguration, logFilesManager, debugProcess.processHandler)
+        }
+
+        val tabLayouter = debugProcess.createTabLayouter()
+        val tabLayouterId = XDebugTabLayouterModel(tabLayouter, layoutBridge).storeGlobally(localTabScope)
+        tabLayouterDto.complete(XDebugTabLayouterDto(tabLayouterId, tabLayouter))
+
+        debuggerManager.coroutineScope.launch(start = CoroutineStart.ATOMIC) {
           try {
             tabClosedChannel.receiveCatching()
           }
           finally {
             tabClosedChannel.close()
             tabCoroutineScope.cancel()
-            Disposer.dispose(mockDescriptor)
           }
         }
         myMockRunContentDescriptor = mockDescriptor
-        myDebugProcess!!.sessionInitialized()
-        project.messageBus.connect(localTabScope).subscribe(RUN_CONTENT_DESCRIPTOR_LIFECYCLE_TOPIC, object : RunContentDescriptorLifecycleListener {
-          override fun beforeContentShown(descriptor: RunContentDescriptor, executor: Executor) {
-            if (descriptor === mockDescriptor) {
-              myShowTabDeferred.complete(Unit)
+        debugProcess.sessionInitialized()
+        project.messageBus.connect(localTabScope)
+          .subscribe(RUN_CONTENT_DESCRIPTOR_LIFECYCLE_TOPIC, object : RunContentDescriptorLifecycleListener {
+            override fun beforeContentShown(descriptor: RunContentDescriptor, executor: Executor) {
+              if (descriptor === mockDescriptor) {
+                myShowTabDeferred.complete(Unit)
+              }
             }
-          }
 
-          override fun afterContentShown(descriptor: RunContentDescriptor, executor: Executor) {
-          }
-        })
+            override fun afterContentShown(descriptor: RunContentDescriptor, executor: Executor) {
+            }
+          })
       }
       else {
         localTabScope.cancel()
@@ -544,34 +685,32 @@ class XDebugSessionImpl @JvmOverloads constructor(
                                           forceNewDebuggerUi, withFramesCustomization, defaultFramesViewKey)
         tabInitialized(tab)
         myMockRunContentDescriptor = tab.runContentDescriptor
-        myDebugProcess!!.sessionInitialized()
+        debugProcess.sessionInitialized()
         if (shouldShowTab) {
           tab.showTab()
         }
       }
     }
+    setUpOutputToFile()
   }
 
-  private fun addAdditionalTabsToManager(additionalTabComponentManager: XDebugSessionAdditionalTabComponentManager) {
-    val runConfiguration = executionEnvironment?.runProfile
-    if (runConfiguration is RunConfigurationBase<*>) {
-      runConfiguration.createAdditionalTabComponents(additionalTabComponentManager, debugProcess.processHandler)
-    }
+  private fun setUpOutputToFile() {
+    val runConfiguration = executionEnvironment?.runProfile ?: return
+    RunTab.configureConsoleOutputToFile(runConfiguration, debugProcess.processHandler, consoleView)
   }
 
-  @ApiStatus.Internal
-  fun tabInitialized(sessionTab: XDebugSessionTab) {
-    mySessionTab.complete(sessionTab)
+  fun tabInitialized(sessionTab: IXDebuggerSessionTab?) {
+    mySessionTab.complete(sessionTab as? XDebugSessionTab)
   }
 
   private fun disableSlaveBreakpoints() {
-    val slaveBreakpoints = myDebuggerManager.breakpointManager.dependentBreakpointManager.allSlaveBreakpoints
+    val slaveBreakpoints = debuggerManager.breakpointManager.dependentBreakpointManager.allSlaveBreakpoints
     if (slaveBreakpoints.isEmpty()) {
       return
     }
 
-    val breakpointTypes: MutableSet<XBreakpointType<*, *>?> = HashSet<XBreakpointType<*, *>?>()
-    for (handler in myDebugProcess!!.breakpointHandlers) {
+    val breakpointTypes: MutableSet<XBreakpointType<*, *>?> = HashSet()
+    for (handler in debugProcess.breakpointHandlers) {
       breakpointTypes.add(getBreakpointTypeClass(handler))
     }
     for (slaveBreakpoint in slaveBreakpoints) {
@@ -594,7 +733,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     @JvmName("valueMarkers")
     get() {
       if (myValueMarkers == null) {
-        val provider = myDebugProcess!!.createValueMarkerProvider()
+        val provider = debugProcess.createValueMarkerProvider()
         if (provider != null) {
           myValueMarkers = XValueMarkers.createValueMarkers(provider)
         }
@@ -607,33 +746,33 @@ class XDebugSessionImpl @JvmOverloads constructor(
     return valueMarkers
   }
 
-  private fun <B : XBreakpoint<*>?> processBreakpoints(
+  private fun <B : XBreakpoint<*>> processBreakpoints(
     handler: XBreakpointHandler<*>,
     register: Boolean,
     temporary: Boolean,
   ) {
     @Suppress("UNCHECKED_CAST")
-    handler as XBreakpointHandler<B?>
-    val breakpoints = myDebuggerManager.breakpointManager.getBreakpoints<B?>(handler.getBreakpointTypeClass())
+    handler as XBreakpointHandler<B>
+    val breakpoints = debuggerManager.breakpointManager.getBreakpoints<B>(handler.getBreakpointTypeClass())
     for (b in breakpoints) {
-      handleBreakpoint<B?>(handler, b, register, temporary)
+      handleBreakpoint(handler, b, register, temporary)
     }
   }
 
-  private fun <B : XBreakpoint<*>?> handleBreakpoint(
-    handler: XBreakpointHandler<B?>, b: B?, register: Boolean,
+  private fun <B : XBreakpoint<*>> handleBreakpoint(
+    handler: XBreakpointHandler<B>, b: B, register: Boolean,
     temporary: Boolean,
   ) {
     if (register) {
-      val active = ReadAction.compute<Boolean, RuntimeException?>(ThrowableComputable { isBreakpointActive(b!!) })
+      val active = isBreakpointActive(b)
       if (active) {
         synchronized(myRegisteredBreakpoints) {
           myRegisteredBreakpoints[b] = CustomizedBreakpointPresentation()
           if (b is XLineBreakpoint<*>) {
-            updateBreakpointPresentation(b as XLineBreakpoint<*>, b.getType().pendingIcon, null)
+            updateBreakpointPresentation(b, b.getType().pendingIcon, null)
           }
         }
-        handler.registerBreakpoint(b!!)
+        handler.registerBreakpoint(b)
       }
     }
     else {
@@ -642,7 +781,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
         removed = myRegisteredBreakpoints.remove(b) != null
       }
       if (removed) {
-        handler.unregisterBreakpoint(b!!, temporary)
+        handler.unregisterBreakpoint(b, temporary)
       }
     }
   }
@@ -654,7 +793,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   private fun processAllHandlers(breakpoint: XBreakpoint<*>, register: Boolean) {
-    for (handler in myDebugProcess!!.breakpointHandlers) {
+    for (handler in debugProcess.breakpointHandlers) {
       processBreakpoint(breakpoint, handler, register)
     }
   }
@@ -667,11 +806,10 @@ class XDebugSessionImpl @JvmOverloads constructor(
     val type = breakpoint.getType()
     if (handler.getBreakpointTypeClass() == type.javaClass) {
       @Suppress("UNCHECKED_CAST")
-      handleBreakpoint(handler as XBreakpointHandler<B?>, breakpoint, register, false)
+      handleBreakpoint(handler as XBreakpointHandler<B>, breakpoint, register, false)
     }
   }
 
-  @RequiresReadLock
   fun isBreakpointActive(b: XBreakpoint<*>): Boolean {
     return !areBreakpointsMuted() && b.isEnabled() && !isInactiveSlaveBreakpoint(b) && !(b as XBreakpointBase<*, *, *>).isDisposed
   }
@@ -680,7 +818,6 @@ class XDebugSessionImpl @JvmOverloads constructor(
     return sessionData.isBreakpointsMuted
   }
 
-  @ApiStatus.Internal
   fun getBreakpointsMutedFlow(): StateFlow<Boolean> {
     return sessionData.breakpointsMutedFlow
   }
@@ -697,94 +834,95 @@ class XDebugSessionImpl @JvmOverloads constructor(
     myDispatcher.removeListener(listener)
   }
 
-  @RequiresReadLock
+  private fun areBreakpointDisabled() = myLock.withLockMaybeCancellable { myBreakpointsDisabled }
+
   override fun setBreakpointMuted(muted: Boolean) {
     if (areBreakpointsMuted() == muted) return
     sessionData.isBreakpointsMuted = muted
-    if (!myBreakpointsDisabled) {
+    if (!areBreakpointDisabled()) {
       processAllBreakpoints(!muted, muted)
     }
-    myDebuggerManager.breakpointManager.lineBreakpointManager.queueAllBreakpointsUpdate()
+    debuggerManager.breakpointManager.lineBreakpointManager.queueAllBreakpointsUpdate()
     myDispatcher.getMulticaster().breakpointsMuted(muted)
   }
 
   override fun stepOver(ignoreBreakpoints: Boolean) {
     rememberUserActionStart(XDebuggerActions.STEP_OVER)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
     if (ignoreBreakpoints) {
       setBreakpointsDisabledTemporarily(true)
     }
-    myDebugProcess!!.startStepOver(doResume())
+    debugProcess.startStepOver(doResume())
   }
 
   override fun stepInto() {
     rememberUserActionStart(XDebuggerActions.STEP_INTO)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
-    myDebugProcess!!.startStepInto(doResume())
+    debugProcess.startStepInto(doResume())
   }
 
   override fun stepOut() {
     rememberUserActionStart(XDebuggerActions.STEP_OUT)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
-    myDebugProcess!!.startStepOut(doResume())
+    debugProcess.startStepOut(doResume())
   }
 
-  override fun <V : XSmartStepIntoVariant?> smartStepInto(handler: XSmartStepIntoHandler<V?>, variant: V?) {
+  override fun <V : XSmartStepIntoVariant> smartStepInto(handler: XSmartStepIntoHandler<V>, variant: V) {
     rememberUserActionStart(XDebuggerActions.SMART_STEP_INTO)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
     val context = doResume()
-    handler.startStepInto(variant!!, context)
+    handler.startStepInto(variant, context)
   }
 
   override fun forceStepInto() {
     rememberUserActionStart(XDebuggerActions.FORCE_STEP_INTO)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
-    myDebugProcess!!.startForceStepInto(doResume())
+    debugProcess.startForceStepInto(doResume())
   }
 
   override fun runToPosition(position: XSourcePosition, ignoreBreakpoints: Boolean) {
     rememberUserActionStart(XDebuggerActions.RUN_TO_CURSOR)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
     if (ignoreBreakpoints) {
       setBreakpointsDisabledTemporarily(true)
     }
-    myDebugProcess!!.runToPosition(position, doResume())
+    debugProcess.runToPosition(position, doResume())
   }
 
   override fun pause() {
     rememberUserActionStart(XDebuggerActions.PAUSE)
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
-    myDebugProcess!!.startPausing()
+    debugProcess.startPausing()
   }
 
-  @RequiresReadLock
   private fun processAllBreakpoints(register: Boolean, temporary: Boolean) {
-    for (handler in myDebugProcess!!.breakpointHandlers) {
-      processBreakpoints<XBreakpoint<*>?>(handler, register, temporary)
+    for (handler in debugProcess.breakpointHandlers) {
+      processBreakpoints<XBreakpoint<*>>(handler, register, temporary)
     }
   }
 
   private fun setBreakpointsDisabledTemporarily(disabled: Boolean) {
-    ApplicationManager.getApplication().runReadAction(Runnable {
-      if (myBreakpointsDisabled == disabled) return@Runnable
+    val changed = myLock.withLockMaybeCancellable {
+      if (myBreakpointsDisabled == disabled) return@withLockMaybeCancellable false
       myBreakpointsDisabled = disabled
-      if (!areBreakpointsMuted()) {
-        processAllBreakpoints(!disabled, disabled)
-      }
-    })
+      true
+    }
+    if (changed && !areBreakpointsMuted()) {
+      processAllBreakpoints(!disabled, disabled)
+    }
   }
 
   override fun resume() {
-    if (!myDebugProcess!!.checkCanPerformCommands()) return
+    if (!debugProcess.checkCanPerformCommands()) return
 
-    myDebugProcess!!.resume(doResume())
+    debugProcess.resume(doResume())
   }
 
   private fun doResume(): XSuspendContext? {
@@ -800,27 +938,18 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   private fun clearPausedData() {
-    // If the scope is not provided by an XSuspendContent implementation,
-    // then a default scope, provided by XDebuggerSuspendScopeProvider is used,
-    // and it must be canceled manually
-    if (suspendContext?.coroutineScope != null) {
-      currentSuspendCoroutineScope?.cancel()
-    }
-    currentSuspendCoroutineScope = null
-    suspendContextFlow.value = null
+    val oldSuspendContextModel = suspendContextModel.getAndSet(null)
+    oldSuspendContextModel?.cancel()
     this.currentExecutionStack = null
     currentStackFrame = null
     topStackFrame.value = null
     clearActiveNonLineBreakpoint()
-    updateExecutionPosition()
   }
 
   @Deprecated("Update should go via front-end listeners")
   override fun updateExecutionPosition() {
     // Actually, it is just a fallback. All information should go via front-end listeners.
-    if (myDebuggerManager.currentSession == this) {
-      updateExecutionPosition(myProject, currentSourceKind)
-    }
+    updateExecutionPosition(this.asProxy())
   }
 
   val isTopFrameSelected: Boolean
@@ -835,12 +964,19 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   override fun setCurrentStackFrame(executionStack: XExecutionStack, frame: XStackFrame, isTopFrame: Boolean) {
-    setCurrentStackFrame(executionStack, frame, isTopFrame, false)
+    val currentSuspendContext = suspendContext ?: return
+    setCurrentStackFrame(currentSuspendContext, executionStack, frame, isTopFrame, false)
   }
 
-  @ApiStatus.Experimental
-  fun setCurrentStackFrame(executionStack: XExecutionStack, frame: XStackFrame, isTopFrame: Boolean, changedByUser: Boolean) {
-    if (suspendContext == null) return
+  fun setCurrentStackFrame(
+    expectedSuspendContext: XSuspendContext,
+    executionStack: XExecutionStack,
+    frame: XStackFrame,
+    isTopFrame: Boolean,
+    changedByUser: Boolean,
+  ) {
+    val currentContext = suspendContext ?: return
+    if (expectedSuspendContext !== currentContext) return
 
     val frameChanged = currentStackFrame !== frame
     this.currentExecutionStack = executionStack
@@ -851,13 +987,13 @@ class XDebugSessionImpl @JvmOverloads constructor(
       myDispatcher.getMulticaster().stackFrameChanged(changedByUser)
     }
 
-    if (myDebuggerManager.currentSession == this) {
+    if (debuggerManager.currentSession == this) {
       activateSession(frameChanged)
     }
   }
 
   fun activateSession(forceUpdateExecutionPosition: Boolean) {
-    myDebuggerManager.setCurrentSession(this)
+    debuggerManager.setCurrentSession(this)
   }
 
   val activeNonLineBreakpoint: XBreakpoint<*>? get() = myActiveNonLineBreakpointFlow.value
@@ -898,15 +1034,15 @@ class XDebugSessionImpl @JvmOverloads constructor(
         reportBreakpointVerified(breakpoint, delay)
       }
     }
-    val debuggerManager = myDebuggerManager.breakpointManager
+    val debuggerManager = debuggerManager.breakpointManager
     if (SplitDebuggerMode.isSplitDebugger() && breakpoint is XLineBreakpointImpl<*>) {
       // for useFeProxy we call update directly since visual presentation is disabled on the backend
       breakpoint.fireBreakpointPresentationUpdated(this)
     }
     else {
-      debuggerManager.lineBreakpointManager.queueBreakpointUpdate(breakpoint, Runnable {
+      debuggerManager.lineBreakpointManager.queueBreakpointUpdate(breakpoint) {
         (breakpoint as XBreakpointBase<*, *, *>).fireBreakpointPresentationUpdated(this)
-      })
+      }
     }
   }
 
@@ -925,7 +1061,6 @@ class XDebugSessionImpl @JvmOverloads constructor(
     return breakpointReached(breakpoint, evaluatedLogExpression, suspendContext, true)
   }
 
-  @ApiStatus.Internal
   fun breakpointReachedNoProcessing(breakpoint: XBreakpoint<*>, suspendContext: XSuspendContext) {
     breakpointReached(breakpoint, null, suspendContext, false)
   }
@@ -943,7 +1078,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
       }
 
       if (breakpoint.isLogStack()) {
-        myDebugProcess!!.logStack(suspendContext, this)
+        debugProcess.logStack(suspendContext, this)
       }
 
       if (evaluatedLogExpression != null) {
@@ -970,7 +1105,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     }
 
     // set this session active on breakpoint, update execution position will be called inside positionReached
-    myDebuggerManager.setCurrentSession(this)
+    debuggerManager.setCurrentSession(this)
 
     positionReachedInternal(suspendContext, true)
 
@@ -998,11 +1133,11 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   fun processDependencies(breakpoint: XBreakpoint<*>) {
-    val dependentBreakpointManager = myDebuggerManager.breakpointManager.dependentBreakpointManager
+    val dependentBreakpointManager = debuggerManager.breakpointManager.dependentBreakpointManager
     if (!dependentBreakpointManager.isMasterOrSlave(breakpoint)) return
 
     val breakpoints = dependentBreakpointManager.getSlaveBreakpoints(breakpoint)
-    breakpoints.forEach(Consumer { o: XBreakpoint<*>? -> myInactiveSlaveBreakpoints.remove(o) })
+    breakpoints.forEach { o -> myInactiveSlaveBreakpoints.remove(o) }
     for (slaveBreakpoint in breakpoints) {
       processAllHandlers(slaveBreakpoint, true)
     }
@@ -1011,26 +1146,28 @@ class XDebugSessionImpl @JvmOverloads constructor(
       val added = myInactiveSlaveBreakpoints.add(breakpoint)
       if (added) {
         processAllHandlers(breakpoint, false)
-        myDebuggerManager.breakpointManager.lineBreakpointManager.queueBreakpointUpdate(breakpoint)
+        debuggerManager.breakpointManager.lineBreakpointManager.queueBreakpointUpdate(breakpoint)
       }
     }
   }
 
   private fun printMessage(message: String, hyperLinkText: String?, info: HyperlinkInfo?) {
-    invokeOnEdt(Runnable {
-      myConsoleView!!.print(message, ConsoleViewContentType.SYSTEM_OUTPUT)
-      if (info != null) {
-        myConsoleView!!.printHyperlink(hyperLinkText!!, info)
+    invokeOnEdt {
+      val console = myConsoleView!!
+      console.print(message, ConsoleViewContentType.SYSTEM_OUTPUT)
+      if (info != null && hyperLinkText != null) {
+        console.printHyperlink(hyperLinkText, info)
       }
       else if (hyperLinkText != null) {
-        myConsoleView!!.print(hyperLinkText, ConsoleViewContentType.SYSTEM_OUTPUT)
+        console.print(hyperLinkText, ConsoleViewContentType.SYSTEM_OUTPUT)
       }
-      myConsoleView!!.print("\n", ConsoleViewContentType.SYSTEM_OUTPUT)
-    })
+      console.print("\n", ConsoleViewContentType.SYSTEM_OUTPUT)
+    }
   }
 
   private fun positionReachedInternal(suspendContext: XSuspendContext, attract: Boolean) {
-    if (handlePositionReaching(suspendContext, attract)) {
+    val effectiveAttract = attract && sessionData.getUserData(XDebugSessionData.SUPPRESS_BREAKPOINT_ATTRACTION) != true
+    if (handlePositionReaching(suspendContext, effectiveAttract)) {
       return
     }
 
@@ -1041,18 +1178,18 @@ class XDebugSessionImpl @JvmOverloads constructor(
     logPositionReached(topFramePosition)
 
     val needsInitialization = myTabInitDataFlow.value == null
-    if (needsInitialization || attract) {
+    if (needsInitialization || effectiveAttract) {
       invokeLaterIfProjectAlive(myProject, Runnable {
-        if (needsInitialization) {
-          initSessionTab(null, true)
+        if (needsInitialization && !DapMode.isDap()) {
+          initSessionTab(null, effectiveAttract)
         }
         val topFrameIsAbsent = topFramePosition == null
         if (SplitDebuggerMode.isSplitDebugger()) {
-          myPausedEvents.tryEmit(XDebugSessionPausedInfo(attract, topFrameIsAbsent))
+          myPausedEvents.tryEmit(XDebugSessionPausedInfo(effectiveAttract, topFrameIsAbsent))
         }
         else {
           // We have to keep this code because Code with Me expects BE to work with tab similar to monolith
-          sessionTab?.onPause(attract, topFrameIsAbsent)
+          sessionTab?.onPause(effectiveAttract, topFrameIsAbsent)
         }
       })
     }
@@ -1060,10 +1197,11 @@ class XDebugSessionImpl @JvmOverloads constructor(
     myDispatcher.getMulticaster().sessionPaused()
   }
 
-  @ApiStatus.Internal
   fun updateSuspendContext(newSuspendContext: XSuspendContext) {
-    suspendContextFlow.value = newSuspendContext
-    this.currentSuspendCoroutineScope = newSuspendContext.coroutineScope ?: provideSuspendScope(this)
+    val newModel = XSuspendContextModel(coroutineScope, newSuspendContext, this)
+    val oldModel = suspendContextModel.getAndSet(newModel)
+    oldModel?.cancel()
+
     this.currentExecutionStack = newSuspendContext.activeExecutionStack
     val newCurrentStackFrame = currentExecutionStack?.topFrame
     currentStackFrame = newCurrentStackFrame
@@ -1101,29 +1239,26 @@ class XDebugSessionImpl @JvmOverloads constructor(
       removeBreakpointListeners()
     }
     finally {
-      myDebugProcess!!.stopAsync().onSuccess { processStopped() }
+      debugProcess.stopAsync().onSuccess { processStopped() }
     }
   }
 
   private fun processStopped() {
     if (!myProject.isDisposed()) {
-      myProject.getMessageBus().syncPublisher<XDebuggerManagerListener>(XDebuggerManager.TOPIC).processStopped(myDebugProcess!!)
+      myProject.getMessageBus().syncPublisher(XDebuggerManager.TOPIC).processStopped(debugProcess)
     }
 
     if (!isTabInitialized && myConsoleView != null) {
-      invokeOnEdt(Runnable { Disposer.dispose(myConsoleView!!) })
+      invokeOnEdt { Disposer.dispose(myConsoleView!!) }
     }
 
     clearPausedData()
 
-    if (myValueMarkers != null) {
-      myValueMarkers!!.clear()
-    }
+    myValueMarkers?.clear()
     if (XDebuggerSettingManagerImpl.getInstanceImpl().generalSettings.isUnmuteOnStop) {
       sessionData.isBreakpointsMuted = false
     }
-    myDebuggerManager.removeSession(this)
-    XDebugSessionProxyKeeper.getInstanceIfExists(project)?.removeProxy(this)
+    debuggerManager.removeSession(this)
     myDispatcher.getMulticaster().sessionStopped()
     myDispatcher.getListeners().clear()
 
@@ -1141,14 +1276,17 @@ class XDebugSessionImpl @JvmOverloads constructor(
   }
 
   private fun removeBreakpointListeners() {
-    val breakpointListenerDisposable = myBreakpointListenerDisposable
-    if (breakpointListenerDisposable != null) {
+    val breakpointListenerDisposable = myLock.withLockMaybeCancellable {
+      val current = myBreakpointListenerDisposable
       myBreakpointListenerDisposable = null
+      current
+    }
+    if (breakpointListenerDisposable != null) {
       Disposer.dispose(breakpointListenerDisposable)
     }
   }
 
-  fun isInactiveSlaveBreakpoint(breakpoint: XBreakpoint<*>?): Boolean {
+  fun isInactiveSlaveBreakpoint(breakpoint: XBreakpoint<*>): Boolean {
     return myInactiveSlaveBreakpoints.contains(breakpoint)
   }
 
@@ -1171,8 +1309,8 @@ class XDebugSessionImpl @JvmOverloads constructor(
   override fun reportMessage(message: String, type: MessageType, listener: HyperlinkListener?) {
     val notification = XDebuggerManagerImpl.getNotificationGroup().createNotification(message, type.toNotificationType())
     if (listener != null) {
-      notification.setListener(NotificationListener { _: Notification?, event: HyperlinkEvent? ->
-        if (event!!.eventType == HyperlinkEvent.EventType.ACTIVATED) {
+      notification.setListener(NotificationListener { _, event: HyperlinkEvent ->
+        if (event.eventType == HyperlinkEvent.EventType.ACTIVATED) {
           listener.hyperlinkUpdate(event)
         }
       })
@@ -1180,7 +1318,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     notification.notify(myProject)
   }
 
-  private inner class MyBreakpointListener : XBreakpointListener<XBreakpoint<*>?> {
+  private inner class MyBreakpointListener : XBreakpointListener<XBreakpoint<*>> {
     override fun breakpointAdded(breakpoint: XBreakpoint<*>) {
       if (processAdd(breakpoint)) {
         val presentation = getBreakpointPresentation(breakpoint)
@@ -1205,7 +1343,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     }
 
     fun processAdd(breakpoint: XBreakpoint<*>): Boolean {
-      if (!myBreakpointsDisabled) {
+      if (!areBreakpointDisabled()) {
         processAllHandlers(breakpoint, true)
         return true
       }
@@ -1280,7 +1418,7 @@ class XDebugSessionImpl @JvmOverloads constructor(
     private val PERFORMANCE_LOG = Logger.getInstance("#com.intellij.xdebugger.impl.XDebugSessionImpl.performance")
 
     // TODO[eldar] needed to workaround nullable myAlternativeSourceHandler.
-    private val ALWAYS_FALSE_STATE = MutableStateFlow<Boolean>(false).asStateFlow<Boolean>()
+    private val ALWAYS_FALSE_STATE = MutableStateFlow(false).asStateFlow()
 
     //need to compile under 1.8, please do not remove before checking
     private fun getBreakpointTypeClass(handler: XBreakpointHandler<*>): XBreakpointType<*, *>? {

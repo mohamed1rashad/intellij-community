@@ -5,6 +5,7 @@ import com.jetbrains.python.PyPsiPackageUtil
 import com.jetbrains.python.codeInsight.stdlib.PyStdlibUtil
 import com.jetbrains.python.packaging.PyPIPackageUtil.INSTANCE
 import com.jetbrains.python.packaging.PyPackageUtil
+import com.jetbrains.python.packaging.common.toRequirements
 import com.jetbrains.python.packaging.management.PythonPackageManager
 
 class InstalledButNotDeclaredChecker(val ignoredPackages: Collection<String>, val pythonPackageManager: PythonPackageManager) {
@@ -13,11 +14,12 @@ class InstalledButNotDeclaredChecker(val ignoredPackages: Collection<String>, va
     if (isIgnoredOrStandardPackage(importedPyModule))
       return null
 
+    val declared = pythonPackageManager.listDeclaredPackagesSnapshot() ?: return null
+
     if (!INSTANCE.isInPyPI(packageName))
       return null
 
-
-    val requirements = pythonPackageManager.getDependencyManager()?.getDependencies() ?: emptyList()
+    val requirements = declared.toRequirements()
     if (requirements.any { it.name == packageName }) {
       return null
     }

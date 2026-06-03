@@ -5,7 +5,11 @@ import com.intellij.find.editorHeaderActions.Utils;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.lightEdit.LightEditCompatible;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CustomShortcutSet;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.ex.ActionButtonLook;
 import com.intellij.openapi.actionSystem.ex.TooltipDescriptionProvider;
 import com.intellij.openapi.actionSystem.impl.ActionButton;
@@ -38,14 +42,24 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.accessibility.AccessibleContext;
 import javax.accessibility.AccessibleRole;
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
+import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.event.DocumentEvent;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultEditorKit;
 import javax.swing.text.PlainDocument;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.GridLayout;
+import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -55,8 +69,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static java.awt.event.InputEvent.*;
-import static javax.swing.ScrollPaneConstants.*;
+import static java.awt.event.InputEvent.CTRL_DOWN_MASK;
+import static java.awt.event.InputEvent.META_DOWN_MASK;
+import static java.awt.event.InputEvent.SHIFT_DOWN_MASK;
+import static javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED;
+import static javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED;
+import static javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER;
 
 public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyChangeListener {
 
@@ -79,6 +97,7 @@ public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyC
   private final ActionButton myHistoryPopupButton;
   private boolean myMultilineEnabled = true;
   private boolean myShowNewLineButton = true;
+  private boolean myIslandsEnabled = false;
 
   /**
    * @deprecated infoMode is not used. Use the other constructor.
@@ -155,7 +174,7 @@ public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyC
       @Override
       public Insets getBorderInsets(Component c) {
         if (SystemInfo.isMac) {
-          return new JBInsets(3, 0, 2, 0);
+          return myIslandsEnabled ? JBUI.insetsTop(1) : new JBInsets(3, 0, 2, 0);
         }
         else {
           int bottom = (StringUtil.getLineBreakCount(myTextArea.getText()) > 0) ? 2 : StartupUiUtil.isUnderDarcula() ? 1 : 0;
@@ -203,12 +222,20 @@ public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyC
     }
   }
 
+  @ApiStatus.Internal
+  public void setIslandsEnabled(boolean islandsEnabled) {
+    if (myIslandsEnabled != islandsEnabled) {
+      myIslandsEnabled = islandsEnabled;
+      updateLayout();
+    }
+  }
+
   protected void updateLayout() {
     JPanel historyButtonWrapper = new NonOpaquePanel(new BorderLayout());
-    historyButtonWrapper.setBorder(ExperimentalUI.isNewUI() ? JBUI.Borders.empty(2, 3, 0, 8) : JBUI.Borders.empty(2, 3, 0, 0));
+    historyButtonWrapper.setBorder(createHistoryButtonBorder());
     historyButtonWrapper.add(myHistoryPopupButton, BorderLayout.NORTH);
     JPanel iconsPanelWrapper = new NonOpaquePanel(new BorderLayout());
-    iconsPanelWrapper.setBorder(JBUI.Borders.emptyTop(2));
+    iconsPanelWrapper.setBorder(createIconsPanelBorder());
     JPanel p = new NonOpaquePanel(new BorderLayout());
     p.add(myIconsPanel, BorderLayout.NORTH);
     myIconsPanel.setBorder(ExperimentalUI.isNewUI() ? JBUI.Borders.emptyRight(8) : JBUI.Borders.emptyRight(5));
@@ -224,6 +251,20 @@ public class SearchTextArea extends JBPanel<SearchTextArea> implements PropertyC
     add(myScrollPane, BorderLayout.CENTER);
     add(iconsPanelWrapper, BorderLayout.EAST);
     updateIconsLayout();
+  }
+
+  private Border createIconsPanelBorder() {
+    return myIslandsEnabled ? JBUI.Borders.empty(1, 0) : JBUI.Borders.emptyTop(2);
+  }
+
+  private Border createHistoryButtonBorder() {
+    if (!ExperimentalUI.isNewUI()) {
+      return JBUI.Borders.empty(2, 3, 0, 0);
+    }
+
+    return myIslandsEnabled
+           ? JBUI.Borders.empty(1, 3, 1, 8)
+           : JBUI.Borders.empty(2, 3, 0, 8);
   }
 
   private void updateIconsLayout() {

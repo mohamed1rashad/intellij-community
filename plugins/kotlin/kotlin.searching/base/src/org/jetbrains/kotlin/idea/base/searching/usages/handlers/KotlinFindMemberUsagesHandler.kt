@@ -6,11 +6,12 @@ import com.intellij.codeInsight.highlighting.ReadWriteAccessDetector
 import com.intellij.find.FindManager
 import com.intellij.find.findUsages.AbstractFindUsagesDialog
 import com.intellij.find.findUsages.FindUsagesOptions
-import com.intellij.find.impl.FindManagerImpl
+import com.intellij.find.impl.FindManagerBase
 import com.intellij.icons.AllIcons.Actions
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.ex.ActionUtil
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -29,7 +30,12 @@ import com.intellij.psi.search.searches.FunctionalExpressionSearch
 import com.intellij.psi.search.searches.MethodReferencesSearch
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.usageView.UsageInfo
-import com.intellij.util.*
+import com.intellij.util.Alarm
+import com.intellij.util.CommonProcessors
+import com.intellij.util.EmptyQuery
+import com.intellij.util.FilteredQuery
+import com.intellij.util.Processor
+import com.intellij.util.Query
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.kotlin.asJava.toLightMethods
@@ -57,7 +63,17 @@ import org.jetbrains.kotlin.idea.search.isOnlyKotlinSearch
 import org.jetbrains.kotlin.idea.search.usagesSearch.buildProcessDelegationCallKotlinConstructorUsagesTask
 import org.jetbrains.kotlin.idea.util.application.isHeadlessEnvironment
 import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtLabelReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtParameterList
+import org.jetbrains.kotlin.psi.KtPrimaryConstructor
 import org.jetbrains.kotlin.psi.psiUtil.containingClass
 import org.jetbrains.kotlin.psi.psiUtil.isExpectDeclaration
 import org.jetbrains.kotlin.psi.psiUtil.parameterIndex
@@ -133,7 +149,7 @@ abstract class KotlinFindMemberUsagesHandler<T : KtNamedDeclaration> protected c
 
             if (isUnitTestMode() ||
                 !isPropertyOfDataClass ||
-                psiElement.getDisableComponentAndDestructionSearch(resetSingleFind = false)
+                runReadAction { psiElement.getDisableComponentAndDestructionSearch(resetSingleFind = false) }
             ) return super.processElementUsages(element, processor, options)
 
             val indicator = ProgressManager.getInstance().progressIndicator
@@ -178,7 +194,7 @@ abstract class KotlinFindMemberUsagesHandler<T : KtNamedDeclaration> protected c
                         }
                     }
                     .toList()
-                    .toTypedArray()
+                    .toTypedArray<PsiElement>()
             }
             return super.getPrimaryElements()
         }
@@ -251,7 +267,7 @@ abstract class KotlinFindMemberUsagesHandler<T : KtNamedDeclaration> protected c
             val kotlinOptions = options as KotlinPropertyFindUsagesOptions
 
             val disabledComponentsAndOperatorsSearch =
-                !forHighlight && psiElement.getDisableComponentAndDestructionSearch(resetSingleFind = true)
+                !forHighlight && runReadAction { psiElement.getDisableComponentAndDestructionSearch(resetSingleFind = true) }
 
             return KotlinReferencesSearchOptions(
                 acceptCallableOverrides = true,
@@ -279,6 +295,7 @@ abstract class KotlinFindMemberUsagesHandler<T : KtNamedDeclaration> protected c
         private val kotlinOptions = options as KotlinCallableFindUsagesOptions
 
         override fun buildTaskList(forHighlight: Boolean): Boolean {
+            if (!super.buildTaskList(forHighlight)) return false
             val referenceProcessor = createReferenceProcessor(processor)
             val uniqueProcessor = CommonProcessors.UniqueProcessor(processor)
 
@@ -398,7 +415,7 @@ abstract class KotlinFindMemberUsagesHandler<T : KtNamedDeclaration> protected c
 
         return if (baseDeclarations.isNotEmpty()) {
             baseDeclarations.flatMap {
-                val handler = (FindManager.getInstance(project) as FindManagerImpl).findUsagesManager.getFindUsagesHandler(it, true)
+                val handler = (FindManager.getInstance(project) as FindManagerBase).findUsagesManager.getFindUsagesHandler(it, true)
                 handler?.findReferencesToHighlight(it, searchScope) ?: emptyList()
             }
         } else {
@@ -441,7 +458,9 @@ abstract class KotlinFindMemberUsagesHandler<T : KtNamedDeclaration> protected c
                         } else {
                             element.putUserData(FIND_USAGES_ONES_FOR_DATA_CLASS_KEY, true)
                         }
-                        FindManager.getInstance(project).findUsages(element)
+                        WriteIntentReadAction.run {
+                            FindManager.getInstance(project).findUsages(element)
+                        }
                     }
                 }
 

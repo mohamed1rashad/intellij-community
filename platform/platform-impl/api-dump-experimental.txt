@@ -50,6 +50,11 @@
 c:com.intellij.execution.wsl.WSLDistribution
 - com.intellij.execution.wsl.AbstractWslDistribution
 - *:getUNCRootPath():java.nio.file.Path
+*f:com.intellij.formatting.LineWrappingUtil
+- sf:WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY:com.intellij.openapi.util.Key
+- <init>():V
+- s:doWrapLongLinesIfNecessary(com.intellij.openapi.editor.Editor,com.intellij.openapi.project.Project,com.intellij.openapi.editor.Document,I,I,java.util.List,I):V
+- s:wrapLongLinesIfNecessary(com.intellij.psi.PsiFile,com.intellij.openapi.editor.Document,I,I,java.util.List,I):V
 *:com.intellij.frontend.HostIdeInfoService
 - a:getHostInfo():com.intellij.frontend.HostInfo
 *f:com.intellij.frontend.HostInfo
@@ -88,6 +93,18 @@ f:com.intellij.ide.plugins.PluginNode
 - com.intellij.ide.plugins.IdeaPluginDescriptor
 - *:getChannel():java.lang.String
 - *:setChannel(java.lang.String):V
+*f:com.intellij.ide.settings.SettingsComponentDescriptor
+- com.intellij.openapi.extensions.PluginAware
+- *sf:Companion:com.intellij.ide.settings.SettingsComponentDescriptor$Companion
+- implementationClass:java.lang.String
+- <init>():V
+- f:getImplementationClass():java.lang.String
+- f:getPluginDescriptor():com.intellij.openapi.extensions.PluginDescriptor
+- f:setImplementationClass(java.lang.String):V
+- setPluginDescriptor(com.intellij.openapi.extensions.PluginDescriptor):V
+*f:com.intellij.ide.settings.SettingsComponentDescriptor$Companion
+- f:getAPPLICATION_EP_NAME():com.intellij.openapi.extensions.ExtensionPointName
+- f:getPROJECT_EP_NAME():com.intellij.openapi.extensions.ExtensionPointName
 f:com.intellij.ide.startup.StartupActionScriptManager
 - *s:addActionCommandsToBeginning(java.util.List):V
 *:com.intellij.ide.trustedProjects.TrustedProjectsListener
@@ -98,10 +115,10 @@ f:com.intellij.ide.startup.StartupActionScriptManager
 - onProjectTrustedFromNotification(com.intellij.openapi.project.Project):V
 - onProjectUntrusted(com.intellij.ide.trustedProjects.TrustedProjectsLocator$LocatedProject):V
 - onProjectUntrusted(com.intellij.openapi.project.Project):V
-- s:onceWhenProjectTrusted(com.intellij.openapi.Disposable,java.util.function.Consumer):V
-- s:onceWhenProjectTrusted(com.intellij.openapi.Disposable,kotlin.jvm.functions.Function1):V
-- s:onceWhenProjectTrusted(java.util.function.Consumer):V
-- s:onceWhenProjectTrusted(kotlin.jvm.functions.Function1):V
+- *s:onceWhenProjectTrusted(com.intellij.openapi.Disposable,java.util.function.Consumer):V
+- *s:onceWhenProjectTrusted(com.intellij.openapi.Disposable,kotlin.jvm.functions.Function1):V
+- *s:onceWhenProjectTrusted(java.util.function.Consumer):V
+- *s:onceWhenProjectTrusted(kotlin.jvm.functions.Function1):V
 *f:com.intellij.ide.trustedProjects.TrustedProjectsListener$Companion
 - f:onceWhenProjectTrusted(com.intellij.openapi.Disposable,java.util.function.Consumer):V
 - f:onceWhenProjectTrusted(com.intellij.openapi.Disposable,kotlin.jvm.functions.Function1):V
@@ -168,7 +185,8 @@ f:com.intellij.openapi.actionSystem.ActionGroupUtil
 - *s:forceRecursiveUpdateInBackground(com.intellij.openapi.actionSystem.ActionGroup):com.intellij.openapi.actionSystem.ActionGroup
 *f:com.intellij.openapi.application.impl.TestOnlyThreading
 - sf:INSTANCE:com.intellij.openapi.application.impl.TestOnlyThreading
-- sf:releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(kotlin.jvm.functions.Function0):java.lang.Object
+- sf:dispatchAwtEventsWithoutWriteIntentLock():V
+- sf:releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(java.lang.Runnable):V
 *e:com.intellij.openapi.editor.ComponentInlayAlignment
 - java.lang.Enum
 - sf:FIT_CONTENT_WIDTH:com.intellij.openapi.editor.ComponentInlayAlignment
@@ -193,9 +211,6 @@ f:com.intellij.openapi.editor.ComponentInlayKt
 - f:paint(com.intellij.openapi.editor.Inlay,java.awt.Graphics,java.awt.Rectangle,com.intellij.openapi.editor.markup.TextAttributes):V
 f:com.intellij.openapi.editor.FileDropManagerKt
 - *sf:containsFileDropTargets(java.awt.datatransfer.DataFlavor[]):Z
-com.intellij.openapi.editor.ex.EditorEx
-- com.intellij.openapi.editor.Editor
-- *:getStickyLinesPanelHeight():I
 a:com.intellij.openapi.editor.ex.EditorGutterComponentEx
 - javax.swing.JComponent
 - com.intellij.openapi.editor.EditorGutter
@@ -243,9 +258,9 @@ f:com.intellij.openapi.editor.impl.EditorImpl
 - com.intellij.openapi.editor.ex.EditorEx
 - com.intellij.openapi.editor.highlighter.HighlighterClient
 - com.intellij.openapi.ui.Queryable
-- com.intellij.psi.codeStyle.CodeStyleSettingsListener
 - java.awt.event.FocusListener
 - *:addHighlightingPredicate(com.intellij.openapi.util.Key,com.intellij.openapi.editor.impl.EditorHighlightingPredicate):com.intellij.openapi.editor.impl.EditorHighlightingPredicate
+- *:getCustomWrapModel():com.intellij.openapi.editor.CustomWrapModel
 - *:removeHighlightingPredicate(com.intellij.openapi.util.Key):com.intellij.openapi.editor.impl.EditorHighlightingPredicate
 *f:com.intellij.openapi.editor.impl.event.EditorGutterHoverEvent
 - java.util.EventObject
@@ -271,6 +286,10 @@ f:com.intellij.openapi.editor.impl.multiverse.CodeInsightContextPresentationKt
 - getMaxWidth():java.lang.Integer
 - a:getTextAttributesKey():com.intellij.openapi.editor.colors.TextAttributesKey
 - paint(com.intellij.openapi.editor.Editor,java.awt.Graphics,java.awt.Rectangle):V
+com.intellij.openapi.editor.toolbar.floating.FloatingToolbarProvider
+- *:onHiddenByEsc(com.intellij.openapi.actionSystem.DataContext):V
+f:com.intellij.openapi.editor.toolbar.floating.FloatingToolbarProvider$DefaultImpls
+- *s:onHiddenByEsc(com.intellij.openapi.editor.toolbar.floating.FloatingToolbarProvider,com.intellij.openapi.actionSystem.DataContext):V
 *f:com.intellij.openapi.fileChooser.ex.FileTextFieldUtil
 - <init>():V
 - s:getLookupString(com.intellij.openapi.fileChooser.ex.FileLookup$LookupFile,com.intellij.openapi.fileChooser.ex.FileLookup$Finder,com.intellij.openapi.fileChooser.ex.FileTextFieldUtil$CompletionResult):java.lang.String
@@ -305,12 +324,58 @@ f:com.intellij.openapi.editor.impl.multiverse.CodeInsightContextPresentationKt
 - setCaretPosition(I):V
 - setText(java.lang.String):V
 - setTextToFile(com.intellij.openapi.fileChooser.ex.FileLookup$LookupFile):V
+a:com.intellij.openapi.fileEditor.TextEditorWithPreviewProvider
+- com.intellij.openapi.fileEditor.AsyncFileEditorProvider
+- *p:createSplitEditorAsync(com.intellij.openapi.project.Project,com.intellij.openapi.fileEditor.TextEditor,com.intellij.openapi.fileEditor.FileEditor,kotlin.coroutines.Continuation):java.lang.Object
 a:com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 - com.intellij.openapi.fileEditor.FileEditorManager
-- *a:openFile(com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions,kotlin.coroutines.Continuation):java.lang.Object
-- *bs:openFile$default(com.intellij.openapi.fileEditor.ex.FileEditorManagerEx,com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions,kotlin.coroutines.Continuation,I,java.lang.Object):java.lang.Object
+- *f:openFile(com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest):com.intellij.openapi.fileEditor.FileEditorComposite
+- *bs:openFile$default(com.intellij.openapi.fileEditor.ex.FileEditorManagerEx,com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest,I,java.lang.Object):com.intellij.openapi.fileEditor.FileEditorComposite
+*e:com.intellij.openapi.fileEditor.ex.FileEditorOpenMode
+- java.lang.Enum
+- sf:DEFAULT:com.intellij.openapi.fileEditor.ex.FileEditorOpenMode
+- sf:NEW_WINDOW:com.intellij.openapi.fileEditor.ex.FileEditorOpenMode
+- sf:RIGHT_SPLIT:com.intellij.openapi.fileEditor.ex.FileEditorOpenMode
+- s:getEntries():kotlin.enums.EnumEntries
+- s:valueOf(java.lang.String):com.intellij.openapi.fileEditor.ex.FileEditorOpenMode
+- s:values():com.intellij.openapi.fileEditor.ex.FileEditorOpenMode[]
+*f:com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- <init>():V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow):V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode):V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode,Z):V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode,Z,Z):V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode,Z,Z,Z):V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode,Z,Z,Z,Z):V
+- <init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode,Z,Z,Z,Z,Z):V
+- b:<init>(com.intellij.openapi.fileEditor.impl.EditorWindow,com.intellij.openapi.fileEditor.ex.FileEditorOpenMode,Z,Z,Z,Z,Z,I,kotlin.jvm.internal.DefaultConstructorMarker):V
+- f:getOpenMode():com.intellij.openapi.fileEditor.ex.FileEditorOpenMode
+- f:getPin():Z
+- f:getRequestFocus():Z
+- f:getReuseOpen():Z
+- f:getSelectAsCurrent():Z
+- f:getTargetWindow():com.intellij.openapi.fileEditor.impl.EditorWindow
+- f:getUsePreviewTab():Z
+- f:withOpenMode(com.intellij.openapi.fileEditor.ex.FileEditorOpenMode):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- f:withPin(Z):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- f:withRequestFocus(Z):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- f:withReuseOpen(Z):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- f:withSelectAsCurrent(Z):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- f:withTargetWindow(com.intellij.openapi.fileEditor.impl.EditorWindow):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
+- f:withUsePreviewTab(Z):com.intellij.openapi.fileEditor.ex.FileEditorOpenRequest
 a:com.intellij.openapi.fileEditor.ex.IdeDocumentHistory
 - *a:reallyExcludeCurrentCommandAsNavigation():V
+f:com.intellij.openapi.fileEditor.impl.HTMLEditorProvider
+- com.intellij.openapi.fileEditor.FileEditorProvider
+- com.intellij.openapi.project.DumbAware
+- *sf:openEditorWithoutBlocking(com.intellij.openapi.project.Project,java.lang.String,com.intellij.openapi.fileEditor.impl.HTMLEditorProvider$Request):V
+f:com.intellij.openapi.fileEditor.impl.HTMLEditorProvider$Companion
+- *f:openEditorAsync(com.intellij.openapi.project.Project,java.lang.String,com.intellij.openapi.fileEditor.impl.HTMLEditorProvider$Request,kotlin.coroutines.Continuation):java.lang.Object
+- *f:openEditorWithoutBlocking(com.intellij.openapi.project.Project,java.lang.String,com.intellij.openapi.fileEditor.impl.HTMLEditorProvider$Request):V
+c:com.intellij.openapi.options.ex.ConfigurableWrapper
+- com.intellij.openapi.options.ConfigurableWithId
+- com.intellij.openapi.options.SearchableConfigurable
+- *:isSearchableInActions():Z
 *:com.intellij.openapi.options.ex.MutableConfigurableGroup
 - com.intellij.openapi.Disposable
 - com.intellij.openapi.options.ConfigurableGroup
@@ -324,6 +389,17 @@ a:com.intellij.openapi.fileEditor.ex.IdeDocumentHistory
 - a:openInChildProcess(java.nio.file.Path,kotlin.coroutines.Continuation):java.lang.Object
 f:com.intellij.openapi.project.impl.P3SupportKt
 - *sf:processPerProjectSupport():com.intellij.openapi.project.impl.P3Support
+*f:com.intellij.openapi.util.io.CancellableComputation
+- java.util.function.Function
+- *sf:Companion:com.intellij.openapi.util.io.CancellableComputation$Companion
+- apply(java.lang.Object):java.lang.Object
+- *sf:computeCancellable(com.intellij.openapi.util.ThrowableComputable):java.lang.Object
+- *sf:wrapAsCancellable(java.util.function.Function):java.util.function.Function
+*f:com.intellij.openapi.util.io.CancellableComputation$Companion
+- f:computeCancellable(com.intellij.openapi.util.ThrowableComputable):java.lang.Object
+- f:wrapAsCancellable(java.util.function.Function):java.util.function.Function
+*f:com.intellij.openapi.util.io.CancellableComputationKt
+- *sf:wrapCancellable(kotlin.jvm.functions.Function2):kotlin.jvm.functions.Function2
 a:com.intellij.openapi.wm.impl.FrameTitleBuilder
 - *:getFileTitleAsync(com.intellij.openapi.project.Project,com.intellij.openapi.vfs.VirtualFile,kotlin.coroutines.Continuation):java.lang.Object
 f:com.intellij.openapi.wm.impl.IdeBackgroundUtil
@@ -351,7 +427,7 @@ c:com.intellij.openapi.wm.impl.welcomeScreen.TabbedWelcomeScreen
 - <init>():V
 - a:assignTo(com.intellij.openapi.actionSystem.Presentation,kotlin.jvm.functions.Function2):V
 - a:canShow():Z
-- sf:followToolbarComponent(com.intellij.openapi.actionSystem.Presentation,javax.swing.JComponent,javax.swing.JComponent):V
+- *sf:followToolbarComponent(com.intellij.openapi.actionSystem.Presentation,javax.swing.JComponent,javax.swing.JComponent):V
 - p:followToolbarComponent(javax.swing.JComponent,javax.swing.JComponent,kotlin.jvm.functions.Function2):V
 - pf:getPointProvider():kotlin.jvm.functions.Function2
 - a:hideOrRepaint(javax.swing.JComponent):V
@@ -487,16 +563,15 @@ f:com.intellij.ui.dsl.builder.components.ValidationTooltipKt
 - s:getEntries():kotlin.enums.EnumEntries
 - s:valueOf(java.lang.String):com.intellij.ui.dsl.builder.components.ValidationType
 - s:values():com.intellij.ui.dsl.builder.components.ValidationType[]
-f:com.intellij.ui.render.RenderersKt
-- *sf:fontInfoRenderer(Z):javax.swing.ListCellRenderer
-f:com.intellij.util.SwingBindingsKt
-- *sf:bindSelectedTabIn(javax.swing.JTabbedPane,kotlinx.coroutines.flow.MutableStateFlow,kotlinx.coroutines.CoroutineScope):kotlinx.coroutines.Job
+c:com.intellij.ui.popup.list.PopupListElementRenderer
+- com.intellij.ui.popup.list.GroupedItemsListRenderer
+- *p:isShowingTooltipForExtraButton():Z
 *f:com.intellij.util.ui.RestartDialogImpl
 - *sf:Companion:com.intellij.util.ui.RestartDialogImpl$Companion
 - <init>():V
-- sf:restartWithConfirmation():V
+- *sf:restartWithConfirmation():V
 - showRestartRequired():V
-- sf:showRestartRequired(Z,Z):I
+- *sf:showRestartRequired(Z,Z):I
 *f:com.intellij.util.ui.RestartDialogImpl$Companion
 - f:restartWithConfirmation():V
 - f:showRestartRequired(Z,Z):I

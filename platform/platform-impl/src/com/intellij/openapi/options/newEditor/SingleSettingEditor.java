@@ -3,11 +3,13 @@ package com.intellij.openapi.options.newEditor;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.scale.JBUIScale;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,7 +21,7 @@ public final class SingleSettingEditor extends ConfigurableEditor {
   private final SimpleBanner myBanner = new SimpleBanner() {
     @Override
     Dimension getPreferredLeftPanelSize(Dimension size) {
-      return new Dimension(size.width, JBUIScale.scale(35));
+      return new Dimension(size.width, JBUIScale.scale(SystemInfo.isMac ? 35 : 41));
     }
   };
   private final Map<Configurable, ConfigurableController> myControllers = new HashMap<>();

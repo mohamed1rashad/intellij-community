@@ -1,18 +1,22 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.theoryinpractice.testng.model;
 
 import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.execution.CantRunException;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
 import com.intellij.execution.testframework.SourceScope;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.AnnotatedMembersSearch;
 import com.intellij.util.ArrayUtil;
@@ -21,14 +25,22 @@ import com.theoryinpractice.testng.configuration.TestNGConfiguration;
 import com.theoryinpractice.testng.util.TestNGUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.testng.annotations.AfterGroups;
-import org.testng.annotations.BeforeGroups;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static com.theoryinpractice.testng.util.TestNGUtil.AFTER_GROUPS_ANNOTATION_FQN;
+import static com.theoryinpractice.testng.util.TestNGUtil.BEFORE_GROUPS_ANNOTATION_FQN;
 
 public abstract class TestNGTestObject {
 
-  public static final String[] GROUPS_CONFIGURATION = {BeforeGroups.class.getName(), AfterGroups.class.getName()};
+  public static final String[] GROUPS_CONFIGURATION = {BEFORE_GROUPS_ANNOTATION_FQN, AFTER_GROUPS_ANNOTATION_FQN};
 
   private static final Logger LOG = Logger.getInstance(TestNGTestObject.class);
   protected final TestNGConfiguration myConfig;
@@ -140,7 +152,7 @@ public abstract class TestNGTestObject {
                                            final GlobalSearchScope searchScope,
                                            final Set<PsiMember> membersToCheckNow,
                                            final PsiClass... classes) {
-    ApplicationManager.getApplication().runReadAction(() -> {
+    ReadAction.runBlocking(() -> {
       final Project project = classes[0].getProject();
       final PsiClass testAnnotation = JavaPsiFacade.getInstance(project).findClass(annotationFqn, GlobalSearchScope.allScope(project));
       if (testAnnotation == null) {
@@ -181,7 +193,7 @@ public abstract class TestNGTestObject {
       valuesMap.put("dependsOnMethods", testMethodDependencies);
       TestNGUtil.collectAnnotationValues(valuesMap, methods, containingClass);
       if (!testMethodDependencies.isEmpty()) {
-        ApplicationManager.getApplication().runReadAction(() -> {
+        ReadAction.runBlocking(() -> {
           final Project project = containingClass.getProject();
           final JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
           for (String dependency : testMethodDependencies) {

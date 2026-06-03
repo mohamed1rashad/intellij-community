@@ -4,6 +4,9 @@ package com.intellij.ide.plugins.api
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.PluginNodeVendorDetails
+import com.intellij.ide.plugins.marketplace.ModuleDependency
+import com.intellij.ide.plugins.marketplace.PluginContentModule
+import com.intellij.ide.plugins.marketplace.PluginModule
 import com.intellij.ide.plugins.newui.PluginDependencyModel
 import com.intellij.ide.plugins.newui.PluginSource
 import com.intellij.ide.plugins.newui.PluginUiModel
@@ -47,6 +50,7 @@ class PluginDto(
   override var downloadUrl: String? = null
 
   override var releaseVersion: Int = 0
+  override var isEssential: Boolean = false
   override var displayCategory: String? = null
   override var isImplementationDetail: Boolean = false
   override var vendorDetails: PluginNodeVendorDetails? = null
@@ -73,6 +77,10 @@ class PluginDto(
   override var repositoryName: String? = null
   override var channel: String? = null
   override var installSource: FUSEventSource? = null
+
+  override var contentModules: List<PluginContentModule> = emptyList()
+  override var modules: List<PluginModule> = emptyList()
+  override var mainModuleDependencies: List<ModuleDependency> = emptyList()
 
   override var category: String? = null
   override var description: String? = null
@@ -160,6 +168,9 @@ class PluginDto(
         repositoryName = model.repositoryName
         channel = model.channel
         installSource = model.installSource
+        contentModules = model.contentModules.toList()
+        modules = model.modules.toList()
+        mainModuleDependencies = model.mainModuleDependencies.toList()
         if (!ignoreDescriptionForNotLoadedPlugins || PluginManagerCore.isLoaded(model.pluginId)) {
           description = model.description
         }
@@ -169,6 +180,7 @@ class PluginDto(
         releaseDate = model.releaseDate
         isBundledUpdate = model.isBundledUpdate
         isImplementationDetail = model.isImplementationDetail
+        isEssential = model.isEssential
         isDisableAllowed = model.isDisableAllowed
       }
     }

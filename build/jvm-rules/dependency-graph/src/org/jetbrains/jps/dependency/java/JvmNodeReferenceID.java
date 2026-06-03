@@ -5,6 +5,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.dependency.GraphDataInput;
 import org.jetbrains.jps.dependency.GraphDataOutput;
 import org.jetbrains.jps.dependency.ReferenceID;
+import org.jetbrains.jps.dependency.impl.GraphElementInterner;
 
 import java.io.IOException;
 
@@ -12,7 +13,7 @@ public final class JvmNodeReferenceID implements ReferenceID {
   private final String myName;
 
   public JvmNodeReferenceID(@NotNull String name) {
-    myName = name;
+    myName = GraphElementInterner.intern(name);
   }
 
   public JvmNodeReferenceID(GraphDataInput in) throws IOException {
@@ -29,6 +30,11 @@ public final class JvmNodeReferenceID implements ReferenceID {
    */
   public String getNodeName() {
     return myName;
+  }
+
+  @Override
+  public int compareTo(@NotNull ReferenceID other) {
+    return myName.compareTo(other instanceof JvmNodeReferenceID? ((JvmNodeReferenceID)other).myName : other.toString());
   }
 
   @Override

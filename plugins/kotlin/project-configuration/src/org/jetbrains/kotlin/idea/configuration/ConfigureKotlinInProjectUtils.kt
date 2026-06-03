@@ -6,7 +6,6 @@ import com.intellij.externalSystem.JavaModuleData
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.application.smartReadAction
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.extensions.Extensions
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleGrouper
@@ -39,9 +38,18 @@ import org.jetbrains.kotlin.config.LanguageVersionSettingsImpl
 import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.facet.isMultiPlatformModule
 import org.jetbrains.kotlin.idea.base.facet.platform.platform
-import org.jetbrains.kotlin.idea.base.indices.KotlinPackageIndexUtils
-import org.jetbrains.kotlin.idea.base.platforms.*
-import org.jetbrains.kotlin.idea.base.projectStructure.*
+import org.jetbrains.kotlin.idea.base.platforms.KotlinCommonLibraryKind
+import org.jetbrains.kotlin.idea.base.platforms.KotlinJavaScriptLibraryKind
+import org.jetbrains.kotlin.idea.base.platforms.KotlinNativeLibraryKind
+import org.jetbrains.kotlin.idea.base.platforms.KotlinWasmJsLibraryKind
+import org.jetbrains.kotlin.idea.base.platforms.KotlinWasmWasiLibraryKind
+import org.jetbrains.kotlin.idea.base.platforms.detectLibraryKind
+import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootGroup
+import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootMap
+import org.jetbrains.kotlin.idea.base.projectStructure.exclude
+import org.jetbrains.kotlin.idea.base.projectStructure.hasKotlinJvmRuntime
+import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
+import org.jetbrains.kotlin.idea.base.projectStructure.toModuleGroup
 import org.jetbrains.kotlin.idea.base.util.GRADLE_SYSTEM_ID
 import org.jetbrains.kotlin.idea.base.util.module
 import org.jetbrains.kotlin.idea.base.util.projectScope
@@ -65,7 +73,7 @@ import org.jetbrains.kotlin.platform.isWasm
 import org.jetbrains.kotlin.platform.jvm.isJvm
 import org.jetbrains.kotlin.platform.konan.isNative
 import java.nio.file.Path
-import java.util.*
+import java.util.EnumSet
 import kotlin.io.path.Path
 import kotlin.io.path.exists
 
@@ -113,7 +121,6 @@ fun DependencyScope.toGradleCompileScope(isAndroidModule: Boolean): String = whe
     DependencyScope.TEST -> if (isAndroidModule) "implementation" else "testImplementation"
     DependencyScope.RUNTIME -> "runtime"
     DependencyScope.PROVIDED -> "implementation"
-    else -> "implementation"
 }
 
 fun DependencyScope.toGradleCompileScope(targetModule: Module? = null): String = when (this) {
@@ -121,7 +128,6 @@ fun DependencyScope.toGradleCompileScope(targetModule: Module? = null): String =
     DependencyScope.TEST -> if (targetModule?.isMultiPlatformModule == true) "implementation" else "testImplementation"
     DependencyScope.RUNTIME -> "runtime"
     DependencyScope.PROVIDED -> "implementation"
-    else -> "implementation"
 }
 
 fun RepositoryDescription.toGroovyRepositorySnippet(): String = "maven { url '$url' }"
@@ -248,10 +254,8 @@ fun getConfiguratorByName(name: String): KotlinProjectConfigurator? {
     return allConfigurators().firstOrNull { it.name == name }
 }
 
-fun allConfigurators(): Array<KotlinProjectConfigurator> {
-    @Suppress("DEPRECATION")
-    return Extensions.getExtensions(KotlinProjectConfigurator.EP_NAME)
-}
+fun allConfigurators(): List<KotlinProjectConfigurator> =
+    KotlinProjectConfigurator.EP_NAME.extensionList
 
 fun getCanBeConfiguredModules(project: Project, configurator: KotlinProjectConfigurator): List<Module> {
     val projectModules = project.modules.toList()
@@ -384,10 +388,6 @@ fun hasAnyKotlinRuntimeInScope(module: Module): Boolean {
     }
 }
 
-fun isStdlibModule(module: Module): Boolean {
-    return KotlinPackageIndexUtils.packageExists(FqName("kotlin"), module.moduleProductionSourceScope)
-}
-
 fun getPlatform(module: Module): String {
     return when {
         module.platform.isJvm() -> {
@@ -405,7 +405,7 @@ fun getPlatform(module: Module): String {
 
         module.platform.isJs() && hasKotlinJsRuntimeInScope(module) -> "js"
         module.platform.isCommon() -> "common"
-        module.platform.isNative() -> "native." + (module.platform?.componentPlatforms?.first()?.targetName ?: "unknown")
+        module.platform.isNative() -> "native." + module.platform.componentPlatforms.first().targetName
         else -> "unknown"
     }
 }

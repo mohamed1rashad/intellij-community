@@ -3,7 +3,6 @@ package org.jetbrains.kotlin.idea.refactoring.helper
 
 import com.intellij.formatting.service.PostQuickFixTaskService
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
@@ -20,6 +19,7 @@ import com.intellij.psi.util.PsiUtilCore
 import com.intellij.refactoring.RefactoringHelper
 import com.intellij.usageView.UsageInfo
 import com.intellij.util.IncorrectOperationException
+import org.jetbrains.kotlin.asJava.unwrapped
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinOptimizeImportsFacility
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.util.application.executeWriteCommand
@@ -35,23 +35,19 @@ class KotlinOptimizeImportsRefactoringHelper : RefactoringHelper<Set<KtFile>> {
     ) : Task.Modal(project, KotlinBundle.message("optimize.imports.collect.unused.imports"), true) {
 
         override fun run(indicator: ProgressIndicator) {
-            run {
-                indicator.isIndeterminate = false
+            indicator.isIndeterminate = false
 
-                val myTotalCount = operationData.size
-                for ((counter, file) in operationData.withIndex()) {
-                    ReadAction.nonBlocking<Unit> {
-                        val virtualFile = file.virtualFile ?: return@nonBlocking
+            val myTotalCount = operationData.size
+            for ((counter, file) in operationData.withIndex()) {
+                runReadAction {
+                    val virtualFile = file.virtualFile ?: return@runReadAction
 
-                        indicator.fraction = counter.toDouble() / myTotalCount
-                        indicator.text2 = virtualFile.presentableUrl
+                    indicator.fraction = counter.toDouble() / myTotalCount
+                    indicator.text2 = virtualFile.presentableUrl
 
-                        val importData = KotlinOptimizeImportsFacility.getInstance().analyzeImports(file)
-                        importData?.unusedImports?.mapTo(unusedImports) { it.createSmartPointer() }
-                    }
-                        .wrapProgress(indicator)
-                        .expireWhen { !file.isValid || project.isDisposed() }
-                        .executeSynchronously()
+                    if (!file.isValid) return@runReadAction
+                    val importData = KotlinOptimizeImportsFacility.getInstance().analyzeImports(file)
+                    importData?.unusedImports?.mapTo(unusedImports) { it.createSmartPointer() }
                 }
             }
         }
@@ -95,7 +91,7 @@ class KotlinOptimizeImportsRefactoringHelper : RefactoringHelper<Set<KtFile>> {
 
     override fun prepareOperation(usages: Array<UsageInfo>, elements: List<PsiElement>): Set<KtFile> {
         return prepareOperation(usages) + elements
-            .mapNotNull { it.containingFile as? KtFile }
+            .mapNotNull { it.unwrapped?.containingFile as? KtFile }
             .filter { ProjectFileIndex.getInstance(elements.first().project).isInSourceContent(it.virtualFile) }.toSet()
     }
 

@@ -4,15 +4,24 @@ package com.intellij.ui.tabs.impl.singleRow;
 import com.intellij.ui.ExperimentalUI;
 import com.intellij.ui.tabs.TabInfo;
 import com.intellij.ui.tabs.TabsUtil;
-import com.intellij.ui.tabs.impl.*;
+import com.intellij.ui.tabs.impl.IslandsPainterProvider;
+import com.intellij.ui.tabs.impl.JBTabsImpl;
+import com.intellij.ui.tabs.impl.LayoutPassInfo;
+import com.intellij.ui.tabs.impl.ShapeTransform;
+import com.intellij.ui.tabs.impl.TabLabel;
+import com.intellij.ui.tabs.impl.TabLayout;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.ui.JBInsets;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.SwingConstants;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.lang.ref.WeakReference;
 import java.util.List;
 import java.util.Objects;
@@ -149,6 +158,12 @@ public abstract class SingleRowLayout extends TabLayout {
     data.insets = tabs.getLayoutInsets();
     if (tabs.isHorizontalTabs()) {
       data.insets.left += tabs.getFirstTabOffset();
+    }
+
+    IslandsPainterProvider provider = IslandsPainterProvider.getInstance();
+    var additionalInsets = provider == null ? null : provider.getSingleRowTabInsets(tabs.getTabsPosition());
+    if (additionalInsets != null) {
+      data.insets = JBInsets.addInsets(data.insets, additionalInsets);
     }
 
     JBTabsImpl.Toolbar selectedForeToolbar = tabs.infoToForeToolbar.get(selected);

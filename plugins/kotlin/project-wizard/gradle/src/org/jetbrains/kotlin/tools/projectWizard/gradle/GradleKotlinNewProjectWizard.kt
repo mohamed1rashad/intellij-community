@@ -7,35 +7,50 @@ import com.intellij.ide.projectWizard.NewProjectWizardCollector.Base.logAddSampl
 import com.intellij.ide.projectWizard.NewProjectWizardCollector.Kotlin.logGenerateMultipleModulesChanged
 import com.intellij.ide.projectWizard.NewProjectWizardCollector.Kotlin.logGenerateMultipleModulesFinished
 import com.intellij.ide.projectWizard.NewProjectWizardConstants.BuildSystem.GRADLE
+import com.intellij.ide.projectWizard.ProjectWizardJdkPredicate
 import com.intellij.ide.projectWizard.generators.AssetsOnboardingTips.shouldRenderOnboardingTips
 import com.intellij.ide.wizard.NewProjectWizardChainStep.Companion.nextStep
 import com.intellij.ide.wizard.NewProjectWizardStep
 import com.intellij.ide.wizard.NewProjectWizardStep.Companion.ADD_SAMPLE_CODE_PROPERTY_NAME
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.observable.util.bindBooleanStorage
 import com.intellij.openapi.observable.util.equalsTo
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.project.modules
+import com.intellij.openapi.projectRoots.JavaSdkVersion
+import com.intellij.openapi.projectRoots.JavaSdkVersionUtil
+import com.intellij.openapi.projectRoots.Sdk
+import com.intellij.openapi.projectRoots.impl.jdkDownloader.JdkItem
 import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.UIBundle
 import com.intellij.ui.dsl.builder.Panel
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.whenStateChangedFromUi
 import com.intellij.ui.layout.ValidationInfoBuilder
+import com.intellij.util.lang.JavaVersion
 import org.gradle.util.GradleVersion
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.Nls
 import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootGroup
 import org.jetbrains.kotlin.idea.base.projectStructure.ModuleSourceRootMap
 import org.jetbrains.kotlin.idea.compiler.configuration.IdeKotlinVersion
 import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.KotlinWithGradleConfigurator
 import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.getBuildScriptPsiFile
 import org.jetbrains.kotlin.idea.gradleJava.kotlinGradlePluginVersion
-import org.jetbrains.kotlin.tools.projectWizard.*
+import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizard
 import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizard.Companion.DEFAULT_KOTLIN_VERSION
+import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizardData
 import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizardData.Companion.SRC_MAIN_KOTLIN_PATH
 import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizardData.Companion.SRC_MAIN_RESOURCES_PATH
 import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizardData.Companion.SRC_TEST_KOTLIN_PATH
 import org.jetbrains.kotlin.tools.projectWizard.BuildSystemKotlinNewProjectWizardData.Companion.SRC_TEST_RESOURCES_PATH
+import org.jetbrains.kotlin.tools.projectWizard.KotlinNewProjectWizard
+import org.jetbrains.kotlin.tools.projectWizard.KotlinNewProjectWizardBundle
+import org.jetbrains.kotlin.tools.projectWizard.Versions
+import org.jetbrains.kotlin.tools.projectWizard.addMultiPlatformLink
+import org.jetbrains.kotlin.tools.projectWizard.compatibility.GradleToPluginsCompatibilityStore
 import org.jetbrains.kotlin.tools.projectWizard.compatibility.KotlinGradleCompatibilityStore
 import org.jetbrains.kotlin.tools.projectWizard.compatibility.KotlinLibrariesCompatibilityStore
 import org.jetbrains.kotlin.tools.projectWizard.compatibility.KotlinLibrariesCompatibilityStore.Companion.COROUTINES_ARTIFACT_ID
@@ -62,7 +77,33 @@ private const val KOTLIN_GRADLE_PLUGIN_ID = "org.jetbrains.kotlin:kotlin-gradle-
 
 private val MIN_GRADLE_VERSION_BUILD_SRC = GradleVersion.version("8.2")
 
+private fun getBundledKotlinPluginVersion(): String {
+    return KotlinWizardVersionStore.getInstance().state?.kotlinPluginVersion ?: DEFAULT_KOTLIN_VERSION
+}
+
+private fun getParsedBundledKotlinVersion(): IdeKotlinVersion? {
+    val bundledKotlinPluginVersion = getBundledKotlinPluginVersion()
+    return IdeKotlinVersion.parse(bundledKotlinPluginVersion).getOrNull()
+}
+
+private fun getMaxJvmTarget(kotlinVersion: IdeKotlinVersion): Int? {
+    return KotlinGradleCompatibilityStore.getMaxJvmTarget(kotlinVersion)
+}
+
+@ApiStatus.Internal
+fun JavaSdkVersion.isLessOrEqualToMaxJvmTarget(): Boolean {
+    val parsedKotlinVersion = getParsedBundledKotlinVersion() ?: return false
+    val maxJvmTarget = getMaxJvmTarget(parsedKotlinVersion)
+    val maxSdkVersion = JavaSdkVersion.fromVersionString(maxJvmTarget.toString())
+    if (maxSdkVersion == null) return false
+    return this <= maxSdkVersion
+}
+
 internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard {
+
+    companion object {
+        private val LOG = Logger.getInstance(GradleKotlinNewProjectWizard::class.java)
+    }
 
     override val name = GRADLE
 
@@ -113,13 +154,22 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
                     .enabledIf(gradleDslProperty.equalsTo(GradleDsl.KOTLIN))
                     .whenStateChangedFromUi { logGenerateMultipleModulesChanged(it) }
                     .onApply { logGenerateMultipleModulesFinished(shouldGenerateMultipleModules) }
-
-                contextHelp(KotlinNewProjectWizardUIBundle.message("tooltip.project.wizard.new.project.generate.multiple.modules"))
+                    .contextHelp(KotlinNewProjectWizardUIBundle.message("tooltip.project.wizard.new.project.generate.multiple.modules"))
             }.visibleIf(gradleDslProperty.equalsTo(GradleDsl.KOTLIN))
         }
 
         override fun setupSettingsUI(builder: Panel) {
-            setupJavaSdkUI(builder)
+            val bundledKotlinPluginVersion = getBundledKotlinPluginVersion()
+            val kotlinVersion = IdeKotlinVersion.parse(bundledKotlinPluginVersion).getOrNull()
+            val maxJvmTargetForBundledKotlinVersion = kotlinVersion?.let { KotlinGradleCompatibilityStore.getMaxJvmTarget(it) }
+
+            setupJavaSdkUI(
+                builder,
+                ::sdkFilter,
+                KotlinJdkPredicate(),
+                bundledKotlinPluginVersion,
+                maxJvmTargetForBundledKotlinVersion?.toString()
+            )
             setupGradleDslUI(builder)
             setupParentsUI(builder)
             setupSampleCodeUI(builder)
@@ -127,6 +177,23 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
                 setupMultipleModulesUI(builder)
                 addMultiPlatformLink(builder)
             }
+        }
+
+        private class KotlinJdkPredicate : ProjectWizardJdkPredicate {
+
+            // Removes SDKs from the `Download JDK` dialog called from the JDK dropdown
+            override fun showJdkItem(jdkItem: JdkItem): Boolean {
+                val javaSdkVersion = JavaSdkVersion.fromVersionString(jdkItem.jdkVersion) ?: return false
+                return javaSdkVersion.isLessOrEqualToMaxJvmTarget()
+            }
+
+            override fun getError(version: JavaVersion, name: String?): @Nls String? = null
+        }
+
+        // Removes SDKs from the `Registered JDKs` list in the JDK dropdown
+        private fun sdkFilter(sdk: Sdk): Boolean {
+            val javaSdkVersion = JavaSdkVersionUtil.getJavaSdkVersion(sdk) ?: return false
+            return javaSdkVersion.isLessOrEqualToMaxJvmTarget()
         }
 
         override fun validateGradleVersion(gradleVersion: GradleVersion): Boolean {
@@ -222,9 +289,7 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
                 return false
             }
 
-            val maxJvmTarget = parsedKotlinVersionToUse?.let {
-                KotlinGradleCompatibilityStore.getMaxJvmTarget(it)
-            } ?: 11
+            val maxJvmTarget = parsedKotlinVersionToUse?.let { getMaxJvmTarget(it) } ?: 11
             selectedJdkJvmTarget?.let {
                 if (it > maxJvmTarget) {
                     return false
@@ -238,7 +303,7 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
             private set
 
         private fun resolveKotlinVersionToUse(project: Project): String {
-            val kotlinPluginVersion = KotlinWizardVersionStore.getInstance().state?.kotlinPluginVersion ?: DEFAULT_KOTLIN_VERSION
+            val kotlinPluginVersion = getBundledKotlinPluginVersion()
 
             if (isCreatingNewLinkedProject) {
                 return kotlinPluginVersion
@@ -312,7 +377,7 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
             setupCommonProjectAssets()
 
             if (parent.shouldGenerateMultipleModules) {
-                setupMultiModuleProjectAssets(project)
+                setupMultiModuleProjectAssets(project, parent.gradleVersionToUse)
             } else {
                 setupSingleModuleProjectAssets(project)
             }
@@ -366,18 +431,25 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
         }
 
         // This is currently only supported for generating new projects!
-        private fun setupMultiModuleProjectAssets(project: Project) {
+        private fun setupMultiModuleProjectAssets(project: Project, gradleVersion: GradleVersion) {
             assert(context.isCreatingNewProject)
             val librariesVersionStore = KotlinLibrariesCompatibilityStore.getInstance()
-            val datetimeVersion = librariesVersionStore.getLatestVersion(KOTLINX_GROUP, DATETIME_ARTIFACT_ID) ?: ""
-            val coroutinesVersion = librariesVersionStore.getLatestVersion(KOTLINX_GROUP, COROUTINES_ARTIFACT_ID) ?: ""
-            val serializationJsonVersion = librariesVersionStore.getLatestVersion(KOTLINX_GROUP, SERIALIZATION_JSON_ARTIFACT_ID) ?: ""
+            val datetimeVersion = getLatestVersionByHighestKotlinVersion(librariesVersionStore, DATETIME_ARTIFACT_ID)
+            val coroutinesVersion = getLatestVersionByHighestKotlinVersion(librariesVersionStore, COROUTINES_ARTIFACT_ID)
+            val serializationJsonVersion = getLatestVersionByHighestKotlinVersion(librariesVersionStore, SERIALIZATION_JSON_ARTIFACT_ID)
+
+            val gradleToPluginsCompatibilityStore = GradleToPluginsCompatibilityStore.getInstance()
+            val foojayVersion =
+                gradleToPluginsCompatibilityStore.getFoojayVersion(gradleVersion)
+                    ?: GradleToPluginsCompatibilityStore.getDefaultFoojayVersion().also {
+                        LOG.error("Unable to get Foojay version for Gradle $gradleVersion, getting a default one")
+                    }
 
             val templateParameters = mapOf(
                 "PROJECT_NAME" to parent.name,
                 "PACKAGE_NAME" to parent.groupId,
                 "KOTLIN_VERSION" to Versions.KOTLIN,
-                "FOOJAY_VERSION" to Versions.GRADLE_PLUGINS.FOOJAY_VERSION,
+                "FOOJAY_VERSION" to foojayVersion,
                 "JVM_VERSION" to (parent.selectedJdkJvmTarget?.toString() ?: "21"),
                 "KOTLINX_DATETIME_VERSION" to datetimeVersion,
                 "KOTLINX_SERIALIZATION_JSON_VERSION" to serializationJsonVersion,
@@ -417,6 +489,14 @@ internal class GradleKotlinNewProjectWizard : BuildSystemKotlinNewProjectWizard 
                 addTemplateAsset("utils/$SRC_MAIN_KOTLIN_PATH/Utilities.kt", "KotlinSampleUtilsUtilities", templateParameters)
                 addTemplateAsset("utils/$SRC_TEST_KOTLIN_PATH/UtilitiesTest.kt", "KotlinSampleUtilsUtilitiesTest", templateParameters)
             }
+        }
+
+        private fun getLatestVersionByHighestKotlinVersion(
+            kotlinLibrariesCompatibilityStore: KotlinLibrariesCompatibilityStore,
+            artifactId: String
+        ): String {
+            return kotlinLibrariesCompatibilityStore.getLatestVersion(KOTLINX_GROUP, artifactId)
+                ?: "".also { LOG.error("Unable to get $artifactId version") }
         }
     }
 }

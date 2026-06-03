@@ -48,12 +48,11 @@ abstract class ProductLoadingStrategy {
     customPluginDir: Path,
     bundledPluginDir: Path?,
     isUnitTestMode: Boolean,
+    isInDevServerMode: Boolean,
     isRunningFromSources: Boolean,
     zipPool: ZipEntryResolverPool,
     mainClassLoader: ClassLoader,
   ): Deferred<List<DiscoveredPluginsList>>
-  
-  abstract fun isOptionalProductModule(moduleId: String): Boolean
 
   /**
    * Returns the path to a JAR or directory containing classes from [moduleId] registered as a content module in the product, or `null`

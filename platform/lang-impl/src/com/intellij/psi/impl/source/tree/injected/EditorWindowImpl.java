@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.source.tree.injected;
 
 import com.intellij.ide.CopyProvider;
@@ -13,22 +13,38 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ReadAction;
-import com.intellij.openapi.editor.*;
-import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorGutter;
+import com.intellij.openapi.editor.EditorKind;
+import com.intellij.openapi.editor.EditorSettings;
+import com.intellij.openapi.editor.FoldRegion;
+import com.intellij.openapi.editor.IndentsModel;
+import com.intellij.openapi.editor.InlayModel;
+import com.intellij.openapi.editor.LineExtensionInfo;
+import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.SelectionModel;
+import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.event.EditorMouseEvent;
 import com.intellij.openapi.editor.event.EditorMouseEventArea;
 import com.intellij.openapi.editor.event.EditorMouseListener;
 import com.intellij.openapi.editor.event.EditorMouseMotionListener;
-import com.intellij.openapi.editor.ex.*;
+import com.intellij.openapi.editor.ex.DocumentEx;
+import com.intellij.openapi.editor.ex.EditorEx;
+import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
+import com.intellij.openapi.editor.ex.EditorPopupHandler;
+import com.intellij.openapi.editor.ex.FocusChangeListener;
+import com.intellij.openapi.editor.ex.FoldingModelEx;
+import com.intellij.openapi.editor.ex.MarkupModelEx;
+import com.intellij.openapi.editor.ex.ScrollingModelEx;
+import com.intellij.openapi.editor.ex.SoftWrapModelEx;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.LightHighlighterClient;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.impl.TextDrawingCallback;
 import com.intellij.openapi.editor.markup.TextAttributes;
-import com.intellij.openapi.fileTypes.SyntaxHighlighter;
-import com.intellij.openapi.fileTypes.SyntaxHighlighterFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.UserDataHolderBase;
@@ -40,9 +56,14 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JScrollPane;
 import javax.swing.border.Border;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.Insets;
+import java.awt.Point;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Point2D;
@@ -273,10 +294,7 @@ final class EditorWindowImpl extends UserDataHolderBase implements EditorWindow,
 
   @Override
   public @NotNull EditorHighlighter getHighlighter() {
-    EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
-    SyntaxHighlighter syntaxHighlighter =
-      SyntaxHighlighterFactory.getSyntaxHighlighter(myInjectedFile.getLanguage(), getProject(), myInjectedFile.getVirtualFile());
-    EditorHighlighter highlighter = HighlighterFactory.createHighlighter(syntaxHighlighter, scheme);
+    EditorHighlighter highlighter = HighlighterFactory.createHighlighter(getProject(), myInjectedFile.getVirtualFile());
     highlighter.setText(getDocument().getText());
     highlighter.setEditor(new LightHighlighterClient(getDocument(), getProject()));
     return highlighter;
@@ -492,13 +510,15 @@ final class EditorWindowImpl extends UserDataHolderBase implements EditorWindow,
   }
 
   private @NotNull EditorMouseEvent convertEvent(@NotNull EditorMouseEvent originalEvent) {
-    LogicalPosition logicalPosition = hostToInjected(originalEvent.getLogicalPosition());
-    int offset = logicalPositionToOffset(logicalPosition);
-    VisualPosition visualPosition = logicalToVisualPosition(logicalPosition);
-    FoldRegion hostFoldRegion = originalEvent.getCollapsedFoldRegion();
-    return new EditorMouseEvent(this, originalEvent.getMouseEvent(), originalEvent.getArea(),
-                                offset, logicalPosition, visualPosition, true,
-                                hostFoldRegion == null ? null : FoldingRegionWindow.getInjectedRegion(hostFoldRegion), null, null);
+    return ReadAction.computeBlocking(() -> {
+      LogicalPosition logicalPosition = hostToInjected(originalEvent.getLogicalPosition());
+      int offset = logicalPositionToOffset(logicalPosition);
+      VisualPosition visualPosition = logicalToVisualPosition(logicalPosition);
+      FoldRegion hostFoldRegion = originalEvent.getCollapsedFoldRegion();
+      return new EditorMouseEvent(this, originalEvent.getMouseEvent(), originalEvent.getArea(),
+                                  offset, logicalPosition, visualPosition, true,
+                                  hostFoldRegion == null ? null : FoldingRegionWindow.getInjectedRegion(hostFoldRegion), null, null);
+    });
   }
 
   @Override
@@ -799,7 +819,7 @@ final class EditorWindowImpl extends UserDataHolderBase implements EditorWindow,
 
   @Override
   public String toString() {
-    return super.toString() + "[disposed=" + myDisposed + "; valid=" + ReadAction.compute(()->isValid()) + "]";
+    return super.toString() + "[disposed=" + myDisposed + "; valid=" + ReadAction.computeBlocking(() -> isValid()) + "]";
   }
 
   @Override

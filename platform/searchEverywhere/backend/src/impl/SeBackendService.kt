@@ -1,8 +1,9 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.searchEverywhere.backend.impl
 
+import com.intellij.ide.rpc.DataContextDeserializationResult
 import com.intellij.ide.rpc.DataContextId
-import com.intellij.ide.rpc.dataContext
+import com.intellij.ide.rpc.dataContextWithDiagnostics
 import com.intellij.openapi.actionSystem.ActionUiKind
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.EDT
@@ -12,27 +13,56 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.project.ProjectId
 import com.intellij.platform.scopes.SearchScopesInfo
-import com.intellij.platform.searchEverywhere.*
+import com.intellij.platform.searchEverywhere.SeItemData
+import com.intellij.platform.searchEverywhere.SeItemsProvider
+import com.intellij.platform.searchEverywhere.SeItemsProviderFactory
+import com.intellij.platform.searchEverywhere.SeParams
+import com.intellij.platform.searchEverywhere.SePreviewInfo
+import com.intellij.platform.searchEverywhere.SeProviderId
+import com.intellij.platform.searchEverywhere.SeProviderIdUtils
+import com.intellij.platform.searchEverywhere.SeSession
+import com.intellij.platform.searchEverywhere.SeTransferEnd
+import com.intellij.platform.searchEverywhere.SeTransferEvent
+import com.intellij.platform.searchEverywhere.SeTransferItem
+import com.intellij.platform.searchEverywhere.asRef
 import com.intellij.platform.searchEverywhere.equalityProviders.SeEqualityChecker
+import com.intellij.platform.searchEverywhere.presentations.SeItemPresentation
 import com.intellij.platform.searchEverywhere.providers.SeLog
 import com.intellij.platform.searchEverywhere.providers.SeProvidersHolder
 import com.intellij.platform.searchEverywhere.providers.SeSortedProviderIds
+import com.intellij.platform.searchEverywhere.providers.areCommandsSupported
+import com.intellij.platform.searchEverywhere.providers.isExtendedInfoEnabled
+import com.intellij.platform.searchEverywhere.providers.isPreviewEnabled
 import com.intellij.platform.searchEverywhere.providers.target.SeTypeVisibilityStatePresentation
+import com.intellij.platform.searchEverywhere.toProviderId
 import com.intellij.platform.searchEverywhere.utils.SeResultsCountBalancer
 import com.jetbrains.rhizomedb.EID
 import fleet.kernel.onDispose
 import fleet.kernel.rete.Rete
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.consumeEach
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.collections.any
 
 @ApiStatus.Internal
 @Service(Service.Level.PROJECT)
@@ -104,7 +134,11 @@ class SeBackendService(val project: Project, private val coroutineScope: Corouti
     dataContextId: DataContextId,
   ): SeSortedProviderIds? {
     val providersHolder = getProvidersHolder(session, dataContextId) ?: return null
-    val allProviderIds = SeItemsProviderFactory.EP_NAME.extensionList.map { it.id.toProviderId() } + providersHolder.legacyAllTabContributors.map { it.key }
+    val allProviderIds = (SeItemsProviderFactory.EP_NAME.extensionList.map { it.id.toProviderId() } +
+                          providersHolder.legacyContributors.allTab.map { it.key }).filter {
+      // Remove the frontend version of TopHit contributor
+      it.value != SeProviderIdUtils.TOP_HIT_ID
+    }
     return SeSortedProviderIds.create(allProviderIds, providersHolder, session)
   }
 
@@ -127,10 +161,11 @@ class SeBackendService(val project: Project, private val coroutineScope: Corouti
         return@withLock null
       }
 
-      val dataContext = withContext(Dispatchers.EDT) {
-        dataContextId.dataContext()
-      } ?: run {
-        SeLog.error("Cannot create providers on the backend: couldn't deserialize data context")
+      val dataContextResolution = withContext(Dispatchers.EDT) {
+        dataContextId.dataContextWithDiagnostics()
+      }
+      val dataContext = dataContextResolution.dataContext ?: run {
+        logDataContextDeserializationFailure(dataContextResolution)
         return@withLock null
       }
 
@@ -145,6 +180,45 @@ class SeBackendService(val project: Project, private val coroutineScope: Corouti
 
       return@withLock providersHolder
     }
+
+  private fun logDataContextDeserializationFailure(result: DataContextDeserializationResult) {
+    val message = buildString {
+      append("Cannot create providers on the backend: couldn't deserialize data context")
+      append(" [reason=").append(describeDeserializationReason(result))
+      result.serializerClassName?.let {
+        append(", serializer=").append(it)
+      }
+      formatCauseChain(result.failure)?.let {
+        append(", failure=").append(it)
+      }
+      append(']')
+    }
+
+    SeLog.error(message)
+  }
+
+  private fun describeDeserializationReason(result: DataContextDeserializationResult): String {
+    return when {
+      !result.hasSerializedValue -> "missing-serialized-value"
+      result.serializerClassName == null -> "no-matching-rpc-serializer"
+      result.failure != null -> "serializer-threw"
+      else -> "serializer-returned-null"
+    }
+  }
+
+  private fun formatCauseChain(throwable: Throwable?): String? {
+    if (throwable == null) return null
+
+    return generateSequence(throwable) { it.cause }
+      .joinToString(" -> ") { current ->
+        buildString {
+          append(current::class.java.name)
+          current.message?.takeIf { it.isNotBlank() }?.let {
+            append(": ").append(it)
+          }
+        }
+      }
+  }
 
   suspend fun itemSelected(session: SeSession, itemData: SeItemData, modifiers: Int, searchText: String, isAllTab: Boolean): Boolean {
     val provider = getProvidersHolder(session, null)?.get(itemData.providerId, isAllTab) ?: return false
@@ -254,8 +328,8 @@ class SeBackendService(val project: Project, private val coroutineScope: Corouti
     isAllTab: Boolean,
   ): Boolean {
     return providerIds.any { providerId ->
-      val provider = getProvidersHolder(session, dataContextId)?.get(providerId, isAllTab)
-      provider?.isPreviewEnabled() ?: false
+      val localProvider = getProvidersHolder(session, dataContextId)?.get(providerId, isAllTab)
+      localProvider?.provider?.isPreviewEnabled() ?: false
     }
   }
 
@@ -266,8 +340,20 @@ class SeBackendService(val project: Project, private val coroutineScope: Corouti
     isAllTab: Boolean,
   ): Boolean {
     return providerIds.any { providerId ->
-      val provider = getProvidersHolder(session, dataContextId)?.get(providerId, isAllTab)
-      provider?.isExtendedInfoEnabled() ?: false
+      val localProvider = getProvidersHolder(session, dataContextId)?.get(providerId, isAllTab)
+      localProvider?.provider?.isExtendedInfoEnabled() ?: false
+    }
+  }
+
+  suspend fun isCommandsSupported(
+    session: SeSession,
+    dataContextId: DataContextId,
+    providerIds: List<SeProviderId>,
+    isAllTab: Boolean,
+  ): Boolean {
+    return providerIds.any { providerId ->
+      val localProvider = getProvidersHolder(session, dataContextId)?.get(providerId, isAllTab)
+      localProvider?.provider?.areCommandsSupported() ?: false
     }
   }
 

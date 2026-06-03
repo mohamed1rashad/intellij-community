@@ -1,8 +1,24 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.extractMethod.newImpl
 
+import com.intellij.codeInsight.daemon.impl.quickfix.AddNewArrayExpressionFix
 import com.intellij.codeInsight.daemon.impl.quickfix.AddTypeCastFix
-import com.intellij.psi.*
+import com.intellij.psi.PsiArrayInitializerExpression
+import com.intellij.psi.PsiBlockStatement
+import com.intellij.psi.PsiCodeBlock
+import com.intellij.psi.PsiDeclarationStatement
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiElementFactory
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiExpressionStatement
+import com.intellij.psi.PsiParserFacade
+import com.intellij.psi.PsiPrimitiveType
+import com.intellij.psi.PsiReturnStatement
+import com.intellij.psi.PsiStatement
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypes
+import com.intellij.psi.PsiVariable
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.PsiUtil
@@ -10,9 +26,14 @@ import com.intellij.psi.util.TypeConversionUtil
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.createDeclaration
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.getReturnedExpression
 import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput
-import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.*
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.ArtificialBooleanOutput
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.EmptyOutput
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.ExpressionOutput
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.VariableOutput
 import com.intellij.refactoring.extractMethod.newImpl.structures.FlowOutput
-import com.intellij.refactoring.extractMethod.newImpl.structures.FlowOutput.*
+import com.intellij.refactoring.extractMethod.newImpl.structures.FlowOutput.ConditionalFlow
+import com.intellij.refactoring.extractMethod.newImpl.structures.FlowOutput.EmptyFlow
+import com.intellij.refactoring.extractMethod.newImpl.structures.FlowOutput.UnconditionalFlow
 import com.intellij.refactoring.extractMethod.newImpl.structures.InputParameter
 import com.intellij.util.CommonJavaRefactoringUtil
 
@@ -121,11 +142,8 @@ class BodyBuilder(private val factory: PsiElementFactory) {
             inputParameters: List<InputParameter>,
             disabledParameters: List<InputParameter>,
             missedDeclarations: List<PsiVariable>): PsiCodeBlock {
-
-    val project = elements.first().project
-
     val expression = elements.singleOrNull() as? PsiExpression
-    val normalizedExpression = PsiUtil.skipParenthesizedExprDown(expression)
+    val normalizedExpression = normalizeExpression(expression)
     if (normalizedExpression != null) {
       require(dataOutput is ExpressionOutput)
       val parameterMarkers = inputParameters.associateWith { parameter -> createMarkers(parameter.references) }
@@ -172,6 +190,7 @@ class BodyBuilder(private val factory: PsiElementFactory) {
     if (defaultReturn != null) {
       block.addAfter(statementOf(defaultReturn), copy.last())
     }
+    val project = block.project
     val disabledDeclarations = disabledParameters.map { createDeclarationForDisabledParameter(it) }
     disabledDeclarations.reversed().forEach { declaration ->
       block.addBefore(declaration, copy.first())
@@ -180,6 +199,14 @@ class BodyBuilder(private val factory: PsiElementFactory) {
     }
     requiredDeclarations.forEach { declaration -> block.addBefore(declaration, copy.first()) }
     return block
+  }
+
+  private fun normalizeExpression(expression: PsiExpression?): PsiExpression? {
+    var result = PsiUtil.skipParenthesizedExprDown(expression)
+    if (result is PsiArrayInitializerExpression) {
+      result = AddNewArrayExpressionFix.doFix(result.copy() as PsiArrayInitializerExpression)
+    }
+    return result; 
   }
 
   private fun createMarkers(elements: List<PsiElement>): List<Any> {

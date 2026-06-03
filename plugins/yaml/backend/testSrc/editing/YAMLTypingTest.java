@@ -76,6 +76,10 @@ public class YAMLTypingTest extends BasePlatformTestCase {
     doTestForSettings("\n", false, false);
   }
 
+  public void testRegressionIjpl64483() {
+    doTestForSettings("\n\n", false, true);
+  }
+
   public void testPreserveDedent() {
     doTest("\n");
   }
@@ -113,6 +117,18 @@ public class YAMLTypingTest extends BasePlatformTestCase {
   }
 
   public void testRemoveHyphenOnEnterInTheLastItem() {
+    doTest("\n");
+  }
+
+  public void testRemoveHyphenOnEnterInTheLastItemWithoutIndent() {
+    doTest("\n");
+  }
+
+  public void testRemoveHyphenOnEnterInTheLastItemWithDeepIndent() {
+    doTest("\n");
+  }
+
+  public void testRemoveHyphenOnEnterInTheLastItemInDeepObject() {
     doTest("\n");
   }
 

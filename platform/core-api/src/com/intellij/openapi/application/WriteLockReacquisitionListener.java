@@ -6,6 +6,10 @@ import org.jetbrains.annotations.ApiStatus;
 import java.util.EventListener;
 
 @ApiStatus.Internal
-public interface WriteLockReacquisitionListener extends EventListener {
-  void beforeWriteLockReacquired();
+public interface WriteLockReacquisitionListener<T> extends EventListener {
+  void beforeWriteLockReacquired(T v);
+
+  void afterWriteLockReacquired(T v);
+
+  T beforeWriteLockTemporarilyReleased();
 }

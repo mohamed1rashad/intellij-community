@@ -18,20 +18,24 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @ApiStatus.Internal
 public final class InspectionViewSuppressActionHolder {
   private final Map<String, Map<ContextDescriptor, SuppressIntentionAction[]>> mySuppressActions =
-    FactoryMap.create(__ -> new HashMap<>());
+    FactoryMap.create(_ -> new HashMap<>());
   private final Interner<Set<SuppressIntentionAction>> myActionSetInterner = Interner.createInterner();
 
   public synchronized SuppressIntentionAction @NotNull [] getSuppressActions(@NotNull InspectionToolWrapper wrapper, @NotNull PsiElement context) {
     ContextDescriptor descriptor = ContextDescriptor.from(context);
     if (descriptor == null) return SuppressIntentionAction.EMPTY_ARRAY;
-    return mySuppressActions.get(wrapper.getShortName()).computeIfAbsent(descriptor, __ -> {
+    return mySuppressActions.get(wrapper.getShortName()).computeIfAbsent(descriptor, _ -> {
       final InspectionProfileEntry tool = wrapper.getTool();
       SuppressIntentionAction[] actions;
       if (tool instanceof CustomSuppressableInspectionTool) {

@@ -3,18 +3,27 @@ package com.intellij.execution.configurations;
 
 import com.google.common.base.Strings;
 import com.intellij.diagnostic.LoadingState;
-import com.intellij.execution.*;
+import com.intellij.execution.CommandLineUtil;
+import com.intellij.execution.ExecutionEnvCustomizerService;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.IllegalEnvVarException;
+import com.intellij.execution.Platform;
+import com.intellij.execution.WorkingDirectoryNotFoundException;
 import com.intellij.execution.process.LocalPtyOptions;
 import com.intellij.execution.process.ProcessNotCreatedException;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.OSAgnosticPathUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
-import com.intellij.platform.eel.EelApi;
+import com.intellij.platform.eel.EelDescriptor;
 import com.intellij.platform.eel.provider.LocalEelDescriptor;
 import com.intellij.util.EnvironmentRestorer;
 import com.intellij.util.EnvironmentUtil;
@@ -33,12 +42,17 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import static com.intellij.execution.util.ExecUtil.startProcessBlockingUsingEel;
-import static com.intellij.platform.eel.provider.EelProviderUtil.getEelDescriptor;
-import static com.intellij.platform.eel.provider.EelProviderUtil.toEelApiBlocking;
+import static com.intellij.platform.eel.provider.EelPathDescriptorKt.getEelDescriptor;
 
 /**
  * OS-independent way of executing external processes with complex parameters.
@@ -103,7 +117,7 @@ public class GeneralCommandLine implements UserDataHolder {
    * `Ref(null)` means that Eel should **not** be used here
    * `Ref(not-null)` means that the Eel **should** be used
    */
-  private @Nullable Ref<@Nullable EelApi> myEelApi = null;
+  private @Nullable Ref<@Nullable EelDescriptor> myEelDescriptor = null;
   private @Nullable Function<ProcessBuilder, Process> myProcessCreator;
 
   public GeneralCommandLine() {
@@ -135,7 +149,7 @@ public class GeneralCommandLine implements UserDataHolder {
     myInputFile = original.myInputFile;
     myUserData = null;  // user data should not be copied over
     myProcessCreator = original.myProcessCreator;
-    myEelApi = original.myEelApi;
+    myEelDescriptor = original.myEelDescriptor;
   }
 
   private static Charset defaultCharset() {
@@ -229,12 +243,6 @@ public class GeneralCommandLine implements UserDataHolder {
 
   public boolean isPassParentEnvironment() {
     return myParentEnvironmentType != ParentEnvironmentType.NONE;
-  }
-
-  /** @deprecated use {@link #withParentEnvironmentType(ParentEnvironmentType)} */
-  @Deprecated(forRemoval = true)
-  public void setPassParentEnvironment(boolean passParentEnvironment) {
-    withParentEnvironmentType(passParentEnvironment ? ParentEnvironmentType.CONSOLE : ParentEnvironmentType.NONE);
   }
 
   public @NotNull ParentEnvironmentType getParentEnvironmentType() {
@@ -425,7 +433,7 @@ public class GeneralCommandLine implements UserDataHolder {
   @ApiStatus.Internal
   @ApiStatus.OverrideOnly
   protected @NotNull Process startProcess() throws ExecutionException, IOException {
-    var commands = myProcessCreator != null || tryGetEel() != null
+    var commands = myProcessCreator != null || getNonLocalEelDescriptor() != null
                    ? ContainerUtil.concat(List.of(myExePath), myProgramParams.getList())
                    : validateAndPrepareCommandLineForLocalRun();
     var process = startProcess(commands);
@@ -450,21 +458,28 @@ public class GeneralCommandLine implements UserDataHolder {
   }
 
   /**
-   * Tries to get Eel backend for this GeneralCommandLine. If this function returns {@code null}, then the old implementation should be used.
+   * Returns a non-local [EelDescriptor] when this command line should be executed via EEL on a non-local
+   * environment (WSL, Docker, SSH, …); returns {@code null} when the legacy (local) implementation should
+   * be used. Specifically, returns {@code null} for:
+   * <ul>
+   *   <li>local exe + local working directory,</li>
+   *   <li>absolute Windows DOS paths (IJPL-177172),</li>
+   *   <li>{@code ide.general.command.line.use.eel} registry key disabled.</li>
+   * </ul>
    */
   @ApiStatus.Internal
-  public @Nullable EelApi tryGetEel() {
-    Ref<EelApi> eelApiRef = myEelApi;
-    if (eelApiRef != null) {
-      return eelApiRef.get();
+  public @Nullable EelDescriptor getNonLocalEelDescriptor() {
+    Ref<EelDescriptor> eelDescriptorRef = myEelDescriptor;
+    if (eelDescriptorRef != null) {
+      return eelDescriptorRef.get();
     }
     if (!Registry.is("ide.general.command.line.use.eel", false)) {
-      myEelApi = new Ref<>(null);
+      myEelDescriptor = new Ref<>(null);
       return null;
     }
 
     // now we need to initialize Eel here
-    EelApi eelApi;
+    EelDescriptor descriptor;
     final var exe = myExePath;
     final var workingDirectory = myWorkingDirectory;
 
@@ -477,25 +492,21 @@ public class GeneralCommandLine implements UserDataHolder {
     // IJPL-177172: do not use eel for absolute Windows paths (e.g., C:\...).
     // Fallback to the legacy WSL behavior where a local exe is executed in a remote working directory.
     if (SystemInfo.isWindows && OSAgnosticPathUtil.isAbsoluteDosPath(exe)) {
-      eelApi = null;
+      descriptor = null;
     }
     else if (getEelDescriptor(exePath) != LocalEelDescriptor.INSTANCE) { // fast check
-      eelApi = toEelApiBlocking(getEelDescriptor(exePath));
+      descriptor = getEelDescriptor(exePath);
     }
-    else if (workingDirectory != null) {
-      if (getEelDescriptor(workingDirectory) != LocalEelDescriptor.INSTANCE) { // also try to compute non-local EelApi from working dir
-        eelApi = toEelApiBlocking(getEelDescriptor(workingDirectory));
-      }
-      else {
-        eelApi = null;
-      }
+    else if (workingDirectory != null && getEelDescriptor(workingDirectory) != LocalEelDescriptor.INSTANCE) {
+      // also try to compute non-local descriptor from working dir
+      descriptor = getEelDescriptor(workingDirectory);
     }
     else {
-      eelApi = null;
+      descriptor = null;
     }
-    myEelApi = Ref.create(eelApi);
+    myEelDescriptor = Ref.create(descriptor);
 
-    return eelApi;
+    return descriptor;
   }
 
   public @NotNull ProcessBuilder toProcessBuilder() throws ExecutionException {
@@ -563,8 +574,8 @@ public class GeneralCommandLine implements UserDataHolder {
     if (myProcessCreator != null) {
       return myProcessCreator.apply(processBuilder);
     }
-    EelApi eelApi = tryGetEel();
-    if (eelApi == null) {
+    EelDescriptor descriptor = getNonLocalEelDescriptor();
+    if (descriptor == null) {
       return processBuilder.start();
     }
     LocalPtyOptions ptyOptions;
@@ -575,7 +586,7 @@ public class GeneralCommandLine implements UserDataHolder {
     else {
       ptyOptions = null;
     }
-    return startProcessBlockingUsingEel(eelApi.getExec(), processBuilder, ptyOptions, isPassParentEnvironment());
+    return startProcessBlockingUsingEel(descriptor, processBuilder, ptyOptions, isPassParentEnvironment());
   }
 
   /** @deprecated please override {@link #createProcess(ProcessBuilder)} instead. */
@@ -600,11 +611,11 @@ public class GeneralCommandLine implements UserDataHolder {
   protected void setupEnvironment(@NotNull Map<String, String> environment) {
     environment.clear();
 
-    if (myParentEnvironmentType != ParentEnvironmentType.NONE && myProcessCreator == null && tryGetEel() == null) {
+    if (myParentEnvironmentType != ParentEnvironmentType.NONE && myProcessCreator == null && getNonLocalEelDescriptor() == null) {
       environment.putAll(getParentEnvironment());
     }
 
-    if (SystemInfo.isUnix && myProcessCreator == null && tryGetEel() == null) {
+    if (SystemInfo.isUnix && myProcessCreator == null && getNonLocalEelDescriptor() == null) {
       File workDirectory = getWorkDirectory();
       if (workDirectory != null) {
         environment.put("PWD", FileUtil.toSystemDependentName(workDirectory.getAbsolutePath()));
@@ -612,7 +623,7 @@ public class GeneralCommandLine implements UserDataHolder {
     }
 
     if (!myEnvParams.isEmpty()) {
-      if (SystemInfo.isWindows && myProcessCreator == null && tryGetEel() == null) {
+      if (SystemInfo.isWindows && myProcessCreator == null && getNonLocalEelDescriptor() == null) {
         Map<String, String> envVars = CollectionFactory.createCaseInsensitiveStringMap();
         envVars.putAll(environment);
         envVars.putAll(myEnvParams);

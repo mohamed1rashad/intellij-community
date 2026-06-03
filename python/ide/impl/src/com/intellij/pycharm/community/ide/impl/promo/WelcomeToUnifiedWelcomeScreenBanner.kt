@@ -10,16 +10,19 @@ import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.pycharm.community.ide.impl.PyCharmCommunityCustomizationBundle
 import com.intellij.pycharm.community.ide.impl.icons.PycharmCommunityIdeImplIcons
-import com.intellij.ui.JBColor
 import com.intellij.ui.components.panels.Wrapper
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.AlignY
+import com.intellij.ui.dsl.builder.EmptySpacingConfiguration
+import com.intellij.ui.dsl.builder.TopGap
+import com.intellij.ui.dsl.builder.actionButton
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.ui.dsl.gridLayout.UnscaledGapsY
 import com.intellij.util.IconUtil
 import com.intellij.util.PlatformUtils
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
-import java.awt.Color
 import java.awt.Dimension
 import javax.swing.Icon
 import javax.swing.JPanel
@@ -36,8 +39,6 @@ class WelcomeToUnifiedWelcomeScreenBanner : PyCommunityToUnifiedWelcomeScreenBan
   private fun onBannerClosed() = PropertiesComponent.getInstance().setValue(BANNER_CLOSED_PROPERTY, true)
 
   override val promoImage: Icon = PycharmCommunityIdeImplIcons.Backgrounds.Promotion_bg
-
-  private val infoFontColor = JBColor(Color.decode("#6C707E"), Color.decode("#A8ADBD"))
   private val closeIcon = IconUtil.scale(PycharmCommunityIdeImplIcons.Icons.Close, null, 1.1f)
 
   private val myCloseAction =
@@ -77,9 +78,6 @@ class WelcomeToUnifiedWelcomeScreenBanner : PyCommunityToUnifiedWelcomeScreenBan
         }.customize(customRowGaps = UnscaledGapsY(top = 12))
         row {
           text(PyCharmCommunityCustomizationBundle.message("promotion.welcome.to.unified.main.text"))
-            .applyToComponent {
-              foreground = infoFontColor
-            }
         }.customize(customRowGaps = UnscaledGapsY(top = 4, bottom = 8))
       }
       row {

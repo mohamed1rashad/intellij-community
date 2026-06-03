@@ -12,6 +12,7 @@ import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.psi.PsiManager
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.concurrency.annotations.RequiresReadLock
@@ -30,18 +31,28 @@ import org.jetbrains.kotlin.idea.base.indices.KotlinPackageIndexUtils.findFilesW
 import org.jetbrains.kotlin.idea.base.projectStructure.scope.KotlinSourceFilterScope
 import org.jetbrains.kotlin.idea.base.psi.getLineStartOffset
 import org.jetbrains.kotlin.idea.base.util.KOTLIN_FILE_EXTENSIONS
-import org.jetbrains.kotlin.idea.debugger.base.util.*
+import org.jetbrains.kotlin.idea.debugger.base.util.KotlinSourceMapCache
+import org.jetbrains.kotlin.idea.debugger.base.util.fqnToInternalName
+import org.jetbrains.kotlin.idea.debugger.base.util.runDumbAnalyze
 import org.jetbrains.kotlin.idea.stubindex.KotlinFileFacadeFqNameIndex
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.kotlin.PackagePartClassUtils
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.platform.isCommon
 import org.jetbrains.kotlin.platform.jvm.isJvm
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtValueArgument
 import org.jetbrains.kotlin.psi.psiUtil.parents
 import org.jetbrains.kotlin.resolve.jvm.JvmClassName
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
-import java.util.*
+import java.util.Locale
 
 object DebuggerUtils {
     @set:TestOnly
@@ -98,7 +109,7 @@ object DebuggerUtils {
     ): List<KtFile> {
         if (!isKotlinSourceFile(fileName)) return emptyList()
         if (DumbService.isDumb(project)
-            && FileBasedIndex.getInstance().currentDumbModeAccessType != DumbModeAccessType.RELIABLE_DATA_ONLY) return emptyList()
+            && FileBasedIndex.getInstance().getCurrentDumbModeAccessType(project) != DumbModeAccessType.RELIABLE_DATA_ONLY) return emptyList()
 
         val partFqName = className.fqNameForClassNameWithoutDollars
 
@@ -112,6 +123,14 @@ object DebuggerUtils {
             }
 
             if (!hasLocation || files.size == 1 && !forceRanking) {
+                if (files.size > 1) {
+                    val psiManager = PsiManager.getInstance(project)
+                    val fromProject = files.find { psiManager.isInProject(it) }
+                    if (fromProject != null) {
+                        return listOf(fromProject)
+                    }
+                }
+
                 return listOf(files.first())
             }
 
@@ -180,7 +199,7 @@ object DebuggerUtils {
     }
 
     private fun isApplicable(file: KtFile, className: JvmClassName): Boolean {
-        val classNames = ClassNameCalculator.getInstance().getTopLevelNames(file).map(String::fqnToInternalName)
+        val classNames = ClassNameProvider().getTopLevelNames(file).map { it.fqnToInternalName() }
         return className.internalName.isInnerClassOfAny(classNames)
     }
 
@@ -189,13 +208,10 @@ object DebuggerUtils {
         return extension in KOTLIN_FILE_EXTENSIONS
     }
 
-    fun String.trimIfMangledInBytecode(isMangledInBytecode: Boolean): String =
-        if (isMangledInBytecode)
-            getMethodNameWithoutMangling()
-        else
-            this
-
-    private fun String.getMethodNameWithoutMangling() =
+    /**
+     * Remove mangling suffix (e.g., functions with value class parameters have it).
+     */
+    fun String.trimMethodNameMangling(): String =
         substringBefore('-')
 
     fun String.isGeneratedIrBackendLambdaMethodName() =

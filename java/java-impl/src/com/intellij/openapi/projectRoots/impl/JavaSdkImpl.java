@@ -7,7 +7,11 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.highlighter.ArchiveFileType;
 import com.intellij.java.JavaBundle;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.*;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.PathManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointUtil;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
@@ -15,7 +19,16 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectBundle;
-import com.intellij.openapi.projectRoots.*;
+import com.intellij.openapi.projectRoots.AdditionalDataConfigurable;
+import com.intellij.openapi.projectRoots.JavaSdk;
+import com.intellij.openapi.projectRoots.JavaSdkVersion;
+import com.intellij.openapi.projectRoots.JdkUtil;
+import com.intellij.openapi.projectRoots.ProjectJdkTable;
+import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.projectRoots.SdkAdditionalData;
+import com.intellij.openapi.projectRoots.SdkModel;
+import com.intellij.openapi.projectRoots.SdkModificator;
+import com.intellij.openapi.projectRoots.testFramework.TestJdkAnnotationsFilesProvider;
 import com.intellij.openapi.roots.AnnotationOrderRootType;
 import com.intellij.openapi.roots.JavadocOrderRootType;
 import com.intellij.openapi.roots.OrderRootType;
@@ -27,7 +40,11 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.jrt.JrtFileSystem;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
@@ -38,20 +55,26 @@ import com.intellij.platform.eel.EelDescriptor;
 import com.intellij.platform.eel.provider.EelProviderUtil;
 import com.intellij.platform.eel.provider.LocalEelDescriptor;
 import com.intellij.pom.java.JavaRelease;
+import com.intellij.util.BazelEnvironmentUtil;
 import com.intellij.util.PathUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import com.intellij.util.containers.MostlySingularMultiMap;
+import com.intellij.util.io.zip.JBZipFile;
 import com.intellij.util.lang.JavaVersion;
 import org.intellij.lang.annotations.MagicConstant;
 import org.jdom.Element;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.VisibleForTesting;
 import org.jetbrains.concurrency.Promise;
 import org.jetbrains.jps.model.java.JdkVersionDetector;
 import org.jetbrains.jps.model.java.impl.JavaSdkUtil;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -59,7 +82,18 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static com.intellij.openapi.projectRoots.impl.JdkPathUtilKt.getJavaPath;
@@ -424,6 +458,17 @@ public final class JavaSdkImpl extends JavaSdk {
       String url = "jar://" + annotationsJarPathString + "!/";
       root = refresh ? vfm.refreshAndFindFileByUrl(url) : vfm.findFileByUrl(url);
       pathsChecked.add(annotationsJarPathString);
+      // if java is modularized,
+      // javaPluginClassesRootPath is "lib/modules", let's try to check "/lib"
+      if (root == null &&
+          javaPluginClassesRootPath.getParent() != null) {
+        Path parentJavaPluginClassesRootPath = javaPluginClassesRootPath.getParent();
+        Path parentAnnotationsJarPath = parentJavaPluginClassesRootPath.resolveSibling(pathInResources);
+        String parentAnnotationsJarPathString = FileUtil.toSystemIndependentName(parentAnnotationsJarPath.toString());
+        String urlParent = "jar://" + parentAnnotationsJarPathString + "!/";
+        root = refresh ? vfm.refreshAndFindFileByUrl(urlParent) : vfm.findFileByUrl(urlParent);
+        pathsChecked.add(parentAnnotationsJarPathString);
+      }
     }
     else {
       // when run against IDEA plugin JDK, something like this comes up: "$IDEA_HOME$/out/classes/production/intellij.java.impl"
@@ -451,13 +496,17 @@ public final class JavaSdkImpl extends JavaSdk {
       pathsChecked.add(path);
     }
     if (root == null) {
-      // Bazel-provided test dependencies, from runfiles tree
-      String testSrcDir = System.getenv("TEST_SRCDIR");
-      if (testSrcDir != null && !testSrcDir.isBlank()) {
-        Path root1 = Path.of(testSrcDir, "community+/java/jdkAnnotations");
-        Path root2 = Path.of(testSrcDir, "_main/java/jdkAnnotations");
-
-        Path rootPath = Files.isDirectory(root1) ? root1 : Files.isDirectory(root2) ? root2 : null;
+      if (BazelEnvironmentUtil.isBazelTestRun()) {
+        ServiceLoader<TestJdkAnnotationsFilesProvider> providerClasses = ServiceLoader.load(TestJdkAnnotationsFilesProvider.class);
+        var iterator = providerClasses.iterator();
+        if (!iterator.hasNext()) {
+          throw new IllegalStateException("TestJdkAnnotationsFilesProvider service provider not found");
+        }
+        TestJdkAnnotationsFilesProvider provider = iterator.next();
+        if (iterator.hasNext()) {
+          throw new IllegalStateException("more than one TestJdkAnnotationsFilesProvider service providers found. Only one is expected");
+        }
+        Path rootPath = provider.getJdkAnnotationsPath();
         if (rootPath != null) {
           String path = FileUtil.toSystemIndependentName(rootPath.toString());
           root = refresh ? lfs.refreshAndFindFileByPath(path) : lfs.findFileByPath(path);
@@ -509,7 +558,7 @@ public final class JavaSdkImpl extends JavaSdk {
       throw new IllegalArgumentException(jdkHomePath.toAbsolutePath() + " doesn't exist");
     }
 
-    Sdk jdk = ProjectJdkTable.getInstance().createSdk(jdkName, this);
+    Sdk jdk = SdkUtils.createSdkForEnvironment(ProjectJdkTable.getInstance(), null, jdkName, this, home);
     SdkModificator sdkModificator = jdk.getSdkModificator();
 
     sdkModificator.setHomePath(FileUtil.toSystemIndependentName(home));
@@ -598,38 +647,86 @@ public final class JavaSdkImpl extends JavaSdk {
 
   @ApiStatus.Internal
   private static void addSources(@NotNull Path jdkHome, @NotNull SdkModificator sdkModificator) {
-    VirtualFile jdkSrc = findSources(jdkHome, "src");
-    if (jdkSrc != null) {
-      if (jdkSrc.findChild("java.base") != null) {
-        for (VirtualFile root : jdkSrc.getChildren()) {
-          if (root.isDirectory()) {
-            sdkModificator.addRoot(root, OrderRootType.SOURCES);
-          }
-        }
-      }
-      else {
-        sdkModificator.addRoot(jdkSrc, OrderRootType.SOURCES);
-      }
-    }
-
-    VirtualFile fxSrc = findSources(jdkHome, "javafx-src");
-    if (fxSrc != null) {
-      sdkModificator.addRoot(fxSrc, OrderRootType.SOURCES);
+    for (String url : findSources(jdkHome)) {
+      sdkModificator.addRoot(url, OrderRootType.SOURCES);
     }
   }
 
-  private static @Nullable VirtualFile findSources(@NotNull Path jdkHome, @NotNull String srcName) {
-    Path srcArc = jdkHome.resolve(srcName + ".jar");
-    if (!Files.exists(srcArc)) srcArc = jdkHome.resolve(srcName + ".zip");
-    if (!Files.exists(srcArc)) srcArc = jdkHome.resolve("lib").resolve(srcName + ".zip");
+  @ApiStatus.Internal
+  public static @NotNull List<String> findSources(@NotNull Path jdkHome) {
+    List<String> result = new ArrayList<>();
+
+    Path srcArc = jdkHome.resolve("src.jar");
+    if (!Files.exists(srcArc)) srcArc = jdkHome.resolve("src.zip");
+    if (!Files.exists(srcArc)) srcArc = jdkHome.resolve("lib").resolve("src.zip");
     if (Files.exists(srcArc)) {
-      VirtualFile srcRoot = findInJar(srcArc, "src");
-      if (srcRoot == null) srcRoot = findInJar(srcArc, "");
-      return srcRoot;
+      addArchiveSourceUrls(srcArc, true, result);
+    }
+    else {
+      Path srcDir = jdkHome.resolve("src");
+      if (Files.isDirectory(srcDir)) {
+        addDirectorySourceUrls(srcDir, result);
+      }
     }
 
-    Path srcDir = jdkHome.resolve("src");
-    return Files.isDirectory(srcDir) ? LocalFileSystem.getInstance().findFileByNioFile(srcDir) : null;
+    Path fxArc = jdkHome.resolve("javafx-src.jar");
+    if (!Files.exists(fxArc)) fxArc = jdkHome.resolve("javafx-src.zip");
+    if (!Files.exists(fxArc)) fxArc = jdkHome.resolve("lib").resolve("javafx-src.zip");
+    if (Files.exists(fxArc)) {
+      addArchiveSourceUrls(fxArc, false, result);
+    }
+
+    return result;
+  }
+
+  private static void addArchiveSourceUrls(@NotNull Path archive, boolean checkModular, @NotNull List<String> result) {
+    String jarBase = "jar://" + vfsPath(archive) + "!/";
+    try (JBZipFile zip = new JBZipFile(archive, true)) {
+      Set<String> noPrefix = new LinkedHashSet<>();   // top-level dirs at root
+      Set<String> srcPrefix = new LinkedHashSet<>();  // top-level dirs under "src/"
+      for (var entry : zip.getEntries()) {
+        String name = entry.getName();
+        int slash = name.indexOf('/');
+        if (slash > 0) noPrefix.add(name.substring(0, slash));
+        if (name.startsWith("src/") && name.length() > 4) {
+          int srcSlash = name.indexOf('/', 4);
+          if (srcSlash > 4) srcPrefix.add(name.substring(4, srcSlash));
+        }
+      }
+      boolean hasSrcPrefix = noPrefix.contains("src");
+      Set<String> topDirs = hasSrcPrefix ? srcPrefix : noPrefix;
+      String urlBase = jarBase + (hasSrcPrefix ? "src/" : "");
+      if (checkModular && topDirs.contains("java.base")) {
+        for (String dir : topDirs) {
+          result.add(urlBase + dir + "/");
+        }
+      }
+      else {
+        result.add(urlBase);
+      }
+    }
+    catch (IOException e) {
+      LOG.info(e);
+      result.add(jarBase);
+    }
+  }
+
+  private static void addDirectorySourceUrls(@NotNull Path srcDir, @NotNull List<String> result) {
+    if (Files.isDirectory(srcDir.resolve("java.base"))) {
+      try (DirectoryStream<Path> children = Files.newDirectoryStream(srcDir)) {
+        for (Path child : children) {
+          if (Files.isDirectory(child)) {
+            result.add(VfsUtil.getUrlForLibraryRoot(child));
+          }
+        }
+      }
+      catch (IOException e) {
+        LOG.info(e);
+      }
+    }
+    else {
+      result.add(VfsUtil.getUrlForLibraryRoot(srcDir));
+    }
   }
 
   private void addDocs(@NotNull Path jdkHome, @NotNull SdkModificator sdkModificator, @Nullable Sdk sdk) {

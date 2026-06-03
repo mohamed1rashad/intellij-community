@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.simple;
 
 import com.intellij.codeWithMe.ClientId;
@@ -9,17 +9,38 @@ import com.intellij.diff.comparison.DiffTooBigException;
 import com.intellij.diff.fragments.LineFragment;
 import com.intellij.diff.requests.ContentDiffRequest;
 import com.intellij.diff.requests.DiffRequest;
-import com.intellij.diff.tools.util.*;
+import com.intellij.diff.tools.util.BaseSyncScrollable;
+import com.intellij.diff.tools.util.DiffChangedRangeProvider;
+import com.intellij.diff.tools.util.DiffDataKeys;
+import com.intellij.diff.tools.util.DiffNotifications;
+import com.intellij.diff.tools.util.DiffSplitter;
+import com.intellij.diff.tools.util.FoldingModelSupport;
+import com.intellij.diff.tools.util.KeyboardModifierListener;
+import com.intellij.diff.tools.util.PrevNextDifferenceIterable;
+import com.intellij.diff.tools.util.PrevNextDifferenceIterableBase;
+import com.intellij.diff.tools.util.StatusPanel;
+import com.intellij.diff.tools.util.SyncScrollSupport;
 import com.intellij.diff.tools.util.base.TextDiffSettingsHolder;
 import com.intellij.diff.tools.util.base.TextDiffViewerUtil;
 import com.intellij.diff.tools.util.side.TwosideContentPanel;
 import com.intellij.diff.tools.util.side.TwosideTextDiffViewer;
 import com.intellij.diff.tools.util.text.TwosideTextDiffProvider;
-import com.intellij.diff.util.*;
+import com.intellij.diff.util.DiffDividerDrawUtil;
+import com.intellij.diff.util.DiffDrawUtil;
+import com.intellij.diff.util.DiffUserDataKeysEx;
 import com.intellij.diff.util.DiffUserDataKeysEx.ScrollToPolicy;
+import com.intellij.diff.util.DiffUtil;
+import com.intellij.diff.util.LineRange;
 import com.intellij.diff.util.Range;
+import com.intellij.diff.util.Side;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.Separator;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.diff.DiffBundle;
@@ -42,10 +63,17 @@ import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.concurrency.annotations.RequiresWriteLock;
 import com.intellij.util.containers.ContainerUtil;
 import kotlin.enums.EnumEntries;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import java.awt.Component;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Iterator;
@@ -120,9 +148,19 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
 
   @Override
   protected @NotNull List<AnAction> createToolbarActions() {
-    List<AnAction> group = new ArrayList<>(myTextDiffProvider.getToolbarActions());
+    List<AnAction> gutterActions = new ArrayList<>();
+    gutterActions.add(new MyToggleExpandByDefaultAction());
+    ContainerUtil.addIfNotNull(gutterActions, ActionManager.getInstance().getAction("Vcs.Diff.ToggleDiffAligningMode"));
+    gutterActions.add(new MyToggleAutoScrollAction());
+
+    List<AnAction> diffActions = new ArrayList<>();
+    ContainerUtil.addIfNotNull(diffActions, ActionManager.getInstance().getAction("Vcs.Diff.ToggleDiffAligningMode"));
+    diffActions.add(new MyToggleAutoScrollAction());
+    diffActions.addAll(myTextDiffProvider.getDiffSettingsActions());
+    myEditorSettingsAction.setDiffActions(gutterActions, diffActions);
+
+    List<AnAction> group = new ArrayList<>();
     group.add(new MyToggleExpandByDefaultAction());
-    group.add(new MyToggleAutoScrollAction());
     group.add(new MyReadOnlyLockAction());
     group.add(myEditorSettingsAction);
 
@@ -134,12 +172,13 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
 
   @Override
   protected @NotNull List<AnAction> createPopupActions() {
-    List<AnAction> group = new ArrayList<>(myTextDiffProvider.getPopupActions());
-    group.add(new MyToggleAutoScrollAction());
-    group.add(new MyToggleExpandByDefaultAction());
+    List<AnAction> group = new ArrayList<>(myTextDiffProvider.getDiffSettingsActions());
 
     group.add(Separator.getInstance());
     group.addAll(super.createPopupActions());
+    group.add(Separator.getInstance());
+    group.add(new MyToggleExpandByDefaultAction());
+    group.add(new MyToggleAutoScrollAction());
 
     return group;
   }
@@ -155,6 +194,10 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
 
     group.add(Separator.getInstance());
     group.addAll(super.createEditorPopupActions());
+
+    group.add(Separator.getInstance());
+    group.add(new MyToggleExpandByDefaultAction());
+    group.add(new MyToggleAutoScrollAction());
 
     return group;
   }
@@ -235,7 +278,7 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
     final Document document2 = getContent2().getDocument();
 
     CharSequence[] texts =
-      ReadAction.compute(() -> new CharSequence[]{document1.getImmutableCharSequence(), document2.getImmutableCharSequence()});
+      ReadAction.computeBlocking(() -> new CharSequence[]{document1.getImmutableCharSequence(), document2.getImmutableCharSequence()});
 
     List<LineFragment> lineFragments = myTextDiffProvider.compare(texts[0], texts[1], indicator);
 
@@ -277,7 +320,7 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       }
 
       //maybe readaction
-      WriteIntentReadAction.run((Runnable)() -> myFoldingModel.install(foldingState, myRequest, getFoldingModelSettings()));
+      WriteIntentReadAction.run(() -> myFoldingModel.install(foldingState, myRequest, getFoldingModelSettings()));
 
       myInitialScrollHelper.onRediff();
 

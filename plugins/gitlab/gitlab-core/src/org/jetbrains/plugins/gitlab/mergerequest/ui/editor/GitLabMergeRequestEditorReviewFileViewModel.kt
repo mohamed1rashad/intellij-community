@@ -1,7 +1,9 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gitlab.mergerequest.ui.editor
 
+import com.intellij.collaboration.async.flatMapLatestEach
 import com.intellij.collaboration.async.mapState
+import com.intellij.collaboration.async.mapStateInNow
 import com.intellij.collaboration.async.stateInNow
 import com.intellij.collaboration.async.transformConsecutiveSuccesses
 import com.intellij.collaboration.ui.codereview.diff.DiffLineLocation
@@ -23,14 +25,25 @@ import git4idea.changes.GitTextFilePatchWithHistory
 import git4idea.changes.createVcsChange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.stateIn
 import org.jetbrains.plugins.gitlab.api.dto.GitLabUserDTO
+import org.jetbrains.plugins.gitlab.data.GitLabImageLoader
 import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequest
 import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequestNewDiscussionPosition
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabNoteLocation
 import org.jetbrains.plugins.gitlab.mergerequest.data.mapToLocation
 import org.jetbrains.plugins.gitlab.mergerequest.ui.filterInFile
 import org.jetbrains.plugins.gitlab.mergerequest.ui.review.GitLabMergeRequestDiscussionsViewModels
+import org.jetbrains.plugins.gitlab.mergerequest.ui.review.mapToLocation
 import org.jetbrains.plugins.gitlab.mergerequest.util.GitLabMergeRequestDiscussionUtil
 import org.jetbrains.plugins.gitlab.mergerequest.util.toLines
 
@@ -47,10 +60,14 @@ interface GitLabMergeRequestEditorReviewFileViewModel {
   val linesWithDiscussions: StateFlow<Set<Int>>
   val linesWithNewDiscussions: StateFlow<Set<Int>>
 
+  val canNavigate: Boolean
+
   val canComment: StateFlow<Boolean>
+  val canAddMultilinePositionalNotes: Boolean
   val newDiscussions: StateFlow<Collection<GitLabMergeRequestEditorNewDiscussionViewModel>>
 
   val avatarIconsProvider: IconsProvider<GitLabUserDTO>
+  val imageLoader: GitLabImageLoader
 
   fun lookupNextComment(line: Int, additionalIsVisible: (String) -> Boolean): String?
   fun lookupNextComment(noteTrackingId: String, additionalIsVisible: (String) -> Boolean): String?
@@ -60,8 +77,8 @@ interface GitLabMergeRequestEditorReviewFileViewModel {
   fun getThreadPosition(noteTrackingId: String): Pair<RefComparisonChange, Int>?
   fun requestThreadFocus(noteTrackingId: String)
 
-  fun requestNewDiscussion(line: Int, focus: Boolean)
-  fun cancelNewDiscussion(line: Int)
+  fun requestNewDiscussion(location: GitLabNoteLocation, focus: Boolean)
+  fun cancelNewDiscussion(lineLocation: DiffLineLocation)
 
   fun showDiff(line: Int?)
 }
@@ -76,6 +93,7 @@ internal class GitLabMergeRequestEditorReviewFileViewModelImpl(
   private val reviewVm: GitLabMergeRequestEditorReviewViewModel,
   discussionsViewOption: StateFlow<DiscussionsViewOption>,
   override val avatarIconsProvider: IconsProvider<GitLabUserDTO>,
+  override val imageLoader: GitLabImageLoader,
 ) : GitLabMergeRequestEditorReviewFileViewModel {
   private val cs = parentCs.childScope(javaClass.name, Dispatchers.Default)
 
@@ -108,40 +126,41 @@ internal class GitLabMergeRequestEditorReviewFileViewModelImpl(
       .transformConsecutiveSuccesses { filterInFile(change) }
       .stateInNow(cs, ComputedResult.loading())
   override val newDiscussions: StateFlow<Collection<GitLabMergeRequestEditorNewDiscussionViewModel>> =
-    reviewVm.newDiscussions
-      .filterInFile(change)
-      .stateInNow(cs, emptyList())
+    discussionsContainer.newDiscussions.mapStateInNow(cs) { vms ->
+      vms.map { baseVm ->
+        GitLabMergeRequestEditorNewDiscussionViewModel(baseVm, diffData, discussionsViewOption)
+      }
+    }
 
   override val linesWithDiscussions: StateFlow<Set<Int>> =
     GitLabMergeRequestDiscussionUtil
       .createDiscussionsPositionsFlow(mergeRequest, discussionsViewOption).toLines {
-        it.mapToLocation(diffData, Side.RIGHT)?.takeIf { it.first == Side.RIGHT }?.second
+        it.mapToLocation(diffData, Side.RIGHT)?.takeIf {
+          it.startSide == Side.RIGHT && it.side == Side.RIGHT
+        }?.lineIdx
       }.stateInNow(cs, emptySet())
 
+  override val canNavigate: Boolean = diffData.isCumulative
+
   override val canComment: StateFlow<Boolean> = discussionsViewOption.mapState { it != DiscussionsViewOption.DONT_SHOW }
+  override val canAddMultilinePositionalNotes: Boolean = mergeRequest.canAddMultilinePositionalNotes
 
-  @OptIn(ExperimentalCoroutinesApi::class)
   override val linesWithNewDiscussions: StateFlow<Set<Int>> =
-    discussionsContainer.newDiscussions
-      .map {
-        it.keys.mapNotNullTo(mutableSetOf()) {
-          it.position.mapToLocation(diffData)?.takeIf { it.first == Side.RIGHT }?.second ?: return@mapNotNullTo null
-        }
+    discussionsContainer.newDiscussions.flatMapLatestEach {
+      it.position.mapNotNull { pos ->
+        pos.mapToLocation(diffData)?.takeIf { loc -> loc.startSide == Side.RIGHT && loc.side == Side.RIGHT }?.lineIdx
       }
-      .stateInNow(cs, emptySet())
+    }.map { lines -> lines.toSet() }.stateInNow(cs, emptySet())
 
-  override fun requestNewDiscussion(line: Int, focus: Boolean) {
-    val position = GitLabMergeRequestNewDiscussionPosition.calcFor(diffData, DiffLineLocation(Side.RIGHT, line)).let {
+  override fun requestNewDiscussion(location: GitLabNoteLocation, focus: Boolean) {
+    val position = GitLabMergeRequestNewDiscussionPosition.calcFor(diffData, location).let {
       GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition(it, Side.RIGHT)
     }
     discussionsContainer.requestNewDiscussion(position, focus)
   }
 
-  override fun cancelNewDiscussion(line: Int) {
-    val position = GitLabMergeRequestNewDiscussionPosition.calcFor(diffData, DiffLineLocation(Side.RIGHT, line)).let {
-      GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition(it, Side.RIGHT)
-    }
-    discussionsContainer.cancelNewDiscussion(position)
+  override fun cancelNewDiscussion(lineLocation: DiffLineLocation) {
+    discussionsContainer.cancelNewDiscussion(lineLocation)
   }
 
   override fun lookupNextComment(line: Int, additionalIsVisible: (String) -> Boolean): String? =

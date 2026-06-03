@@ -11,7 +11,17 @@ import org.jetbrains.plugins.textmate.language.syntax.TextMateCapture
 import org.jetbrains.plugins.textmate.language.syntax.lexer.SyntaxMatchUtils.replaceGroupsWithMatchDataInCaptures
 import org.jetbrains.plugins.textmate.language.syntax.lexer.TextMateLexerState.Companion.notMatched
 import org.jetbrains.plugins.textmate.language.syntax.selector.TextMateWeigh
-import org.jetbrains.plugins.textmate.regex.*
+import org.jetbrains.plugins.textmate.regex.MatchData
+import org.jetbrains.plugins.textmate.regex.TextMateByteOffset
+import org.jetbrains.plugins.textmate.regex.TextMateCharOffset
+import org.jetbrains.plugins.textmate.regex.TextMateCharRange
+import org.jetbrains.plugins.textmate.regex.TextMateString
+import org.jetbrains.plugins.textmate.regex.byteOffset
+import org.jetbrains.plugins.textmate.regex.byteOffsetByCharOffset
+import org.jetbrains.plugins.textmate.regex.charOffset
+import org.jetbrains.plugins.textmate.regex.get
+import org.jetbrains.plugins.textmate.regex.indexOf
+import org.jetbrains.plugins.textmate.regex.subSequence
 import kotlin.math.min
 
 class TextMateLexerCore(
@@ -64,6 +74,7 @@ class TextMateLexerCore(
                            linePosition = 0.charOffset(),
                            lineByteOffset = 0.byteOffset(),
                            injections = languageDescriptor.injections,
+                           checkWhileConditions = true,
                            checkCancelledCallback = checkCancelledCallback)
       addToken(output, endLineOffset)
       output
@@ -77,6 +88,7 @@ class TextMateLexerCore(
                            linePosition = 0.charOffset(),
                            lineByteOffset = 0.byteOffset(),
                            injections = languageDescriptor.injections,
+                           checkWhileConditions = true,
                            checkCancelledCallback = checkCancelledCallback)
       output
     }
@@ -90,6 +102,7 @@ class TextMateLexerCore(
     linePosition: TextMateCharOffset,
     lineByteOffset: TextMateByteOffset,
     injections: List<InjectionNodeDescriptor>,
+    checkWhileConditions: Boolean,
     checkCancelledCallback: Runnable?,
   ): PersistentList<TextMateLexerState> {
     var states = states
@@ -103,29 +116,31 @@ class TextMateLexerCore(
     var anchorByteOffset = (-1).byteOffset() // makes sense only for a line, cannot be used across lines
 
     return mySyntaxMatcher.matchingString(line) { string ->
-      var whileStates = states
-      while (!whileStates.isEmpty()) {
-        val whileState = whileStates.last()
-        whileStates = whileStates.removeAt(whileStates.size - 1)
-        if (whileState.syntaxRule.getStringAttribute(Constants.StringKey.WHILE) != null) {
-          val matchWhile = mySyntaxMatcher.matchStringRegex(keyName = Constants.StringKey.WHILE,
-                                                            string = string,
-                                                            byteOffset = lineByteOffset,
-                                                            matchBeginPosition = anchorByteOffset == lineByteOffset,
-                                                            matchBeginString = matchBeginString,
-                                                            lexerState = whileState,
-                                                            checkCancelledCallback = checkCancelledCallback)
-          if (matchWhile.matched) {
-            // todo: support whileCaptures
-            if (anchorByteOffset.offset == -1) {
-              anchorByteOffset = matchWhile.byteRange().end
+      if (checkWhileConditions) {
+        var whileStates = states
+        while (!whileStates.isEmpty()) {
+          val whileState = whileStates.last()
+          whileStates = whileStates.removeAt(whileStates.size - 1)
+          if (whileState.syntaxRule.getStringAttribute(Constants.StringKey.WHILE) != null) {
+            val matchWhile = mySyntaxMatcher.matchStringRegex(keyName = Constants.StringKey.WHILE,
+                                                              string = string,
+                                                              byteOffset = lineByteOffset,
+                                                              matchBeginPosition = anchorByteOffset == lineByteOffset,
+                                                              matchBeginString = matchBeginString,
+                                                              lexerState = whileState,
+                                                              checkCancelledCallback = checkCancelledCallback)
+            if (matchWhile.matched) {
+              // todo: support whileCaptures
+              if (anchorByteOffset.offset == -1) {
+                anchorByteOffset = matchWhile.byteRange().end
+              }
             }
-          }
-          else {
-            closeScopeSelector(output, linePosition + lineStartOffset)
-            closeScopeSelector(output, linePosition + lineStartOffset)
-            states = whileStates
-            anchorByteOffset = (-1).byteOffset()
+            else {
+              closeScopeSelector(output, linePosition + lineStartOffset)
+              closeScopeSelector(output, linePosition + lineStartOffset)
+              states = whileStates
+              anchorByteOffset = (-1).byteOffset()
+            }
           }
         }
       }
@@ -279,8 +294,12 @@ class TextMateLexerCore(
         closeScopeSelector(output, startLineOffset + activeCaptureRanges.removeLast().end)
       }
 
-      if (capture is TextMateCapture.Name) {
-        val captureName = capture.name
+      val captureName = when (capture) {
+        is TextMateCapture.Name -> capture.name
+        is TextMateCapture.Rule -> capture.node.getStringAttribute(Constants.StringKey.NAME)
+      }
+
+      if (captureName != null) {
         val scopeName = if (rule.hasBackReference(captureKey, group)) {
           replaceGroupsWithMatchDataInCaptures(captureName, string, matchData)
         }
@@ -304,7 +323,7 @@ class TextMateLexerCore(
           activeCaptureRanges.addLast(captureRange)
         }
       }
-      else if (capture is TextMateCapture.Rule) {
+      if (capture is TextMateCapture.Rule) {
         val capturedString = line.subSequence(0.charOffset(), captureRange.end)
         mySyntaxMatcher.matchingString(capturedString) { capturedTextMateString ->
           val captureState = TextMateLexerState(syntaxRule = capture.node,
@@ -319,11 +338,9 @@ class TextMateLexerCore(
                     linePosition = captureRange.start,
                     lineByteOffset = byteRange.start,
                     injections = emptyList(),
+                    checkWhileConditions = false,
                     checkCancelledCallback = checkCancelledCallback)
         }
-      }
-      else {
-        error("unknown capture type: $capture")
       }
     }
     while (!activeCaptureRanges.isEmpty()) {
@@ -351,7 +368,7 @@ class TextMateLexerCore(
 
   private fun closeScopeSelector(output: MutableList<TextmateToken>, position: TextMateCharOffset) {
     val lastOpenedName = myCurrentScope.scopeName
-    if (lastOpenedName != null && !lastOpenedName.isEmpty()) {
+    if (!lastOpenedName.isNullOrEmpty()) {
       addToken(output, position)
     }
     myNestedScope.removeLastOrNull()?.let { nestingLevel ->

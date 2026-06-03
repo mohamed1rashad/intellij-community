@@ -7,53 +7,64 @@ import com.intellij.notebooks.ui.afterDistinctChange
 import com.intellij.notebooks.ui.visualization.NotebookUtil.notebookAppearance
 import com.intellij.notebooks.visualization.NotebookVisualizationCoroutine
 import com.intellij.notebooks.visualization.controllers.selfUpdate.SelfManagedCellController
+import com.intellij.notebooks.visualization.settings.NotebookSettings
 import com.intellij.notebooks.visualization.ui.DataProviderComponent
 import com.intellij.notebooks.visualization.ui.EditorCell
+import com.intellij.notebooks.visualization.ui.NotebookUiUtils.intersectsEvenIfEmpty
 import com.intellij.notebooks.visualization.ui.jupyterToolbars.JupyterCellActionsToolbar
 import com.intellij.notebooks.visualization.ui.notebookEditor
-import com.intellij.notebooks.visualization.ui.providers.bounds.JupyterBoundsChangeHandler
+import com.intellij.notebooks.visualization.ui.providers.bounds.JupyterBoundsChangeNotifier
 import com.intellij.openapi.actionSystem.ActionGroup
-import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.util.coroutines.childScope
-import com.intellij.util.asDisposable
-import com.intellij.util.cancelOnDispose
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.debounce
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.util.PlatformUtils
+import com.intellij.util.ui.JBUI
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.intellij.lang.annotations.Language
 import java.awt.Point
 import java.awt.Rectangle
-import java.time.Duration
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
-import kotlin.time.toKotlinDuration
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.time.Duration.Companion.milliseconds
 
 /** Position of the floating toolbar in cells top right corner. */
-@OptIn(FlowPreview::class) // For 'debounce'.
 internal class EditorCellActionsToolbarController(
   private val cell: EditorCell,
 ) : SelfManagedCellController {
   private val editor = cell.editor
   private var toolbar: JupyterCellActionsToolbar? = null
   private var showToolbarJob: Job? = null
-  private val coroutineScope = NotebookVisualizationCoroutine.Utils.scope.childScope("EditorCellActionsToolbarManager").also {
-    Disposer.register(this, it.asDisposable())
+  private val coroutineScope = NotebookVisualizationCoroutine.Utils.scope.childScope("EditorCellActionsToolbarManager").also { scope ->
+    Disposer.register(this@EditorCellActionsToolbarController) {
+      scope.cancel(CancellationException("Disposed EditorCellActionsToolbarController"))
+    }
   }
 
   private val targetComponent: JComponent?
     get() = cell.view?.controllers?.filterIsInstance<DataProviderComponent>()?.firstOrNull()?.retrieveDataProvider()
 
   init {
-    coroutineScope.launch {
-      JupyterBoundsChangeHandler.get(editor).eventFlow.debounce(Duration.ofMillis(200).toKotlinDuration()).collect {
-        val targetComponent = toolbar?.targetComponent ?: return@collect
-        withContext(Dispatchers.EDT) {
-          updateToolbarPosition(targetComponent)
-        }
-      }
-    }.cancelOnDispose(this)
+    JupyterBoundsChangeNotifier.get(editor).subscribe(this) {
+      val targetComponent = toolbar?.targetComponent ?: return@subscribe
+      updateToolbarPosition(targetComponent)
+    }
+
+    editor.scrollingModel.addVisibleAreaListener {
+      if (!NotebookSettings.getInstance().cellToolbarStickyVisible) return@addVisibleAreaListener
+      val targetComponent = toolbar?.targetComponent ?: return@addVisibleAreaListener
+      updateToolbarPosition(targetComponent)
+    }
 
     cell.isSelected.afterDistinctChange(this) {
       updateToolbarVisibility()
@@ -64,16 +75,36 @@ internal class EditorCellActionsToolbarController(
     editor.notebookEditor.singleFileDiffMode.afterDistinctChange(this) {
       updateToolbarVisibility()
     }
-    updateToolbarVisibility()
+    editor.notebookEditor.cellAddToolbarShown.afterDistinctChange(this) {
+      updateToolbarVisibility()
+    }
+
+    //Prevent StackOverflow
+    coroutineScope.launch(Dispatchers.EDT) {
+      updateToolbarVisibility()
+    }
+  }
+
+  /**
+   * Functionality to hide "CellActions" toolbar when "AddNewCell" tollbar is shown initially was made for specifically long toolbar of DS.
+   * Currently, it is disabled for all platforms except DS.
+   */
+  fun shouldShowCellToolbarTogetherWithAddNewCellToolbar(): Boolean {
+    return !PlatformUtils.isDataSpell()
   }
 
   override fun checkAndRebuildInlays() {
     val component = targetComponent ?: return
+    toolbar?.apply {
+      background = editor.notebookAppearance.editorBackgroundColor()
+    }
     updateToolbarPosition(component)
   }
 
   private fun updateToolbarVisibility() {
-    val shouldBeVisible = editor.notebookEditor.singleFileDiffMode.get().not() && (cell.isSelected.get() || cell.isHovered.get())
+    val shouldBeVisible = editor.notebookEditor.singleFileDiffMode.get().not() &&
+                          (editor.notebookEditor.cellAddToolbarShown.get().not() || shouldShowCellToolbarTogetherWithAddNewCellToolbar()) &&
+                          ((cell.isSelected.get() && NotebookSettings.getInstance().showToolbarForSelectedCell) || cell.isHovered.get())
     if (shouldBeVisible)
       showToolbar()
     else
@@ -86,12 +117,14 @@ internal class EditorCellActionsToolbarController(
     val component = targetComponent ?: return
     val actionGroup = getActionGroup(cell.interval.type) ?: return
 
-    toolbar = JupyterCellActionsToolbar(actionGroup, component, actionsUpdatedCallback = { updateToolbarPosition(component) })
+    toolbar = JupyterCellActionsToolbar(actionGroup, component, actionsUpdatedCallback = { updateToolbarPosition(component) }).apply {
+      background = editor.notebookAppearance.editorBackgroundColor()
+    }
     showToolbarJob?.cancel()
 
     showToolbarJob = coroutineScope.launch {
       delay(SHOW_TOOLBAR_DELAY_MS)
-      withContext(Dispatchers.Main) {
+      withContext(Dispatchers.EDT) {
         updateToolbarPosition(component)
         editor.contentComponent.add(toolbar, 0)
       }
@@ -113,7 +146,9 @@ internal class EditorCellActionsToolbarController(
   }
 
   private fun removeToolbar() = toolbar?.let {
+    val toolbarBounds = it.bounds
     editor.contentComponent.remove(it)
+    editor.contentComponent.repaint(toolbarBounds)
     toolbar = null
   }
 
@@ -129,21 +164,21 @@ internal class EditorCellActionsToolbarController(
     }
     CellType.MARKDOWN -> {
       hideDropdownIcon(ADDITIONAL_MARKDOWN_ELLIPSIS_ACTION_GROUP_ID)
-      ActionManager.getInstance().getAction(ADDITIONAL_MARKDOWN_ACTION_GROUP_ID) as? ActionGroup
+      ActionUtil.getActionGroup(ADDITIONAL_MARKDOWN_ACTION_GROUP_ID)
     }
     CellType.RAW -> null
   }
 
-  private fun hideDropdownIcon(actionGroupId: String) = ActionManager.getInstance().getAction(actionGroupId)
+  private fun hideDropdownIcon(actionGroupId: String) = ActionUtil.getAction(actionGroupId)!!
     .templatePresentation
     .putClientProperty(ActionUtil.HIDE_DROPDOWN_ICON, true)
 
   private fun calculateToolbarBounds(panel: JComponent, toolbar: JComponent): Rectangle {
-    val toolbarHeight = toolbar.preferredSize.height
-    val toolbarWidth = toolbar.preferredSize.width
-
     val panelHeight = panel.height
     val panelWidth = panel.width
+
+    val toolbarHeight = toolbar.preferredSize.height
+    val toolbarWidth = min(toolbar.preferredSize.width, panelWidth)
 
     val delimiterSize = when (cell.interval.ordinal) {
       0 -> editor.notebookAppearance.aboveFirstCellDelimiterHeight
@@ -152,19 +187,42 @@ internal class EditorCellActionsToolbarController(
 
     val panelRoofHeight = panelHeight - delimiterSize
 
-    val xOffset = (panelWidth - toolbarWidth - (panelWidth * RELATIVE_Y_OFFSET_RATIO)).toInt()
+    val xOffset = max(0, panelWidth - toolbarWidth - (panelWidth * RELATIVE_Y_OFFSET_RATIO).toInt())
     val yOffset = panelHeight - panelRoofHeight - (toolbarHeight / 2)
 
     val panelLocationInEditor = SwingUtilities.convertPoint(panel, Point(0, 0), editor.contentComponent)
 
     val xCoordinate = panelLocationInEditor.x + xOffset
-    val yCoordinate = panelLocationInEditor.y + yOffset
+    var yCoordinate = panelLocationInEditor.y + yOffset
 
-    return Rectangle(xCoordinate, yCoordinate, toolbarWidth, toolbarHeight)
+    // We have StickyLinesPanel - to show current class/method. This panel has a full-editor width.
+    if (NotebookSettings.getInstance().cellToolbarStickyVisible) {
+      yCoordinate = max(yCoordinate, editor.contentComponent.visibleRect.y + JBUI.scale(2) + editor.stickyLinesPanelHeight)
+
+      val bounds = cell.view?.calculateBounds()
+      if (bounds != null) {
+        yCoordinate = min(yCoordinate, bounds.y + bounds.height - toolbarHeight - JBUI.scale(4))
+      }
+    }
+
+    val result =  Rectangle(xCoordinate, yCoordinate, toolbarWidth, toolbarHeight)
+
+    // We have also EditorInspectionsActionToolbar in the top right editor corner, and we want to protect from overlap.
+    val statusComponent = (editor.scrollPane as? JBScrollPane)?.statusComponent
+    if (statusComponent != null) {
+      val statusComponentLocation = SwingUtilities.convertPoint(statusComponent, Point(0, 0), editor.contentComponent)
+      val statusComponentBounds = Rectangle(statusComponentLocation, statusComponent.size)
+
+      if (result.intersectsEvenIfEmpty(statusComponentBounds)) {
+        result.y = statusComponentBounds.y + statusComponentBounds.height
+      }
+    }
+
+    return result
   }
 
   companion object {
-    private const val SHOW_TOOLBAR_DELAY_MS = 35L
+    private val SHOW_TOOLBAR_DELAY_MS = 35.milliseconds
 
     private const val RELATIVE_Y_OFFSET_RATIO = 0.05
 

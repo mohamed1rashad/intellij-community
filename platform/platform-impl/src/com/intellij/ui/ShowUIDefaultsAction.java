@@ -6,7 +6,11 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.TextCopyProvider;
 import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataProvider;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
@@ -29,17 +33,34 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JCheckBox;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JTable;
+import javax.swing.SwingConstants;
+import javax.swing.UIDefaults;
+import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.plaf.ColorUIResource;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellRenderer;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Insets;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Enumeration;
+import java.util.EventObject;
 import java.util.List;
-import java.util.*;
 import java.util.function.Function;
 
 import static com.intellij.util.ui.JBUI.Panels.simplePanel;
@@ -107,7 +128,7 @@ public final class ShowUIDefaultsAction extends AnAction implements DumbAware {
                       changed.set(true);
                     }
                   }
-                });
+                }, null, true);
               }
               else if (value instanceof Boolean) {
                 updateValue(pair, !((Boolean)value), row, column);
@@ -208,7 +229,7 @@ public final class ShowUIDefaultsAction extends AnAction implements DumbAware {
             final JPanel panel = simplePanel(label);
             if (value instanceof Color c) {
               label.setText(
-                String.format("  [%d,%d,%d] #%s", c.getRed(), c.getGreen(), c.getBlue(), StringUtil.toUpperCase(ColorUtil.toHex(c))));
+                String.format("  [%d,%d,%d,%d] #%s", c.getRed(), c.getGreen(), c.getBlue(), c.getAlpha(), StringUtil.toUpperCase(ColorUtil.toHex(c, true))));
               Color fg = ColorUtil.isDark(c) ? Gray.xFF : Gray.x00;
               label.setForeground(fg);
               panel.setBackground(c);
@@ -262,7 +283,7 @@ public final class ShowUIDefaultsAction extends AnAction implements DumbAware {
                     for (int row : rows) {
                       var pair = (Pair<?, ?>)content.table.getModel().getValueAt(row, 0);
                       if (pair.second instanceof Color) {
-                        result.add("\"" + pair.first.toString() + "\": \"" + ColorUtil.toHtmlColor((Color)pair.second) + "\"" + tail);
+                        result.add("\"" + pair.first.toString() + "\": \"#" + ColorUtil.toHex((Color)pair.second, true) + "\"" + tail);
                       }
                       else {
                         result.add("\"" + pair.first.toString() + "\": \"" + pair.second + "\"" + tail);

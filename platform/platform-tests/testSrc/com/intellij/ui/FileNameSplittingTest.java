@@ -15,6 +15,7 @@
  */
 package com.intellij.ui;
 
+import com.intellij.testFramework.PerformanceUnitTest;
 import com.intellij.tools.ide.metrics.benchmark.Benchmark;
 import com.intellij.util.ui.FilePathSplittingPolicy;
 import junit.framework.TestCase;
@@ -77,10 +78,10 @@ public class FileNameSplittingTest extends TestCase {
       "...",
       "...",
       "...",
-      "...",
-      "...",
-      "...",
-      "...",
+      "...t",
+      "f...t",
+      "f...xt",
+      "fi...xt",
       "file.txt",
       "file.txt",
       "file.txt",
@@ -115,6 +116,7 @@ public class FileNameSplittingTest extends TestCase {
 
   }
 
+  @PerformanceUnitTest
   public void testPerformance() {
     myPolicy = FilePathSplittingPolicy.SPLIT_BY_SEPARATOR;
 

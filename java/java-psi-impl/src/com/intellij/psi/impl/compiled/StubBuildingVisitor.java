@@ -1,7 +1,8 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.compiled;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiPackage;
@@ -9,8 +10,28 @@ import com.intellij.psi.impl.cache.ModifierFlags;
 import com.intellij.psi.impl.cache.TypeInfo;
 import com.intellij.psi.impl.compiled.SignatureParsing.TypeInfoProvider;
 import com.intellij.psi.impl.compiled.SignatureParsing.TypeParametersDeclaration;
-import com.intellij.psi.impl.java.stubs.*;
-import com.intellij.psi.impl.java.stubs.impl.*;
+import com.intellij.psi.impl.java.stubs.JavaClassReferenceListElementType;
+import com.intellij.psi.impl.java.stubs.JavaStubElementTypes;
+import com.intellij.psi.impl.java.stubs.PsiClassReferenceListStub;
+import com.intellij.psi.impl.java.stubs.PsiClassStub;
+import com.intellij.psi.impl.java.stubs.PsiFieldStub;
+import com.intellij.psi.impl.java.stubs.PsiMethodStub;
+import com.intellij.psi.impl.java.stubs.PsiModifierListStub;
+import com.intellij.psi.impl.java.stubs.PsiPackageStatementStub;
+import com.intellij.psi.impl.java.stubs.PsiRecordComponentStub;
+import com.intellij.psi.impl.java.stubs.PsiRecordHeaderStub;
+import com.intellij.psi.impl.java.stubs.impl.PsiAnnotationStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiClassReferenceListStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiClassStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiFieldStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiMethodStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiModifierListStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiPackageStatementStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiParameterListStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiParameterStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiRecordComponentStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiRecordHeaderStubImpl;
+import com.intellij.psi.impl.java.stubs.impl.PsiTypeParameterListStubImpl;
 import com.intellij.psi.stubs.PsiFileStub;
 import com.intellij.psi.stubs.StubElement;
 import com.intellij.util.ArrayUtil;
@@ -22,11 +43,24 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
-import org.jetbrains.org.objectweb.asm.*;
+import org.jetbrains.org.objectweb.asm.AnnotationVisitor;
+import org.jetbrains.org.objectweb.asm.ClassVisitor;
+import org.jetbrains.org.objectweb.asm.FieldVisitor;
+import org.jetbrains.org.objectweb.asm.Label;
+import org.jetbrains.org.objectweb.asm.MethodVisitor;
+import org.jetbrains.org.objectweb.asm.Opcodes;
+import org.jetbrains.org.objectweb.asm.RecordComponentVisitor;
+import org.jetbrains.org.objectweb.asm.Type;
+import org.jetbrains.org.objectweb.asm.TypePath;
+import org.jetbrains.org.objectweb.asm.TypeReference;
 
 import java.lang.reflect.Array;
 import java.text.CharacterIterator;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static com.intellij.util.BitUtil.isSet;
 
@@ -246,6 +280,7 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
 
   @Override
   public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+    if (!isSupportedAnnotationDescriptor(desc)) return null;
     return new AnnotationTextCollector(desc, myFirstPassData, text -> new PsiAnnotationStubImpl(myModList, text));
   }
 
@@ -551,6 +586,7 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
 
     @Override
     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+      if (!isSupportedAnnotationDescriptor(desc)) return null;
       return new AnnotationTextCollector(desc, myFirstPassData, text -> {
         new PsiAnnotationStubImpl(myModList, text);
       });
@@ -583,6 +619,7 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
 
     @Override
     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+      if (!isSupportedAnnotationDescriptor(desc)) return null;
       return new AnnotationTextCollector(desc, myFirstPassData, text -> {
         new PsiAnnotationStubImpl(myModList, text);
       });
@@ -640,6 +677,7 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
 
     @Override
     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
+      if (!isSupportedAnnotationDescriptor(desc)) return null;
       return new AnnotationTextCollector(desc, myFirstPassData, text -> {
         new PsiAnnotationStubImpl(myModList, text);
       });
@@ -647,7 +685,8 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
 
     @Override
     public AnnotationVisitor visitParameterAnnotation(int parameter, String desc, boolean visible) {
-      return parameter < myParamIgnoreCount ? null : new AnnotationTextCollector(desc, myFirstPassData, text -> {
+      if (parameter < myParamIgnoreCount || !isSupportedAnnotationDescriptor(desc)) return null;
+      return new AnnotationTextCollector(desc, myFirstPassData, text -> {
         int idx = parameter - myParamIgnoreCount;
         new PsiAnnotationStubImpl(myOwner.findParameter(idx).getModList(), text);
       });
@@ -823,7 +862,13 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
       int start = canonicalText.lastIndexOf('/') + 2; // -1 => 1 if no package; skip first char in class name
       for (int p = start; p < sb.length(); p++) {
         char c = sb.charAt(p);
-        if (c == '$' && p < sb.length() - 1 && sb.charAt(p + 1) != '$') {
+        if (c == '$' && p < sb.length() - 1) {
+          char next = sb.charAt(p + 1);
+          // Keep '$' before another '$' (JVM-escaped '$' in names like `A$$Lambda`).
+          // Also, before a digit (anonymous / local classes such as `Outer$1`, `Outer$1Helper`),
+          // it is often used to create synthetic classes.
+          // writing those as `Outer.1` is inappropriate.
+          if (next == '$' || Registry.is("java.dont.convert.digits.after.dollar.name") && Character.isDigit(next)) continue;
           sb.setCharAt(p, '.');
           updated = true;
         }
@@ -839,6 +884,16 @@ public class StubBuildingVisitor<T> extends ClassVisitor {
   public static final TypeInfoProvider GUESSING_PROVIDER = TypeInfoProvider.from(GUESSING_MAPPER);
 
   public static AnnotationVisitor getAnnotationTextCollector(String desc, Consumer<? super String> consumer) {
+    if (!isSupportedAnnotationDescriptor(desc)) return null;
     return new AnnotationTextCollector(desc, GUESSING_PROVIDER, consumer);
+  }
+
+  /**
+   * Synthetic JDK markers such as {@code Ljdk/Profile+Annotation;} carry a {@code '+'} in their
+   * internal class name. Those names are legal in the class file format but are
+   * not a valid Java identifier reference. Skip them at the bytecode reader.
+   */
+  private static boolean isSupportedAnnotationDescriptor(@Nullable String desc) {
+    return desc == null || (desc.indexOf('+') < 0 && desc.indexOf('-') < 0);
   }
 }

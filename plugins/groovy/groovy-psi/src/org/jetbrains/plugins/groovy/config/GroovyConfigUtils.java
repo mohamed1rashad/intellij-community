@@ -18,7 +18,6 @@ import java.io.File;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 public final class GroovyConfigUtils extends AbstractConfigUtils {
@@ -71,6 +70,10 @@ public final class GroovyConfigUtils extends AbstractConfigUtils {
 
   public static boolean isAtLeastGroovy25(@NotNull PsiElement element) {
     return getInstance().isVersionAtLeast(element, GROOVY2_5);
+  }
+
+  public static boolean isAtLeastGroovy30(@NotNull PsiElement element) {
+    return getInstance().isVersionAtLeast(element, GROOVY3_0);
   }
 
   public static boolean isAtLeastGroovy40(@NotNull PsiElement element) {
@@ -178,7 +181,7 @@ public final class GroovyConfigUtils extends AbstractConfigUtils {
         try {
           yield Integer.parseInt(part);
         }
-        catch (NumberFormatException __) {
+        catch (NumberFormatException _) {
           yield -4;
         }
       }

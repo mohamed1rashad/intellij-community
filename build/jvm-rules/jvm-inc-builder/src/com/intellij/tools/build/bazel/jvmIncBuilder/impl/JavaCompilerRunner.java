@@ -206,7 +206,7 @@ public class JavaCompilerRunner implements CompilerRunner {
         final Set<String> staticImports = new HashSet<>();
         final Map<String, List<CompilerDataSink.ConstantRef>> cRefs = new HashMap<>();
 
-        for (JavacRef ref : allRefs) {
+        for (JavacRef ref : filter(allRefs, Objects::nonNull)) {
           final JavacRef.ImportProperties importProps = ref.getImportProperties();
           if (importProps != null) { // the reference comes from import list
             if (ref instanceof JavacRef.JavacClass) {
@@ -274,7 +274,7 @@ public class JavaCompilerRunner implements CompilerRunner {
       if (source != null) {
         msgBuilder.append("\n\t").append(source.getName());
         if (diagnostic.getPosition() != Diagnostic.NOPOS) {
-          msgBuilder.append(" (").append(diagnostic.getLineNumber()).append(":").append(diagnostic.getColumnNumber()).append(")");
+          msgBuilder.append(":").append(diagnostic.getLineNumber()).append(":").append(diagnostic.getColumnNumber());
           try {
             int start = (int)(diagnostic.getStartPosition());
             int end = (int)(diagnostic.getEndPosition());

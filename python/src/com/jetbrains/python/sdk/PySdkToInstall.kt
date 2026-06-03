@@ -7,20 +7,14 @@ import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.projectRoots.impl.ProjectJdkImpl
-import com.intellij.openapi.util.NlsContexts
-import com.intellij.openapi.util.UserDataHolder
 import com.intellij.openapi.util.Version
-import com.intellij.openapi.util.text.HtmlBuilder
-import com.intellij.openapi.util.text.HtmlChunk
-import com.intellij.openapi.util.text.StringUtil
 import com.intellij.python.community.impl.installer.BinaryInstallerUsagesCollector
 import com.intellij.python.community.impl.installer.PySdkToInstallManager
 import com.intellij.ui.SimpleColoredComponent
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.util.concurrency.annotations.RequiresEdt
-import com.jetbrains.python.PyBundle
 import com.jetbrains.python.psi.LanguageLevel
+import com.jetbrains.python.sdk.add.v2.InstallablePythonSdk
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor
 import com.jetbrains.python.sdk.installer.BinaryInstallation
 import com.jetbrains.python.sdk.installer.installBinary
@@ -38,32 +32,14 @@ fun getSdksToInstall(): List<PySdkToInstall> {
   }
 }
 
-// TODO: PythonInterpreterService: get rid of this function
-@RequiresEdt
-@Internal
-fun installSdkIfNeeded(sdk: Sdk, module: Module?, existingSdks: List<Sdk>, context: UserDataHolder? = null): Result<Sdk> =
-  if (sdk is PySdkToInstall) sdk.install(module) {
-    context?.let { detectSystemWideSdks(module, existingSdks, context) } ?: detectSystemWideSdks(module, existingSdks)
-  }
-  else Result.success(sdk)
-
-
 /**
  * Generic PySdkToInstall. Compatible with all OS / CpuArch.
  */
 @Internal
 class PySdkToInstall(
   val installation: BinaryInstallation,
-) : ProjectJdkImpl(
-  installation.release.title,
-  PythonSdkType.getInstance(),
-  "",
-  /**
-   * We use [com.jetbrains.python.sdk.flavors.PythonSdkFlavor.getLanguageLevelFromVersionStringStaticSafe] to parse versions of this type
-   * of SDK. That method relies on the version string being prepended with "Python ".
-   */
-  "${PythonSdkFlavor.PYTHON_VERSION_STRING_PREFIX}${installation.release.version}"
-) {
+) : InstallablePythonSdk {
+  override val name: String = installation.release.title
 
   /**
    * Customize [renderer], which is typically either [com.intellij.ui.ColoredListCellRenderer] or [com.intellij.ui.ColoredTreeCellRenderer].
@@ -77,24 +53,9 @@ class PySdkToInstall(
     renderer.icon = AllIcons.Actions.Download
   }
 
-  @CalledInAny
-  @NlsContexts.DialogMessage
-  fun getInstallationWarning(@NlsContexts.Button defaultButtonName: String): String {
-    val preview = installation.toResourcePreview()
-    val fileSize = StringUtil.formatFileSize(preview.size)
-    return HtmlBuilder()
-      .append(PyBundle.message("python.sdk.executable.not.found.header"))
-      .append(HtmlChunk.tag("ul").children(
-        HtmlChunk.tag("li").children(HtmlChunk.raw(
-          PyBundle.message("python.sdk.executable.not.found.option.specify.path", HtmlChunk.text("...").bold(), "python.exe"))),
-        HtmlChunk.tag("li").children(HtmlChunk.raw(PyBundle.message("python.sdk.executable.not.found.option.download.and.install",
-                                                                    HtmlChunk.text(defaultButtonName).bold(), fileSize)))
-      )).toString()
-  }
-
   @RequiresEdt
   @Internal
-  fun install(module: Module?, systemWideSdksDetector: () -> List<PyDetectedSdk>): Result<PyDetectedSdk> {
+  override fun install(module: Module?, systemWideSdksDetector: () -> List<Sdk>): Result<Sdk> {
     val project = module?.project
     return installBinary(installation, project) {
       findInstalledSdkInternal(
@@ -110,8 +71,8 @@ class PySdkToInstall(
 internal fun findInstalledSdkInternal(
   languageLevel: LanguageLevel?,
   project: Project?,
-  systemWideSdksDetector: () -> List<PyDetectedSdk>,
-): PyDetectedSdk? {
+  systemWideSdksDetector: () -> List<Sdk>,
+): Sdk? {
   LOGGER.debug("Resetting system-wide sdks detectors")
   resetSystemWideSdksDetectors()
 

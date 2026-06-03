@@ -3,7 +3,7 @@ package com.intellij.filePrediction.features
 
 import com.intellij.filePrediction.features.FilePredictionFeature.Companion.binary
 import com.intellij.filePrediction.features.FilePredictionFeature.Companion.numerical
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.roots.FileIndexFacade
@@ -57,7 +57,7 @@ class FilePredictionSimilarityFeatures : FilePredictionFeatureProvider {
                                      prevFile: VirtualFile?,
                                      cache: FilePredictionFeaturesCache): Map<String, FilePredictionFeature> {
     val result = HashMap<String, FilePredictionFeature>()
-    ApplicationManager.getApplication().runReadAction {
+    runReadActionBlocking {
       if (newFile.isValid) {
         val fileIndex = FileIndexFacade.getInstance(project)
         result["in_project"] = binary(fileIndex.isInProjectScope(newFile))
@@ -145,8 +145,8 @@ class FilePredictionSimilarityFeatures : FilePredictionFeatureProvider {
     result["name_prefix_norm"] = numerical((2 * commonPrefixLen.toDouble()) / (newFileName.length + prevFileName.length))
 
     var common = 0
-    val newWords = ContainerUtil.map2Set(NameUtilCore.nameToWords(newFileName), Strings::toLowerCase)
-    val prevWords = ContainerUtil.map2Set(NameUtilCore.nameToWords(prevFileName), Strings::toLowerCase)
+    val newWords = ContainerUtil.map2Set(NameUtilCore.nameToWordList(newFileName), Strings::toLowerCase)
+    val prevWords = ContainerUtil.map2Set(NameUtilCore.nameToWordList(prevFileName), Strings::toLowerCase)
     for (prevWord in prevWords) {
       if (newWords.contains(prevWord)) common++
     }

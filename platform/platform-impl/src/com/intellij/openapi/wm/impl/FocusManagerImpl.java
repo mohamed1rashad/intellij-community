@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl;
 
 import com.intellij.concurrency.ContextAwareRunnable;
@@ -12,13 +12,13 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
+import com.intellij.openapi.ui.popup.StackingPopupDispatcher;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.ExpirableRunnable;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.ex.IdeFocusTraversalPolicy;
-import com.intellij.platform.locking.impl.IntelliJLockingUtil;
 import com.intellij.ui.ComponentUtil;
 import com.intellij.ui.DirtyUI;
 import com.intellij.ui.popup.AbstractPopup;
@@ -29,8 +29,15 @@ import com.intellij.util.ui.StartupUiUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JFrame;
+import javax.swing.RootPaneContainer;
+import javax.swing.SwingUtilities;
+import java.awt.AWTEvent;
+import java.awt.Component;
+import java.awt.Frame;
+import java.awt.KeyboardFocusManager;
+import java.awt.Window;
 import java.awt.event.FocusEvent;
 import java.awt.event.WindowEvent;
 import java.util.LinkedList;
@@ -111,6 +118,18 @@ public final class FocusManagerImpl extends IdeFocusManager implements Disposabl
   @DirtyUI
   @Override
   public ActionCallback requestFocusInProject(@NotNull Component c, @Nullable Project project) {
+    if (StartupUiUtil.isWaylandToolkit()) {
+      var currentPopup = StackingPopupDispatcher.getInstance().getFocusedPopup();
+      if (currentPopup != null && !AbstractPopup.isForceCancelOnFocusLoss(currentPopup)) {
+        var currentPopupComponent = currentPopup.getContent();
+        if (!currentPopupComponent.isAncestorOf(c)) {
+          // On Wayland, transferring focus out of a popup is possible,
+          // but usually lead to an uncomfortable state when the popup is still showing,
+          // but doesn't get keyboard input.
+          return ActionCallback.REJECTED;
+        }
+      }
+    }
     // if focus transfer is requested to the active project's window, we call 'requestFocus' to allow focusing detached project windows
     // (editor or tool windows), otherwise we call 'requestFocusInWindow' to avoid unexpected project switching
     Project activeProject = ProjectUtil.getActiveProject();
@@ -120,6 +139,7 @@ public final class FocusManagerImpl extends IdeFocusManager implements Disposabl
       }
       if (project == activeProject) {
         logFocusRequest(c, project, false);
+        toFrontImpl(c);
         c.requestFocus();
         return ActionCallback.DONE;
       }
@@ -174,11 +194,7 @@ public final class FocusManagerImpl extends IdeFocusManager implements Disposabl
       if (immediate.get()) {
         boolean expired = runnable instanceof ExpirableRunnable && ((ExpirableRunnable)runnable).isExpired();
         if (!expired) {
-          // Even immediate code need explicit write-safe context, not implicit one
-          IntelliJLockingUtil.getGlobalThreadingSupport().runPreventiveWriteIntentReadAction(() -> {
-            runnable.run();
-            return null;
-          });
+          runnable.run();
         }
       }
       else {
@@ -255,13 +271,17 @@ public final class FocusManagerImpl extends IdeFocusManager implements Disposabl
 
   @Override
   public void toFront(JComponent c) {
+    toFrontImpl(c);
+  }
+
+  private void toFrontImpl(Component c) {
     assertDispatchThread();
 
     if (c == null) {
       return;
     }
 
-    Window window = ComponentUtil.getParentOfType((Class<? extends Window>)Window.class, (Component)c);
+    Window window = ComponentUtil.getParentOfType((Class<? extends Window>)Window.class, c);
     if (window != null && window.isShowing()) {
       doWhenFocusSettlesDown(() -> {
         if (ApplicationManager.getApplication().isActive()) {

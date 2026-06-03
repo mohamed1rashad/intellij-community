@@ -1,7 +1,11 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ide.nonModalWelcomeScreen.leftPanel
 
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.popup.JBPopupFactory
@@ -28,7 +32,8 @@ internal class WelcomeScreenLeftTabActionNew : DumbAwareAction() {
 
   override fun actionPerformed(e: AnActionEvent) {
     // From com.intellij.platform.ide.nonModalWelcomeScreen.leftPanel.LeftPanelDisclosureButtonAction
-    val component = e.presentation.getClientProperty(CustomComponentAction.COMPONENT_KEY)
+    val component = e.inputEvent?.component as? JComponent
+                           ?: e.presentation.getClientProperty(CustomComponentAction.COMPONENT_KEY)
 
     val actionGroup = ActionManager.getInstance().getAction("NonModalWelcomeScreen.LeftTabActions.New") as ActionGroup
     val step = createStep(actionGroup, e.dataContext, component)

@@ -1,22 +1,54 @@
 ### auto-generated section `build intellij.platform.ide.nonModalWelcomeScreen.frontend` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "frontend_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "frontend",
+  module_name = "intellij.platform.ide.nonModalWelcomeScreen.frontend",
   visibility = ["//visibility:public"],
-  srcs = glob([], allow_empty = True),
-  resources = [":frontend_resources"],
-  runtime_deps = [
+  srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
+  deps = [
     "@lib//:kotlin-stdlib",
     "//platform/core-api:core",
     "//platform/compose",
     "//platform/non-modal-welcome-screen",
+    "//platform/analysis-api:analysis",
+    "//platform/util",
+    "//platform/lang-impl",
+    "//platform/core-ui",
+    "//platform/project/shared:project",
+    "//fleet/rpc",
+    "//platform/platform-impl:ide-impl",
+    "//platform/ide-core",
+  ]
+)
+
+jvm_library(
+  name = "frontend_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.ide.nonModalWelcomeScreen.frontend",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":frontend",
+    "//platform/core-api:core_test_lib",
+    "//platform/compose:compose_test_lib",
+    "//platform/non-modal-welcome-screen:non-modal-welcome-screen_test_lib",
+    "//platform/analysis-api:analysis_test_lib",
+    "//platform/util:util_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//platform/core-ui:core-ui_test_lib",
+    "//platform/project/shared:project_test_lib",
+    "//fleet/rpc:rpc_test_lib",
+    "//platform/platform-impl:ide-impl_test_lib",
+    "//platform/ide-core:ide-core_test_lib",
   ]
 )
 ### auto-generated section `build intellij.platform.ide.nonModalWelcomeScreen.frontend` end
+
+### auto-generated section `iml intellij.platform.ide.nonModalWelcomeScreen.frontend` start
+exports_files([
+  "intellij.platform.ide.nonModalWelcomeScreen.frontend.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.ide.nonModalWelcomeScreen.frontend` end

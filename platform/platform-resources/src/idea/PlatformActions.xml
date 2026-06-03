@@ -28,38 +28,58 @@
       <action id="List-selectNextColumn" class="com.intellij.ui.ListActions$Right" use-shortcut-of="EditorRight"/>
       <action id="List-selectNextColumnExtendSelection" class="com.intellij.ui.ListActions$ShiftRight"
               use-shortcut-of="EditorRightWithSelection"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="List-scrollUp" class="com.intellij.ui.ListActions$PageUp" use-shortcut-of="EditorPageUp"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="List-scrollUpExtendSelection" class="com.intellij.ui.ListActions$ShiftPageUp"
               use-shortcut-of="EditorPageUpWithSelection"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="List-scrollDown" class="com.intellij.ui.ListActions$PageDown" use-shortcut-of="EditorPageDown"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="List-scrollDownExtendSelection" class="com.intellij.ui.ListActions$ShiftPageDown"
               use-shortcut-of="EditorPageDownWithSelection"/>
       <add-to-group group-id="Other.KeymapGroup"/>
     </group>
 
     <group id="TableActions">
-      <action id="Table-selectFirstRow" class="com.intellij.ui.TableActions$CtrlHome" use-shortcut-of="EditorTextStart"/>
+      <action id="Table-selectFirstRow" class="com.intellij.ui.TableActions$CtrlHome" use-shortcut-of="EditorTextStart">
+        <keyboard-shortcut first-keystroke="control UP" keymap="$default"/>
+      </action>
       <action id="Table-selectFirstRowExtendSelection" class="com.intellij.ui.TableActions$CtrlShiftHome"
-              use-shortcut-of="EditorTextStartWithSelection"/>
-      <action id="Table-selectLastRow" class="com.intellij.ui.TableActions$CtrlEnd" use-shortcut-of="EditorTextEnd"/>
+              use-shortcut-of="EditorTextStartWithSelection">
+        <keyboard-shortcut first-keystroke="control shift UP" keymap="$default"/>
+      </action>
+      <action id="Table-selectLastRow" class="com.intellij.ui.TableActions$CtrlEnd" use-shortcut-of="EditorTextEnd">
+        <keyboard-shortcut first-keystroke="control DOWN" keymap="$default"/>
+      </action>
       <action id="Table-selectLastRowExtendSelection" class="com.intellij.ui.TableActions$CtrlShiftEnd"
-              use-shortcut-of="EditorTextEndWithSelection"/>
+              use-shortcut-of="EditorTextEndWithSelection">
+        <keyboard-shortcut first-keystroke="control shift DOWN" keymap="$default"/>
+      </action>
       <action id="Table-selectPreviousRow" class="com.intellij.ui.TableActions$Up" use-shortcut-of="EditorUp"/>
       <action id="Table-selectPreviousRowExtendSelection" class="com.intellij.ui.TableActions$ShiftUp"
               use-shortcut-of="EditorUpWithSelection"/>
       <action id="Table-selectNextRow" class="com.intellij.ui.TableActions$Down" use-shortcut-of="EditorDown"/>
       <action id="Table-selectNextRowExtendSelection" class="com.intellij.ui.TableActions$ShiftDown"
               use-shortcut-of="EditorDownWithSelection"/>
+      <action id="Table-selectFirstColumn" class="com.intellij.ui.TableActions$CtrlLeft" use-shortcut-of="EditorPreviousWord"/>
+      <action id="Table-selectLastColumn" class="com.intellij.ui.TableActions$CtrlRight" use-shortcut-of="EditorNextWord"/>
+      <action id="Table-selectFirstColumnExtendSelection" class="com.intellij.ui.TableActions$CtrlShiftLeft" use-shortcut-of="EditorPreviousWordWithSelection"/>
+      <action id="Table-selectLastColumnExtendSelection" class="com.intellij.ui.TableActions$CtrlShiftRight" use-shortcut-of="EditorNextWordWithSelection"/>
       <action id="Table-selectPreviousColumn" class="com.intellij.ui.TableActions$Left" use-shortcut-of="EditorLeft"/>
       <action id="Table-selectPreviousColumnExtendSelection" class="com.intellij.ui.TableActions$ShiftLeft"
               use-shortcut-of="EditorLeftWithSelection"/>
       <action id="Table-selectNextColumn" class="com.intellij.ui.TableActions$Right" use-shortcut-of="EditorRight"/>
       <action id="Table-selectNextColumnExtendSelection" class="com.intellij.ui.TableActions$ShiftRight"
               use-shortcut-of="EditorRightWithSelection"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Table-scrollUpChangeSelection" class="com.intellij.ui.TableActions$PageUp" use-shortcut-of="EditorPageUp"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Table-scrollUpExtendSelection" class="com.intellij.ui.TableActions$ShiftPageUp"
               use-shortcut-of="EditorPageUpWithSelection"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Table-scrollDownChangeSelection" class="com.intellij.ui.TableActions$PageDown" use-shortcut-of="EditorPageDown"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Table-scrollDownExtendSelection" class="com.intellij.ui.TableActions$ShiftPageDown"
               use-shortcut-of="EditorPageDownWithSelection"/>
       <action id="Table-startEditing" icon="AllIcons.Actions.Edit" class="com.intellij.ide.actions.table.StartEditingAction">
@@ -86,10 +106,14 @@
       <action id="Tree-selectChild" class="com.intellij.ui.TreeActions$Right" use-shortcut-of="EditorRight"/>
       <action id="Tree-selectChildExtendSelection" class="com.intellij.ui.TreeActions$ShiftRight"
               use-shortcut-of="EditorRightWithSelection"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Tree-scrollUpChangeSelection" class="com.intellij.ui.TreeActions$PageUp" use-shortcut-of="EditorPageUp"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Tree-scrollUpExtendSelection" class="com.intellij.ui.TreeActions$ShiftPageUp"
               use-shortcut-of="EditorPageUpWithSelection"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Tree-scrollDownChangeSelection" class="com.intellij.ui.TreeActions$PageDown" use-shortcut-of="EditorPageDown"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="Tree-scrollDownExtendSelection" class="com.intellij.ui.TreeActions$ShiftPageDown"
               use-shortcut-of="EditorPageDownWithSelection"/>
       <action id="Tree-selectNextSibling" class="com.intellij.ui.TreeActions$NextSibling"/>
@@ -185,7 +209,9 @@
     <group id="EditorActions">
       <action id="EditorPageUp" class="com.intellij.openapi.editor.actions.PageUpAction"/>
       <action id="EditorPageDown" class="com.intellij.openapi.editor.actions.PageDownAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorPageUpWithSelection" class="com.intellij.openapi.editor.actions.PageUpWithSelectionAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorPageDownWithSelection" class="com.intellij.openapi.editor.actions.PageDownWithSelectionAction"/>
       <action id="EditorCopy" class="com.intellij.openapi.editor.actions.CopyAction" use-shortcut-of="$Copy" icon="AllIcons.Actions.Copy"/>
       <action id="EditorCut" class="com.intellij.openapi.editor.actions.CutAction" use-shortcut-of="$Cut" icon="AllIcons.Actions.MenuCut"/>
@@ -214,15 +240,21 @@
       <action id="EditorResetFontSize" class="com.intellij.openapi.editor.actions.ResetFontSizeAction"/>
       <action id="EditorScrollUp" class="com.intellij.openapi.editor.actions.ScrollUpAction"/>
       <action id="EditorScrollDown" class="com.intellij.openapi.editor.actions.ScrollDownAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorScrollUpAndMove" class="com.intellij.openapi.editor.actions.ScrollUpAndMoveAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorScrollDownAndMove" class="com.intellij.openapi.editor.actions.ScrollDownAndMoveAction"/>
       <action id="EditorScrollRight" class="com.intellij.openapi.editor.actions.ScrollRightAction"/>
       <action id="EditorScrollLeft" class="com.intellij.openapi.editor.actions.ScrollLeftAction"/>
       <action id="EditorScrollTop" class="com.intellij.openapi.editor.actions.ScrollToTopAction"/>
       <action id="EditorScrollBottom" class="com.intellij.openapi.editor.actions.ScrollToBottomAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorMoveUpAndScroll" class="com.intellij.openapi.editor.actions.MoveUpAndScrollAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorMoveDownAndScroll" class="com.intellij.openapi.editor.actions.MoveDownAndScrollAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorMoveUpAndScrollWithSelection" class="com.intellij.openapi.editor.actions.MoveUpWithSelectionAndScrollAction"/>
+      <!--suppress PluginXmlCapitalization -->
       <action id="EditorMoveDownAndScrollWithSelection" class="com.intellij.openapi.editor.actions.MoveDownWithSelectionAndScrollAction"/>
       <action id="EditorAddOrRemoveCaret" class="com.intellij.openapi.actionSystem.EmptyAction"/>
       <action id="EditorCreateRectangularSelection" class="com.intellij.openapi.editor.actions.CreateRectangularSelectionAction"/>
@@ -396,6 +428,7 @@
       <group id="Diff.Conflicts.Additional.Actions"/>
       <group id="Diff.Conflicts.Feedback"/>
 
+      <group id="Merge.Dialog.Iterative.ResolveActions"/>
       <group id="compare.contents" icon="AllIcons.Actions.Diff" popup="true" class="com.intellij.openapi.actionSystem.EmptyActionGroup">
         <action id="Diff.ComparePartial.Base.Left" class="com.intellij.openapi.actionSystem.EmptyAction"
                 icon="AllIcons.Diff.Compare4LeftMiddle"/>
@@ -420,7 +453,6 @@
     <group id="Diff.ViewerToolbar"/>
     <group id="Diff.EditorGutterPopupMenu">
       <group id="Diff.EditorGutterPopupMenu.DiffModes"/>
-      <separator/>
       <group id="Diff.EditorGutterPopupMenu.EditorSettings"/>
     </group>
     <group id="Diff.Binary.Settings" popup="true" icon="AllIcons.General.GearPlain" searchable="false"/>
@@ -504,7 +536,7 @@
           <action id="ImportSettings" class="com.intellij.configurationStore.ImportSettingsAction"/>
           <action id="ExportSettings" class="com.intellij.configurationStore.ExportSettingsAction"/>
           <separator/>
-          <action id="RestoreDefaultSettings" class="com.intellij.configurationStore.RestoreDefaultSettingsAction"/>
+          <action id="RestoreDefaultSettings" class="com.intellij.configurationStore.defaults.RestoreDefaultSettingsAction"/>
         </group>
         <group id="FileOtherSettingsGroup" class="com.intellij.ide.actions.SmartPopupActionGroup">
           <action id="TemplateProjectProperties" class="com.intellij.ide.actions.TemplateProjectPropertiesAction"/>
@@ -631,6 +663,7 @@
               <synonym key="action.ToggleFullScreen.text.enter"/>
               <synonym key="action.ToggleFullScreen.text.exit"/>
             </action>
+            <!--suppress PluginXmlCapitalization -->
             <action id="ToggleZenMode" class="com.intellij.ide.actions.ToggleZenModeAction">
               <synonym key="action.ToggleZenMode.exit"/>
               <synonym key="action.ToggleZenMode.enter"/>
@@ -786,6 +819,7 @@
         <group id="ActiveToolwindowGroup" popup="true">
           <action id="HideActiveWindow" class="com.intellij.ide.actions.HideToolWindowAction"/>
           <action id="HideSideWindows" class="com.intellij.ide.actions.HideSideWindowsAction"/>
+          <action id="HideBottomWindows" class="com.intellij.ide.actions.HideBottomToolWindowsAction"/>
           <action id="HideAllWindows" class="com.intellij.ide.actions.HideAllToolWindowsAction"/>
           <action id="MoveToolWindowTabToEditorAction" class="com.intellij.openapi.wm.impl.tabInEditor.ToolWindowTabInEditorAction"
                   icon="AllIcons.Actions.OpenNewTab"/>
@@ -871,6 +905,7 @@
                     use-shortcut-of="EditorUp"/>
             <action id="SplitChooser.SplitLeft" class="com.intellij.ide.actions.InteractiveSplitAction$Key$SplitLeft"
                     use-shortcut-of="EditorLeft"/>
+            <!--suppress PluginXmlCapitalization -->
             <action id="SplitChooser.SplitDown" class="com.intellij.ide.actions.InteractiveSplitAction$Key$SplitDown"
                     use-shortcut-of="EditorDown"/>
             <action id="SplitChooser.SplitRight" class="com.intellij.ide.actions.InteractiveSplitAction$Key$SplitRight"
@@ -918,7 +953,6 @@
         <group id="LearnGroup"/>
         <separator/>
         <action id="WhatsNewAction" class="com.intellij.ide.actions.WhatsNewAction"/>
-        <action id="MeetNewUIAction" class="com.intellij.ide.ui.experimental.meetNewUi.MeetNewUIAction"/>
         <action id="OnlineDocAction" class="com.intellij.ide.actions.OnlineDocAction"/>
         <action id="Help.JetBrainsTV" class="com.intellij.ide.actions.JetBrainsTvAction"/>
         <action id="Help.KeymapReference" class="com.intellij.ide.actions.RefCardAction"/>
@@ -935,7 +969,6 @@
           <synonym key="action.ShowLog.Explorer.text"/>
         </action>
         <action id="CollectZippedLogs" class="com.intellij.ide.actions.CollectZippedLogsAction"/>
-        <action id="DeleteOldAppDirs" class="com.intellij.ide.actions.DeleteOldAppDirectoriesAction"/>
         <separator/>
         <group id="HelpDiagnosticTools" popup="true">
           <action id="Performance.ActivityMonitor" class="com.intellij.ide.actions.ActivityMonitorAction"/>
@@ -946,11 +979,13 @@
           <action id="BrowseSpecialPaths" class="com.intellij.diagnostic.specialPaths.BrowseSpecialPathsAction"/>
           <action id="CollectTroubleshootingInformation" class="com.intellij.troubleshooting.ui.CollectTroubleshootingInformationAction"
                   internal="true"/>
+          <action class="com.intellij.diagnostic.ResetWindowsDefenderNotification" id="ResetWindowsDefenderNotification"/>
         </group>
 
         <action id="performancePlugin.ShowMemoryDialogAction" class="com.intellij.diagnostic.ShowMemoryDialogAction"/>
         <action id="EditCustomProperties" class="com.intellij.ide.actions.EditCustomPropertiesAction"/>
         <action id="EditCustomVmOptions" class="com.intellij.ide.actions.EditCustomVmOptionsAction"/>
+        <action id="DeleteOldAppDirs" class="com.intellij.ide.actions.DeleteOldAppDirectoriesAction"/>
         <separator/>
         <action id="CheckForUpdate" class="com.intellij.openapi.updateSettings.impl.CheckForUpdateAction">
           <override-text place="WelcomeScreen"/>
@@ -966,20 +1001,28 @@
       <reference ref="RevealGroup"/>
     </group>
 
+    <!--suppress PluginXmlCapitalization -->
     <action id="ZoomInIdeAction" class="com.intellij.ide.actions.ZoomInIdeAction">
+      <!--suppress PluginXmlCapitalization -->
       <synonym key="action.ZoomInIdeAction.text"/>
     </action>
+    <!--suppress PluginXmlCapitalization -->
     <action id="ZoomOutIdeAction" class="com.intellij.ide.actions.ZoomOutIdeAction">
+      <!--suppress PluginXmlCapitalization -->
       <synonym key="action.ZoomOutIdeAction.text"/>
     </action>
     <action id="ResetIdeScaleAction" class="com.intellij.ide.actions.ResetIdeScaleAction">
       <synonym key="action.ResetIdeScaleAction.text"/>
     </action>
 
+    <action id="ShowSettingsChangesLogFile" class="com.intellij.ide.actions.ShowSettingsChangesLogFile" internal="true"/>
+
     <group id="MainToolbarPopupActions" searchable="false">
       <reference ref="ViewToolBar"/>
       <action id="CustomizeUI" class="com.intellij.ide.actions.CustomizeUIAction"/>
     </group>
+
+    <group id="EditorTabsToolbarActions" searchable="false"/>
 
     <group id="EditorTabsEntryPoint" popup="true" icon="AllIcons.Actions.More">
       <reference ref="RecentFilesFallback"/>
@@ -1112,7 +1155,7 @@
         </group>
         <group id="TouchBarDefault_cmd">
           <!--Use Cmd modifier key to show Navigation buttons, Bookmark and Breakpoint toggles and to Show Usages/-->
-          <!--Cmd key is used, because it’s used in most of the action shortcuts: Back/Forward, Breakpoint and Find Usages./-->
+          <!--Cmd key is used because it’s used in most of the action shortcuts: Back/Forward, Breakpoint and Find Usages./-->
           <reference ref="Back"/>
           <reference ref="Forward"/>
           <!--suppress PluginXmlI18n, PluginXmlCapitalization -->
@@ -1264,7 +1307,7 @@
       <action id="FileChooser.NewFolder" class="com.intellij.openapi.fileChooser.actions.NewFolderAction"
               icon="AllIcons.Actions.NewFolder"/>
       <action id="FileChooser.Delete" class="com.intellij.openapi.fileChooser.actions.FileDeleteAction"
-              icon="AllIcons.Actions.Cancel" use-shortcut-of="$Delete"/>
+              icon="AllIcons.General.Delete" use-shortcut-of="$Delete"/>
       <separator/>
       <action id="FileChooser.Refresh" class="com.intellij.openapi.fileChooser.actions.RefreshFileChooserAction"
               icon="AllIcons.Actions.Refresh" use-shortcut-of="Synchronize"/>
@@ -1288,7 +1331,9 @@
       <action id="ChangeToolWindowLayout" class="com.intellij.ide.actions.QuickChangeToolWindowLayout">
         <override-text place="GoToAction"/>
       </action>
-      <action id="ChangeIdeScale" class="com.intellij.ide.actions.QuickChangeIdeScaleAction"/>
+      <action id="ChangeIdeScale" class="com.intellij.ide.actions.QuickChangeIdeScaleAction">
+        <override-text place="GoToAction"/>
+      </action>
     </group>
 
     <group id="MaintenanceGroup">
@@ -1312,7 +1357,7 @@
     <action id="LogFocusRequests" class="com.intellij.internal.focus.LogFocusRequestsAction"/>
     <action id="CreateAllServicesAndExtensions" internal="true"
             class="com.intellij.ide.plugins.CreateAllServicesAndExtensionsAction"
-            text="Create All Services And Extensions"/>
+            text="Create All Services and Extensions"/>
     <action id="PerformGC" internal="true" class="com.intellij.internal.PerformGCAction"/>
 
     <action id="ShowTrustProjectDialog" class="com.intellij.ide.trustedProjects.impl.ShowTrustProjectDialogAction"/>
@@ -1331,7 +1376,7 @@
         <action id="DropPluginError" internal="true" class="com.intellij.diagnostic.DropPluginErrorAction"
                 text="Drop an Error in a Random Plugin" description="Hold down SHIFT for 3rd-party plugins only"/>
         <action id="DropAnOutOfMemoryError" internal="true" class="com.intellij.diagnostic.DropAnOutOfMemoryErrorAction"
-                text="Drop an OutOfMemoryError" description="Hold down SHIFT for OOME in Metaspace"/>
+                text="Drop an OutOfMemoryError" description="No modifier to exhaust heap, CTRL/CMD to throw heap OOME, SHIFT to throw Metaspace OOME"/>
       </group>
       <separator/>
       <action internal="true" id="ReloadProjectAction" class="com.intellij.internal.ReloadProjectAction"/>
@@ -1348,14 +1393,16 @@
         <action id="WorkspaceEntitiesJsonLogFile" internal="true"
                 class="com.intellij.workspaceModel.ide.impl.jsonDump.DumpWorkspaceEntitiesToLogFileAction"
                 text="Dump Workspace Entities to a File as Json"/>
-
       </group>
+
+      <action id="ShowRegisteredRemoteApis" internal="true" class="com.intellij.internal.rpc.ShowRegisteredRemoteApisAction" />
       <action id="ShowEdtUtilizationChart" internal="true" class="com.intellij.internal.ShowEdtUtilizationChartAction"/>
       <action internal="true" id="ShowMainMenu" class="com.intellij.internal.ui.ShowMainMenuAction"/>
       <action id="DumbMode" internal="true" class="com.intellij.internal.ToggleDumbModeAction">
         <synonym text="Exit Dumb Mode"/>
         <synonym text="Enter Dumb Mode"/>
       </action>
+      <action id="ShortDumbMode" internal="true" class="com.intellij.internal.RunShortDumbModeAction" text="Run Short Dumb Action"/>
       <action id="ToggleIncompleteMode" internal="true" class="com.intellij.internal.ToggleIncompleteDependenciesModeAction">
         <synonym text="Exit Incomplete Dependencies Mode"/>
       </action>
@@ -1364,6 +1411,10 @@
       <action id="DumbModeTremble" class="com.intellij.internal.DumbModeTrembleAction" internal="true">
         <synonym text="Exit Tremble Dumb Mode"/>
         <synonym text="Enter Tremble Dumb Mode"/>
+      </action>
+      <action id="IoFlooding" class="com.intellij.internal.IoFloodingAction" internal="true">
+        <synonym text="Stop IO Flooding"/>
+        <synonym text="Start IO Flooding"/>
       </action>
       <action id="ShowPoweredProgress" internal="true"
               class="com.intellij.internal.ShowPoweredProgressAction"
@@ -1383,10 +1434,15 @@
       <separator/>
       <group id="Internal.Editor" popup="true">
         <action id="AddInlayInternalAction" internal="true" class="com.intellij.internal.AddInlayInternalAction"/>
+        <action id="AddAfterLineEndInlayInternalAction" internal="true" class="com.intellij.internal.AddAfterLineEndInlayInternalAction"/>
         <action id="AddInlayBlockInternalAction" internal="true" class="com.intellij.internal.AddInlayBlockInternalAction"/>
+        <action id="DumpEditorStateInternalAction" internal="true" class="com.intellij.internal.DumpEditorStateInternalAction"/>
         <action id="SetCaretVisualAttributesInternalAction" internal="true" class="com.intellij.internal.SetCaretVisualAttributesAction"/>
         <action id="EditorRenderingBenchmarkAction" internal="true"
                 class="com.intellij.internal.performance.EditorRenderingBenchmarkAction"/>
+        <action id="EditorAddCustomWrap" internal="true" class="com.intellij.openapi.editor.actions.AddCustomWrapAction"/>
+        <action id="EditorRemoveCustomWrapsAtCaret" internal="true"
+                class="com.intellij.openapi.editor.actions.RemoveCustomWrapsAtCaretAction"/>
       </group>
       <group id="Internal.UI" popup="true">
         <group id="Internal.UI.Demos" popup="true">
@@ -1419,15 +1475,17 @@
           <action id="IconScaleTestAction" internal="true" class="com.intellij.internal.ui.ShowIconScaleTestAction"/>
         </group>
         <group id="Internal.UI.KotlinUiDsl" popup="true">
-          <action id="UiDslShowcaseAction" internal="true" class="com.intellij.internal.ui.uiDslShowcase.UiDslShowcaseAction"/>
-          <action id="GridLayoutTestAction" internal="true" class="com.intellij.internal.ui.gridLayoutTestAction.GridLayoutTestAction"/>
+          <action id="GridLayoutTestAction" internal="true" class="com.intellij.internal.ui.gridLayoutTestAction.GridLayoutTestAction"
+                  text="Show GridLayout Test"/>
         </group>
         <action id="JBCefOsrMeasureFps" class="com.intellij.internal.jcef.JBCefOsrBrowserMeasureFpsAction"/>
         <action id="NotificationTestAction" internal="true" class="com.intellij.notification.impl.actions.NotificationTestAction"/>
         <action id="TestMessageBoxAction" internal="true" class="com.intellij.diagnostic.TestMessageBoxAction"/>
+        <action id="ShowCountdownDialog" internal="true" class="com.intellij.openapi.updateSettings.impl.ShowCountdownDialogAction"/>
         <action id="ComponentPanelTestAction" internal="true" class="com.intellij.internal.ui.ComponentPanelTestAction"/>
         <action id="WrapLayoutTestAction" internal="true" class="com.intellij.internal.ui.WrapLayoutTestAction"/>
         <action id="UIFreeze" internal="true" class="com.intellij.internal.UIFreezeAction"/>
+        <action id="PooledFreeze" internal="true" class="com.intellij.internal.PooledFreezeAction"/>
         <separator/>
         <action id="UISandboxAction" internal="true" class="com.intellij.internal.ui.sandbox.UISandboxAction"/>
         <action id="UiInspector" internal="true" class="com.intellij.internal.inspector.UiInspectorAction">
@@ -1454,6 +1512,9 @@
         <action id="EnableMetalRendering" internal="true" class="com.intellij.ui.EnableMetalRenderingAction">
           <abbreviation value="metal"/>
         </action>
+        <action id="EnableWayland" internal="true" class="com.intellij.ui.EnableWaylandAction">
+          <abbreviation value="wayland"/>
+        </action>
         <action id="RulerGuide" internal="true" class="com.intellij.internal.rulerguide.RulerGuideAction"/>
         <action id="ShowHideDebugInfoInUi" internal="true" class="com.intellij.ide.actions.ShowHideDebugInfoInUiAction"/>
         <separator/>
@@ -1463,6 +1524,8 @@
         <action id="AddManyTestProcesses" internal="true" class="com.intellij.openapi.wm.impl.status.AddManyTestProcesses"/>
         <action id="WriteActionUnderProgress" internal="true" class="com.intellij.internal.TestWriteActionUnderProgress"/>
         <action id="LongBackgroundWriteAction" internal="true" class="com.intellij.internal.LongBackgroundWriteAction"/>
+        <action id="FrequentBackgroundWriteAction" internal="true" class="com.intellij.internal.FrequentBackgroundWriteAction"/>
+        <action id="FrequentBackgroundReadAction" internal="true" class="com.intellij.internal.FrequentBackgroundReadAction"/>
         <action id="TestProgressWindow" internal="true" class="com.intellij.internal.TestProgressWindow"/>
         <action id="TestCoroutineProgress" internal="true" class="com.intellij.internal.TestCoroutineProgressAction"/>
         <separator/>
@@ -1593,9 +1656,6 @@
     <action id="DecrementWindowHeight" class="com.intellij.ide.actions.WindowAction$DecrementHeight" use-shortcut-of="ResizeToolWindowUp"/>
     <action id="MaximizeActiveDialog" class="com.intellij.ide.actions.MaximizeActiveDialogAction"/>
 
-    <action id="ExportTestResults" class="com.intellij.execution.testframework.export.ExportTestResultsAction"
-            icon="AllIcons.ToolbarDecorator.Export"/>
-
     <action id="SaveDocument" class="com.intellij.ide.actions.SaveDocumentAction"/>
 
     <action id="MarkNotificationsAsRead" class="com.intellij.notification.impl.actions.MarkAllNotificationsAsReadAction"/>
@@ -1684,8 +1744,6 @@
       <add-to-group group-id="Internal"/>
     </group>
 
-    <action id="AnalyzePluginStartupPerformance" class="com.intellij.diagnostic.AnalyzePluginStartupPerformanceAction" internal="true"/>
-
     <action id="TriggerLowMemoryNotification" class="com.intellij.diagnostic.TriggerLowMemoryNotificationAction" internal="true"/>
 
     <action id="NextWindow" class="com.intellij.openapi.wm.impl.NextWindow"/>
@@ -1745,10 +1803,7 @@
 
     <group id="ActivateToolWindowActions" searchable="false">
       <action id="ActivateFindToolWindow" class="com.intellij.find.actions.ActivateFindToolWindowAction"/>
-      <action id="ActivateMeetNewUIToolWindow" class="com.intellij.ide.ui.experimental.meetNewUi.ActivateMeetNewUIToolWindowAction"/>
     </group>
-
-    <action class="com.intellij.diagnostic.ResetWindowsDefenderNotification" id="ResetWindowsDefenderNotification"/>
 
     <group id="UpdateEntryPointGroup"/>
     <group id="SettingsEntryPointGroup" class="com.intellij.ide.actions.SettingsEntryPointGroup">
@@ -1806,6 +1861,22 @@
       <action id="MergeMenuWithWindowTitleAction" class="com.intellij.ide.actions.MergeMenuWithWindowTitleAction"/>
     </group>
 
+    <action id="FocusMainToolbar" class="com.intellij.openapi.wm.impl.headertoolbar.FocusMainToolbarAction">
+      <keyboard-shortcut keymap="$default" first-keystroke="alt PAGE_UP"/>
+      <keyboard-shortcut keymap="Visual Studio" first-keystroke="alt PAGE_UP" remove="true"/>
+      <keyboard-shortcut keymap="Visual Studio OSX" first-keystroke="alt PAGE_UP" remove="true"/>
+      <keyboard-shortcut keymap="Visual Studio for Mac" first-keystroke="alt PAGE_UP" remove="true"/>
+      <keyboard-shortcut keymap="Xcode" first-keystroke="alt PAGE_UP" remove="true"/>
+    </action>
+
+    <action id="FocusStatusBar" class="com.intellij.openapi.wm.impl.status.FocusStatusBarAction">
+      <keyboard-shortcut keymap="$default" first-keystroke="alt PAGE_DOWN"/>
+      <keyboard-shortcut keymap="Visual Studio" first-keystroke="alt PAGE_DOWN" remove="true"/>
+      <keyboard-shortcut keymap="Visual Studio OSX" first-keystroke="alt PAGE_DOWN" remove="true"/>
+      <keyboard-shortcut keymap="Visual Studio for Mac" first-keystroke="alt PAGE_DOWN" remove="true"/>
+      <keyboard-shortcut keymap="Xcode" first-keystroke="alt PAGE_DOWN" remove="true"/>
+    </action>
+
     <action id="RemoveMainToolbarActionsAction" class="com.intellij.openapi.wm.impl.headertoolbar.RemoveMainToolbarActionsAction"
             internal="true"/>
 
@@ -1851,12 +1922,10 @@
       <reference ref="MainToolbarQuickActionsRaw"/>
     </group>
 
-    <action id="UndoDumpAction" internal="true" class="com.intellij.ide.actions.UndoDumpAction"/>
+    <action id="UndoDumpAction" internal="true" class="com.intellij.ide.actions.UndoDumpHistoryAction"/>
+    <action id="UndoClearAction" internal="true" class="com.intellij.ide.actions.UndoClearHistoryAction"/>
 
-    <action id="DisableMinimap" class="com.intellij.ide.minimap.actions.DisableMinimapAction"/>
-    <action id="ToggleMinimap" class="com.intellij.ide.minimap.actions.ToggleMinimapAction"/>
-    <action id="OpenMinimapSettings" class="com.intellij.ide.minimap.actions.OpenMinimapSettingsAction"/>
-    <action id="MoveMinimap" class="com.intellij.ide.minimap.actions.MoveMinimapAction"/>
+
 
     <!-- id should be "OpenInDefaultBrowser", but existing name preserved to keep compatibility - if user configured shortcut for action, it should not be lost -->
     <action id="OpenInBrowser" class="com.intellij.ide.browsers.actions.OpenFileInDefaultBrowserAction"
@@ -1873,6 +1942,25 @@
       <add-to-group group-id="OpenInBrowserEditorContextBarGroup" anchor="last"/>
     </group>
   </actions>
+
+  <actions resource-bundle="messages.MinimapBundle">
+    <action id="ToggleMinimap" class="com.intellij.ide.minimap.actions.ToggleMinimapAction" icon="AllIcons.Actions.Minimap">
+      <add-to-group group-id="EditorTabsEntryPoint"/>
+    </action>
+    <action id="EnableMinimap" class="com.intellij.ide.minimap.actions.EnableMinimapAction" icon="AllIcons.Actions.Minimap"/>
+    <action id="DisableMinimap" class="com.intellij.ide.minimap.actions.DisableMinimapAction"/>
+    <action id="OpenMinimapSettings" class="com.intellij.ide.minimap.actions.OpenMinimapSettingsAction"/>
+    <action id="MoveMinimap" class="com.intellij.ide.minimap.actions.MoveMinimapAction"/>
+    <action id="ToggleMinimapScaleMode" class="com.intellij.ide.minimap.actions.ToggleMinimapScaleModeAction"/>
+
+    <group id="MinimapActionsGroup">
+      <reference ref="OpenMinimapSettings"/>
+      <reference ref="MoveMinimap"/>
+      <reference ref="ToggleMinimapScaleMode"/>
+      <reference ref="DisableMinimap"/>
+    </group>
+  </actions>
+
   <applicationListeners>
     <listener class="com.intellij.ide.projectView.impl.ProjectViewVfsInfoListener" topic="com.intellij.openapi.util.registry.RegistryValueListener"/>
     <listener class="com.intellij.ide.projectView.impl.ProjectViewIndexableInfoListener" topic="com.intellij.openapi.util.registry.RegistryValueListener"/>

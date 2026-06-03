@@ -1,7 +1,18 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.cce.interpreter
 
-import com.intellij.cce.actions.*
+import com.intellij.cce.actions.CallFeature
+import com.intellij.cce.actions.Delay
+import com.intellij.cce.actions.DeleteRange
+import com.intellij.cce.actions.FileActions
+import com.intellij.cce.actions.MoveCaret
+import com.intellij.cce.actions.OpenFileInBackground
+import com.intellij.cce.actions.OptimiseImports
+import com.intellij.cce.actions.PrintText
+import com.intellij.cce.actions.Rename
+import com.intellij.cce.actions.Rollback
+import com.intellij.cce.actions.SelectRange
+import com.intellij.cce.actions.SessionId
 import com.intellij.cce.core.Session
 import com.intellij.cce.util.FileTextUtil.computeChecksum
 import com.intellij.cce.util.FileTextUtil.getDiff
@@ -11,7 +22,7 @@ class ActionInvokingInterpreter(private val invokersFactory: InvokersFactory,
                                 private val filter: InterpretFilter,
                                 private val order: InterpretationOrder) {
 
-  fun interpret(fileActions: FileActions, sessionHandler: (Session) -> Unit): List<Session> {
+  suspend fun interpret(fileActions: FileActions, sessionHandler: (Session) -> Unit): List<Session> {
     val actionsInvoker = invokersFactory.createActionsInvoker()
     val featureInvoker = invokersFactory.createFeatureInvoker()
     val fileOpener = FileOpener(fileActions.path, actionsInvoker)
@@ -40,7 +51,7 @@ class ActionInvokingInterpreter(private val invokersFactory: InvokersFactory,
         }
         is CallFeature -> {
           if (shouldCompleteToken) {
-            val session = featureInvoker.callFeature(action.expectedText, action.offset, action.nodeProperties, action.sessionId.id)
+            val session = featureInvoker.call(action.expectedText, action.offset, action.nodeProperties, action.sessionId.id)
             sessions.add(session)
             sessionHandler(session)
           }

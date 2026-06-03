@@ -1,13 +1,33 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInspection.dataFlow.inference
 
 import com.intellij.codeInsight.Nullability
 import com.intellij.codeInsight.NullableNotNullManager
-import com.intellij.codeInspection.dataFlow.*
-import com.intellij.codeInspection.dataFlow.StandardMethodContract.ValueConstraint.*
+import com.intellij.codeInspection.dataFlow.ContractReturnValue
+import com.intellij.codeInspection.dataFlow.JavaMethodContractUtil
+import com.intellij.codeInspection.dataFlow.NullabilityUtil
+import com.intellij.codeInspection.dataFlow.StandardMethodContract
+import com.intellij.codeInspection.dataFlow.StandardMethodContract.ValueConstraint.ANY_VALUE
+import com.intellij.codeInspection.dataFlow.StandardMethodContract.ValueConstraint.FALSE_VALUE
+import com.intellij.codeInspection.dataFlow.StandardMethodContract.ValueConstraint.NOT_NULL_VALUE
+import com.intellij.codeInspection.dataFlow.StandardMethodContract.ValueConstraint.NULL_VALUE
+import com.intellij.codeInspection.dataFlow.StandardMethodContract.ValueConstraint.TRUE_VALUE
 import com.intellij.codeInspection.dataFlow.inference.ContractInferenceInterpreter.withConstraint
 import com.intellij.codeInspection.dataFlow.java.inst.MethodCallInstruction
-import com.intellij.psi.*
+import com.intellij.psi.CommonClassNames
+import com.intellij.psi.PsiCodeBlock
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiField
+import com.intellij.psi.PsiFunctionalExpression
+import com.intellij.psi.PsiLiteralExpression
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiNewExpression
+import com.intellij.psi.PsiParameter
+import com.intellij.psi.PsiPolyadicExpression
+import com.intellij.psi.PsiPrimitiveType
+import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiThisExpression
 import com.intellij.psi.util.PsiUtil
 import com.siyeh.ig.psiutils.MethodUtils
 import com.siyeh.ig.psiutils.SideEffectChecker
@@ -29,8 +49,11 @@ internal data class DelegationContract(internal val expression: ExpressionRange,
     val call : PsiMethodCallExpression = expression.restoreExpression(body())
 
     val result = call.resolveMethodGenerics()
-    val targetMethod = result.element as PsiMethod? ?: return emptyList()
-    if (targetMethod == method) return emptyList()
+    val targetMethod = result.element as? PsiMethod? ?: return emptyList()
+    if (targetMethod == method ||
+        JavaSourceInference.INFERENCE_RECURSION_GUARD.currentStack().contains(targetMethod)) {
+      return emptyList()
+    }
 
     val parameters = targetMethod.parameterList.parameters
     val arguments = call.argumentList.expressions
@@ -135,10 +158,6 @@ internal data class DelegationContract(internal val expression: ExpressionRange,
   private fun emptyConstraints(method: PsiMethod) = StandardMethodContract.createConstraintArray(
     method.parameterList.parametersCount)
 
-  private fun returnNotNull(mc: StandardMethodContract): StandardMethodContract {
-    return if (mc.returnValue.isFail) mc else mc.withReturnValue(ContractReturnValue.returnNotNull())
-  }
-
   private fun getLiteralConstraint(argument: PsiExpression) = when (argument) {
     is PsiLiteralExpression -> ContractInferenceInterpreter.getLiteralConstraint(
       argument.getFirstChild().node.elementType)
@@ -181,6 +200,9 @@ internal data class MethodCallContract(internal val call: ExpressionRange, inter
 
   override fun toContracts(method: PsiMethod, body: () -> PsiCodeBlock): List<StandardMethodContract> {
     val target = call.restoreExpression<PsiMethodCallExpression>(body()).resolveMethod()
+    if (target != null && JavaSourceInference.INFERENCE_RECURSION_GUARD.currentStack().contains(target)) {
+      return emptyList()
+    }
     if (target != null && target != method && NullableNotNullManager.isNotNull(target)) {
       return ContractInferenceInterpreter.toContracts(states.map { it.toTypedArray() }, ContractReturnValue.returnNotNull())
     }

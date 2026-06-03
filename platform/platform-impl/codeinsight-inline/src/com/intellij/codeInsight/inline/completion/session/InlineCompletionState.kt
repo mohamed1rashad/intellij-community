@@ -5,7 +5,8 @@ import com.intellij.codeInsight.inline.completion.elements.InlineCompletionEleme
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.util.concurrency.annotations.RequiresEdt
-import java.util.*
+import java.awt.Point
+import java.util.LinkedList
 
 class InlineCompletionState internal constructor() : Disposable {
   private val _elements: MutableList<InlineCompletionElement.Presentable> = LinkedList()
@@ -31,4 +32,8 @@ class InlineCompletionState internal constructor() : Disposable {
   override fun dispose() {
     clear()
   }
+}
+
+internal fun InlineCompletionState.containsPoint(pointInEditor: Point): Boolean {
+  return elements.mapNotNull { it.getBounds() }.any { it.contains(pointInEditor) }
 }

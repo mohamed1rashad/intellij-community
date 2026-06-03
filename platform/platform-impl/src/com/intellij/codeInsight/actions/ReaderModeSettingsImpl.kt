@@ -3,7 +3,12 @@ package com.intellij.codeInsight.actions
 
 import com.intellij.codeInsight.actions.ReaderModeProvider.ReaderMode
 import com.intellij.openapi.application.Experiments
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.BaseState
+import com.intellij.openapi.components.PersistentStateComponentWithModificationTracker
+import com.intellij.openapi.components.ReportValue
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.psi.codeStyle.CodeStyleScheme
 import kotlinx.coroutines.CoroutineScope
@@ -11,13 +16,13 @@ import org.jetbrains.annotations.ApiStatus
 
 @ApiStatus.Internal
 class ReaderModeDefaultsOverrideImpl : ReaderModeDefaultsOverride {
-  override val showWarningsDefault = false
+  override val showWarningsDefault: Boolean = false
   @ApiStatus.Internal
-  override fun getEnableVirtualFormattingDefault() = true
+  override fun getEnableVirtualFormattingDefault(): Boolean = true
 }
 
 @ApiStatus.Internal
-@State(name = "ReaderModeSettings", storages = [Storage(StoragePathMacros.PRODUCT_WORKSPACE_FILE)], perClient = true)
+@State(name = "ReaderModeSettings", storages = [Storage(StoragePathMacros.PRODUCT_WORKSPACE_FILE)])
 class ReaderModeSettingsImpl(override val coroutineScope: CoroutineScope) : PersistentStateComponentWithModificationTracker<ReaderModeSettingsImpl.State>,
                                                                             ReaderModeSettings {
   private var state = State()

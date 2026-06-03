@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -18,20 +19,18 @@ import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspac
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ModifiableNotNullToNullEntity
 import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.NotNullToNullEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.NotNullToNullEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEntityData) : NotNullToNullEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEntityData) : NotNullToNullEntity,
+                                                                                          WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -45,7 +44,6 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
       readField("notNullString")
       return dataSource.notNullString
     }
-
   override val notNullList: List<Int>
     get() {
       readField("notNullList")
@@ -63,8 +61,8 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
   }
 
 
-  internal class Builder(result: NotNullToNullEntityData?) : ModifiableWorkspaceEntityBase<NotNullToNullEntity, NotNullToNullEntityData>(
-    result), ModifiableNotNullToNullEntity {
+  internal class Builder(result: NotNullToNullEntityData?) :
+    ModifiableWorkspaceEntityBase<NotNullToNullEntity, NotNullToNullEntityData>(result), NotNullToNullEntityBuilder {
     internal constructor() : this(NotNullToNullEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -77,15 +75,13 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
           error("Entity NotNullToNullEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -130,7 +126,6 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
         changedProperty.add("entitySource")
 
       }
-
     override var nullInt: Int??
       get() = getEntityData().nullInt
       set(value) {
@@ -138,7 +133,6 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
         getEntityData(true).nullInt = value
         changedProperty.add("nullInt")
       }
-
     override var notNullString: String?
       get() = getEntityData().notNullString
       set(value) {
@@ -146,7 +140,6 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
         getEntityData(true).notNullString = value
         changedProperty.add("notNullString")
       }
-
     private val notNullListUpdater: (value: List<Int>) -> Unit = { value ->
 
       changedProperty.add("notNullList")
@@ -171,6 +164,7 @@ internal class NotNullToNullEntityImpl(private val dataSource: NotNullToNullEnti
 
     override fun getEntityClass(): Class<NotNullToNullEntity> = NotNullToNullEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -181,14 +175,13 @@ internal class NotNullToNullEntityData : WorkspaceEntityData<NotNullToNullEntity
 
   internal fun isNotNullListInitialized(): Boolean = ::notNullList.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<NotNullToNullEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<NotNullToNullEntity> {
     val modifiable = NotNullToNullEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): NotNullToNullEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -200,8 +193,7 @@ internal class NotNullToNullEntityData : WorkspaceEntityData<NotNullToNullEntity
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.NotNullToNullEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.NotNullToNullEntity") as EntityMetadata
   }
 
   override fun clone(): NotNullToNullEntityData {
@@ -215,7 +207,7 @@ internal class NotNullToNullEntityData : WorkspaceEntityData<NotNullToNullEntity
     return NotNullToNullEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return NotNullToNullEntity(notNullList, entitySource) {
       this.nullInt = this@NotNullToNullEntityData.nullInt
       this.notNullString = this@NotNullToNullEntityData.notNullString
@@ -230,9 +222,7 @@ internal class NotNullToNullEntityData : WorkspaceEntityData<NotNullToNullEntity
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as NotNullToNullEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.nullInt != other.nullInt) return false
     if (this.notNullString != other.notNullString) return false
@@ -243,9 +233,7 @@ internal class NotNullToNullEntityData : WorkspaceEntityData<NotNullToNullEntity
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as NotNullToNullEntityData
-
     if (this.nullInt != other.nullInt) return false
     if (this.notNullString != other.notNullString) return false
     if (this.notNullList != other.notNullList) return false

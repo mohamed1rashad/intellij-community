@@ -18,14 +18,29 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.platform.eel.*
+import com.intellij.platform.eel.EelApi
+import com.intellij.platform.eel.isArm64
+import com.intellij.platform.eel.isLinux
+import com.intellij.platform.eel.isMac
+import com.intellij.platform.eel.isWindows
+import com.intellij.platform.eel.isX86_64
 import com.intellij.util.io.Decompressor
 import com.intellij.util.io.HttpRequests
 import com.intellij.util.io.write
 import com.intellij.util.lang.JavaVersion
 import com.intellij.util.system.CpuArch
 import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.jps.model.java.JdkVersionDetector
@@ -39,6 +54,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.io.path.readText
+import kotlin.time.Duration.Companion.seconds
 
 /** describes vendor + product part of the UI **/
 @Internal
@@ -108,6 +124,7 @@ data class JdkItem(
 ) {
   val archiveSizeInMB: String = String.format("%.1f", archiveSize.toDouble() / 1024 / 1024)
 
+  @Throws(IOException::class)
   fun writeMarkerFile(file: Path) {
     saveToFile(file)
   }
@@ -246,7 +263,8 @@ data class JdkPredicate(
     fun none(): JdkPredicate = JdkPredicate(null, emptySet())
 
     fun default(): JdkPredicate = createInstance(forWsl = false)
-    fun forWSL(buildNumber: BuildNumber? = ApplicationInfoImpl.getShadowInstance().build): JdkPredicate = createInstance(forWsl = true, buildNumber)
+    fun forWSL(buildNumber: BuildNumber? = ApplicationInfoImpl.getShadowInstance().build): JdkPredicate =
+      createInstance(forWsl = true, buildNumber)
 
     fun forEel(
       eel: EelApi,
@@ -259,7 +277,10 @@ data class JdkPredicate(
      */
     fun forCurrentProcess(): JdkPredicate = JdkPredicate(null, setOf(JdkPlatform(currentOS, currentArch)))
 
-    private fun createInstance(forWsl: Boolean = false, buildNumber: BuildNumber? = ApplicationInfoImpl.getShadowInstance().build): JdkPredicate {
+    private fun createInstance(
+      forWsl: Boolean = false,
+      buildNumber: BuildNumber? = ApplicationInfoImpl.getShadowInstance().build,
+    ): JdkPredicate {
       val x86_64 = "x86_64"
       val defaultPlatform = JdkPlatform(currentOS, x86_64)
       val platforms = when {
@@ -408,11 +429,7 @@ data class JdkPredicate(
     op: (acc: Boolean, Boolean) -> Boolean,
   ): Boolean? {
     val items = filter.get("items") as? JsonArray ?: return null
-    if (items.isEmpty()) {
-      return false
-    }
-
-    return items.fold(emptyResult) { acc, subFilter ->
+    return !items.isEmpty() && items.fold(emptyResult) { acc, subFilter ->
       val subResult = testPredicate(subFilter) ?: return null
       op(acc, subResult)
     }
@@ -428,6 +445,7 @@ object ReadJdkItemsForWSL {
   }
 
 }
+
 @Internal
 object JdkListParser {
   fun readTree(rawData: String): JsonObject = Json.decodeFromString<JsonElement>(rawData).jsonObject
@@ -464,7 +482,8 @@ object JdkListParser {
         isPreview = item["preview"]?.let { filters.testPredicate(it) == true } ?: false,
 
         jdkMajorVersion = (item["jdk_version_major"] as? JsonPrimitive)?.intOrNull ?: return emptyList(),
-        jdkVersion = (pkg["version"] as? JsonPrimitive)?.contentOrNull ?: (item["jdk_version"] as? JsonPrimitive)?.contentOrNull ?: return emptyList(),
+        jdkVersion = (pkg["version"] as? JsonPrimitive)?.contentOrNull ?: (item["jdk_version"] as? JsonPrimitive)?.contentOrNull
+                     ?: return emptyList(),
         jdkVendorVersion = (item["jdk_vendor_version"] as? JsonPrimitive)?.contentOrNull,
         suggestedSdkName = (item["suggested_sdk_name"] as? JsonPrimitive)?.contentOrNull ?: return emptyList(),
 
@@ -516,13 +535,19 @@ class JdkListDownloader : JdkListDownloaderBase() {
 
 @Internal
 abstract class JdkListDownloaderBase {
+  companion object {
+    private val CONNECT_TIMEOUT = 15.seconds
+    private val REQUEST_TIMEOUT = 60.seconds
+  }
+
   protected abstract val feedUrl: String
 
   private fun downloadJdkList(feedUrl: String, progress: ProgressIndicator?) =
     HttpRequests
       .request(feedUrl)
+      .connectTimeout(CONNECT_TIMEOUT.inWholeMilliseconds.toInt())
+      .readTimeout(REQUEST_TIMEOUT.inWholeMilliseconds.toInt())
       .productNameAsUserAgent()
-      //timeouts are handled inside
       .readBytes(progress)
 
   /**
@@ -530,7 +555,8 @@ abstract class JdkListDownloaderBase {
    * contains few more entries than the result of the [downloadForUI] call.
    * Entries are sorter from the best suggested to the worst suggested items.
    */
-  fun downloadModelForJdkInstaller(progress: ProgressIndicator?): List<JdkItem> = downloadModelForJdkInstaller(progress, JdkPredicate.default())
+  fun downloadModelForJdkInstaller(progress: ProgressIndicator?): List<JdkItem> =
+    downloadModelForJdkInstaller(progress, JdkPredicate.default())
 
   /**
    * Returns a list of entries for JDK automatic installation. That set of entries normally
@@ -550,7 +576,8 @@ abstract class JdkListDownloaderBase {
   /**
    * Lists all entries suitable for UI download, there can be some unlisted entries that are ignored here by intent
    */
-  fun downloadForUI(progress: ProgressIndicator?, feedUrl: String? = null): List<JdkItem> = downloadForUI(progress, feedUrl, JdkPredicate.default())
+  fun downloadForUI(progress: ProgressIndicator?, feedUrl: String? = null): List<JdkItem> =
+    downloadForUI(progress, feedUrl, JdkPredicate.default())
 
   /**
    * Lists all entries suitable for UI download, there can be some unlisted entries that are ignored here by intent

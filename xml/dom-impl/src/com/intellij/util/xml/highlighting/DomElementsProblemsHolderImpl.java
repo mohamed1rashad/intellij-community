@@ -14,7 +14,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
@@ -66,8 +72,8 @@ public final class DomElementsProblemsHolderImpl implements DomElementsProblemsH
 
   public void addProblem(DomElementProblemDescriptor descriptor, Class<? extends DomElementsInspection<?>> inspection) {
     myCachedErrors
-      .computeIfAbsent(descriptor.getDomElement(), __ -> new ConcurrentHashMap<>())
-      .computeIfAbsent(inspection, __ -> new SmartList<>())
+      .computeIfAbsent(descriptor.getDomElement(), _ -> new ConcurrentHashMap<>())
+      .computeIfAbsent(inspection, _ -> new SmartList<>())
       .add(descriptor);
     myCachedChildrenErrors.clear();
   }
@@ -139,7 +145,7 @@ public final class DomElementsProblemsHolderImpl implements DomElementsProblemsH
     }
 
     for (Map.Entry<T, List<DomElementProblemDescriptor>> entry : toAdd.entrySet()) {
-      accumulator.computeIfAbsent(entry.getKey(), __ -> new SmartList<>()).addAll(entry.getValue());
+      accumulator.computeIfAbsent(entry.getKey(), _ -> new SmartList<>()).addAll(entry.getValue());
     }
   }
 

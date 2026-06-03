@@ -8,7 +8,8 @@ import com.intellij.notebooks.visualization.controllers.selfUpdate.SelfManagedCe
 import com.intellij.notebooks.visualization.ui.EditorCell
 import com.intellij.notebooks.visualization.ui.ProgressStatus
 import com.intellij.notebooks.visualization.ui.notebook
-import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ex.ActionUtil
+import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.DumbAwareAction.SimpleDumbAwareAction
 
@@ -20,12 +21,12 @@ class EditorCellRunGutterController(
   private val runAction = SimpleDumbAwareAction.create(AllIcons.Actions.Execute) {
     val cellLineOffset = cell.interval.lines.first
     editor.caretModel.moveToOffset(editor.document.getLineStartOffset(cellLineOffset))
-    val runCellAction = ActionManager.getInstance().getAction("NotebookRunCellAction")
+    val runCellAction = ActionUtil.getAction("NotebookRunCellAction")!!
     runCellAction.actionPerformed(it)
   }
 
   private val stopAction = SimpleDumbAwareAction.create(AllIcons.Run.Stop) {
-    val interruptKernelAction = ActionManager.getInstance().getAction("JupyterInterruptKernelAction")
+    val interruptKernelAction = ActionUtil.getAction("JupyterInterruptKernelAction")!!
     interruptKernelAction.actionPerformed(it)
   }
 
@@ -52,7 +53,7 @@ class EditorCellRunGutterController(
   override fun checkAndRebuildInlays() {}
 
   private fun updateGutterAction() {
-    //For markdown, it will set up in markdown component
+    //For Markdown, it will set up in a Markdown component
     if (cell.type == CellType.MARKDOWN)
       return
 
@@ -63,7 +64,10 @@ class EditorCellRunGutterController(
       return
     }
 
-    cell.gutterAction.set(newAction)
+    // This should be called on EDT only, because inside we are accessing EditorEx.xyToLogicalPosition().
+    runInEdt {
+      cell.gutterAction.set(newAction)
+    }
   }
 
   private fun calculateAction(): DumbAwareAction? {

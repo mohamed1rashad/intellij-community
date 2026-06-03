@@ -8,7 +8,17 @@ import com.intellij.gradle.toolingExtension.util.GradleVersionUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.externalSystem.model.DataNode;
 import com.intellij.openapi.externalSystem.model.ProjectKeys;
-import com.intellij.openapi.externalSystem.model.project.*;
+import com.intellij.openapi.externalSystem.model.project.DependencyData;
+import com.intellij.openapi.externalSystem.model.project.ExternalEntityData;
+import com.intellij.openapi.externalSystem.model.project.IExternalSystemSourceType;
+import com.intellij.openapi.externalSystem.model.project.LibraryData;
+import com.intellij.openapi.externalSystem.model.project.LibraryDependencyData;
+import com.intellij.openapi.externalSystem.model.project.LibraryLevel;
+import com.intellij.openapi.externalSystem.model.project.LibraryPathType;
+import com.intellij.openapi.externalSystem.model.project.ModuleData;
+import com.intellij.openapi.externalSystem.model.project.ModuleDependencyData;
+import com.intellij.openapi.externalSystem.model.project.ProjectData;
+import com.intellij.openapi.externalSystem.model.project.ProjectId;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
@@ -22,6 +32,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.platform.workspace.jps.entities.ModuleId;
 import com.intellij.platform.workspace.storage.EntityStorage;
+import com.intellij.platform.workspace.storage.ImmutableEntityStorage;
 import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.PathUtilRt;
 import com.intellij.util.SmartList;
@@ -32,11 +43,26 @@ import org.gradle.api.artifacts.Dependency;
 import org.gradle.tooling.model.BuildIdentifier;
 import org.gradle.tooling.model.GradleProject;
 import org.gradle.tooling.model.idea.IdeaModule;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.plugins.gradle.DefaultExternalDependencyId;
 import org.jetbrains.plugins.gradle.ExternalDependencyId;
 import org.jetbrains.plugins.gradle.issue.UnresolvedDependencySyncIssue;
-import org.jetbrains.plugins.gradle.model.*;
+import org.jetbrains.plugins.gradle.model.DefaultExternalMultiLibraryDependency;
+import org.jetbrains.plugins.gradle.model.DefaultFileCollectionDependency;
+import org.jetbrains.plugins.gradle.model.ExternalDependency;
+import org.jetbrains.plugins.gradle.model.ExternalLibraryDependency;
+import org.jetbrains.plugins.gradle.model.ExternalMultiLibraryDependency;
+import org.jetbrains.plugins.gradle.model.ExternalProject;
+import org.jetbrains.plugins.gradle.model.ExternalProjectDependency;
+import org.jetbrains.plugins.gradle.model.ExternalSourceSet;
+import org.jetbrains.plugins.gradle.model.FileCollectionDependency;
+import org.jetbrains.plugins.gradle.model.GradleBuildScriptClasspathModel;
+import org.jetbrains.plugins.gradle.model.GradleLightProject;
+import org.jetbrains.plugins.gradle.model.UnresolvedExternalDependency;
 import org.jetbrains.plugins.gradle.model.data.GradleSourceSetData;
 import org.jetbrains.plugins.gradle.service.cache.GradleLocalCacheHelper;
 import org.jetbrains.plugins.gradle.settings.GradleExecutionWorkspace;
@@ -50,7 +76,22 @@ import java.lang.reflect.Constructor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -135,7 +176,7 @@ public final class GradleProjectResolverUtil {
 
     String directoryToRunTask;
     if (compositeBuildGradlePath.isEmpty()) {
-      directoryToRunTask = isUnderProjectRoot ? mainModuleConfigPath : rootProjectPath;
+      directoryToRunTask = rootProjectPath;
     }
     else {
       directoryToRunTask = mainBuildRootPath;
@@ -199,6 +240,27 @@ public final class GradleProjectResolverUtil {
                                                @NotNull ExternalProject externalProject,
                                                @Nullable String sourceSetName,
                                                @NotNull ProjectResolverContext resolverCtx) {
+    if (resolverCtx.isPhasedSyncEnabled()) {
+      if (sourceSetName == null) {
+        return getHolderModuleName(
+          resolverCtx,
+          gradleModule.getGradleProject().getProjectIdentifier().getBuildIdentifier().getRootDir().toPath(),
+          // Build name is derived from the root project's name
+          getRootProject(gradleModule.getGradleProject()).getName(),
+          externalProject
+        );
+      } else {
+        return resolveSourceSetModuleName(
+          resolverCtx,
+          gradleModule.getGradleProject().getProjectIdentifier().getBuildIdentifier().getRootDir().toPath(),
+          // Build name is derived from the root project's name
+          getRootProject(gradleModule.getGradleProject()).getName(),
+          externalProject,
+          sourceSetName
+        );
+      }
+    }
+
     String delimiter;
     StringBuilder moduleName = new StringBuilder();
     String rootName = gradleModule.getProject().getName();
@@ -241,10 +303,24 @@ public final class GradleProjectResolverUtil {
     // TODO: replace with GradleLightProject#identityPath
     @NotNull ExternalProject externalProject
   ) {
+    return getHolderModuleName(
+      context,
+      projectModel.getBuild().getBuildIdentifier().getRootDir().toPath(),
+      projectModel.getBuild().getName(),
+      externalProject
+    );
+  }
+
+  private static @NotNull String getHolderModuleName(
+    @NotNull ProjectResolverContext context,
+    @NotNull Path buildPath,
+    @NotNull String buildName,
+    // TODO: replace with GradleLightProject#identityPath
+    @NotNull ExternalProject externalProject
+  ) {
     var rootBuildPath = context.getRootBuild().getBuildIdentifier().getRootDir().toPath();
     var rootBuildName = context.getRootBuild().getName();
-    var buildPath = projectModel.getBuild().getBuildIdentifier().getRootDir().toPath();
-    var buildName = projectModel.getBuild().getName();
+
     var identityPath = externalProject.getIdentityPath();
 
     var moduleName = Strings.trimStart(identityPath, ":");
@@ -285,16 +361,32 @@ public final class GradleProjectResolverUtil {
     @NotNull ExternalProject externalProject,
     @NotNull String sourceSetName
   ) {
-    var holderModuleName = getHolderModuleName(context, projectModel, externalProject);
-    var sourceSetModuleName = holderModuleName + "." + escapeModuleNameElement(sourceSetName);
-
+    var sourceSetModuleName = resolveSourceSetModuleName(
+      context,
+      projectModel.getBuild().getBuildIdentifier().getRootDir().toPath(),
+      projectModel.getBuild().getName(),
+      externalProject,
+      sourceSetName
+    );
     if (storage.contains(new ModuleId(sourceSetModuleName))) {
       // Related issue: IDEA-169388
       // The user can create the 'test' holder module that conflicts with the `test` source set module.
       return sourceSetModuleName + "~1";
+    } else {
+      return sourceSetModuleName;
     }
+  }
 
-    return sourceSetModuleName;
+  private static @NotNull String resolveSourceSetModuleName(
+    @NotNull ProjectResolverContext context,
+    @NotNull Path buildPath,
+    @NotNull String buildName,
+    // TODO: replace with GradleLightProject#identityPath
+    @NotNull ExternalProject externalProject,
+    @NotNull String sourceSetName
+  ) {
+    var holderModuleName = getHolderModuleName(context, buildPath, buildName, externalProject);
+    return holderModuleName + "." + escapeModuleNameElement(sourceSetName);
   }
 
   /**
@@ -1039,7 +1131,7 @@ public final class GradleProjectResolverUtil {
   private static @NotNull Map<ExternalDependencyId, Collection<ExternalDependency>> groupTransitiveDependenciesById(@NotNull Collection<ExternalDependency> dependencies) {
     Map<ExternalDependencyId, Collection<ExternalDependency>> dependencyMap = new LinkedHashMap<>();
     for (ExternalDependency dependency : dependencies) {
-      Collection<ExternalDependency> transitiveDependencies = dependencyMap.computeIfAbsent(dependency.getId(), __ -> new LinkedHashSet<>());
+      Collection<ExternalDependency> transitiveDependencies = dependencyMap.computeIfAbsent(dependency.getId(), _ -> new LinkedHashSet<>());
       transitiveDependencies.addAll(dependency.getDependencies());
     }
     return dependencyMap;

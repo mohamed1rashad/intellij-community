@@ -1,13 +1,13 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.actions;
 
+import com.intellij.diff.impl.AssignmentTracker;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.impl.DocumentImpl;
-import com.intellij.openapi.editor.impl.EditorFactoryImpl;
 import com.intellij.openapi.project.Project;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -74,11 +74,29 @@ public abstract class DocumentsSynchronizer {
   }
 
   public static @NotNull Document createFakeDocument(@NotNull Document original) {
-    EditorFactoryImpl editorFactory = (EditorFactoryImpl)EditorFactory.getInstance();
     boolean acceptsSlashR = original instanceof DocumentImpl && ((DocumentImpl)original).acceptsSlashR();
     boolean writeThreadOnly = original instanceof DocumentImpl && ((DocumentImpl)original).isWriteThreadOnly();
-    Document document = editorFactory.createDocument("", acceptsSlashR, !writeThreadOnly);
+    Document document = EditorFactory.getInstance().createDocument("", acceptsSlashR, !writeThreadOnly);
     document.putUserData(UndoManager.ORIGINAL_DOCUMENT, original);
     return document;
+  }
+
+  @ApiStatus.Internal
+  public static class DocumentSynchronizerAssignmentTracker extends AssignmentTracker {
+    @NotNull private final DocumentsSynchronizer mySynchronizer;
+
+    public DocumentSynchronizerAssignmentTracker(@NotNull DocumentsSynchronizer synchronizer) {
+      mySynchronizer = synchronizer;
+    }
+
+    @Override
+    public void onFirstAssignment() {
+      mySynchronizer.startListen();
+    }
+
+    @Override
+    public void onLastUnassignment() {
+      mySynchronizer.stopListen();
+    }
   }
 }

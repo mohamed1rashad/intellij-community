@@ -1,19 +1,34 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.codeinsight.utils
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.psi.util.parentOfType
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
 import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.receiverType
 import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.builtins.StandardNames
 import org.jetbrains.kotlin.idea.base.psi.getContainingValueArgument
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
+import org.jetbrains.kotlin.psi.KtExperimentalApi
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.resolution.KtResolvableCall
 
 @ApiStatus.Internal
 fun KaSession.isInlinedArgument(argument: KtFunction, allowCrossinline: Boolean = true): Boolean =
@@ -67,13 +82,14 @@ fun KaSession.getCallExpressionSymbol(argument: KtExpression): Pair<KaFunctionSy
     return symbol to argumentSymbol
 }
 
+@OptIn(KaExperimentalApi::class, KtExperimentalApi::class)
 @ApiStatus.Internal
 fun KaSession.resolveFunctionCall(expression: KtExpression): KaFunctionCall<*>? {
     val successfulCall = expression.resolveToCall()?.successfulFunctionCallOrNull()
     if (successfulCall != null) return successfulCall
     if (!ApplicationManager.getApplication().isUnitTestMode) return null
     // Functions with context receivers are not resolved in K2 tests for some reason
-    return expression.resolveToCallCandidates().firstOrNull()?.candidate as? KaFunctionCall<*>
+    return (expression as? KtResolvableCall)?.collectCallCandidates()?.firstOrNull()?.candidate as? KaFunctionCall<*>
 }
 
 private fun KaSession.isArrayGeneratorConstructorCall(symbol: KaFunctionSymbol): Boolean {

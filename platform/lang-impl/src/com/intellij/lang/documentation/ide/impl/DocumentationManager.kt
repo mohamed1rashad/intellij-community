@@ -38,11 +38,24 @@ import com.intellij.platform.ide.documentation.DOCUMENTATION_TARGETS
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.ui.popup.AbstractPopup
 import com.intellij.util.ui.EDT
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
+import java.awt.Component
 import java.awt.Point
+import java.awt.Rectangle
 import java.lang.ref.WeakReference
 
 @ApiStatus.Internal
@@ -117,6 +130,57 @@ class DocumentationManager(private val project: Project, private val cs: Corouti
       EDT.assertIsEdt()
       return popup?.get()?.isVisible == true
     }
+
+  /**
+   * Allows showing documentation on hover in a non-editor context.
+   *
+   * The documentation will be shown around the [areaWithinComponent] rectangle
+   * relative to [component] position, it'll have minimal height of [minHeight].
+   * There will be a [delay]ms wait before the popup shows up during which the
+   * popup may be canceled if mouse moves outside the desired area.
+   * Once the documentation session is done, [onDocumentationSessionDone] will be invoked.
+   * Use the returned [DocumentationOnHoverSession] to control the session.
+   */
+  @ApiStatus.Experimental
+  fun showDocumentationOnHoverAround(
+    targets: List<DocumentationTarget>,
+    project: Project,
+    component: Component,
+    areaWithinComponent: Rectangle,
+    minHeight: Int,
+    delay: Int,
+    onDocumentationSessionDone: Runnable?,
+  ): DocumentationOnHoverSession? {
+    EDT.assertIsEdt()
+    val requests = targets.map { it.documentationRequest() }
+    return showDocumentationOnHoverAroundByRequests(requests, project, component, areaWithinComponent, minHeight, delay, onDocumentationSessionDone)
+  }
+
+
+  /**
+   * Allows showing documentation on hover in a non-editor context.
+   *
+   * @see showDocumentationOnHoverAround
+   */
+  @ApiStatus.Experimental
+  fun showDocumentationOnHoverAroundByRequests(
+    requests: List<DocumentationRequest>,
+    project: Project,
+    component: Component,
+    areaWithinComponent: Rectangle,
+    minHeight: Int,
+    delay: Int,
+    onDocumentationSessionDone: Runnable?,
+  ): DocumentationOnHoverSession? {
+    EDT.assertIsEdt()
+    if (requests.isEmpty()) return null
+
+    val popupContext = ComponentAreaPopupContext(project, component, areaWithinComponent, onDocumentationSessionDone, minHeight, delay)
+    showDocumentation(requests, popupContext, null) {
+      onDocumentationSessionDone?.run()
+    }
+    return popupContext.session
+  }
 
   private fun getPopup(): AbstractPopup? {
     EDT.assertIsEdt()
@@ -287,6 +351,16 @@ class DocumentationManager(private val project: Project, private val cs: Corouti
     finally {
       pauseAutoUpdateHandle?.let(Disposer::dispose)
     }
+  }
+
+  interface DocumentationOnHoverSession {
+
+    fun mouseOutsideOfSourceArea()
+
+    fun mouseWithinSourceArea()
+
+    fun tryFinishImmediately(): Boolean
+
   }
 }
 

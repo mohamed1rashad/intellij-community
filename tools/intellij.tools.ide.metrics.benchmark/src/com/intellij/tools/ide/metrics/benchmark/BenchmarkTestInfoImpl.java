@@ -37,7 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
+
 import java.util.Locale;
 import java.util.ServiceLoader;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,6 +60,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
   private String uniqueTestName;                        // at least full qualified test name (plus other identifiers, optionally)
   private final @NotNull IJTracer tracer;
   private final ArrayList<MetricsCollector> metricsCollectors = new ArrayList<>();
+  private @Nullable Class<?> testClass;
 
   /** sets {@link ApplicationManagerEx#setInStressTest(boolean)} to true before the benchmark, restores original value after */
   private boolean setInStressTest = false;
@@ -101,10 +102,9 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
     try {
       TelemetryManager.Companion.resetGlobalSdk();
       var telemetryClazz = Class.forName("com.intellij.platform.diagnostic.telemetry.impl.TelemetryManagerImpl");
-      var instance = Arrays.stream(telemetryClazz.getDeclaredConstructors())
-        .filter((it) -> it.getParameterCount() > 0).findFirst()
-        .get()
-        .newInstance(coroutineScope, true);
+      var instance = telemetryClazz
+        .getDeclaredConstructor(CoroutineScope.class, boolean.class, boolean.class)
+        .newInstance(coroutineScope, true, false);
 
       TelemetryManager.Companion.forceSetTelemetryManager((TelemetryManager)instance);
     }
@@ -123,27 +123,37 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
       // remove content of the previous tests from the idea.log
       IJPerfBenchmarksMetricsPublisher.Companion.truncateTestLog();
 
-      try (Stream<Path> logDirChildren = Files.list(PathManager.getLogDir())) {
-        logDirChildren.filter(child -> {
-            String name = child.toString();
-            return name.contains("-metrics")
-                   || name.contains("-meters")
-                   || name.endsWith(".jfr");
-          })
-          .forEach(childToRemove -> {
-            try {
-              Files.deleteIfExists(childToRemove);
-            }
-            catch (IOException e) {
-              // ignore deletion errors for individual files
-            }
-          });
+      Path logDir = PathManager.getLogDir();
+      cleanupMetersDir(logDir);
+
+      Path telemetryDir = logDir.resolve("telemetry"); // new location
+      if (Files.exists(telemetryDir)) {
+        cleanupMetersDir(telemetryDir);
       }
     }
     catch (Exception e) {
       System.err.println(
         "Error during removing Telemetry files with meters before start of perf test. This might affect collected metrics value.");
       e.printStackTrace();
+    }
+  }
+
+  private static void cleanupMetersDir(Path logDir) throws IOException {
+    try (Stream<Path> logDirChildren = Files.list(logDir)) {
+      logDirChildren.filter(child -> {
+          String name = child.toString();
+          return name.contains("-metrics")
+                 || name.contains("-meters")
+                 || name.endsWith(".jfr");
+        })
+        .forEach(childToRemove -> {
+          try {
+            Files.deleteIfExists(childToRemove);
+          }
+          catch (IOException e) {
+            // ignore deletion errors for individual files
+          }
+        });
     }
   }
 
@@ -275,14 +285,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
   @Override
   public void start() {
     if (setInStressTest) {
-      boolean wasInStressTestBefore = ApplicationManagerEx.isInStressTest();
-      ApplicationManagerEx.setInStressTest(true);
-      try {
-        start(getCallingTestMethod(), launchName);
-      }
-      finally {
-        ApplicationManagerEx.setInStressTest(wasInStressTestBefore);
-      }
+      ApplicationManagerEx.runInStressTest(true, ()-> start(getCallingTestMethod(), launchName));
     }
     else {
       Application app = ApplicationManager.getApplication();
@@ -290,7 +293,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
         if (!ApplicationManagerEx.isInStressTest()) {
           Logger log = Logger.getInstance(BenchmarkTestInfoImpl.class);
           log.error("ApplicationManagerEx.isInStressTest=false -- not good for reliable benchmarks!\n" +
-                    "Either use .runInStressTest() on the benchmark, or @StressTestApplication on the test itself");
+                    "Either use `BenchmarkTestInfoImpl.runAsStressTest()`, or @StressTestApplication on the test itself");
         }
       }
       start(getCallingTestMethod(), launchName);
@@ -305,6 +308,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
    * @see BenchmarkTestInfoImpl#start(kotlin.reflect.KFunction)
    **/
   public void start(@NotNull Method javaTestMethod, String subTestName) {
+    this.testClass = javaTestMethod.getDeclaringClass();
     var fullTestName = String.format("%s.%s", javaTestMethod.getDeclaringClass().getName(), javaTestMethod.getName());
     if (subTestName != null && !subTestName.isEmpty()) {
       fullTestName += " - " + subTestName;
@@ -351,7 +355,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
     this.uniqueTestName = uniqueTestName;
 
     if (PlatformTestUtil.COVERAGE_ENABLED_BUILD) return;
-    System.out.printf("Starting benchmark test \"%s\" in mode: %s%n", uniqueTestName, iterationType);
+    LOG.info("Starting benchmark test \"%s\" in mode: %s%n".formatted(uniqueTestName, iterationType));
 
     int maxIterationsNumber;
     if (iterationType.equals(IterationMode.WARMUP)) {
@@ -368,7 +372,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
 
     try {
       TraceKt.use(tracer.spanBuilder(uniqueTestName).setAttribute("warmup", String.valueOf(iterationType.equals(IterationMode.WARMUP))),
-                  __ -> {
+                  _ -> {
                     try {
                       PlatformTestUtil.waitForAllBackgroundActivityToCalmDown();
 
@@ -411,7 +415,7 @@ public class BenchmarkTestInfoImpl implements BenchmarkTestInfo {
           }
           collectors.addAll(metricsCollectors);
 
-          IJPerfBenchmarksMetricsPublisher.Companion.publishSync(uniqueTestName, collectors.toArray(new MetricsCollector[0]));
+          IJPerfBenchmarksMetricsPublisher.Companion.publishSync(uniqueTestName, testClass, collectors.toArray(new MetricsCollector[0]));
         }
       }
       catch (Throwable t) {

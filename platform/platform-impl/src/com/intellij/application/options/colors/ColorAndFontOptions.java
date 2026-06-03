@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.application.options.colors;
 
 import com.intellij.application.options.OptionsContainingConfigurable;
@@ -19,7 +19,12 @@ import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.colors.*;
+import com.intellij.openapi.editor.colors.ColorKey;
+import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.EditorColorsScheme;
+import com.intellij.openapi.editor.colors.EditorSchemeAttributeDescriptor;
+import com.intellij.openapi.editor.colors.Groups;
+import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.colors.ex.DefaultColorSchemesManager;
 import com.intellij.openapi.editor.colors.impl.AbstractColorsScheme;
 import com.intellij.openapi.editor.colors.impl.DefaultColorsScheme;
@@ -28,13 +33,29 @@ import com.intellij.openapi.editor.colors.impl.EditorColorsSchemeImpl;
 import com.intellij.openapi.editor.markup.EffectType;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.extensions.BaseExtensionPointName;
-import com.intellij.openapi.options.*;
-import com.intellij.openapi.options.colors.*;
+import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.Scheme;
+import com.intellij.openapi.options.SchemeManager;
+import com.intellij.openapi.options.SearchableConfigurable;
+import com.intellij.openapi.options.ShowSettingsUtil;
+import com.intellij.openapi.options.colors.AbstractKeyDescriptor;
+import com.intellij.openapi.options.colors.AttributesDescriptor;
+import com.intellij.openapi.options.colors.ColorAndFontDescriptorsProvider;
+import com.intellij.openapi.options.colors.ColorDescriptor;
+import com.intellij.openapi.options.colors.ColorSettingsPage;
+import com.intellij.openapi.options.colors.ColorSettingsPages;
+import com.intellij.openapi.options.colors.RainbowColorSettingsPage;
 import com.intellij.openapi.options.ex.Settings;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.JDOMUtil;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vcs.FileStatusFactory;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.packageDependencies.DependencyValidationManager;
@@ -53,13 +74,31 @@ import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.JBUI;
 import org.jdom.Attribute;
 import org.jdom.Element;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.Window;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -101,6 +140,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
 
   private MessageBusConnection myEditorColorSchemeConnection;
   private boolean myShouldChangeLafIfNecessary = true;
+  private @Nullable String myPreselectedSchemeName;
 
   public ColorAndFontOptions() {
     myModel.addListener(modelListener);
@@ -421,7 +461,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
       }
 
       if (!myInitResetCompleted) {
-        myModel.setPreselectedSchemeName(schemeName, this);
+        myPreselectedSchemeName = schemeName;
       }
     });
   }
@@ -531,6 +571,11 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
         }
 
         @Override
+        public @NotNull @NonNls String getConfigurableId() {
+          return page.getId();
+        }
+
+        @Override
         public DisplayPriority getPriority() {
           if (page instanceof DisplayPrioritySortable) {
             return ((DisplayPrioritySortable)page).getPriority();
@@ -581,6 +626,11 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     }
 
     @Override
+    public @NotNull @NonNls String getConfigurableId() {
+      return "ColorSchemeFont";
+    }
+
+    @Override
     public DisplayPriority getPriority() {
       return DisplayPriority.FONT_SETTINGS;
     }
@@ -609,6 +659,11 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     }
 
      @Override
+     public @NotNull @NonNls String getConfigurableId() {
+       return "ConsoleFont";
+     }
+
+     @Override
      public @NotNull DisplayPriority getPriority() {
        return DisplayPriority.FONT_SETTINGS;
      }
@@ -621,15 +676,14 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
       myModel.dropSchemes(this);
       for (EditorColorsScheme allScheme : EditorColorsManager.getInstance().getAllSchemes()) {
         MyColorScheme schemeDelegate = new MyColorScheme(allScheme);
-        initScheme(schemeDelegate);
         myModel.putScheme(schemeDelegate.getName(), schemeDelegate, this);
       }
 
       EditorColorsScheme schemeToSelect = null;
-      String preselectedSchemeName = myModel.getPreselectedSchemeName();
+      String preselectedSchemeName = myPreselectedSchemeName;
       if (preselectedSchemeName != null) {
         schemeToSelect = myModel.getScheme(preselectedSchemeName);
-        myModel.setPreselectedSchemeName(null, this);
+        myPreselectedSchemeName = null;
       }
 
       if (schemeToSelect == null) {
@@ -637,7 +691,6 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
 
         if (EditorColorsManagerImpl.Companion.isTempScheme(schemeToSelect)) {
           MyColorScheme schemeDelegate = new MyTempColorScheme((AbstractColorsScheme)schemeToSelect);
-          initScheme(schemeDelegate);
           myModel.putScheme(schemeDelegate.getName(), schemeDelegate, this);
         }
       }
@@ -1205,6 +1258,13 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     }
 
     public EditorSchemeAttributeDescriptor[] getDescriptors() {
+      if (myDescriptors == null) {
+        initScheme(this);
+      }
+      return myDescriptors;
+    }
+
+    private EditorSchemeAttributeDescriptor[] getInitializedDescriptors() {
       return myDescriptors;
     }
 
@@ -1216,7 +1276,10 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
     public boolean isModified() {
       if (isFontModified() || isConsoleFontModified()) return true;
 
-      for (EditorSchemeAttributeDescriptor descriptor : myDescriptors) {
+      EditorSchemeAttributeDescriptor[] descriptors = getInitializedDescriptors();
+      if (descriptors == null) return false;
+
+      for (EditorSchemeAttributeDescriptor descriptor : descriptors) {
         if (descriptor.isModified()) {
           return true;
         }
@@ -1259,10 +1322,13 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
         scheme.setConsoleFontPreferences(getConsoleFontPreferences());
       }
 
-      for (EditorSchemeAttributeDescriptor descriptor : myDescriptors) {
-        if (descriptor.isModified()) {
-          isModified = true;
-          descriptor.apply(scheme);
+      EditorSchemeAttributeDescriptor[] descriptors = getInitializedDescriptors();
+      if (descriptors != null) {
+        for (EditorSchemeAttributeDescriptor descriptor : descriptors) {
+          if (descriptor.isModified()) {
+            isModified = true;
+            descriptor.apply(scheme);
+          }
         }
       }
 
@@ -1547,7 +1613,10 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
           }
         }
         else {
-          for (EditorSchemeAttributeDescriptor descriptor : scheme.getDescriptors()) {
+          EditorSchemeAttributeDescriptor[] descriptors = scheme.getInitializedDescriptors();
+          if (descriptors == null) continue;
+
+          for (EditorSchemeAttributeDescriptor descriptor : descriptors) {
             if (mySubPanel.contains(descriptor) && descriptor.isModified()) {
               myRevertChangesCompleted = false;
               return true;
@@ -1589,7 +1658,7 @@ public class ColorAndFontOptions extends SearchableConfigurable.Parent.Abstract
 
     @Override
     public @NotNull String getId() {
-      return ColorAndFontOptions.this.getId() + "." + getDisplayName();
+      return ColorAndFontOptions.this.getId() + "." + myFactory.getConfigurableId();
     }
 
     @Override

@@ -1,6 +1,7 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.io;
 
+import com.intellij.testFramework.PerformanceUnitTest;
 import org.jetbrains.annotations.NotNull;
 import org.junit.FixMethodOrder;
 import org.junit.Test;
@@ -9,6 +10,8 @@ import org.junit.runners.MethodSorters;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardOpenOption;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -25,6 +28,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * But keep in mind: benchmark uses (FILE_SIZE * THREADS) of disk space.
  */
 @FixMethodOrder(MethodSorters.JVM)
+@PerformanceUnitTest
 public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAccessBaseTest {
 
   /** Write/read each file more than once -- to be sure :) */
@@ -32,7 +36,12 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
   private static final boolean USE_IDEMPOTENT_OPS = Boolean.getBoolean("PerformanceOfFileAccessViaChannelTest.USE_IDEMPOTENT_OPS");
 
 
-  private final OpenChannelsCache cache = new OpenChannelsCache(32);
+  private final OpenChannelsCache cache = new OpenChannelsCache(32, (path, readOnly) -> {
+    return readOnly
+           ? FileChannel.open(path, StandardOpenOption.READ)
+           : FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE);
+  });
+  private final ChannelsAccessor writableCacheAccessor = cache.asWritable();
 
   //======================= Single-threaded: =======================
 
@@ -218,14 +227,14 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
                                  final long blockOffset,
                                  final ByteBuffer blockToWrite) throws IOException {
     if (USE_IDEMPOTENT_OPS) {
-      return cache.executeIdempotentOp(file.toPath(), channel -> {
+      return writableCacheAccessor.executeIdempotentOp(file.toPath(), channel -> {
         return channel.write(blockToWrite, blockOffset);
-      }, false);
+      });
     }
     else {
-      return cache.executeOp(file.toPath(), channel -> {
+      return writableCacheAccessor.executeOp(file.toPath(), channel -> {
         return channel.write(blockToWrite, blockOffset);
-      }, false);
+      });
     }
   }
 
@@ -233,14 +242,14 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
                                 final long blockOffset,
                                 final ByteBuffer blockToRead) throws IOException {
     if (USE_IDEMPOTENT_OPS) {
-      return cache.executeIdempotentOp(file.toPath(), channel -> {
+      return writableCacheAccessor.executeIdempotentOp(file.toPath(), channel -> {
         return channel.read(blockToRead, blockOffset);
-      }, false);
+      });
     }
     else {
-      return cache.executeOp(file.toPath(), channel -> {
+      return writableCacheAccessor.executeOp(file.toPath(), channel -> {
         return channel.read(blockToRead, blockOffset);
-      }, false);
+      });
     }
   }
 
@@ -256,7 +265,7 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
         assert bytesRead == BUFFER_SIZE : "bytesRead: " + bytesRead;
       }
     }
-    cache.closeChannel(file.toPath());
+    writableCacheAccessor.closeChannel(file.toPath());
   }
 
   private void readFileRandomlyApproximatelyTwice(final @NotNull File file,
@@ -271,7 +280,7 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
       final int bytesRead = readBlockAtOffset(file, blockOffset, buffer);
       assert bytesRead == BUFFER_SIZE : "bytesRead: " + bytesRead;
     }
-    cache.closeChannel(file.toPath());
+    writableCacheAccessor.closeChannel(file.toPath());
   }
 
   private void writeFileSequentiallyTwice(final @NotNull File file,
@@ -285,7 +294,7 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
         assert bytesWritten == BUFFER_SIZE : "bytesWritten: " + bytesWritten;
       }
     }
-    cache.closeChannel(file.toPath());
+    writableCacheAccessor.closeChannel(file.toPath());
   }
 
   private void writeFileRandomlyApproximatelyTwice(final @NotNull File file,
@@ -299,6 +308,6 @@ public class PerformanceOfFileAccessViaChannelTest extends PerformanceOfFileAcce
       final int bytesWritten = writeBlockAtOffset(file, blockOffset, buffer);
       assert bytesWritten == BUFFER_SIZE : "bytesWritten: " + bytesWritten;
     }
-    cache.closeChannel(file.toPath());
+    writableCacheAccessor.closeChannel(file.toPath());
   }
 }

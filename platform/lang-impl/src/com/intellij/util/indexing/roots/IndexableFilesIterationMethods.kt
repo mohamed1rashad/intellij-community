@@ -1,12 +1,16 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.indexing.roots
 
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ContentIterator
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.VFileProperty
+import com.intellij.openapi.vfs.VfsUtilCore
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileFilter
+import com.intellij.openapi.vfs.VirtualFileWithId
 import com.intellij.util.indexing.roots.origin.IndexingRootHolder
 import com.intellij.util.indexing.roots.origin.IndexingSourceRootHolder
 import org.jetbrains.annotations.ApiStatus
@@ -35,11 +39,11 @@ object IndexableFilesIterationMethods {
     }
   }
 
-  private fun iterateRootsNonRecursively(project: Project,
+  fun iterateRootsNonRecursively(project: Project,
                                          roots: Iterable<VirtualFile>,
                                          contentIterator: ContentIterator,
                                          fileFilter: VirtualFileFilter,
-                                         excludeNonProjectRoots: Boolean): Boolean {
+                                         excludeNonProjectRoots: Boolean = true): Boolean {
     val projectFileIndex = ProjectFileIndex.getInstance(project)
     val rootsSet = roots.toSet()
     for (root in roots) {
@@ -95,6 +99,6 @@ object IndexableFilesIterationMethods {
     if (file !is VirtualFileWithId || file.id <= 0) {
       return false
     }
-    return !excludeNonProjectRoots || runReadAction { !projectFileIndex.isExcluded(file) }
+    return !excludeNonProjectRoots || runReadActionBlocking { !projectFileIndex.isExcluded(file) }
   }
 }

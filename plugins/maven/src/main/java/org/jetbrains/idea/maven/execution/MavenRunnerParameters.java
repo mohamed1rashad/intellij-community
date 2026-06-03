@@ -15,7 +15,14 @@ import org.jetbrains.idea.maven.model.MavenConstants;
 import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeSet;
 
 public final class MavenRunnerParameters implements Cloneable {
   private final boolean isPomExecution;
@@ -36,17 +43,6 @@ public final class MavenRunnerParameters implements Cloneable {
 
   public MavenRunnerParameters() {
     this(true, "", null, null, null, null);
-  }
-
-  /**
-   * @deprecated use {@link MavenRunnerParameters#MavenRunnerParameters(boolean, String, String, List, Collection)}
-   */
-  @Deprecated(forRemoval = true)
-  public MavenRunnerParameters(boolean isPomExecution,
-                               @NotNull String workingDirPath,
-                               @Nullable List<String> goals,
-                               @Nullable Collection<String> explicitEnabledProfiles) {
-    this(isPomExecution, workingDirPath, null, goals, explicitEnabledProfiles, null);
   }
 
   public MavenRunnerParameters(boolean isPomExecution,

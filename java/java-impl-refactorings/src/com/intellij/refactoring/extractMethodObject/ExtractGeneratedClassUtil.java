@@ -4,25 +4,60 @@ package com.intellij.refactoring.extractMethodObject;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaRecursiveElementVisitor;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFileFactory;
+import com.intellij.psi.PsiImportList;
+import com.intellij.psi.PsiImportStatementBase;
+import com.intellij.psi.PsiImportStaticStatement;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiTypesUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.refactoring.extractMethodObject.reflect.PsiReflectionAccessUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 final class ExtractGeneratedClassUtil {
-  private static final String GENERATED_CLASS_PACKAGE = "idea.debugger.rt";
   private static final Logger LOG = Logger.getInstance(ExtractGeneratedClassUtil.class);
 
   static PsiClass extractGeneratedClass(@NotNull PsiClass generatedInnerClass,
                                         @NotNull PsiElementFactory elementFactory,
-                                        @NotNull PsiElement anchor) {
+                                        @NotNull PsiElement anchor,
+                                        @Nullable String explicitGeneratedEvaluationClassFullName) {
     Project project = generatedInnerClass.getProject();
 
-    PsiClass extractedClass = elementFactory.createClass("GeneratedEvaluationClass");
+    if (explicitGeneratedEvaluationClassFullName == null) {
+      explicitGeneratedEvaluationClassFullName = "idea.debugger.rt.GeneratedEvaluationClass";
+    }
+
+    int dotIndex = explicitGeneratedEvaluationClassFullName.lastIndexOf('.');
+
+
+    String generatedEvaluationClass = dotIndex == -1 ? explicitGeneratedEvaluationClassFullName : explicitGeneratedEvaluationClassFullName.substring(dotIndex + 1);
+    String packageName = dotIndex == -1 ? "" : explicitGeneratedEvaluationClassFullName.substring(0, dotIndex);
+
+    PsiClass extractedClass = elementFactory.createClass(generatedEvaluationClass);
+    copyTypeParameters(generatedInnerClass, extractedClass, elementFactory);
 
     for (PsiField field : generatedInnerClass.getAllFields()) {
       extractedClass.add(elementFactory.createFieldFromText(field.getText(), anchor)); // TODO: check if null is OK
@@ -34,9 +69,8 @@ final class ExtractGeneratedClassUtil {
 
     PsiJavaFile generatedFile = (PsiJavaFile)PsiFileFactory.getInstance(project)
       .createFileFromText(extractedClass.getName() + ".java", JavaFileType.INSTANCE, extractedClass.getContainingFile().getText());
-    // copy.getModificationStamp(),
-    //false, false);
-    generatedFile.setPackageName(GENERATED_CLASS_PACKAGE);
+
+    generatedFile.setPackageName(packageName);
     extractedClass = PsiTreeUtil.findChildOfType(generatedFile, PsiClass.class);
     copyStaticImports(generatedInnerClass, generatedFile, elementFactory);
     assert extractedClass != null;
@@ -47,6 +81,23 @@ final class ExtractGeneratedClassUtil {
 
     addGeneratedClassInfo(codeBlock, generatedInnerClass, extractedClass);
     return extractedClass;
+  }
+
+  private static void copyTypeParameters(@NotNull PsiClass generatedInnerClass,
+                                         @NotNull PsiClass extractedClass,
+                                         @NotNull PsiElementFactory elementFactory) {
+    PsiTypeParameterList targetTypeParameters = extractedClass.getTypeParameterList();
+    if (targetTypeParameters == null) return;
+
+    Set<String> visibleTypeParameters = new HashSet<>();
+    for (PsiTypeParameter typeParameter : PsiUtil.typeParametersIterable(generatedInnerClass)) {
+      String name = typeParameter.getName();
+      if (name != null && visibleTypeParameters.add(name)) {
+        PsiClassType[] accessibleBounds = ContainerUtil.filter(typeParameter.getExtendsListTypes(), PsiReflectionAccessUtil::isAccessibleTypeParameterBound)
+          .toArray(PsiClassType.EMPTY_ARRAY);
+        targetTypeParameters.add(elementFactory.createTypeParameter(name, accessibleBounds));
+      }
+    }
   }
 
   private static void copyStaticImports(@NotNull PsiElement from,

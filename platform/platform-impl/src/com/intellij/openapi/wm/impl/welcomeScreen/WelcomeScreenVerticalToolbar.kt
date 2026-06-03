@@ -2,7 +2,15 @@
 package com.intellij.openapi.wm.impl.welcomeScreen
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionGroupWrapper
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUiKind
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
@@ -12,7 +20,11 @@ import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.ui.JBColor
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.DisclosureButton
-import com.intellij.util.ui.*
+import com.intellij.util.ui.EmptyIcon
+import com.intellij.util.ui.FocusUtil
+import com.intellij.util.ui.JBInsets
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus
 import java.awt.Dimension
 import java.awt.Point
@@ -82,7 +94,7 @@ private class WelcomeScreenVerticalToolbar(place: String, actionGroup: ActionGro
   }
 }
 
-private class WelcomeScreenActionGroupWrapper(
+internal class WelcomeScreenActionGroupWrapper(
   group: ActionGroup,
   val type: WelcomeScreenToolbarType,
   val sliderDisposable: Disposable?,
@@ -122,6 +134,11 @@ private class VerticalToolbarLayoutStrategy(
     WelcomeScreenToolbarType.TOOLWINDOW -> 2 // + 3 * 2 = 8, from DarculaDisclosureButtonBorder
   }
 
+  private val unscaledPreferredButtonWidth = when (type) {
+    WelcomeScreenToolbarType.FRAME -> 278
+    WelcomeScreenToolbarType.TOOLWINDOW -> 0
+  }
+
   override fun calculateBounds(toolbar: ActionToolbar): List<Rectangle> {
     val res = mutableListOf<Rectangle>()
 
@@ -147,7 +164,14 @@ private class VerticalToolbarLayoutStrategy(
       width = maxOf(width, preferredSize.width)
       height += preferredSize.height + JBUI.scale(unscaledVerticalGap)
     }
-    if (height > 0) height -= JBUI.scale(unscaledVerticalGap)
+    if (height > 0) {
+      height -= JBUI.scale(unscaledVerticalGap) // the last button needs no gap
+    }
+
+    if (width > 0) {
+      width = maxOf(width, JBUI.scale(unscaledPreferredButtonWidth))
+    }
+
     val result = JBUI.size(width, height)
     JBInsets.addTo(result, toolbar.component.insets)
     return result
@@ -162,7 +186,9 @@ private class WelcomeScreenDisclosureButtonAction(
 ) : CustomComponentAction {
   override fun createCustomComponent(presentation: Presentation, place: String): JComponent {
     val button = DisclosureButton()
-    button.arrowIcon = null
+    if (!presentation.isPopupGroup && getInlineActions(presentation).isEmpty()) {
+      button.arrowIcon = null
+    }
     button.isOpaque = false
 
     if (type == WelcomeScreenToolbarType.FRAME) {
@@ -184,7 +210,7 @@ private class WelcomeScreenDisclosureButtonAction(
     component.text = presentation.text
     component.icon = presentation.icon ?: EmptyIcon.ICON_16
 
-    val inlineActions = presentation.getClientProperty(ActionUtil.INLINE_ACTIONS).orEmpty()
+    val inlineActions = getInlineActions(presentation)
     if (inlineActions.isNotEmpty()) {
       component.additionalAction = object : DisclosureButton.ActionListener {
         override fun actionTriggered(e: InputEvent?) {
@@ -197,6 +223,8 @@ private class WelcomeScreenDisclosureButtonAction(
     }
     UIUtil.setEnabled(component, presentation.isEnabled, true)
   }
+
+  private fun getInlineActions(presentation: Presentation): List<AnAction> = presentation.getClientProperty(ActionUtil.INLINE_ACTIONS).orEmpty()
 
   private fun performAction(component: JComponent, presentation: Presentation) {
     val dataContext = ActionToolbar.getDataContextFor(component)
@@ -221,6 +249,6 @@ private class WelcomeScreenDisclosureButtonAction(
   }
 }
 
-private enum class WelcomeScreenToolbarType {
+internal enum class WelcomeScreenToolbarType {
   FRAME, TOOLWINDOW
 }

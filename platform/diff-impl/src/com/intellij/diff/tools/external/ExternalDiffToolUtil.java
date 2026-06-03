@@ -4,7 +4,11 @@ package com.intellij.diff.tools.external;
 import com.intellij.CommonBundle;
 import com.intellij.diff.DiffContentFactory;
 import com.intellij.diff.DiffRequestFactory;
-import com.intellij.diff.contents.*;
+import com.intellij.diff.contents.DiffContent;
+import com.intellij.diff.contents.DirectoryContent;
+import com.intellij.diff.contents.DocumentContent;
+import com.intellij.diff.contents.EmptyContent;
+import com.intellij.diff.contents.FileContent;
 import com.intellij.diff.merge.MergeRequest;
 import com.intellij.diff.merge.MergeResult;
 import com.intellij.diff.merge.ThreesideMergeRequest;
@@ -14,8 +18,13 @@ import com.intellij.diff.util.Side;
 import com.intellij.diff.util.ThreeSide;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.process.*;
+import com.intellij.execution.process.KillableProcessHandler;
+import com.intellij.execution.process.ProcessEvent;
+import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessListener;
+import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.DiffBundle;
 import com.intellij.openapi.diff.impl.DiffUsageTriggerCollector;
@@ -39,7 +48,11 @@ import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.openapi.vfs.encoding.EncodingProjectManager;
-import com.intellij.util.*;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.Consumer;
+import com.intellij.util.LineSeparator;
+import com.intellij.util.PathUtil;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.execution.ParametersListUtil;
 import com.intellij.util.io.BaseDataReader;
@@ -48,11 +61,15 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -82,7 +99,7 @@ public final class ExternalDiffToolUtil {
 
       Document document = FileDocumentManager.getInstance().getCachedDocument(file);
       if (document != null) {
-        FileDocumentManager.getInstance().saveDocument(document);
+        WriteAction.run(() -> FileDocumentManager.getInstance().saveDocument(document));
       }
 
       if (file.isInLocalFileSystem()) {
@@ -109,7 +126,7 @@ public final class ExternalDiffToolUtil {
   private static @NotNull File createTempFile(@Nullable Project project,
                                               @NotNull DocumentContent content,
                                               @NotNull FileNameInfo fileName) throws IOException {
-    FileDocumentManager.getInstance().saveDocument(content.getDocument());
+    WriteAction.run(() -> FileDocumentManager.getInstance().saveDocument(content.getDocument()));
 
     LineSeparator separator = content.getLineSeparator();
     if (separator == null) separator = LineSeparator.getSystemLineSeparator();
@@ -154,7 +171,7 @@ public final class ExternalDiffToolUtil {
 
       Document document = FileDocumentManager.getInstance().getCachedDocument(file);
       if (document != null) {
-        FileDocumentManager.getInstance().saveDocument(document);
+        WriteAction.run(() -> FileDocumentManager.getInstance().saveDocument(document));
       }
 
       if (file.isInLocalFileSystem()) {

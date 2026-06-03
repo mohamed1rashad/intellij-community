@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui.popup;
 
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
@@ -6,10 +6,17 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.ShortcutProvider;
 import com.intellij.openapi.actionSystem.ShortcutSet;
 import com.intellij.openapi.application.WriteIntentReadAction;
+import com.intellij.openapi.client.ClientSystemInfo;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.popup.*;
+import com.intellij.openapi.ui.popup.JBPopup;
+import com.intellij.openapi.ui.popup.ListPopupStep;
+import com.intellij.openapi.ui.popup.PopupShowOptionsBuilder;
+import com.intellij.openapi.ui.popup.PopupShowOptionsImpl;
+import com.intellij.openapi.ui.popup.PopupStep;
+import com.intellij.openapi.ui.popup.SpeedSearchFilter;
+import com.intellij.openapi.ui.popup.TreePopupStep;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.PopupBorder;
@@ -23,17 +30,38 @@ import com.intellij.ui.popup.tree.TreePopupImpl;
 import com.intellij.ui.popup.util.MnemonicsSearch;
 import com.intellij.ui.speedSearch.ElementFilter;
 import com.intellij.ui.speedSearch.SpeedSearch;
+import com.intellij.ui.wayland.WaylandUtilKt;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.TimerUtil;
-import org.intellij.lang.annotations.JdkConstants;
+import com.intellij.util.ui.JdkConstants;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.ActionMap;
+import javax.swing.InputMap;
+import javax.swing.JComponent;
+import javax.swing.JScrollPane;
+import javax.swing.KeyStroke;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.KeyboardFocusManager;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.util.Collections;
 
 public abstract class WizardPopup extends AbstractPopup implements ActionListener, ElementFilter {
@@ -210,22 +238,62 @@ public abstract class WizardPopup extends AbstractPopup implements ActionListene
 
       Dimension size = getContent().getPreferredSize();
       Dimension minimumSize = getMinimumSize();
+
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("START Showing a WizardPopup requested at screen(" + aScreenX + "," + aScreenY + "), " +
+                  "pref size " + size + ", min size " + minimumSize);
+      }
+
       size.width = Math.max(size.width, minimumSize.width);
       size.height = Math.max(size.height, minimumSize.height);
       Rectangle targetBounds = new Rectangle(new Point(aScreenX, aScreenY), size);
 
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("The initial target bounds are " + targetBounds);
+      }
+
       if (getParent() != null && alignByParentBounds) {
         final Rectangle parentBounds = getParent().getBounds();
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Trying to align to parent bounds " + parentBounds);
+        }
         parentBounds.x += STEP_X_PADDING;
         parentBounds.width -= STEP_X_PADDING * 2;
-        ScreenUtil.moveToFit(targetBounds, ScreenUtil.getScreenRectangle(
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("The parent bounds corrected for padding: " + parentBounds);
+        }
+        var screenRectangle = ScreenUtil.getScreenRectangle(
           parentBounds.x + parentBounds.width / 2,
-          parentBounds.y + parentBounds.height / 2), null);
+          parentBounds.y + parentBounds.height / 2
+        );
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("The parent screen rectangle: " + screenRectangle);
+        }
+        ScreenUtil.moveToFit(targetBounds, screenRectangle, null);
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("The target bounds fit to screen: " + targetBounds);
+        }
         if (parentBounds.intersects(targetBounds)) {
           targetBounds.x = getParent().getBounds().x - targetBounds.width - STEP_X_PADDING;
+          if (LOG.isDebugEnabled()) {
+            LOG.debug("The target bounds aligned to the parent's X: " + targetBounds);
+          }
+          if (targetBounds.x < screenRectangle.x) { // prevent the child popup from appearing on another monitor
+            targetBounds.x = screenRectangle.x;
+            if (LOG.isDebugEnabled()) {
+              LOG.debug("The target bounds fit to screen again: " + targetBounds);
+            }
+          }
         }
-      } else {
+        else {
+          LOG.debug("No intersection with the parent bounds, no alignment needed");
+        }
+      }
+      else {
         ScreenUtil.moveToFit(targetBounds, ScreenUtil.getScreenRectangle(aScreenX + 1, aScreenY + 1), null);
+      }
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("END the WizardPopup part, delegating to super(), the target bounds: " + targetBounds);
       }
       newOptions = new PopupShowOptionsBuilder()
         .withOwner(owner)
@@ -350,31 +418,38 @@ public abstract class WizardPopup extends AbstractPopup implements ActionListene
         return super.getPreferredSize();
       }
       final Component focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-      Point p = null;
-      if (focusOwner != null && focusOwner.isShowing()) {
-        p = focusOwner.getLocationOnScreen();
-      }
-
-      return computeNotBiggerDimension(super.getPreferredSize().getSize(), p);
+      return computeNotBiggerDimension(super.getPreferredSize().getSize(), focusOwner);
     }
 
-    private static Dimension computeNotBiggerDimension(Dimension ofContent, final Point locationOnScreen) {
-      int resultHeight;
-      if (locationOnScreen == null) {
-        resultHeight = ofContent.height > MAX_SIZE.height + 50 ? MAX_SIZE.height : ofContent.height;
-      }
-      else {
-        Rectangle r = ScreenUtil.getScreenRectangle(locationOnScreen);
-        resultHeight = Math.min(ofContent.height, r.height - (r.height / 4));
-      }
+    private static Dimension computeNotBiggerDimension(@NotNull Dimension ofContent, @Nullable Component focusOwner) {
+      int defaultHeight = ofContent.height > MAX_SIZE.height + 50 ? MAX_SIZE.height : ofContent.height;
+      @Nullable Integer computedHeight = computeNotBiggerHeight(ofContent, focusOwner);
+      int resultHeight = computedHeight != null ? computedHeight : defaultHeight;
 
       int resultWidth = Math.min(ofContent.width, MAX_SIZE.width);
-
       if (ofContent.height > resultHeight) {
         resultWidth += ScrollPaneFactory.createScrollPane().getVerticalScrollBar().getPreferredSize().getWidth();
       }
 
       return new Dimension(resultWidth, resultHeight);
+    }
+
+    private static @Nullable Integer computeNotBiggerHeight(@NotNull Dimension ofContent, @Nullable Component focusOwner) {
+      @Nullable Integer screenHeight = null;
+      if (ClientSystemInfo.isWaylandToolkit()) {
+        screenHeight = WaylandUtilKt.getFakeScreenHeight(focusOwner);
+      }
+      else {
+        Point locationOnScreen = null;
+        if (focusOwner != null && focusOwner.isShowing()) {
+          locationOnScreen = focusOwner.getLocationOnScreen();
+        }
+        if (locationOnScreen != null) {
+          Rectangle r = ScreenUtil.getScreenRectangle(locationOnScreen);
+          screenHeight = r.height;
+        }
+      }
+      return screenHeight == null ? null : Math.min(ofContent.height, screenHeight - (screenHeight / 4));
     }
   }
 

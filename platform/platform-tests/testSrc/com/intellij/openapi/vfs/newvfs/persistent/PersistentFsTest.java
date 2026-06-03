@@ -2,6 +2,7 @@
 package com.intellij.openapi.vfs.newvfs.persistent;
 
 import com.intellij.CacheSwitcher;
+import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -23,15 +24,40 @@ import com.intellij.openapi.util.io.FileAttributes;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.IoTestUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.PersistentFSConstants;
+import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.VirtualFileSystem;
+import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.openapi.vfs.ex.temp.TempFileSystem;
 import com.intellij.openapi.vfs.impl.jar.JarFileSystemImpl;
-import com.intellij.openapi.vfs.newvfs.*;
-import com.intellij.openapi.vfs.newvfs.events.*;
+import com.intellij.openapi.vfs.newvfs.BulkFileListener;
+import com.intellij.openapi.vfs.newvfs.ChildInfoImpl;
+import com.intellij.openapi.vfs.newvfs.FileAttribute;
+import com.intellij.openapi.vfs.newvfs.ManagingFS;
+import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
+import com.intellij.openapi.vfs.newvfs.NewVirtualFileSystem;
+import com.intellij.openapi.vfs.newvfs.RefreshQueue;
+import com.intellij.openapi.vfs.newvfs.events.ChildInfo;
+import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualDirectoryImpl;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry;
 import com.intellij.platform.testFramework.DynamicPluginTestUtilsKt;
-import com.intellij.testFramework.*;
+import com.intellij.testFramework.HeavyPlatformTestCase;
+import com.intellij.testFramework.LoggedErrorProcessor;
+import com.intellij.testFramework.PlatformTestUtil;
+import com.intellij.testFramework.UsefulTestCase;
+import com.intellij.testFramework.VfsTestUtil;
 import com.intellij.testFramework.fixtures.BareTestFixtureTestCase;
 import com.intellij.testFramework.rules.TempDirectory;
 import com.intellij.testFramework.utils.vfs.CheckVFSHealthRule;
@@ -50,13 +76,26 @@ import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 
-import java.io.*;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarFile;
@@ -64,12 +103,17 @@ import java.util.jar.Manifest;
 
 import static com.intellij.testFramework.EdtTestUtil.runInEdtAndGet;
 import static com.intellij.testFramework.EdtTestUtil.runInEdtAndWait;
-import static com.intellij.testFramework.UsefulTestCase.*;
+import static com.intellij.testFramework.UsefulTestCase.TEMP_DIR_MARKER;
+import static com.intellij.testFramework.UsefulTestCase.assertEmpty;
+import static com.intellij.testFramework.UsefulTestCase.assertInstanceOf;
+import static com.intellij.testFramework.UsefulTestCase.assertOneElement;
+import static com.intellij.testFramework.UsefulTestCase.assertSize;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
@@ -570,21 +614,24 @@ public class PersistentFsTest extends BareTestFixtureTestCase {
   @Test
   public void testCreateNewDirectoryEntailsLoadingAllChildren() throws Exception {
     tempDirectory.newFile("d/d1/x.txt");
+    tempDirectory.newDirectory(".idea"); // for some reason when the test is run on TC .idea is not created (e.g. for temp project) or IDEA is notified later, so we create it here in advance
     Path source = tempDirectory.getRootPath().resolve("d");
     Path target = tempDirectory.getRootPath().resolve("target");
     VirtualFile vTemp = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory.getRoot());
     assertNotNull(vTemp);
     vTemp.refresh(false, true);
-    assertEquals("d", assertOneElement(vTemp.getChildren()).getName());
+    assertSize(2, vTemp.getChildren()); // d and .idea
 
-    Project project = ProjectManager.getInstance().loadAndOpenProject(tempDirectory.getRoot().getPath());
+    Project project = ProjectUtil.openOrImport(tempDirectory.getRoot().toPath());
     Disposer.register(getTestRootDisposable(), () -> ProjectManager.getInstance().closeAndDispose(project));
 
     Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
     vTemp.refresh(false, true);
     assertChildrenAreLoaded(vTemp);
-    VirtualFile vTarget = assertOneElement(((VirtualDirectoryImpl)vTemp).getCachedChildren());
-    assertEquals("target", vTarget.getName());
+    List<VirtualFile> rootChildren = ((VirtualDirectoryImpl)vTemp).getCachedChildren();
+    assertSize(2, rootChildren);
+    VirtualFile vTarget = ContainerUtil.find(rootChildren, f -> f.getName().equals("target"));
+    assertNotNull(vTarget);
     assertChildrenAreLoaded(vTarget);
     VirtualFile vd1 = assertOneElement(((VirtualDirectoryImpl)vTarget).getCachedChildren());
     assertEquals("d1", vd1.getName());
@@ -596,14 +643,15 @@ public class PersistentFsTest extends BareTestFixtureTestCase {
   @Test
   public void testCreateNewDirectoryEntailsLoadingAllChildrenExceptExcluded() throws Exception {
     tempDirectory.newFile("d/d1/x.txt");
+    tempDirectory.newDirectory(".idea"); // for some reason when the test is run on TC .idea is not created (e.g. for temp project) or IDEA is notified later, so we create it here in advance
     Path source = tempDirectory.getRootPath().resolve("d");
     Path target = tempDirectory.getRootPath().resolve("target");
     VirtualFile vTemp = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory.getRoot());
     assertNotNull(vTemp);
     vTemp.refresh(false, true);
-    assertEquals("d", assertOneElement(vTemp.getChildren()).getName());
+    assertSize(2, vTemp.getChildren()); // d and .idea
 
-    Project project = ProjectManager.getInstance().loadAndOpenProject(tempDirectory.getRoot().getPath());
+    Project project = ProjectUtil.openOrImport(tempDirectory.getRoot().toPath());
     Disposer.register(getTestRootDisposable(), () -> ProjectManager.getInstance().closeAndDispose(project));
 
     String imlPath = tempDirectory.getRootPath().resolve("temp.iml").toString();
@@ -619,13 +667,70 @@ public class PersistentFsTest extends BareTestFixtureTestCase {
     Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
     vTemp.refresh(false, true);
     assertChildrenAreLoaded(vTemp);
-    VirtualFile vTarget = assertOneElement(((VirtualDirectoryImpl)vTemp).getCachedChildren());
+    List<VirtualFile> rootChildren = ((VirtualDirectoryImpl)vTemp).getCachedChildren();
+    assertSize(2, rootChildren);
+    VirtualFile vTarget = ContainerUtil.find(rootChildren, f -> f.getName().equals("target"));
+    assertNotNull(vTarget);
     assertEquals("target", vTarget.getName());
     assertChildrenAreLoaded(vTarget);
     VirtualFile vd1 = assertOneElement(((VirtualDirectoryImpl)vTarget).getCachedChildren());
     assertEquals("d1", vd1.getName());
     assertFalse(((VirtualDirectoryImpl)vd1).allChildrenLoaded());
     assertEquals(Collections.emptyList(), ((VirtualDirectoryImpl)vd1).getCachedChildren());
+  }
+
+  @Test
+  public void testCreateNewDirectoryCanLoadOnlySomeChildren() throws Exception {
+    VirtualFile vTemp = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory.getRoot());
+    assertNotNull(vTemp);
+    assertEmpty(vTemp.getChildren());
+
+    Path target = Files.createDirectory(tempDirectory.getRootPath().resolve("target"));
+    Path loaded = Files.writeString(target.resolve("loaded.txt"), "loaded");
+    Files.writeString(target.resolve("skipped.txt"), "skipped");
+
+    PersistentFSImpl pfs = (PersistentFSImpl)PersistentFS.getInstance();
+    ChildInfo loadedInfo = new ChildInfoImpl(pfs.peer().getNameId("loaded.txt"), fileAttributes(loaded), null, null, false);
+    processEvent(new VFileCreateEvent(this, vTemp, "target", true, fileAttributes(target), null, new ChildInfo[]{loadedInfo}, false));
+
+    VirtualDirectoryImpl vTarget = (VirtualDirectoryImpl)vTemp.findChild("target");
+    assertNotNull(vTarget);
+    assertFalse(vTarget.allChildrenLoaded());
+    assertFalse(pfs.areChildrenLoaded(vTarget));
+    VirtualFile vLoaded = assertOneElement(vTarget.getCachedChildren());
+    assertEquals("loaded.txt", vLoaded.getName());
+  }
+
+  @Test
+  public void testPartialEmptyChildrenDoNotMarkDirectoryLoaded() throws Exception {
+    VirtualFile vTemp = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory.getRoot());
+    assertNotNull(vTemp);
+    assertEmpty(vTemp.getChildren());
+
+    Path target = Files.createDirectory(tempDirectory.getRootPath().resolve("target"));
+    PersistentFSImpl pfs = (PersistentFSImpl)PersistentFS.getInstance();
+    processEvent(new VFileCreateEvent(this, vTemp, "target", true, fileAttributes(target), null, ChildInfo.EMPTY_ARRAY, false));
+
+    VirtualDirectoryImpl vTarget = (VirtualDirectoryImpl)vTemp.findChild("target");
+    assertNotNull(vTarget);
+    assertFalse(vTarget.allChildrenLoaded());
+    assertFalse(pfs.areChildrenLoaded(vTarget));
+    assertEmpty(vTarget.getCachedChildren());
+  }
+
+  @Test
+  public void testCompleteEmptyChildrenMarkDirectoryLoaded() throws Exception {
+    VirtualFile vTemp = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(tempDirectory.getRoot());
+    assertNotNull(vTemp);
+    assertEmpty(vTemp.getChildren());
+
+    Path target = Files.createDirectory(tempDirectory.getRootPath().resolve("target"));
+    processEvent(new VFileCreateEvent(this, vTemp, "target", true, fileAttributes(target), null, ChildInfo.EMPTY_ARRAY));
+
+    VirtualFile vTarget = vTemp.findChild("target");
+    assertNotNull(vTarget);
+    assertChildrenAreLoaded(vTarget);
+    assertEmpty(((VirtualDirectoryImpl)vTarget).getCachedChildren());
   }
 
   @Test
@@ -1152,6 +1257,14 @@ public class PersistentFsTest extends BareTestFixtureTestCase {
     }
 
     assertEquals(expectedEvents, log.toString());
+  }
+
+  private static void processEvent(VFileEvent event) {
+    WriteCommandAction.runWriteCommandAction(null, () -> RefreshQueue.getInstance().processEvents(false, List.of(event)));
+  }
+
+  private static FileAttributes fileAttributes(Path file) throws IOException {
+    return FileAttributes.fromNio(file, Files.readAttributes(file, BasicFileAttributes.class));
   }
 
   private static void assertChildrenAreLoaded(VirtualFile file) {

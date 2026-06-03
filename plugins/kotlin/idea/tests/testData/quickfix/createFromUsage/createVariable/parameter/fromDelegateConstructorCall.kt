@@ -1,4 +1,6 @@
 // "Create parameter 'x'" "true"
+// K2_ERROR: There's a cycle in the delegation calls chain.
+// K2_ERROR: Unresolved reference 'x'.
 // K2_AFTER_ERROR: None of the following candidates is applicable:<br><br>constructor(): CtorAccess:<br>  Too many arguments for 'constructor(): CtorAccess'.<br><br>constructor(ps: String, x: String): CtorAccess:<br>  No value passed for parameter 'x'.
 // ERROR: None of the following functions can be called with the arguments supplied: <br>public constructor CtorAccess() defined in CtorAccess<br>public constructor CtorAccess(ps: String, x: String) defined in CtorAccess
 
@@ -7,3 +9,4 @@ class CtorAccess() {
 }
 // FUS_QUICKFIX_NAME: org.jetbrains.kotlin.idea.quickfix.createFromUsage.createVariable.CreateParameterFromUsageFix
 // FUS_K2_QUICKFIX_NAME: org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateParameterFromUsageBuilder$CreateParameterFromUsageAction
+// TEST_PREVIEW: x: kotlin.String

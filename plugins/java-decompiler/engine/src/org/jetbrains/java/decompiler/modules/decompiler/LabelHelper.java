@@ -4,12 +4,23 @@ package org.jetbrains.java.decompiler.modules.decompiler;
 import org.jetbrains.java.decompiler.modules.decompiler.StatEdge.EdgeDirection;
 import org.jetbrains.java.decompiler.modules.decompiler.StatEdge.EdgeType;
 import org.jetbrains.java.decompiler.modules.decompiler.exps.Exprent;
-import org.jetbrains.java.decompiler.modules.decompiler.stats.*;
+import org.jetbrains.java.decompiler.modules.decompiler.stats.DoStatement;
 import org.jetbrains.java.decompiler.modules.decompiler.stats.DoStatement.LoopType;
+import org.jetbrains.java.decompiler.modules.decompiler.stats.IfStatement;
+import org.jetbrains.java.decompiler.modules.decompiler.stats.RootStatement;
+import org.jetbrains.java.decompiler.modules.decompiler.stats.Statement;
 import org.jetbrains.java.decompiler.modules.decompiler.stats.Statement.StatementType;
+import org.jetbrains.java.decompiler.modules.decompiler.stats.SwitchStatement;
+import org.jetbrains.java.decompiler.modules.decompiler.stats.SynchronizedStatement;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map.Entry;
+import java.util.Set;
 
 
 public final class LabelHelper {
@@ -82,7 +93,7 @@ public final class LabelHelper {
     }
 
     if (!stat.hasBasicSuccEdge()) {
-      for (StatEdge edge : stat.getSuccessorEdges(EdgeType.CONTINUE.unite(EdgeType.BREAK))) {
+      for (StatEdge edge : stat.getSuccessorEdges(EdgeType.CONTINUE_BREAK)) {
         stat.removeSuccessor(edge);
       }
     }
@@ -254,7 +265,7 @@ public final class LabelHelper {
           Statement stt = swst.getCaseStatements().get(i);
           Statement stnext = swst.getCaseStatements().get(i + 1);
 
-          if (stnext.getExprents() != null && stnext.getExprents().isEmpty()) {
+          if (stnext.getExprents() != null && stnext.getExprents().isEmpty() && !stnext.getAllSuccessorEdges().isEmpty()) {
             stnext = stnext.getAllSuccessorEdges().get(0).getDestination();
           }
           processEdgesWithNext(stt, setExplicitEdges(stt), stnext);
@@ -263,7 +274,7 @@ public final class LabelHelper {
         int last = swst.getCaseStatements().size() - 1;
         if (last >= 0) { // empty switch possible
           Statement stlast = swst.getCaseStatements().get(last);
-          if (stlast.getExprents() != null && stlast.getExprents().isEmpty()) {
+          if (stlast.getExprents() != null && stlast.getExprents().isEmpty() && !stlast.getAllSuccessorEdges().isEmpty()) {
             StatEdge edge = stlast.getAllSuccessorEdges().get(0);
             mapEdges.put(edge.getDestination(), new ArrayList<>(Collections.singletonList(edge)));
           }
@@ -387,7 +398,7 @@ public final class LabelHelper {
       if (last >= 0) { // empty switch possible
         Statement stlast = swst.getCaseStatements().get(last);
 
-        if (stlast.getExprents() != null && stlast.getExprents().isEmpty()) {
+        if (stlast.getExprents() != null && stlast.getExprents().isEmpty() && !stlast.getAllSuccessorEdges().isEmpty()) {
           if (!stlast.getAllSuccessorEdges().get(0).explicit) {
             List<StatEdge> lstEdges = swst.getCaseEdges().get(last);
             lstEdges.remove(swst.getDefaultEdge());

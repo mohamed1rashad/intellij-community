@@ -21,9 +21,9 @@ import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ListUtil;
-import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.components.JBList;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.util.ArrayUtil;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.codeInsight.typing.PyBundledStubs;
@@ -34,10 +34,15 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.util.*;
+import javax.swing.DefaultListModel;
+import javax.swing.JList;
+import javax.swing.ListCellRenderer;
+import java.awt.Component;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class PythonPathEditor extends SdkPathEditor {
   private final @NotNull PathListModel myPathListModel;
@@ -56,17 +61,6 @@ public class PythonPathEditor extends SdkPathEditor {
     if (modificator != null) {
       List<VirtualFile> list = ImmutableList.copyOf(modificator.getRoots(getOrderRootType()));
       resetPath(myPathListModel.reset(list, modificator));
-    }
-    else {
-      setEnabled(false);
-    }
-  }
-
-  public void reload(@Nullable SdkModificator sdkModificator) {
-    if (sdkModificator != null) {
-      List<VirtualFile> list = ImmutableList.copyOf(sdkModificator.getRoots(getOrderRootType()));
-      resetPath(myPathListModel.reload(list));
-      setModified(true);
     }
     else {
       setEnabled(false);
@@ -113,7 +107,7 @@ public class PythonPathEditor extends SdkPathEditor {
 
   @Override
   protected ListCellRenderer<VirtualFile> createListCellRenderer(JBList<VirtualFile> list) {
-    return SimpleListCellRenderer.create("", value -> {
+    return BuilderKt.textListCellRenderer("", value -> {
       String suffix = myPathListModel.getPresentationSuffix(value);
       if (!suffix.isEmpty()) suffix = "  " + suffix;
       return getPresentablePath(value) + suffix;
@@ -147,7 +141,6 @@ public class PythonPathEditor extends SdkPathEditor {
     private final List<VirtualFile> myFilteredOut = new ArrayList<>();
     private final DefaultListModel<VirtualFile> myListModel;
     private final OrderRootType myOrderRootType;
-    private final Set<VirtualFile> myUserAddedToRemove = new HashSet<>();
 
     PathListModel(OrderRootType orderRootType, DefaultListModel<VirtualFile> listModel) {
       myOrderRootType = orderRootType;
@@ -167,7 +160,6 @@ public class PythonPathEditor extends SdkPathEditor {
         if (!myFoundFiles.contains(file)) {
           if (!myExcluded.remove(file)) { //if it was excluded we only delete exclusion mark
             myAdded.add(file);
-            myUserAddedToRemove.remove(file);
           }
           else {
             myFoundFiles.add(file);
@@ -187,7 +179,6 @@ public class PythonPathEditor extends SdkPathEditor {
         if (myAdded.contains(e.first)) {
           toRemove.add(e.second);
           myAdded.remove(e.first);
-          myUserAddedToRemove.add(e.first);
         }
         else if (myExcluded.contains(e.first)) {
           myExcluded.remove(e.first);
@@ -238,23 +229,12 @@ public class PythonPathEditor extends SdkPathEditor {
       return "";
     }
 
-    public @NotNull List<VirtualFile> reload(@NotNull List<VirtualFile> list) {
-      myFoundFiles.clear();
-      myFoundFiles.addAll(list);
-      List<VirtualFile> result = filterOutStubs(list, myFilteredOut);
-      result.removeAll(myUserAddedToRemove);
-      result.addAll(myAdded);
-
-      return result;
-    }
-
     public @NotNull List<VirtualFile> reset(@NotNull List<VirtualFile> list, @NotNull SdkModificator modificator) {
       myFilteredOut.clear();
       List<VirtualFile> result = filterOutStubs(list, myFilteredOut);
 
       myFoundFiles.clear();
       myFoundFiles.addAll(list);
-      myUserAddedToRemove.clear();
 
       if (modificator.getSdkAdditionalData() instanceof PythonSdkAdditionalData data) {
         setAdded(data.getAddedPathFiles());

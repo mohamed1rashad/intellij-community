@@ -21,18 +21,34 @@ import com.intellij.psi.util.QualifiedName;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
-import com.jetbrains.python.PyLanguageFacadeKt;
 import com.jetbrains.python.codeInsight.imports.AddImportHelper.ImportPriority;
 import com.jetbrains.python.formatter.PyCodeStyleSettings;
 import com.jetbrains.python.inspections.PyUnusedImportsInspection;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyElementGenerator;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyFromImportStatement;
+import com.jetbrains.python.psi.PyImportElement;
+import com.jetbrains.python.psi.PyImportStatement;
+import com.jetbrains.python.psi.PyImportStatementBase;
+import com.jetbrains.python.psi.PyRecursiveElementVisitor;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.model.java.JavaResourceRootType;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import static com.jetbrains.python.psi.PyUtil.as;
 
@@ -78,9 +94,7 @@ public final class PyImportOptimizer implements ImportOptimizer {
     TypeEvalContext context = TypeEvalContext.codeAnalysis(file.getProject(), rfile);
 
     PyUnusedImportsInspection inspection = new PyUnusedImportsInspection();
-    PyUnusedImportsInspection.Visitor visitor = new PyUnusedImportsInspection.Visitor(
-      null, inspection, context, PyLanguageFacadeKt.getEffectiveLanguageLevel(file)
-    );
+    PyUnusedImportsInspection.Visitor visitor = new PyUnusedImportsInspection.Visitor(null, inspection, context);
     file.accept(new PyRecursiveElementVisitor() {
       @Override
       public void visitElement(@NotNull PsiElement node) {
@@ -163,7 +177,7 @@ public final class PyImportOptimizer implements ImportOptimizer {
       for (PyImportStatementBase statement : imports) {
         final PyFromImportStatement fromImport = as(statement, PyFromImportStatement.class);
         if (fromImport != null && !fromImport.isStarImport()) {
-          myOldFromImportBySources.putValue(getNormalizedFromImportSource(fromImport), fromImport);
+          myOldFromImportBySources.putValue(fromImportKey(fromImport), fromImport);
         }
         final Couple<List<PsiComment>> boundAndOthers = collectPrecedingLineComments(statement);
         myOldImportToLineComments.putValues(statement, boundAndOthers.getFirst());
@@ -192,8 +206,9 @@ public final class PyImportOptimizer implements ImportOptimizer {
       final PyImportElement[] importElements = importStatement.getImportElements();
       // Split combined imports like "import foo, bar as b"
       if (importElements.length > 1) {
+        final boolean lazy = importStatement.isLazy();
         final List<PyImportStatement> newImports =
-          ContainerUtil.map(importElements, e -> myGenerator.createImportStatement(myLangLevel, e.getText(), null));
+          ContainerUtil.map(importElements, e -> myGenerator.createImportStatement(myLangLevel, e.getText(), null, lazy));
         replaceOneImportWithSeveral(result, importStatement, newImports);
       }
       else {
@@ -209,12 +224,14 @@ public final class PyImportOptimizer implements ImportOptimizer {
       }
 
       final String source = getNormalizedFromImportSource(fromImport);
+      final boolean lazy = fromImport.isLazy();
+      final String key = fromImportKey(fromImport);
       final PyImportElement[] importedFromNames = fromImport.getImportElements();
 
       final List<PyImportElement> newFromImportNames = new ArrayList<>();
       final Comparator<PyImportElement> fromNamesComparator = getFromNamesComparator();
 
-      final Collection<PyFromImportStatement> sameSourceImports = myOldFromImportBySources.get(source);
+      final Collection<PyFromImportStatement> sameSourceImports = myOldFromImportBySources.get(key);
       if (sameSourceImports.isEmpty()) {
         return;
       }
@@ -231,7 +248,7 @@ public final class PyImportOptimizer implements ImportOptimizer {
           ContainerUtil.addAll(newFromImportNames, sameSourceImport.getImportElements());
         }
         // Remember that we have checked imports with this source already
-        myOldFromImportBySources.remove(source);
+        myOldFromImportBySources.remove(key);
       }
       else if (!shouldSplitImport && myPySettings.OPTIMIZE_IMPORTS_SORT_NAMES_IN_FROM_IMPORTS) {
         if (!Ordering.from(fromNamesComparator).isOrdered(Arrays.asList(importedFromNames))) {
@@ -248,7 +265,7 @@ public final class PyImportOptimizer implements ImportOptimizer {
         if (forceParentheses) {
           importedNames = "(" + importedNames + ")";
         }
-        final PyFromImportStatement combinedImport = myGenerator.createFromImportStatement(myLangLevel, source, importedNames, null);
+        final PyFromImportStatement combinedImport = myGenerator.createFromImportStatement(myLangLevel, source, importedNames, null, lazy);
         final Set<PyImportStatementBase> oldImports = ContainerUtil.map2LinkedSet(newFromImportNames,
                                                                                   e -> (PyImportStatementBase)e.getParent());
         replaceSeveralImportsWithOne(result, oldImports, combinedImport);
@@ -257,13 +274,23 @@ public final class PyImportOptimizer implements ImportOptimizer {
         final List<PyFromImportStatement> newFromImports = ContainerUtil.map(importedFromNames, importElem -> {
           final String name = Objects.toString(importElem.getImportedQName(), "");
           final String alias = importElem.getAsName();
-          return myGenerator.createFromImportStatement(myLangLevel, source, name, alias);
+          return myGenerator.createFromImportStatement(myLangLevel, source, name, alias, lazy);
         });
         replaceOneImportWithSeveral(result, fromImport, newFromImports);
       }
       else {
         addImportAsIs(result, fromImport);
       }
+    }
+
+    /**
+     * Key used to group {@code from X import …} statements. Lazy and non-lazy imports of the same
+     * source get distinct keys (PEP 810 — different semantics, cannot be joined).
+     */
+    private static @NotNull String fromImportKey(@NotNull PyFromImportStatement fromImport) {
+      final String source = getNormalizedFromImportSource(fromImport);
+      // '\0' separator never appears in a normalized module qualifier.
+      return fromImport.isLazy() ? "lazy\0" + source : source;
     }
 
     private void replaceSeveralImportsWithOne(@NotNull List<PyImportStatementBase> result,

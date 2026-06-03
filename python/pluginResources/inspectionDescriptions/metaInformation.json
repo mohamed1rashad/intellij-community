@@ -10,7 +10,7 @@
     },
     {
       "id": "PoetryPackageVersionsInspection",
-      "codeQualityCategory": "Sanity"
+      "codeQualityCategory": "Unspecified"
     },
     {
       "id": "UvPackageVersionsInspection",
@@ -18,27 +18,27 @@
     },
     {
       "id": "PyStubPackagesCompatibilityInspection",
-      "codeQualityCategory": "Sanity"
+      "codeQualityCategory": "Reliability"
     },
     {
-      "id": "UnsatisfiedRequirementInspection",
-      "codeQualityCategory": "Sanity"
+      "id": "DependenciesInspection",
+      "codeQualityCategory": "Reliability"
     },
     {
       "id": "CommandLineInspection",
-      "codeQualityCategory": "Sanity"
+      "codeQualityCategory": "Reliability"
     },
     {
       "id": "PyStubPackagesAdvertiser",
-      "codeQualityCategory": "Sanity"
+      "codeQualityCategory": "Unspecified"
     },
     {
       "id": "PyRelativeImportInspection",
-      "codeQualityCategory": "Sanity"
+      "codeQualityCategory": "Reliability"
     },
     {
       "id": "PyShadowingBuiltinsInspection",
-      "codeQualityCategory": "Code Style"
+      "codeQualityCategory": "Reliability"
     },
     {
       "id": "RestRoleInspection",
@@ -58,7 +58,7 @@
     },
     {
       "id": "CythonUsageBeforeDeclarationInspection",
-      "codeQualityCategory": "Reliability"
+      "codeQualityCategory": "Sanity"
     }
   ]
 }

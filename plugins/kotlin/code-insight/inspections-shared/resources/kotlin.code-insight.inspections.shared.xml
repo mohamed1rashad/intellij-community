@@ -1,8 +1,11 @@
-<idea-plugin package="org.jetbrains.kotlin.idea.codeInsight.inspections.shared">
+<idea-plugin package="org.jetbrains.kotlin.idea.codeInsight.inspections.shared" visibility="internal">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.java.psi"/>
+    <module name="intellij.kotlin.codeInsight.shared"/>
+  </dependencies>
+  <!-- endregion -->
   <extensions defaultExtensionNs="com.intellij">
-    <applicationService
-            serviceInterface="org.jetbrains.kotlin.idea.codeinsights.impl.base.KotlinInspectionFacade"
-            serviceImplementation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.KotlinInspectionFacadeImpl"/>
 
     <codeInsight.blockingMethodChecker
             implementation="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.blockingCallsDetection.CoroutineBlockingMethodChecker"/>
@@ -271,7 +274,7 @@
             key="big.decimal.equals" bundle="messages.KotlinBundle"/>
 
     <localInspection
-            implementationClass="org.jetbrains.kotlin.idea.inspections.EnumValuesSoftDeprecateInJavaInspection"
+            implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.EnumValuesSoftDeprecateInJavaInspection"
             groupPath="Kotlin"
             groupBundle="messages.KotlinBundle" groupKey="group.names.other.problems"
             enabledByDefault="true"
@@ -556,7 +559,7 @@
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.coroutines.SuspiciousImplicitCoroutineScopeReceiverAccessInspection"
                      groupPath="Kotlin"
                      groupBundle="messages.KotlinBundle" groupKey="group.names.coroutine"
-                     enabledByDefault="false"
+                     enabledByDefault="true"
                      level="WARNING"
                      language="kotlin"
                      key="inspection.suspicious.implicit.coroutine.scope.receiver.display.name" bundle="messages.KotlinBundle"/>
@@ -624,6 +627,14 @@
                      level="WEAK WARNING"
                      language="kotlin"
                      key="inspection.suspicious.equals.combination.display.name" bundle="messages.KotlinBundle"/>
+
+    <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.SuspiciousJavaClassCallableReferenceInspection"
+                     groupPath="Kotlin"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.probable.bugs"
+                     enabledByDefault="true"
+                     level="WARNING"
+                     language="kotlin"
+                     key="inspection.suspicious.javaClass.callable.reference.name" bundle="messages.KotlinBundle"/>
 
     <localInspection implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.ReplaceAssertBooleanWithAssertEqualityInspection"
                      groupPath="Kotlin"
@@ -788,5 +799,16 @@
                      level="WEAK WARNING"
                      language="kotlin"
                      key="inspection.implicit.nullable.nothing.type.display.name" bundle="messages.KotlinBundle"/>
+    <localInspection
+            implementationClass="org.jetbrains.kotlin.idea.codeInsight.inspections.shared.ConvertRangeCheckToTwoComparisonsInspection"
+            groupPath="Kotlin"
+            groupBundle="messages.KotlinBundle"
+            groupKey="group.names.style.issues"
+            enabledByDefault="true"
+            level="INFORMATION"
+            bundle="messages.KotlinBundle"
+            key="convert.to.comparisons"
+            language="kotlin"
+    />
   </extensions>
 </idea-plugin>

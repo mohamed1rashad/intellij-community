@@ -10,8 +10,10 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.Shortcut
 import com.intellij.openapi.application.ApplicationInfo
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupListener
@@ -60,6 +62,63 @@ class GotItTooltipService {
 }
 
 /**
+ * Got It tooltip for providing contextual guidance after user actions.
+ *
+ * ## When to Use Got It Tooltips
+ *
+ * Got It tooltips may **only** appear as a direct response to an **active user action**.
+ * If the user did not do something that makes this message directly relevant, it should not appear.
+ *
+ * ### Valid Triggers (Active User Actions)
+ * An action qualifies if it is deliberate, specific, and directly connected to the content of the Got It tooltip:
+ * - The user enables a feature in Settings
+ * - The user runs a command for the first time
+ * - The user opens a tool window and interacts with a new control
+ * - The user triggers a workflow that the Got It tooltip explains or extends
+ * - The user installs a new plugin
+ * - The user interacts with a promotion in an inline banner or What's New page
+ *
+ * ### Invalid Triggers (Do NOT Use Got It For)
+ * - Opening the IDE or a project
+ * - Switching between tabs or windows
+ * - An IDE update being applied in the background
+ * - A timer, usage counter, or any automated trigger
+ *
+ * ## What to Use Instead for Feature Promotion
+ *
+ * If you have a feature worth promoting, use these alternatives that don't interrupt active work:
+ *
+ * ### Inline Banners
+ * Inline banners appear inside a relevant tool window or panel — exactly where the feature lives.
+ * They are visible when the user is already in the right context, don't steal focus, and require no immediate action.
+ * See [InlineBanner]
+ *
+ * ## Appropriate Use Cases
+ *
+ * ### Single Got It
+ * Use a single Got It tooltip to confirm or explain the immediate result of a user action.
+ * Keep it short: one clear sentence about what happened or what is now available.
+ *
+ * ### Tours (Linked Sequence)
+ * When a user action reveals multiple new UI elements or a complex workflow, a short tour is appropriate.
+ * Tours should:
+ * - Be triggered only by a deliberate action the user took
+ * - Be completable quickly (ideally 3–5 steps, never more than 7)
+ * - Be skippable at any point
+ * - Point to specific UI elements rather than describing them abstractly
+ * - End with a clear summary or next step, not just "Done"
+ *
+ * ## Self-Check Before Adding a Got It tooltip
+ *
+ * Before adding a Got It tooltip to any flow, verify:
+ * - Did the user just do something specific that makes this message directly relevant?
+ * - Is the message explaining or confirming what the user's action produced?
+ * - Is the message short enough to read in under five seconds?
+ *
+ * If you answer "no" to any of the questions above, choose an inline banner or other less destructive approaches
+ *
+ * ## Got It Tooltip Technical Details
+ *
  * The `id` is a unique identifier for the tooltip that will be used to store the tooltip state in [PropertiesComponent].
  * Identifier has the following format: `place.where.used` (lowercase words separated with dots).
  *
@@ -74,6 +133,8 @@ class GotItTooltipService {
 class GotItTooltip @ApiStatus.Internal constructor(@NonNls val id: String,
                                                    private val gotItBuilder: GotItComponentBuilder,
                                                    parentDisposable: Disposable? = null) : ToolbarActionTracker<Balloon>() {
+  private val hasConstructorDisposable = parentDisposable != null
+
   private var timeout: Int = -1
   private var maxCount = 1
   private var onBalloonCreated: (Balloon) -> Unit = {}
@@ -312,19 +373,23 @@ class GotItTooltip @ApiStatus.Internal constructor(@NonNls val id: String,
       return
     }
 
+    if (component.isShowing && !component.bounds.isEmpty) {
+      showImpl(component, pointProvider)
+      return
+    }
+
+    if (!hasConstructorDisposable && ApplicationManager.getApplication().isInternal) {
+      logger<GotItTooltip>().error("GotItTooltip must be properly disposed, if the component is not shown")
+    }
+
     if (component.isShowing) {
-      if (!component.bounds.isEmpty) {
-        showImpl(component, pointProvider)
-      }
-      else {
-        component.addComponentListener(object : ComponentAdapter() {
-          override fun componentResized(event: ComponentEvent) {
-            if (!event.component.bounds.isEmpty) {
-              showImpl(event.component as JComponent, pointProvider)
-            }
+      component.addComponentListener(object : ComponentAdapter() {
+        override fun componentResized(event: ComponentEvent) {
+          if (!event.component.bounds.isEmpty) {
+            showImpl(event.component as JComponent, pointProvider)
           }
-        }.also { Disposer.register(this, Disposable { component.removeComponentListener(it) }) })
-      }
+        }
+      }.also { Disposer.register(this, Disposable { component.removeComponentListener(it) }) })
     }
     else {
       component.addAncestorListener(object : AncestorListenerAdapter() {
@@ -409,50 +474,54 @@ class GotItTooltip @ApiStatus.Internal constructor(@NonNls val id: String,
         }
       }
     }
-    val balloon = createBalloon().also {
-      val dispatcherDisposable = Disposer.newDisposable()
-      Disposer.register(this, dispatcherDisposable)
 
-      it.addListener(object : JBPopupListener {
-        override fun beforeShown(event: LightweightWindowEvent) {
-          GotItUsageCollector.instance.logOpen(id, savedCount("$PROPERTY_PREFIX.$id") + 1)
-        }
+    val balloon = createBalloon()
 
-        override fun onClosed(event: LightweightWindowEvent) {
-          HelpTooltip.setMasterPopupOpenCondition(tracker.component, null)
-          ClientProperty.put(tracker.component as JComponent, BALLOON_PROPERTY, null)
-          Disposer.dispose(dispatcherDisposable)
+    // It is fine to register on 'this' even with 'hasConstructorDisposable == false' as we will dispose 'dispatcherDisposable' ourselves.
+    // Thus removing 'this' from the Disposer tree if we were the only child.
+    val dispatcherDisposable = Disposer.newDisposable()
+    Disposer.register(this, dispatcherDisposable)
 
-          if (event.isOk) {
-            currentlyShown?.let { tooltip ->
-              Disposer.dispose(tooltip)
-              tooltip.nextToShow = null
-            }
-            currentlyShown = null
-
-            gotIt()
-          }
-          else {
-            pendingRefresh = true
-          }
-        }
-      })
-
-      IdeEventQueue.getInstance().addDispatcher(IdeEventQueue.EventDispatcher { e ->
-        if (e is KeyEvent && KeymapUtil.isEventForAction(e, GotItComponentBuilder.CLOSE_ACTION_NAME)) {
-          it.hide(true)
-          GotItUsageCollector.instance.logClose(id, GotItUsageCollectorGroup.CloseType.EscapeShortcutPressed)
-          true
-        }
-        else false
-      }, dispatcherDisposable)
-
-      HelpTooltip.setMasterPopupOpenCondition(tracker.component) {
-        it.isDisposed
+    balloon.addListener(object : JBPopupListener {
+      override fun beforeShown(event: LightweightWindowEvent) {
+        GotItUsageCollector.instance.logOpen(id, savedCount("$PROPERTY_PREFIX.$id") + 1)
       }
 
-      onBalloonCreated(it)
+      override fun onClosed(event: LightweightWindowEvent) {
+        HelpTooltip.setMasterPopupOpenCondition(tracker.component, null)
+        ClientProperty.put(tracker.component as JComponent, BALLOON_PROPERTY, null)
+        Disposer.dispose(dispatcherDisposable)
+
+        if (event.isOk) {
+          currentlyShown?.let { tooltip ->
+            Disposer.dispose(tooltip)
+            tooltip.nextToShow = null
+          }
+          currentlyShown = null
+
+          gotIt()
+        }
+        else {
+          pendingRefresh = true
+        }
+      }
+    })
+
+    IdeEventQueue.getInstance().addDispatcher(IdeEventQueue.EventDispatcher { e ->
+      if (e is KeyEvent && KeymapUtil.isEventForAction(e, GotItComponentBuilder.CLOSE_ACTION_NAME)) {
+        balloon.hide(true)
+        GotItUsageCollector.instance.logClose(id, GotItUsageCollectorGroup.CloseType.EscapeShortcutPressed)
+        true
+      }
+      else false
+    }, dispatcherDisposable)
+
+    HelpTooltip.setMasterPopupOpenCondition(tracker.component) {
+      balloon.isDisposed
     }
+
+    onBalloonCreated(balloon)
+
     this.balloon = balloon
     ClientProperty.put(component, BALLOON_PROPERTY, balloon)
 
@@ -497,10 +566,14 @@ class GotItTooltip @ApiStatus.Internal constructor(@NonNls val id: String,
   }
 
   private fun createBalloon(): Balloon {
+    // we uses sub disposable for the ballon otherwise we have the race condition with 'dispatcherDisposable'
+    val balloonDisposable = Disposer.newDisposable()
+    Disposer.register(this, balloonDisposable)
+
     val balloon = gotItBuilder
       .onButtonClick { GotItUsageCollector.instance.logClose(id, GotItUsageCollectorGroup.CloseType.ButtonClick) }
       .onLinkClick { GotItUsageCollector.instance.logClose(id, GotItUsageCollectorGroup.CloseType.LinkClick) }
-      .build(parentDisposable = this)
+      .build(parentDisposable = balloonDisposable)
 
     if (timeout > 0) {
       hideBalloonJob?.cancel()

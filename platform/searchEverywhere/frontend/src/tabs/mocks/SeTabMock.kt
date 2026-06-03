@@ -3,11 +3,14 @@ package com.intellij.platform.searchEverywhere.frontend.tabs.mocks
 
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Disposer
-import com.intellij.platform.searchEverywhere.*
+import com.intellij.platform.searchEverywhere.SeItemData
+import com.intellij.platform.searchEverywhere.SeParams
+import com.intellij.platform.searchEverywhere.SeProviderId
+import com.intellij.platform.searchEverywhere.SeResultEvent
+import com.intellij.platform.searchEverywhere.SeSession
 import com.intellij.platform.searchEverywhere.frontend.SeFilterEditor
-import com.intellij.platform.searchEverywhere.frontend.SeTab
 import com.intellij.platform.searchEverywhere.frontend.resultsProcessing.SeTabDelegate
+import com.intellij.platform.searchEverywhere.frontend.tabs.SeDefaultTabBase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import org.jetbrains.annotations.ApiStatus.Internal
@@ -15,9 +18,10 @@ import org.jetbrains.annotations.ApiStatus.Internal
 @Internal
 class SeTabMock(
   override val name: String,
-  private val delegate: SeTabDelegate,
-) : SeTab {
+  delegate: SeTabDelegate,
+) : SeDefaultTabBase(delegate) {
   override val id: String = name
+  override val priority: Int get() = 0
 
   override fun getItems(params: SeParams): Flow<SeResultEvent> =
     delegate.getItems(params)
@@ -37,24 +41,8 @@ class SeTabMock(
     return false
   }
 
-  override suspend fun getPreviewInfo(itemData: SeItemData): SePreviewInfo? {
-    return delegate.getPreviewInfo(itemData, false)
-  }
-
-  override suspend fun isPreviewEnabled(): Boolean {
-    return delegate.isPreviewEnabled()
-  }
-
-  override suspend fun isExtendedInfoEnabled(): Boolean {
-    return delegate.isExtendedInfoEnabled()
-  }
-
-  override fun dispose() {
-    Disposer.dispose(delegate)
-  }
-
   companion object {
-    fun create(
+    suspend fun create(
       project: Project?,
       session: SeSession,
       name: String,
@@ -62,7 +50,7 @@ class SeTabMock(
       initEvent: AnActionEvent,
       scope: CoroutineScope,
     ): SeTabMock {
-      val delegate = SeTabDelegate(project, session, name, providerIds, initEvent, scope)
+      val delegate = SeTabDelegate.create(project, session, name, providerIds, initEvent, scope)
       return SeTabMock(name, delegate)
     }
   }

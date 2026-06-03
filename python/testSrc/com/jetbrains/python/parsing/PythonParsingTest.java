@@ -8,7 +8,14 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.python.community.helpersLocator.PythonHelpersLocator;
 import com.intellij.testFramework.ParsingTestCase;
 import com.intellij.testFramework.TestDataPath;
-import com.jetbrains.python.*;
+import com.jetbrains.python.PyElementTypesFacade;
+import com.jetbrains.python.PyElementTypesFacadeImpl;
+import com.jetbrains.python.PyLanguageFacade;
+import com.jetbrains.python.PyLanguageFacadeImpl;
+import com.jetbrains.python.PythonDialectsTokenSetContributor;
+import com.jetbrains.python.PythonLanguage;
+import com.jetbrains.python.PythonParserDefinition;
+import com.jetbrains.python.PythonTokenSetContributor;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.PyPsiFacade;
@@ -1426,6 +1433,23 @@ public class PythonParsingTest extends ParsingTestCase {
 
   // PY-79967
   public void testFStringInsideTemplateString() {
+    doTest(LanguageLevel.PYTHON314);
+  }
+
+  // PY-88664, PEP 810
+  public void testLazyImport() {
+    doTest(LanguageLevel.PYTHON315);
+  }
+
+  // PY-88664, PEP 810: `lazy` outside import context stays an identifier
+  public void testLazyImportNotAKeyword() {
+    doTest(LanguageLevel.PYTHON315);
+  }
+
+  // PY-88664, PEP 810: `lazy import …` is still parsed as a lazy import on Python < 3.15
+  // so that users get a single, accurate compatibility error rather than the misleading
+  // `Unresolved reference 'lazy'` suggestion to install the `lazy` package.
+  public void testLazyImportOnOlderPython() {
     doTest(LanguageLevel.PYTHON314);
   }
 

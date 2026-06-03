@@ -1,15 +1,17 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ide.impl.wsl.ijent.nio
 
-import com.intellij.execution.ijent.nio.getCachedFileAttributesAndWrapToDosAttributesAdapter
-import com.intellij.execution.ijent.nio.readAttributesUsingDosAttributesAdapter
 import com.intellij.execution.wsl.WslDistributionManager
 import com.intellij.execution.wsl.WslPath
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.core.nio.fs.RoutingAwareFileSystemProvider
-import com.intellij.platform.eel.provider.utils.EelPathUtils
+import com.intellij.platform.eel.EelDescriptor
+import com.intellij.platform.eel.provider.utils.EelPathTransfer
 import com.intellij.platform.ijent.community.impl.nio.IjentNioPath
+import com.intellij.platform.ijent.community.impl.nio.fs.getCachedFileAttributesAndWrapToDosAttributesAdapter
+import com.intellij.platform.ijent.community.impl.nio.fs.getFileAttributeViewUsingDosAttributesAdapter
+import com.intellij.platform.ijent.community.impl.nio.fs.readAttributesUsingDosAttributesAdapter
 import com.intellij.util.io.sanitizeFileName
 import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
@@ -19,7 +21,18 @@ import java.net.URI
 import java.nio.channels.AsynchronousFileChannel
 import java.nio.channels.FileChannel
 import java.nio.channels.SeekableByteChannel
-import java.nio.file.*
+import java.nio.file.AccessMode
+import java.nio.file.CopyOption
+import java.nio.file.DirectoryStream
+import java.nio.file.FileStore
+import java.nio.file.FileSystemException
+import java.nio.file.FileSystemNotFoundException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.OpenOption
+import java.nio.file.Path
+import java.nio.file.ProviderMismatchException
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.FileAttribute
 import java.nio.file.attribute.FileAttributeView
@@ -48,6 +61,7 @@ class IjentWslNioFileSystemProvider(
   val wslId: @NlsSafe String,
   private val ijentFsProvider: FileSystemProvider,
   internal val originalFsProvider: FileSystemProvider,
+  private val eelDescriptor: EelDescriptor,
 ) : FileSystemProvider(), RoutingAwareFileSystemProvider {
   private val ijentFsUri: URI = URI("ijent", "wsl", "/$wslId", null, null)
   private val originalFs = originalFsProvider.getFileSystem(URI("file:/"))
@@ -120,7 +134,8 @@ class IjentWslNioFileSystemProvider(
         provider = this,
         wslId = wslId,
         ijentFs = ijentFsProvider.getFileSystem(URI("ijent", "wsl", "/$wslId", null, null)),
-        originalFsProvider.getFileSystem(URI("file:/"))
+        originalFs = originalFsProvider.getFileSystem(URI("file:/")),
+        eelDescriptor = eelDescriptor,
       )
     }
   }
@@ -244,7 +259,7 @@ class IjentWslNioFileSystemProvider(
       }
 
       else -> {
-        EelPathUtils.walkingTransfer(source, target, removeSource = false, copyAttributes = StandardCopyOption.COPY_ATTRIBUTES in options)
+        EelPathTransfer.walkingTransfer(source, target, removeSource = false, copyAttributes = StandardCopyOption.COPY_ATTRIBUTES in options)
       }
     }
   }
@@ -263,7 +278,7 @@ class IjentWslNioFileSystemProvider(
       }
 
       else -> {
-        EelPathUtils.walkingTransfer(source, target, removeSource = true, copyAttributes = StandardCopyOption.COPY_ATTRIBUTES in options)
+        EelPathTransfer.walkingTransfer(source, target, removeSource = true, copyAttributes = StandardCopyOption.COPY_ATTRIBUTES in options)
       }
     }
   }
@@ -302,8 +317,8 @@ class IjentWslNioFileSystemProvider(
   override fun getFileStore(path: Path): FileStore =
     ijentFsProvider.getFileStore(path.toIjentPath())
 
-  override fun <V : FileAttributeView?> getFileAttributeView(path: Path, type: Class<V>, vararg options: LinkOption): V =
-    ijentFsProvider.getFileAttributeView(path.toIjentPath(), type, *options)
+  override fun <V : FileAttributeView> getFileAttributeView(path: Path, type: Class<V>, vararg options: LinkOption): V =
+    ijentFsProvider.getFileAttributeViewUsingDosAttributesAdapter(path.toIjentPath(), type, *options)
 
   override fun <A : BasicFileAttributes> readAttributes(path: Path, type: Class<A>, vararg options: LinkOption): A {
     return ijentFsProvider.readAttributesUsingDosAttributesAdapter(path, path.toIjentPath(), type, *options)

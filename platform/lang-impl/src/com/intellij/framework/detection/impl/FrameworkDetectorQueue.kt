@@ -1,16 +1,16 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.framework.detection.impl
 
 import com.intellij.framework.detection.DetectedFrameworkDescription
 import com.intellij.framework.detection.DetectionExcludesConfiguration
 import com.intellij.framework.detection.impl.exclude.DetectionExcludesConfigurationImpl
-import com.intellij.ide.lightEdit.LightEdit
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.smartReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.ex.isBackgroundActivitiesSuppressed
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.indexing.FileBasedIndex
@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.TestOnly
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.function.Consumer
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -35,8 +36,7 @@ internal class FrameworkDetectorQueue(
 ) {
   lateinit var detectedFrameworksData: DetectedFrameworksData
 
-  @Volatile
-  private var isSuspended: Boolean = false
+  private var isSuspended: AtomicBoolean = AtomicBoolean(false)
 
   @Volatile
   var notificationListener: Consumer<Collection<String>>? = null
@@ -58,22 +58,22 @@ internal class FrameworkDetectorQueue(
   }
 
   fun queueDetection(detectors: Set<String>) {
-    if (isSuspended) return
+    if (isSuspended.get()) return
 
     frameworkRequests.tryEmit(LinkedHashSet(detectors))
   }
 
   fun suspend() {
-    isSuspended = true
-
-    coroutineScope.coroutineContext.cancelChildren()
+    if (isSuspended.compareAndSet(false, true)) {
+      coroutineScope.coroutineContext.cancelChildren()
+    }
   }
 
   fun resume(detectors: Set<String>) {
-    isSuspended = false
-
-    scheduleFlow()
-    queueDetection(detectors)
+    if (isSuspended.compareAndSet(true, false)) {
+      scheduleFlow()
+      queueDetection(detectors)
+    }
   }
 
   @RequiresReadLock
@@ -114,7 +114,7 @@ internal class FrameworkDetectorQueue(
   }
 
   private suspend fun doRunDetection(detectors: Collection<String>) {
-    if (LightEdit.owns(project)) {
+    if (isBackgroundActivitiesSuppressed(project)) {
       return
     }
 

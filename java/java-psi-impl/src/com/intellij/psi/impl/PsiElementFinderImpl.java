@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl;
 
 import com.intellij.openapi.application.ReadActionProcessor;
@@ -10,7 +10,16 @@ import com.intellij.openapi.roots.PackageIndex;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDirectoryService;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassOwner;
+import com.intellij.psi.PsiClassOwnerEx;
+import com.intellij.psi.PsiCompiledElement;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElementFinder;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiPackage;
 import com.intellij.psi.impl.file.impl.JavaFileManager;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.stubs.StubTreeLoader;
@@ -21,7 +30,14 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 public final class PsiElementFinderImpl extends PsiElementFinder implements DumbAware {
@@ -196,18 +212,13 @@ public final class PsiElementFinderImpl extends PsiElementFinder implements Dumb
   @Override
   public boolean processPackageFiles(@NotNull PsiPackage psiPackage,
                                      final @NotNull GlobalSearchScope scope,
-                                     final @NotNull Processor<? super PsiFile> consumer) {
-    final PsiManager psiManager = PsiManager.getInstance(myProject);
+                                     final @NotNull Processor<? super VirtualFile> consumer) {
     return PackageIndex.getInstance(myProject)
       .getFilesByPackageName(psiPackage.getQualifiedName())
       .forEach(new ReadActionProcessor<VirtualFile>() {
         @Override
-        public boolean processInReadAction(final VirtualFile dir) {
-          if (scope.contains(dir)) {
-            PsiFile psiFile = psiManager.findFile(dir);
-            if (psiFile != null && !consumer.process(psiFile)) return false;
-          }
-          return true;
+        public boolean processInReadAction(VirtualFile file) {
+          return !scope.contains(file) || consumer.process(file);
         }
       });
   }

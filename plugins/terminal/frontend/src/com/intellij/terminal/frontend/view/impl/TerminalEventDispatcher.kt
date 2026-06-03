@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.actionSystem.KeyboardShortcut
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.editor.Editor
@@ -24,9 +25,14 @@ import com.intellij.util.concurrency.ThreadingAssertions
 import com.jediterm.terminal.emulator.mouse.MouseMode
 import org.intellij.lang.annotations.Language
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.plugins.terminal.TerminalEscapeBehaviorChangeNotification
 import org.jetbrains.plugins.terminal.block.reworked.TerminalSessionModel
 import java.awt.AWTEvent
-import java.awt.event.*
+import java.awt.event.InputEvent
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
+import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelListener
 import javax.swing.KeyStroke
 
 /**
@@ -49,7 +55,7 @@ import javax.swing.KeyStroke
 private class TerminalEventDispatcher(
   private val editor: EditorEx,
   private val settings: JBTerminalSystemSettingsProviderBase,
-  private val eventsHandler: TerminalEventsHandler,
+  private val eventsHandler: TerminalKeyEventsHandler,
   private val parentDisposable: Disposable,
 ) : IdeEventQueue.EventDispatcher {
   private val sendShortcutAction = SendShortcutToTerminalAction(eventsHandler)
@@ -79,6 +85,13 @@ private class TerminalEventDispatcher(
 
   private fun dispatchKeyEvent(e: TimedKeyEvent) {
     LOG.trace { "Key event received: ${e.original}" }
+
+    // Special handling for Escape shortcut - show notification about behavior change.
+    // Should be checked before the action system.
+    val keyEvent = e.original
+    if (keyEvent.id == KeyEvent.KEY_PRESSED && keyEvent.keyCode == KeyEvent.VK_ESCAPE && keyEvent.modifiersEx == 0) {
+      TerminalEscapeBehaviorChangeNotification.showNotificationIfNeeded(editor.project!!)
+    }
 
     if (isAllowedActionShortcut(e.original)) {
       // KeyEvent will be handled by action system, so we need to remember that the next KeyTyped event is not needed
@@ -223,6 +236,7 @@ private class TerminalEventDispatcher(
       "Terminal.MoveToEditor",
       // essential terminal actions
       "Terminal.Escape",
+      "Terminal.SwitchFocusToEditor",
       "Terminal.CopySelectedText",
       "Terminal.Paste",
       "Terminal.LineUp",
@@ -236,10 +250,10 @@ private class TerminalEventDispatcher(
       "Terminal.MoveToolWindowTabRight",
       "Terminal.ClearBuffer",
       "Terminal.Find",
-      "Terminal.CommandCompletion.Gen2",
-      "Terminal.EnterCommandCompletion",
-      "Terminal.UpCommandCompletion",
-      "Terminal.DownCommandCompletion",
+      "Terminal.CommandCompletion.Invoke",
+      "Terminal.CommandCompletion.InsertSuggestion",
+      "Terminal.CommandCompletion.SelectSuggestionAbove",
+      "Terminal.CommandCompletion.SelectSuggestionBelow",
       "Terminal.InsertInlineCompletion",
     )
 
@@ -249,7 +263,7 @@ private class TerminalEventDispatcher(
 
 private class TerminalKeyListener(
   private val settings: JBTerminalSystemSettingsProviderBase,
-  private val eventsHandler: TerminalEventsHandler,
+  private val eventsHandler: TerminalKeyEventsHandler,
 ) : KeyAdapter() {
   override fun keyTyped(e: KeyEvent) {
     handleEvent(e)
@@ -261,15 +275,17 @@ private class TerminalKeyListener(
 
   private fun handleEvent(e: KeyEvent) {
     if (settings.overrideIdeShortcuts()) return // handled by the dispatcher
-    eventsHandler.handleKeyEvent(TimedKeyEvent(e))
-    e.consume()
+    WriteIntentReadAction.run {
+      eventsHandler.handleKeyEvent(TimedKeyEvent(e))
+      e.consume()
+    }
   }
 }
 
-internal fun setupKeyEventHandling(
+internal fun setupKeyEventsHandling(
   editor: EditorEx,
   settings: JBTerminalSystemSettingsProviderBase,
-  eventsHandler: TerminalEventsHandler,
+  eventsHandler: TerminalKeyEventsHandler,
   disposable: Disposable,
 ) {
   // Key events forwarding from the editor to the shell
@@ -292,11 +308,11 @@ internal fun setupKeyEventHandling(
   editor.contentComponent.addKeyListener(TerminalKeyListener(settings, eventsHandler))
 }
 
-internal fun setupMouseListener(
+internal fun setupMouseEventsHandling(
   editor: EditorEx,
   sessionModel: TerminalSessionModel,
   settings: JBTerminalSystemSettingsProviderBase,
-  eventsHandler: TerminalEventsHandler,
+  eventsHandler: TerminalMouseEventsHandler,
   disposable: Disposable,
 ) {
   fun isRemoteMouseAction(e: MouseEvent): Boolean {

@@ -23,15 +23,27 @@ import com.intellij.platform.util.progress.asContextElement
 import com.intellij.platform.util.progress.reportRawProgress
 import com.intellij.util.awaitCancellationAndInvoke
 import com.jetbrains.rd.framework.util.launch
-import com.jetbrains.rd.framework.util.startAsync
 import com.jetbrains.rd.framework.util.startChildAsync
 import com.jetbrains.rd.util.lifetime.Lifetime
 import com.jetbrains.rd.util.lifetime.LifetimeDefinition
 import com.jetbrains.rd.util.lifetime.isNotAlive
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import kotlin.coroutines.CoroutineContext
@@ -210,20 +222,6 @@ fun <T> Lifetime.startUnderBackgroundProgressAsync(
   project: Project,
   action: suspend ProgressCoroutineScope.() -> T
 ): Deferred<T> = startBackgroundAsync { withBackgroundProgressContext(title, canBeCancelled, project, action) }
-
-@ApiStatus.Internal
-@ApiStatus.ScheduledForRemoval
-@Deprecated("Use startWithBackgroundProgressAsync")
-fun <T> Lifetime.startUnderBackgroundProgressAsync(
-  @Nls(capitalization = Nls.Capitalization.Sentence) title: String,
-  canBeCancelled: Boolean = true,
-  isIndeterminate: Boolean = true,
-  action: suspend ProgressCoroutineScope.() -> T
-): Deferred<T> {
-  return runBackgroundAsync(title, canBeCancelled, isIndeterminate, null) { dispatcher, indicator ->
-    startAsync(dispatcher) { ProgressCoroutineScopeLegacy.execute(coroutineContext, this@runBackgroundAsync, indicator(), action) }
-  }
-}
 
 private fun <T: Job> Lifetime.runBackgroundAsync(
   @Nls(capitalization = Nls.Capitalization.Sentence) title: String,

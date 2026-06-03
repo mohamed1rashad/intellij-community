@@ -1,7 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.compiler.impl;
 
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.compiler.CompileScope;
 import com.intellij.openapi.compiler.ExportableUserDataHolderBase;
 import com.intellij.openapi.fileTypes.FileType;
@@ -14,7 +14,13 @@ import com.intellij.openapi.vfs.VirtualFileVisitor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 
 /**
  * @author Eugene Zhuravlev
@@ -27,14 +33,12 @@ public class FileSetCompileScope extends ExportableUserDataHolderBase implements
 
   public FileSetCompileScope(@NotNull Collection<VirtualFile> files, Module @NotNull [] modules) {
     myAffectedModules = modules;
-    ApplicationManager.getApplication().runReadAction(
-      () -> {
-        for (VirtualFile file : files) {
-          assert file != null;
-          addFile(file);
-        }
+    ReadAction.runBlocking(() -> {
+      for (VirtualFile file : files) {
+        assert file != null;
+        addFile(file);
       }
-    );
+    });
   }
 
   @Override

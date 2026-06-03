@@ -3,14 +3,12 @@ package com.intellij.platform.find
 
 import com.intellij.find.FindModel
 import com.intellij.find.FindSettings
-import com.intellij.find.actions.ShowUsagesAction
 import com.intellij.find.findInProject.FindInProjectManager
 import com.intellij.find.impl.FindAndReplaceExecutor
 import com.intellij.find.impl.FindInProjectUtil
 import com.intellij.find.impl.FindKey
 import com.intellij.find.replaceInProject.ReplaceInProjectManager
 import com.intellij.ide.rpc.ThrottledOneItem
-import com.intellij.ide.rpc.performRpcWithRetries
 import com.intellij.ide.rpc.throttledWithAccumulation
 import com.intellij.ide.vfs.rpcId
 import com.intellij.ide.vfs.virtualFile
@@ -27,6 +25,7 @@ import com.intellij.usages.FindUsagesProcessPresentation
 import com.intellij.usages.UsageInfo2UsageAdapter
 import com.intellij.usages.UsageInfoAdapter
 import com.intellij.util.cancelOnDispose
+import fleet.rpc.client.RpcClientException
 import fleet.rpc.client.RpcTimeoutException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -58,7 +57,8 @@ open class FindAndReplaceExecutorImpl(val coroutineScope: CoroutineScope) : Find
     disposableParent: Disposable,
     onUpdateModelCallback: Consumer<UsageInfoAdapter>,
     onResult: (UsageInfoAdapter) -> Boolean,
-    onFinish: () -> Unit?
+    onFinish: () -> Unit?,
+    maxUsages: Int,
   ) {
     if (FindKey.isEnabled) {
       findUsagesJob?.cancel("new find request is started")
@@ -80,13 +80,12 @@ open class FindAndReplaceExecutorImpl(val coroutineScope: CoroutineScope) : Find
             initScope.cancel("search disposed")
           }
         }
-        val maxUsagesCount = ShowUsagesAction.getUsagesPageSize()
         FindRemoteApi.getInstance().findByModel(
           findModel = findModel,
           projectId = project.projectId(),
           filesToScanInitially = filesToScanInitially.map { it.rpcId() },
-          maxUsagesCount = maxUsagesCount
-        ).take(maxUsagesCount)
+          maxUsagesCount = maxUsages
+        ).take(maxUsages)
           .let {
             if (shouldThrottle) it.throttledWithAccumulation()
             else it.map { event -> ThrottledOneItem(event) }
@@ -143,9 +142,12 @@ open class FindAndReplaceExecutorImpl(val coroutineScope: CoroutineScope) : Find
       validationJob?.cancel("new validation request is started")
     }
     validationJob = coroutineScope.launch {
-      LOG.performRpcWithRetries(
-        rpcCall = { FindRemoteApi.getInstance().checkDirectoryExists(findModel).let { onFinish(it) } },
-        onRpcTimeout = { onFinish(false) })
+      try {
+        FindRemoteApi.getInstance().checkDirectoryExists(findModel).let { onFinish(it) }
+      } catch (ex: RpcClientException) {
+        LOG.warn("Unable to check directory", ex)
+        onFinish(false)
+      }
     }
   }
 

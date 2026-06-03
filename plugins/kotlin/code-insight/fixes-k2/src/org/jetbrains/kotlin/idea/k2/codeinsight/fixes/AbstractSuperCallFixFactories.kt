@@ -28,6 +28,7 @@ import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFi
 import org.jetbrains.kotlin.idea.codeinsight.utils.AbstractSuperCallFixUtils.addSuperTypeListEntryIfNotExists
 import org.jetbrains.kotlin.idea.codeinsight.utils.AbstractSuperCallFixUtils.getParentSuperExpression
 import org.jetbrains.kotlin.idea.codeinsight.utils.AbstractSuperCallFixUtils.specifySuperType
+import org.jetbrains.kotlin.idea.codeinsight.utils.KotlinEqualsHashCodeToStringSymbolUtils.getPropertiesToUseInGeneratedMember
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.UpdateToCorrectMethodFix.Method.Companion.isAnyEquals
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.UpdateToCorrectMethodFix.Method.Companion.isAnyHashCode
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.UpdateToCorrectMethodFix.Method.Companion.isAnyToString
@@ -39,15 +40,16 @@ import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtSuperExpression
 import org.jetbrains.kotlin.psi.psiUtil.getNonStrictParentOfType
 
 internal object AbstractSuperCallFixFactories {
     val errorFixFactory = KotlinQuickFixFactory.ModCommandBased { diagnostic: KaFirDiagnostic.AbstractSuperCall ->
-        listOfNotNull(createQuickFix(diagnostic.psi))
-    }
-
-    val warningFactory = KotlinQuickFixFactory.ModCommandBased { diagnostic: KaFirDiagnostic.AbstractSuperCallWarning ->
         listOfNotNull(createQuickFix(diagnostic.psi))
     }
 
@@ -59,7 +61,7 @@ internal object AbstractSuperCallFixFactories {
 
         fun KaSession.computeInfoIfNotInObject(containingClass: KtClassOrObject): Info? {
             if (containingClass !is KtClass) return null
-            val variablesForEquals = GenerateEqualsAndHashCodeUtils.getPropertiesToUseInGeneratedMember(containingClass)
+            val variablesForEquals = getPropertiesToUseInGeneratedMember(containingClass)
             return Info(containingClass, variablesForEquals, variablesForEquals, equalsInClass = null, hashCodeInClass = null)
         }
 
@@ -168,8 +170,8 @@ private class SpecifySuperTypeExplicitlyFix(
         updater: ModPsiUpdater,
     ) {
         val containingClass = element.getNonStrictParentOfType<KtClassOrObject>() ?: return
-        element.specifySuperType(superType)
         containingClass.addSuperTypeListEntryIfNotExists(superType)
+        element.specifySuperType(superType)
     }
 }
 

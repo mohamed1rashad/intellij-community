@@ -1,18 +1,21 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion.command.configuration
 
 import com.intellij.codeInsight.CodeInsightBundle
 import com.intellij.codeInsight.completion.group.GroupedCompletionContributor
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurableProvider
 import com.intellij.openapi.options.UiDslUnnamedConfigurable
+import com.intellij.ui.components.Badge
 import com.intellij.ui.components.JBCheckBox
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.selected
 import com.intellij.util.PlatformUtils
 import org.jetbrains.annotations.ApiStatus
 
-@ApiStatus.Experimental
 @ApiStatus.Internal
 class CommandCompletionConfigurableProvider : ConfigurableProvider() {
 
@@ -36,10 +39,7 @@ class CommandCompletionConfigurableProvider : ConfigurableProvider() {
           completionEnabledCheckBox = checkBox(CodeInsightBundle.message("options.command.completion.enabled"))
             .bindSelected({ settings.state.isEnabled() },
                           { r -> settings.state.setEnabled(r) })
-            .gap(RightGap.SMALL)
-          contextHelp(CodeInsightBundle.message("options.command.completion.display.comment"))
-            .gap(RightGap.SMALL)
-          icon(AllIcons.General.Beta)
+            .contextHelp(CodeInsightBundle.message("options.command.completion.display.comment"))
         }
         if (GroupedCompletionContributor.isGroupEnabledInApp()) {
           indent {
@@ -59,7 +59,7 @@ class CommandCompletionConfigurableProvider : ConfigurableProvider() {
                             { r -> settings.state.myReadOnlyEnabled = r })
               .gap(RightGap.SMALL)
               .enabledIf(completionEnabledCheckBox.selected)
-            icon(AllIcons.General.Beta)
+            icon(Badge.beta)
           }
         }
       }

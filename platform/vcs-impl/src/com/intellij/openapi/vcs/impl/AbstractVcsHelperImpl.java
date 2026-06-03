@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.impl;
 
 import com.intellij.CommonBundle;
@@ -29,7 +29,18 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vcs.*;
+import com.intellij.openapi.vcs.AbstractVcs;
+import com.intellij.openapi.vcs.AbstractVcsHelper;
+import com.intellij.openapi.vcs.CommittedChangesProvider;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import com.intellij.openapi.vcs.RepositoryLocation;
+import com.intellij.openapi.vcs.TransactionProvider;
+import com.intellij.openapi.vcs.TransactionRunnable;
+import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsKey;
+import com.intellij.openapi.vcs.VcsShowConfirmationOption;
 import com.intellij.openapi.vcs.actions.AnnotateToggleAction;
 import com.intellij.openapi.vcs.annotate.AnnotationProvider;
 import com.intellij.openapi.vcs.annotate.FileAnnotation;
@@ -40,7 +51,13 @@ import com.intellij.openapi.vcs.changes.committed.ChangesBrowserDialog;
 import com.intellij.openapi.vcs.changes.committed.CommittedChangesFilterDialog;
 import com.intellij.openapi.vcs.changes.committed.CommittedChangesTableModel;
 import com.intellij.openapi.vcs.changes.committed.RepositoryLocationCommittedChangesPanel;
-import com.intellij.openapi.vcs.changes.ui.*;
+import com.intellij.openapi.vcs.changes.ui.ChangeListViewerDialog;
+import com.intellij.openapi.vcs.changes.ui.ChangesViewContentI;
+import com.intellij.openapi.vcs.changes.ui.ChangesViewContentManager;
+import com.intellij.openapi.vcs.changes.ui.CommitChangeListDialog;
+import com.intellij.openapi.vcs.changes.ui.LoadingCommittedChangeListPanel;
+import com.intellij.openapi.vcs.changes.ui.SelectFilePathsDialog;
+import com.intellij.openapi.vcs.changes.ui.SelectFilesDialog;
 import com.intellij.openapi.vcs.history.FileHistoryRefresher;
 import com.intellij.openapi.vcs.history.FileHistoryRefresherI;
 import com.intellij.openapi.vcs.history.VcsHistoryProvider;
@@ -62,20 +79,31 @@ import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentFactory;
 import com.intellij.ui.content.ContentManagerUtil;
 import com.intellij.ui.content.MessageView;
-import com.intellij.util.*;
+import com.intellij.util.ArrayUtilRt;
+import com.intellij.util.AsynchConsumer;
+import com.intellij.util.BufferedListConsumer;
+import com.intellij.util.Consumer;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.MessageCategory;
+import com.intellij.util.ui.VcsConfirmationUtil;
 import com.intellij.vcs.history.VcsHistoryProviderEx;
 import com.intellij.vcsUtil.VcsUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-import java.awt.*;
-import java.util.*;
+import java.awt.Component;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import static com.intellij.openapi.ui.Messages.getQuestionIcon;
-import static com.intellij.util.ui.ConfirmationDialog.requestForConfirmation;
 import static java.text.MessageFormat.format;
 
 public class AbstractVcsHelperImpl extends AbstractVcsHelper {
@@ -141,11 +169,11 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
     }
 
     final String okActionName = CommonBundle.getAddButtonText();
-    final String cancelActionName = CommonBundle.getCancelButtonText();
+    final String cancelActionName = Messages.getCancelButton();
 
     if (files.size() == 1 && singleFileTitle != null && singleFilePromptTemplate != null) {
       String filePrompt = format(singleFilePromptTemplate, FileUtil.getLocationRelativeToUserHome(files.get(0).getPresentableUrl()));
-      if (requestForConfirmation(confirmationOption, myProject, filePrompt, singleFileTitle, getQuestionIcon(),
+      if (VcsConfirmationUtil.requestConfirmation(confirmationOption, myProject, filePrompt, singleFileTitle, getQuestionIcon(),
                                  okActionName, cancelActionName)) {
         return new ArrayList<>(files);
       }
@@ -180,7 +208,7 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
                                                                  @Nullable String cancelActionName) {
     if (files.size() == 1 && singleFileTitle != null && singleFilePromptTemplate != null) {
       final String filePrompt = format(singleFilePromptTemplate, files.get(0).getPresentableUrl());
-      if (requestForConfirmation(confirmationOption, myProject, filePrompt, singleFileTitle,
+      if (VcsConfirmationUtil.requestConfirmation(confirmationOption, myProject, filePrompt, singleFileTitle,
                                  getQuestionIcon(), okActionName, cancelActionName)) {
         return new ArrayList<>(files);
       }
@@ -341,8 +369,8 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
   public void showAnnotation(FileAnnotation annotation, VirtualFile file, AbstractVcs vcs, int line) {
     TextEditor textFileEditor;
     FileEditor fileEditor = FileEditorManager.getInstance(myProject).getSelectedEditor(file);
-    if (fileEditor instanceof TextEditor) {
-      textFileEditor = ((TextEditor)fileEditor);
+    if (fileEditor instanceof TextEditor te) {
+      textFileEditor = te;
     }
     else {
       textFileEditor = ContainerUtil.findInstance(FileEditorManager.getInstance(myProject).getEditorList(file), TextEditor.class);
@@ -395,15 +423,21 @@ public class AbstractVcsHelperImpl extends AbstractVcsHelper {
   }
 
   @Override
-  public @NotNull List<VirtualFile> showMergeDialog(@NotNull List<? extends VirtualFile> files,
-                                                    @NotNull MergeProvider provider,
-                                                    @NotNull MergeDialogCustomizer mergeDialogCustomizer) {
-    if (files.isEmpty()) return Collections.emptyList();
-    RefreshVFsSynchronously.refreshVirtualFiles(files);
+  public @NotNull MergeDialogResult showMergeDialogWithResult(@NotNull List<? extends VirtualFile> files,
+                                                              @NotNull MergeProvider provider,
+                                                              @NotNull MergeDialogCustomizer mergeDialogCustomizer) {
+    return showMergeDialogImpl(files, provider, mergeDialogCustomizer);
+  }
+
+  private @NotNull MergeDialogResult showMergeDialogImpl(@NotNull List<? extends VirtualFile> files,
+                                                         @NotNull MergeProvider provider,
+                                                         @NotNull MergeDialogCustomizer mergeDialogCustomizer) {
+    if (files.isEmpty()) return new MergeDialogResultImpl(Collections.emptyList(), true);
+    ApplicationManager.getApplication().runWriteAction(() -> RefreshVFsSynchronously.refreshVirtualFiles(files));
     final MultipleFileMergeDialog fileMergeDialog = new MultipleFileMergeDialog(myProject, files, provider, mergeDialogCustomizer);
     AppIcon.getInstance().requestAttention(myProject, true);
     fileMergeDialog.show();
-    return fileMergeDialog.getProcessedFiles();
+    return new MergeDialogResultImpl(fileMergeDialog.getProcessedFiles(), fileMergeDialog.getShouldFinishMergeAfterClosing());
   }
 
   @Override

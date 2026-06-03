@@ -1,16 +1,34 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.light;
 
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.navigation.ItemPresentation;
 import com.intellij.navigation.ItemPresentationProviders;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileVisitor;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDirectoryService;
+import com.intellij.psi.JavaElementVisitor;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaModule;
+import com.intellij.psi.PsiJavaModuleReference;
+import com.intellij.psi.PsiJavaModuleReferenceElement;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiNameHelper;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiPackageAccessibilityStatement;
+import com.intellij.psi.PsiProvidesStatement;
+import com.intellij.psi.PsiRequiresStatement;
+import com.intellij.psi.PsiUsesStatement;
+import com.intellij.psi.ResolveState;
 import com.intellij.psi.impl.source.resolve.JavaResolveUtil;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.scope.PsiScopeProcessor;
@@ -33,6 +51,8 @@ import java.util.regex.Pattern;
 import static com.intellij.util.ObjectUtils.notNull;
 
 public final class LightJavaModule extends LightElement implements PsiJavaModule {
+  private static final Key<String> CLAIMED_MODULE_NAME_KEY = Key.create("LightJavaModule.claimedModuleName");
+
   private final LightJavaModuleReferenceElement myRefElement;
   private final VirtualFile myRoot;
   private final NotNullLazyValue<List<PsiPackageAccessibilityStatement>> myExports = NotNullLazyValue.atomicLazy(this::findExports);
@@ -277,11 +297,16 @@ public final class LightJavaModule extends LightElement implements PsiJavaModule
   }
 
   public static @Nullable String claimedModuleName(@NotNull VirtualFile manifest) {
+    String cached = manifest.getUserData(CLAIMED_MODULE_NAME_KEY);
+    if (cached != null) return cached.isEmpty() ? null : cached;
     try (InputStream stream = manifest.getInputStream()) {
-      return new Manifest(stream).getMainAttributes().getValue(AUTO_MODULE_NAME);
+      String result = new Manifest(stream).getMainAttributes().getValue(AUTO_MODULE_NAME);
+      manifest.putUserData(CLAIMED_MODULE_NAME_KEY, result != null ? result : "");
+      return result;
     }
     catch (IOException e) {
       Logger.getInstance(LightJavaModule.class).warn(manifest.getPath(), e);
+      manifest.putUserData(CLAIMED_MODULE_NAME_KEY, "");
       return null;
     }
   }

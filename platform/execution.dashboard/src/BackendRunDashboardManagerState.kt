@@ -10,9 +10,21 @@ import com.intellij.execution.dashboard.RunDashboardService
 import com.intellij.execution.dashboard.RunDashboardServiceId
 import com.intellij.ide.ui.icons.rpcId
 import com.intellij.openapi.project.Project
-import com.intellij.platform.execution.dashboard.splitApi.*
+import com.intellij.platform.execution.dashboard.splitApi.CustomLinkDto
+import com.intellij.platform.execution.dashboard.splitApi.NavigateToServiceEvent
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardAdditionalServiceDto
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardConfigurationDto
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardMainServiceDto
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardServiceDto
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardSettingsDto
+import com.intellij.platform.execution.dashboard.splitApi.ServiceCustomizationDto
+import com.intellij.platform.execution.dashboard.splitApi.ServiceStatusDto
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 internal class BackendRunDashboardManagerState(private val project: Project) {
   private val sharedSettings = MutableStateFlow(RunDashboardSettingsDto())
@@ -26,7 +38,18 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
   private val sharedStatuses = MutableSharedFlow<ServiceStatusDto>(1, 100, BufferOverflow.DROP_OLDEST)
   private val sharedConfigurationTypes = MutableStateFlow<Set<String>>(emptySet())
 
+  private val sharedAvailableConfigurations = MutableStateFlow<List<RunDashboardConfigurationDto>>(emptyList())
   private val sharedExcludedTypes = MutableStateFlow(emptySet<String>())
+
+  private val sharedStateUpdatesQueue = BackendRunDashboardUpdatesQueue(
+    RunDashboardCoroutineScopeProvider.getInstance(project).createChildNamedScope("Backend run dashboard shared state updates"),
+    OverlappingTasksStrategy.SCHEDULE_FOR_LATER)
+
+  private val navigateToServiceEvents = MutableSharedFlow<NavigateToServiceEvent>(1, 100, BufferOverflow.DROP_OLDEST)
+
+  private fun scheduleSharedStateUpdate(update: Runnable) {
+    sharedStateUpdatesQueue.submit(update)
+  }
 
   fun getLinkByServiceId(link: String, serviceId: RunDashboardServiceId): Runnable? {
     return tagCallbacksByServiceId[serviceId]?.firstOrNull { linkDto -> linkDto.presentableText == link }?.callback
@@ -40,22 +63,41 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
     return sharedServicesState.asStateFlow()
   }
 
-  fun setServices(value: List<List<RunDashboardService>>) {
-    val flattenServices = value.flatten()
-    sharedServicesState.value = flattenServices.map { backendServiceModel ->
-      createServiceDto(backendServiceModel)
-    }
+  fun setServices(value: List<RunDashboardService>) {
+    scheduleSharedStateUpdate {
+      sharedServicesState.value = value.map { backendServiceModel ->
+        createServiceDto(backendServiceModel)
+      }
 
-    val effectiveServicesSet = flattenServices.asSequence().map { it.uuid }.toSet()
-    tagCallbacksByServiceId.keys.retainAll(effectiveServicesSet)
+      val effectiveServicesSet = value.asSequence().map { it.uuid }.toSet()
+      tagCallbacksByServiceId.keys.retainAll(effectiveServicesSet)
+    }
   }
 
   fun setSettings(openRunningConfigInTab: Boolean) {
-    sharedSettings.value = RunDashboardSettingsDto(openRunningConfigInTab)
+    scheduleSharedStateUpdate {
+      sharedSettings.value = RunDashboardSettingsDto(openRunningConfigInTab)
+    }
+  }
+
+  fun fireAvailableConfigurationsUpdated(availableConfigurations: List<RunDashboardConfigurationDto>) {
+    scheduleSharedStateUpdate {
+      sharedAvailableConfigurations.value = availableConfigurations
+    }
+  }
+
+  fun getAvailableConfigurations(): Flow<List<RunDashboardConfigurationDto>> {
+    return sharedAvailableConfigurations.asStateFlow()
+  }
+
+  fun getCurrentAvailableConfigurations(): List<RunDashboardConfigurationDto> {
+    return sharedAvailableConfigurations.value
   }
 
   fun fireExcludedTypesUpdated(excludedTypes: Set<String>) {
-    sharedExcludedTypes.value = excludedTypes
+    scheduleSharedStateUpdate {
+      sharedExcludedTypes.value = excludedTypes
+    }
   }
 
   fun getExcludedTypes(): Flow<Set<String>> {
@@ -63,11 +105,23 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
   }
 
   fun fireStatusUpdated(backendService: RunDashboardService, persistedStatus: RunDashboardRunConfigurationStatus?) {
-    val effectiveStatus = when {
-      backendService.descriptor == null && persistedStatus != null -> persistedStatus
-      else -> RunDashboardRunConfigurationStatus.getStatus(backendService.descriptor)
+    scheduleSharedStateUpdate {
+      val effectiveStatus = when {
+        backendService.descriptor == null && persistedStatus != null -> persistedStatus
+        else -> RunDashboardRunConfigurationStatus.getStatus(backendService.descriptor)
+      }
+      sharedStatuses.tryEmit(ServiceStatusDto(backendService.uuid, effectiveStatus.id))
     }
-    sharedStatuses.tryEmit(ServiceStatusDto(backendService.uuid, effectiveStatus.id))
+  }
+
+  fun fireNavigateToServiceEvent(serviceId: RunDashboardServiceId, focus: Boolean){
+    scheduleSharedStateUpdate {
+      navigateToServiceEvents.tryEmit(NavigateToServiceEvent(serviceId, focus))
+    }
+  }
+
+  fun getNavigateToServiceEvents() : Flow<NavigateToServiceEvent> {
+    return navigateToServiceEvents.asSharedFlow()
   }
 
   fun getStatuses(): Flow<ServiceStatusDto> {
@@ -75,9 +129,11 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
   }
 
   fun fireCustomizationUpdated(backendService: RunDashboardService, customizers: List<RunDashboardCustomizer>) {
-    val value = createCustomizationDto(backendService, customizers)
-    tagCallbacksByServiceId[backendService.uuid] = value.links
-    sharedServicesCustomizations.tryEmit(value)
+    scheduleSharedStateUpdate {
+      val value = createCustomizationDto(backendService, customizers)
+      tagCallbacksByServiceId[backendService.uuid] = value.links
+      sharedServicesCustomizations.tryEmit(value)
+    }
   }
 
   fun getCustomizations(): Flow<ServiceCustomizationDto> {
@@ -96,7 +152,9 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
   }
 
   fun setConfigurationTypes(value: Set<String>) {
-    sharedConfigurationTypes.value = value
+    scheduleSharedStateUpdate {
+      sharedConfigurationTypes.value = value
+    }
   }
 
   fun getConfigurationTypes(): Flow<Set<String>> {
@@ -111,6 +169,7 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
       val project = configuration.project
       val contentIdImpl = backendServiceModel.descriptor?.id as? RunContentDescriptorIdImpl
 
+      val hasSettings = RunManager.getInstance(project).hasSettings(settings)
       if (backendServiceModel is RunDashboardManagerImpl.RunDashboardServiceImpl) {
         return RunDashboardMainServiceDto(
           uuid = backendServiceModel.uuid,
@@ -121,9 +180,9 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
           typeIconId = configuration.type.icon.rpcId(),
           folderName = settings.folderName,
           contentId = contentIdImpl,
-          isRemovable = RunManager.getInstance(project).hasSettings(settings),
+          isRemovable = hasSettings,
           serviceViewId = backendServiceModel.serviceViewId,
-          isStored = RunManager.getInstance(project).hasSettings(settings),
+          isStored = hasSettings,
           isActivateToolWindowBeforeRun = settings.isActivateToolWindowBeforeRun,
           isFocusToolWindowBeforeRun = settings.isFocusToolWindowBeforeRun
         )
@@ -138,9 +197,9 @@ internal class BackendRunDashboardManagerState(private val project: Project) {
           typeIconId = configuration.type.icon.rpcId(),
           folderName = settings.folderName,
           contentId = contentIdImpl,
-          isRemovable = RunManager.getInstance(project).hasSettings(settings),
+          isRemovable = hasSettings,
           serviceViewId = backendServiceModel.serviceViewId,
-          isStored = RunManager.getInstance(project).hasSettings(settings),
+          isStored = hasSettings,
           isActivateToolWindowBeforeRun = settings.isActivateToolWindowBeforeRun,
           isFocusToolWindowBeforeRun = settings.isFocusToolWindowBeforeRun
         )

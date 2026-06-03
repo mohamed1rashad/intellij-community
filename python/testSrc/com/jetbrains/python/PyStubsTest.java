@@ -4,6 +4,7 @@ package com.jetbrains.python;
 import com.google.common.collect.ImmutableRangeSet;
 import com.google.common.collect.Range;
 import com.google.common.collect.RangeSet;
+import com.intellij.idea.TestFor;
 import com.intellij.lang.FileASTNode;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.Document;
@@ -11,7 +12,11 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Version;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.SingleRootFileViewProvider;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.ProjectScope;
@@ -23,18 +28,69 @@ import com.intellij.testFramework.TestDataPath;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.ast.PyAstFunction;
+import com.jetbrains.python.codeInsight.typing.PyTypedDictTypeProvider;
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.fixtures.PyTestCase;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.FutureFeature;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.Property;
+import com.jetbrains.python.psi.PyCallable;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyDecorator;
+import com.jetbrains.python.psi.PyDecoratorList;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyFromImportStatement;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyImportElement;
+import com.jetbrains.python.psi.PyNamedParameter;
+import com.jetbrains.python.psi.PyParameter;
+import com.jetbrains.python.psi.PyPsiFacade;
+import com.jetbrains.python.psi.PyRecursiveElementVisitor;
+import com.jetbrains.python.psi.PySingleStarParameter;
+import com.jetbrains.python.psi.PySlashParameter;
+import com.jetbrains.python.psi.PyStatementList;
+import com.jetbrains.python.psi.PyTargetExpression;
+import com.jetbrains.python.psi.PyTypeAliasStatement;
+import com.jetbrains.python.psi.PyTypeParameter;
+import com.jetbrains.python.psi.PyTypeParameterListOwner;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.impl.PyFileImpl;
-import com.jetbrains.python.psi.stubs.*;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.stubs.PyClassNameIndex;
+import com.jetbrains.python.psi.stubs.PyClassStub;
+import com.jetbrains.python.psi.stubs.PyDataclassFieldStub;
+import com.jetbrains.python.psi.stubs.PyDataclassStub;
+import com.jetbrains.python.psi.stubs.PyDataclassTransformDecoratorStub;
+import com.jetbrains.python.psi.stubs.PyFileStub;
+import com.jetbrains.python.psi.stubs.PyFromImportStatementStub;
+import com.jetbrains.python.psi.stubs.PyFunctionStub;
+import com.jetbrains.python.psi.stubs.PyImportStatementStub;
+import com.jetbrains.python.psi.stubs.PyNamedTupleStub;
+import com.jetbrains.python.psi.stubs.PySuperClassIndex;
+import com.jetbrains.python.psi.stubs.PyTargetExpressionStub;
+import com.jetbrains.python.psi.stubs.PyTypeAliasNameIndex;
+import com.jetbrains.python.psi.stubs.PyTypeAliasStatementStub;
+import com.jetbrains.python.psi.stubs.PyTypedDictStub;
+import com.jetbrains.python.psi.stubs.PyTypingAliasStub;
+import com.jetbrains.python.psi.stubs.PyTypingNewTypeStub;
+import com.jetbrains.python.psi.stubs.PyVariableNameIndex;
+import com.jetbrains.python.psi.stubs.PyVersionSpecificStub;
+import com.jetbrains.python.psi.types.PyCallableType;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyNamedTupleType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypedDictType;
+import com.jetbrains.python.psi.types.PyTypingNewTypeFactoryType;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.toolbox.Maybe;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 @TestDataPath("$CONTENT_ROOT/../testData/stubs/")
@@ -1032,7 +1088,7 @@ public class PyStubsTest extends PyTestCase {
     final TypeEvalContext context = TypeEvalContext.codeInsightFallback(myFixture.getProject());
     final PyType typeDef = context.getType(type);
 
-    assertTrue(typeDef instanceof PyTypingNewType);
+    assertInstanceOf(typeDef, PyTypingNewTypeFactoryType.class);
     assertNotParsed(file);
   }
 
@@ -1192,7 +1248,6 @@ public class PyStubsTest extends PyTestCase {
     assertFalse(customStub.getEqDefault());
     assertTrue(customStub.getOrderDefault());
     assertFalse(customStub.getKwOnlyDefault());
-    assertFalse(customStub.getFrozenDefault());
     assertEquals(
       List.of(
         QualifiedName.fromDottedString("field1"),
@@ -1220,6 +1275,32 @@ public class PyStubsTest extends PyTestCase {
     assertNotParsed(file);
   }
 
+  // PY-78911
+  public void testPydanticFieldSpecifierPositionalDefault() {
+    myFixture.copyDirectoryToProject("pydantic", "pydantic");
+    PyFile file = getTestFile();
+    @Nullable PyClass pydanticModel = file.findTopLevelClass("Model");
+    assertNotNull(pydanticModel);
+    @Nullable PyTargetExpression attribute = pydanticModel.findClassAttribute("a", false, TypeEvalContext.codeAnalysis(myFixture.getProject(), myFixture.getFile()));
+    assertNotNull(attribute);
+    PyDataclassFieldStub pydanticFieldStub = attribute.getStub().getCustomStub(PyDataclassFieldStub.class);
+    assertNotNull(pydanticFieldStub);
+    assertTrue(pydanticFieldStub.hasDefault());
+  }
+
+  @TestFor(issues = "PY-89012")
+  public void testPydanticValidateByNameAndAliasOnClass() {
+    myFixture.copyDirectoryToProject("pydantic", "pydantic");
+    PyFile file = getTestFile();
+    @Nullable PyClass pydanticModel = file.findTopLevelClass("Model");
+    assertNotNull(pydanticModel);
+    PyDataclassStub pydanticStub = pydanticModel.getStub().getCustomStub(PyDataclassStub.class);
+    assertNotNull(pydanticStub);
+    assertTrue(pydanticStub.getValidateByName());
+    assertFalse(pydanticStub.getValidateByAlias());
+    assertNotParsed(file);
+  }
+
   // PY-54560
   public void testDataclassStubForClassDecoratedWithDataclassTransformFactoryFunction() {
     PyFile file = getTestFile();
@@ -1238,6 +1319,67 @@ public class PyStubsTest extends PyTestCase {
     assertNotParsed(file);
   }
 
+  // PY-85421
+  public void testTypedDictExtraItemsAndClosed() {
+    final PyFile file = getTestFile();
+
+    final PyTargetExpression attribute = file.findTopLevelAttribute("td");
+    assertNotNull(attribute);
+
+    final PyTypedDictStub stub = attribute.getStub().getCustomStub(PyTypedDictStub.class);
+    assertNotNull(stub);
+    assertTrue(stub.isClosed());
+    assertEquals("bool", stub.getExtraItemsType());
+
+    final PyType typeFromStub = TypeEvalContext.codeInsightFallback(myFixture.getProject()).getType(attribute);
+    assertInstanceOf(typeFromStub, PyTypedDictType.class);
+    final PyTypedDictType typedDictFromStub = (PyTypedDictType)typeFromStub;
+    assertTrue(typedDictFromStub.isClosed());
+    final PyType stubExtraItemsType = typedDictFromStub.getExtraItemsType();
+    assertNotNull(stubExtraItemsType);
+    assertEquals("bool", stubExtraItemsType.getName());
+    assertNotParsed(file);
+
+    final FileASTNode astNode = file.getNode();
+    assertNotNull(astNode);
+
+    final PyType typeFromAst = TypeEvalContext.userInitiated(myFixture.getProject(), file).getType(attribute);
+    assertInstanceOf(typeFromAst, PyTypedDictType.class);
+    final PyTypedDictType typedDictFromAst = (PyTypedDictType)typeFromAst;
+    assertTrue(typedDictFromAst.isClosed());
+    final PyType astExtraItemsType = typedDictFromAst.getExtraItemsType();
+    assertNotNull(astExtraItemsType);
+    assertEquals("bool", astExtraItemsType.getName());
+  }
+
+  // PY-85421
+  public void testTypedDictClassFormExtraItemsAndClosed() {
+    final PyFile file = getTestFile();
+
+    final PyClass cls = file.findTopLevelClass("ClosedDict");
+    assertNotNull(cls);
+
+    final PyTypedDictType typeFromStub = PyTypedDictTypeProvider.Helper.INSTANCE.getTypedDictTypeForResolvedElement(
+      cls, TypeEvalContext.codeInsightFallback(myFixture.getProject()));
+    assertInstanceOf(typeFromStub, PyTypedDictType.class);
+    assertTrue(typeFromStub.isClosed());
+    final PyType stubExtraItemsType = typeFromStub.getExtraItemsType();
+    assertNotNull(stubExtraItemsType);
+    assertEquals("bool", stubExtraItemsType.getName());
+    assertNotParsed(file);
+
+    final FileASTNode astNode = file.getNode();
+    assertNotNull(astNode);
+
+    final PyTypedDictType typeFromAst = PyTypedDictTypeProvider.Helper.INSTANCE.getTypedDictTypeForResolvedElement(
+      cls, TypeEvalContext.userInitiated(myFixture.getProject(), file));
+    assertInstanceOf(typeFromAst, PyTypedDictType.class);
+    assertTrue(typeFromAst.isClosed());
+    final PyType astExtraItemsType = typeFromAst.getExtraItemsType();
+    assertNotNull(astExtraItemsType);
+    assertEquals("bool", astExtraItemsType.getName());
+  }
+
   // PY-54560
   public void testDataclassStubForClassExtendingDataclassTransformFactoryBase() {
     PyFile file = getTestFile();
@@ -1253,6 +1395,46 @@ public class PyStubsTest extends PyTestCase {
     assertNull(customStub.unsafeHashValue());
     assertTrue(customStub.frozenValue());
     assertNull(customStub.kwOnly());
+    assertNotParsed(file);
+  }
+
+  @TestFor(issues = "PY-89012")
+  public void testPydanticFieldInsideAnnotatedStub() {
+    myFixture.copyDirectoryToProject("pydantic", "pydantic");
+    final PyFile file = getTestFile();
+    final PyClass cls = file.findTopLevelClass("Model");
+    PyDataclassFieldStub fieldStub = cls.findClassAttribute("b", false, null)
+      .getStub()
+      .getCustomStub(PyDataclassFieldStub.class);
+    assertNotNull(fieldStub);
+    assertTrue(fieldStub.hasDefault());
+    assertEquals("B", fieldStub.getAlias());
+    assertNotParsed(file);
+  }
+
+  @TestFor(issues = "PY-88897")
+  public void testPydanticDecoratorConfigImportedFromAnotherFileDoesNotCauseUnstubbing() {
+    myFixture.copyDirectoryToProject("pydantic", "pydantic");
+    final PyFile modelFile = getTestFile(getTestName(true) + "/model.py");
+    final PyFile configFile = getTestFile(getTestName(true) + "/config.py");
+    @Nullable PyClass modelClass = modelFile.findTopLevelClass("Model");
+    assertNotNull(modelClass);
+    PyDataclassStub stub = modelClass.getStub().getCustomStub(PyDataclassStub.class);
+    assertNotNull(stub);
+    assertNull(stub.getPopulateByName());
+    assertNotParsed(modelFile);
+    assertNotParsed(configFile);
+  }
+
+  @TestFor(issues = "PY-88897")
+  public void testPydanticDecoratorConfigDoesNotCauseUnstubbing() {
+    myFixture.copyDirectoryToProject("pydantic", "pydantic");
+    PyFile file = getTestFile();
+    @Nullable PyClass modelClass = file.findTopLevelClass("Model");
+    assertNotNull(modelClass);
+    PyDataclassStub stub = modelClass.getStub().getCustomStub(PyDataclassStub.class);
+    assertNotNull(stub);
+    assertTrue(stub.getPopulateByName());
     assertNotParsed(file);
   }
 

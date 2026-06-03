@@ -2,20 +2,37 @@
 package com.intellij.lang.impl.modcommand;
 
 import com.intellij.codeInsight.intention.IntentionAction;
-import com.intellij.codeInspection.*;
+import com.intellij.codeInspection.GlobalInspectionTool;
+import com.intellij.codeInspection.InspectionProfileEntry;
+import com.intellij.codeInspection.LocalInspectionTool;
+import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.LocalQuickFixAndIntentionActionOnPsiElement;
 import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.codeInspection.options.OptControl;
 import com.intellij.codeInspection.options.OptionController;
-import com.intellij.modcommand.*;
+import com.intellij.injected.editor.DocumentWindow;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModCommand;
+import com.intellij.modcommand.ModCommandAction;
+import com.intellij.modcommand.ModCommandService;
+import com.intellij.modcommand.ModCommandWithContext;
+import com.intellij.modcommand.ModNavigate;
+import com.intellij.modcommand.ModPsiUpdater;
+import com.intellij.modcommand.ModUpdateFileText;
+import com.intellij.modcommand.ModUpdateSystemOptions;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ThrowableComputable;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.profile.codeInspection.InspectionProfileManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtilBase;
+import com.intellij.psi.util.ReadActionCache;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import org.jdom.Element;
 import org.jetbrains.annotations.ApiStatus;
@@ -24,7 +41,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 @ApiStatus.Internal
@@ -46,11 +63,6 @@ public final class ModCommandServiceImpl implements ModCommandService {
   }
 
   @Override
-  public @NotNull LocalQuickFix wrapToQuickFix(@NotNull ModCommandAction action, boolean availableInBatchMode) {
-    return new ModCommandActionQuickFixWrapper(action, availableInBatchMode);
-  }
-
-  @Override
   public @Nullable ModCommandAction unwrap(@NotNull LocalQuickFix fix) {
     if (fix instanceof ModCommandActionQuickFixWrapper wrapper) {
       return wrapper.getAction();
@@ -59,8 +71,10 @@ public final class ModCommandServiceImpl implements ModCommandService {
   }
 
   @Override
-  public @NotNull ModCommand psiUpdate(@NotNull ActionContext context, @NotNull Consumer<@NotNull ModPsiUpdater> updater) {
-    return PsiUpdateImpl.psiUpdate(context, updater);
+  public @NotNull ModCommand psiUpdate(@NotNull ActionContext context,
+                                       @NotNull Consumer<@NotNull Document> copyCleaner,
+                                       @NotNull Consumer<@NotNull ModPsiUpdater> updater) {
+    return PsiUpdateImpl.psiUpdate(context, copyCleaner, updater);
   }
 
   @Override
@@ -118,6 +132,8 @@ public final class ModCommandServiceImpl implements ModCommandService {
     Project project = hostFile.getProject();
     ThrowableComputable<ModCommandWithContext, RuntimeException> computable =
       () -> ReadAction.nonBlocking(() -> {
+          ReadActionCache.getInstance().disable(); // this read action in fact modifies Document, do not try to cache its results
+
           ActionContext context = chooseContextForAction(hostFile, hostEditor, commandAction, fixOffset);
           if (context == null) {
             return new ModCommandWithContext(ActionContext.from(null, hostFile), ModCommand.nop());
@@ -154,4 +170,24 @@ public final class ModCommandServiceImpl implements ModCommandService {
     }
     return null;
   }
+
+  @Override
+  public @NotNull ModCommand insertText(@NotNull ActionContext context, @NotNull String text, boolean moveAfter) {
+    int offset = context.offset();
+    Document document = context.file().getFileDocument();
+    if (document instanceof DocumentWindow window) {
+      offset = window.injectedToHost(offset);
+      document = window.getDelegate();
+    }
+    String oldText = document.getText();
+    String newText = oldText.substring(0, offset) + text + oldText.substring(offset);
+    VirtualFile file = Objects.requireNonNull(FileDocumentManager.getInstance().getFile(document));
+    ModCommand fix = new ModUpdateFileText(file, oldText, newText,
+                                           List.of(new ModUpdateFileText.Fragment(offset, 0, text.length())));
+    if (moveAfter) {
+      fix = fix.andThen(new ModNavigate(file, -1, -1, offset + text.length()));
+    }
+    return fix;
+  }
+
 }

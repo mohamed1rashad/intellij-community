@@ -1,7 +1,13 @@
 package com.intellij.database.run.ui.grid.renderers;
 
-import com.intellij.database.datagrid.*;
+import com.intellij.database.datagrid.DataGrid;
+import com.intellij.database.datagrid.GridCellRequest;
+import com.intellij.database.datagrid.GridColumn;
+import com.intellij.database.datagrid.GridModel;
+import com.intellij.database.datagrid.GridRow;
+import com.intellij.database.datagrid.HierarchicalColumnsCollapseManager;
 import com.intellij.database.datagrid.HierarchicalColumnsDataGridModel.HierarchicalGridColumn;
+import com.intellij.database.datagrid.ModelIndex;
 import com.intellij.database.extractors.ObjectFormatterConfig;
 import com.intellij.database.run.ui.DataAccessType;
 import com.intellij.openapi.util.Disposer;
@@ -22,14 +28,14 @@ public class CollapsedCellRendererFactory implements GridCellRendererFactory {
   }
 
   @Override
-  public boolean supports(@NotNull ModelIndex<GridRow> row, @NotNull ModelIndex<GridColumn> column) {
+  public boolean supports(@NotNull GridCellRequest<GridRow, GridColumn> request) {
     HierarchicalColumnsCollapseManager collapseManager =
       myGrid.getHierarchicalColumnsCollapseManager();
-    return collapseManager != null && collapseManager.isColumnCollapsedSubtree(column);
+    return collapseManager != null && collapseManager.isColumnCollapsedSubtree(request.getColumnIdx());
   }
 
   @Override
-  public @NotNull GridCellRenderer getOrCreateRenderer(@NotNull ModelIndex<GridRow> row, @NotNull ModelIndex<GridColumn> column) {
+  public @NotNull GridCellRenderer getOrCreateRenderer(@NotNull GridCellRequest<GridRow, GridColumn> request) {
     if (myTextRenderer == null) {
       myTextRenderer = new CollapsedCellRenderer(myGrid);
       Disposer.register(myGrid, myTextRenderer);
@@ -51,10 +57,10 @@ public class CollapsedCellRendererFactory implements GridCellRendererFactory {
     }
 
     @Override
-    public int getSuitability(@NotNull ModelIndex<GridRow> row, @NotNull ModelIndex<GridColumn> column) {
+    public int getSuitability(@NotNull GridCellRequest<GridRow, GridColumn> request) {
       HierarchicalColumnsCollapseManager collapseManager =
         myGrid.getHierarchicalColumnsCollapseManager();
-      return collapseManager != null && collapseManager.isColumnCollapsedSubtree(column) ? SUITABILITY_MIN + 1 : SUITABILITY_UNSUITABLE;
+      return collapseManager != null && collapseManager.isColumnCollapsedSubtree(request.getColumnIdx()) ? SUITABILITY_MIN + 1 : SUITABILITY_UNSUITABLE;
     }
 
     @Override

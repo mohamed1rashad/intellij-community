@@ -30,9 +30,23 @@ import org.jetbrains.plugins.gradle.util.GradleConstants;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 public class GradleAutoImportAware implements ExternalSystemAutoImportAware {
@@ -102,18 +116,23 @@ public class GradleAutoImportAware implements ExternalSystemAutoImportAware {
   }
 
   @Override
-  public @NotNull List<File> getAffectedExternalProjectFiles(@NotNull String externalProjectPath, @NotNull Project project) {
+  public @NotNull List<Path> getAffectedExternalProjectFilePaths(String externalProjectPath, @NotNull Project project) {
     var settings = GradleSettings.getInstance(project);
     var projectSettings = settings.getLinkedProjectSettings(externalProjectPath);
     if (projectSettings == null) {
       return Collections.emptyList();
     }
-    var result = new SmartList<File>();
+    var result = new SmartList<Path>();
     GradleAutoReloadSettingsCollector.EP_NAME.forEachExtensionSafe(extension -> {
       var settingsFiles = extension.collectSettingsFiles(project, projectSettings);
-      result.addAll(ContainerUtil.map(settingsFiles, it -> it.toFile()));
+      result.addAll(settingsFiles);
     });
     return result;
+  }
+
+  @Override
+  public @NotNull List<File> getAffectedExternalProjectFiles(@NotNull String externalProjectPath, @NotNull Project project) {
+    return ContainerUtil.map(getAffectedExternalProjectFilePaths(externalProjectPath, project), Path::toFile);
   }
 
   public static final class GradlePropertiesCollector implements GradleAutoReloadSettingsCollector {

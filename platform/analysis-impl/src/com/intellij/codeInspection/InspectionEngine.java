@@ -1,11 +1,18 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInspection;
 
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.codeInsight.daemon.impl.Divider;
 import com.intellij.codeInsight.daemon.impl.InspectionVisitorOptimizer;
+import com.intellij.codeInsight.daemon.impl.ProblemDescriptorWithReporterName;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightingLevelManager;
-import com.intellij.codeInspection.ex.*;
+import com.intellij.codeInspection.ex.DynamicGroupTool;
+import com.intellij.codeInspection.ex.GlobalInspectionContextEx;
+import com.intellij.codeInspection.ex.GlobalInspectionToolWrapper;
+import com.intellij.codeInspection.ex.InspectListener;
+import com.intellij.codeInspection.ex.InspectionToolWrapper;
+import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
+import com.intellij.codeInspection.ex.ToolLanguageUtil;
 import com.intellij.codeInspection.reference.RefElement;
 import com.intellij.codeInspection.reference.RefEntity;
 import com.intellij.codeInspection.reference.RefManagerImpl;
@@ -25,7 +32,13 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Predicates;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.UserDataHolderBase;
-import com.intellij.psi.*;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.PsiRecursiveElementVisitor;
+import com.intellij.psi.PsiRecursiveVisitor;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.PairProcessor;
 import com.intellij.util.Processor;
@@ -37,10 +50,19 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import static com.intellij.openapi.diagnostic.LoggerKt.rethrowControlFlowException;
 
 public final class InspectionEngine {
   private static final Logger LOG = Logger.getInstance(InspectionEngine.class);
@@ -49,17 +71,15 @@ public final class InspectionEngine {
                                                          @NotNull ProblemsHolder holder,
                                                          boolean isOnTheFly,
                                                          @NotNull LocalInspectionToolSession session) {
-    if (!tool.isAvailableForFile(holder.getFile())) {
-      return PsiElementVisitor.EMPTY_VISITOR;
-    }
     PsiElementVisitor visitor;
     try {
+      if (!tool.isAvailableForFile(holder.getFile())) {
+        return PsiElementVisitor.EMPTY_VISITOR;
+      }
       visitor = tool.buildVisitor(holder, isOnTheFly, session);
     }
     catch (Throwable e) {
-      if (Logger.shouldRethrow(e)) {
-        throw e;
-      }
+      rethrowControlFlowException(e);
       Throwable t = PluginException.createByClass("Inspection tool '"+tool.getShortName()+"' ("+tool.getClass()+") thrown exception from its buildVisitor()", e, tool.getClass());
       LOG.error(t);
       return PsiElementVisitor.EMPTY_VISITOR;
@@ -348,22 +368,20 @@ public final class InspectionEngine {
         }
         catch (Exception e) {
           if (inspectionListener != null) {
-            inspectionListener.inspectionFailed(
-              toolWrapper.getID(),
-              e,
-              psiFile,
-              psiFile.getProject()
-            );
+            inspectionListener.inspectionFailed(toolWrapper.getID(), e, psiFile, psiFile.getProject());
           }
           throw e;
         }
 
         if (holder.hasResults()) {
-          List<ProblemDescriptor> descriptors = ContainerUtil.filter(holder.getResults(), descriptor -> {
+          for (ProblemDescriptor descriptor : holder.getResults()) {
             PsiElement element = descriptor.getPsiElement();
-            return element == null || !ignoreSuppressedElements || !SuppressionUtil.inspectionResultSuppressed(element, tool);
-          });
-          resultDescriptors.put(toolWrapper, descriptors);
+            LocalInspectionToolWrapper wrapper = getRedirectedToolWrapper(toolWrapper, descriptor, toolWrappers);
+            if (wrapper == null) continue;
+            if (element == null || !ignoreSuppressedElements || !SuppressionUtil.inspectionResultSuppressed(element, wrapper.getTool())) {
+              resultDescriptors.computeIfAbsent(wrapper, x -> new ArrayList<>()).add(descriptor);
+            }
+          }
         }
 
         return true;
@@ -372,6 +390,24 @@ public final class InspectionEngine {
     });
 
     return resultDescriptors;
+  }
+
+  private static @Nullable LocalInspectionToolWrapper getRedirectedToolWrapper(
+    LocalInspectionToolWrapper tool,
+    ProblemDescriptor descriptor,
+    List<? extends LocalInspectionToolWrapper> tools
+  ) {
+    if (descriptor instanceof ProblemDescriptorWithReporterName name) {
+      String reportingToolName = name.getReportingToolShortName();
+      List<? extends LocalInspectionToolWrapper> toolWrappers = tool instanceof DynamicGroupTool groupTool ? groupTool.getChildren() : tools;
+      for (LocalInspectionToolWrapper child : toolWrappers) {
+        if (child.getShortName().equals(reportingToolName)) {
+          return child;
+        }
+      }
+      return null;
+    }
+    return tool;
   }
 
   public static @NotNull @Unmodifiable List<ProblemDescriptor> runInspectionOnFile(@NotNull PsiFile psiFile,
@@ -386,8 +422,7 @@ public final class InspectionEngine {
         if (toolWrapper instanceof LocalInspectionToolWrapper local) {
           Map<LocalInspectionToolWrapper, List<ProblemDescriptor>> problemDescriptors =
             inspectEx(Collections.singletonList(local), psiFile, psiFile.getTextRange(), psiFile.getTextRange(),
-                      false,
-                      false, true, new EmptyProgressIndicator(), PairProcessor.alwaysTrue());
+                      false, false, true, new EmptyProgressIndicator(), PairProcessor.alwaysTrue());
 
           for (List<ProblemDescriptor> group : problemDescriptors.values()) {
             result.addAll(group);
@@ -482,7 +517,7 @@ public final class InspectionEngine {
 
       boolean applyToDialects = tool.applyToDialects();
       Map<String, Boolean> map = applyToDialects ? resultsWithDialects : resultsNoDialects;
-      return map.computeIfAbsent(toolLanguageId, __ ->
+      return map.computeIfAbsent(toolLanguageId, _ ->
         ToolLanguageUtil.isToolLanguageOneOf(tool.runForWholeFile() ? elementDialectIdsForWholeFileTool : elementDialectIdsForRegularTool, toolLanguageId, applyToDialects));
     });
   }

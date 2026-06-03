@@ -2,6 +2,7 @@
 
 package org.jetbrains.kotlin.idea.refactoring.introduce
 
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.project.Project
@@ -13,7 +14,11 @@ import org.jetbrains.annotations.Nls
 import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.psi.replaced
 import org.jetbrains.kotlin.idea.util.application.executeWriteCommand
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
 import org.jetbrains.kotlin.psi.psiUtil.getNonStrictParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypeAndBranch
 import org.jetbrains.kotlin.psi.psiUtil.isIdentifier
@@ -46,7 +51,9 @@ abstract class AbstractKotlinInplaceIntroducer<D : KtNamedDeclaration>(
             myProject.executeWriteCommand(commandName, commandName, action)
             // myExprMarker was invalidated by stopIntroduce()
             myExprMarker = myExpr?.let { createMarker(it) }
-            startInplaceIntroduceTemplate()
+            WriteIntentReadAction.run {
+                startInplaceIntroduceTemplate()
+            }
         } finally {
             myEditor.putUserData(InplaceRefactoring.INTRODUCE_RESTART, false)
         }

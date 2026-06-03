@@ -15,7 +15,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 public class IdeaLoggerTest extends BareTestFixtureTestCase {
   @After
@@ -57,7 +59,7 @@ public class IdeaLoggerTest extends BareTestFixtureTestCase {
       @Override
       public void log(java.util.logging.Level level, String msg, Throwable thrown) {
         if (thrown != null) {
-          diags.computeIfAbsent(level, __ -> new ArrayList<>()).add(Pair.create(String.valueOf(msg), thrown));
+          diags.computeIfAbsent(level, _ -> new ArrayList<>()).add(Pair.create(String.valueOf(msg), thrown));
         }
       }
     };

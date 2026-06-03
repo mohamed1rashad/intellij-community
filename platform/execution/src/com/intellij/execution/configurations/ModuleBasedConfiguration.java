@@ -18,7 +18,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Base class for a configuration that is associated with a specific module. For example, Java run configurations use the selected module
@@ -184,7 +190,7 @@ public abstract class ModuleBasedConfiguration<ConfigurationModule extends RunCo
 
   @Override
   public Module @NotNull [] getModules() {
-    Module module = ReadAction.compute(() -> getConfigurationModule().getModule());
+    Module module = ReadAction.computeBlocking(() -> getConfigurationModule().getModule());
     return module == null ? Module.EMPTY_ARRAY : new Module[]{module};
   }
 

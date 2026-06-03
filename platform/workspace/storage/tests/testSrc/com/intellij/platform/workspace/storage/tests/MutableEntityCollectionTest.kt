@@ -5,7 +5,13 @@ import com.intellij.platform.workspace.storage.impl.MutableEntityStorageImpl
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.containers.MutableWorkspaceSet
 import com.intellij.platform.workspace.storage.impl.url.VirtualFileUrlManagerImpl
-import com.intellij.platform.workspace.storage.testEntities.entities.*
+import com.intellij.platform.workspace.storage.testEntities.entities.ListVFUEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.ListVFUEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.SampleEntitySource
+import com.intellij.platform.workspace.storage.testEntities.entities.SetVFUEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.SetVFUEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.modifyListVFUEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.modifySetVFUEntity
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
 import org.junit.jupiter.api.BeforeEach
@@ -171,7 +177,7 @@ class MutableEntityCollectionTest {
   }
 
   private fun makeOperationOnSetAndCheck(builder: MutableEntityStorageImpl, vararg urls: String, removeOperation: Boolean = false,
-                                         operation: (ModifiableSetVFUEntity, Set<VirtualFileUrl>) -> Unit) {
+                                         operation: (SetVFUEntityBuilder, Set<VirtualFileUrl>) -> Unit) {
     val entity = builder.entities(SetVFUEntity::class.java).single()
     val vfuForAction = urls.map { virtualFileManager.getOrCreateFromUrl(it) }.toSet()
 
@@ -201,7 +207,7 @@ class MutableEntityCollectionTest {
     val builder = createEmptyBuilder()
     builder.addEntity(SetVFUEntity("hello", vfuSet, SampleEntitySource("test")))
     val entity = builder.entities(SetVFUEntity::class.java).first()
-    val entityBuilder = entity.builderFrom(builder) as ModifiableSetVFUEntity
+    val entityBuilder = entity.builderFrom(builder) as SetVFUEntityBuilder
     assertThrows<IllegalStateException> {
       entityBuilder.fileProperty.remove(entity.fileProperty.first())
     }
@@ -228,7 +234,7 @@ class MutableEntityCollectionTest {
   }
 
   private fun makeReplaceOnSetOperationAndCheck(builder: MutableEntityStorageImpl, oldUrls: List<String>, newUrls: List<String>,
-                                                operation: (ModifiableSetVFUEntity, Set<VirtualFileUrl>) -> Unit) {
+                                                operation: (SetVFUEntityBuilder, Set<VirtualFileUrl>) -> Unit) {
     val entity = builder.entities(SetVFUEntity::class.java).single()
     val vfuForAction = oldUrls.map { virtualFileManager.getOrCreateFromUrl(it) }.toSet()
 
@@ -245,7 +251,7 @@ class MutableEntityCollectionTest {
   }
 
   private fun makeOperationOnListAndCheck(builder: MutableEntityStorageImpl, vararg urls: String, removeOperation: Boolean = false,
-                                          operation: (ModifiableListVFUEntity, List<VirtualFileUrl>) -> Unit) {
+                                          operation: (ListVFUEntityBuilder, List<VirtualFileUrl>) -> Unit) {
     val entity = builder.entities(ListVFUEntity::class.java).single()
     val vfuForAction = urls.map { virtualFileManager.getOrCreateFromUrl(it) }
 
@@ -268,7 +274,7 @@ class MutableEntityCollectionTest {
   }
 
   private fun makeReplaceOnListOperationAndCheck(builder: MutableEntityStorageImpl, oldUrls: List<String>, newUrls: List<String>,
-                                                 operation: (ModifiableListVFUEntity, List<VirtualFileUrl>) -> Unit) {
+                                                 operation: (ListVFUEntityBuilder, List<VirtualFileUrl>) -> Unit) {
     val entity = builder.entities(ListVFUEntity::class.java).single()
     val vfuForAction = oldUrls.map { virtualFileManager.getOrCreateFromUrl(it) }
 

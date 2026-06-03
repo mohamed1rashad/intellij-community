@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.k2.codeInsight.postfix.test;
 
@@ -152,6 +152,16 @@ public abstract class K2PostfixTemplateTestGenerated extends AbstractK2PostfixTe
             performTest();
         }
 
+        @TestMetadata("conjunctionType.kt")
+        public void testConjunctionType() throws Exception {
+            performTest();
+        }
+
+        @TestMetadata("dataClass.kt")
+        public void testDataClass() throws Exception {
+            performTest();
+        }
+
         @TestMetadata("forOnMap.kt")
         public void testForOnMap() throws Exception {
             performTest();
@@ -164,6 +174,11 @@ public abstract class K2PostfixTemplateTestGenerated extends AbstractK2PostfixTe
 
         @TestMetadata("intArray.kt")
         public void testIntArray() throws Exception {
+            performTest();
+        }
+
+        @TestMetadata("iterator.kt")
+        public void testIterator() throws Exception {
             performTest();
         }
 
@@ -507,6 +522,21 @@ public abstract class K2PostfixTemplateTestGenerated extends AbstractK2PostfixTe
 
         @TestMetadata("qualifiedCall.kt")
         public void testQualifiedCall() throws Exception {
+            performTest();
+        }
+
+        @TestMetadata("qualifiedCallInsideWithCall.kt")
+        public void testQualifiedCallInsideWithCall() throws Exception {
+            performTest();
+        }
+
+        @TestMetadata("qualifiedCallInsideWithProperty.kt")
+        public void testQualifiedCallInsideWithProperty() throws Exception {
+            performTest();
+        }
+
+        @TestMetadata("qualifiedCallWithLambda.kt")
+        public void testQualifiedCallWithLambda() throws Exception {
             performTest();
         }
 

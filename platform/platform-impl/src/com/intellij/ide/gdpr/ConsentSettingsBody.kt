@@ -4,18 +4,27 @@ package com.intellij.ide.gdpr
 import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.gdpr.ConsentSettingsUi.ConsentStateSupplier
+import com.intellij.ide.gdpr.localConsents.LocalConsentOptions
 import com.intellij.ide.gdpr.ui.consents.ConsentForcedState
 import com.intellij.ide.gdpr.ui.consents.ConsentForcedState.ExternallyDisabled
-import com.intellij.ide.gdpr.ui.consents.ConsentGroup
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.ui.components.JBCheckBox
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.AlignY
+import com.intellij.ui.dsl.builder.DEFAULT_COMMENT_WIDTH
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.builder.selected
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus
+
+private const val JETBRAINS_VENDOR_NAME = "JetBrains"
 
 @ApiStatus.Internal
 internal fun createNoOptionsConsentSettings(preferencesMode: Boolean): DialogPanel {
@@ -30,15 +39,32 @@ internal fun createNoOptionsConsentSettings(preferencesMode: Boolean): DialogPan
 }
 
 @ApiStatus.Internal
-internal fun createConsentSettings(consentMapping: MutableCollection<ConsentStateSupplier>, preferencesMode: Boolean, consents: List<Consent>): DialogPanel {
+internal fun createConsentSettings(consentMapping: MutableCollection<ConsentStateSupplier>,
+                                   preferencesMode: Boolean,
+                                   isJetBrainsVendor: Boolean,
+                                   consents: List<Consent>): DialogPanel {
   val addCheckBox = preferencesMode || consents.size > 1
+  val shortCompanyName = if (isJetBrainsVendor) JETBRAINS_VENDOR_NAME else ApplicationInfoImpl.getShadowInstance().shortCompanyName
   return panel {
-    val (singleConsents, consentsWithGroup) = partitionConsentsByGroupId(consents)
-    addGroupConsents(consentMapping, consentsWithGroup, addCheckBox)
-    addSingleConsents(consentMapping, singleConsents, addCheckBox)
-    if (!ConsentOptions.getInstance().isEAP) {
+    if (isJetBrainsVendor) {
       row {
-        comment(IdeBundle.message("gdpr.hint.text.apply.to.all.installed.products", ApplicationInfoImpl.getShadowInstance().getShortCompanyName()))
+        comment(IdeBundle.message("gdpr.data.sharing.title.comment.text", shortCompanyName))
+      }
+    }
+    val (actualConsents, localConsentsAsConsents) = partitionConsentsAndLocalConsents(consents)
+    if (!actualConsents.isEmpty()) {
+      if (isJetBrainsVendor) {
+        group(IdeBundle.message("gdpr.data.sharing.consents.title", shortCompanyName)) {
+          createConsentElements(actualConsents, addCheckBox, consentMapping)
+        }
+      }
+      else {
+        createConsentElements(actualConsents, addCheckBox, consentMapping)
+      }
+    }
+    if (!localConsentsAsConsents.isEmpty()) {
+      group(IdeBundle.message("gdpr.data.sharing.local.settings.title")) {
+        createConsentElements(localConsentsAsConsents, addCheckBox, consentMapping)
       }
     }
     if (!preferencesMode) {
@@ -52,43 +78,20 @@ internal fun createConsentSettings(consentMapping: MutableCollection<ConsentStat
   }
 }
 
-internal fun partitionConsentsByGroupId(consents: List<Consent>): Pair<List<Consent>, List<ConsentGroup>> {
-  var ungroupedConsents = consents.toList()
-  val consentGroups = ConsentGroup.CONSENT_GROUP_MAPPING.mapNotNull { (groupId, predicate) ->
-    val matchingConsents = ungroupedConsents.filter { predicate(it) }
-    if (matchingConsents.isEmpty()) null
-    else {
-      ungroupedConsents = ungroupedConsents.filterNot(predicate)
-      ConsentGroup(groupId, matchingConsents)
-    }
-  }
-  return ungroupedConsents to consentGroups
-}
-
-private fun Panel.addSingleConsents(
+private fun Panel.createConsentElements(
+  actualConsents: List<Consent>,
+  addCheckBox: Boolean,
   consentMapping: MutableCollection<ConsentStateSupplier>,
-  singleConsents: List<Consent>,
-  addCheckBox: Boolean
 ) {
-  singleConsents.forEach { consent ->
+  for (consent in actualConsents) {
     val supplier = createConsentElement(consent, addCheckBox)
     consentMapping.add(supplier)
   }
 }
 
-private fun Panel.addGroupConsents(
-  consentMapping: MutableCollection<ConsentStateSupplier>,
-  consentsGroups: List<ConsentGroup>,
-  addCheckBox: Boolean
-) {
-  consentsGroups.forEach { consentGroup ->
-    if (consentGroup.consents.size > 1) {
-      val suppliers = createGroupConsentsElement(consentGroup)
-      consentMapping.addAll(suppliers)
-    } else {
-      addSingleConsents(consentMapping, consentGroup.consents, addCheckBox)
-    }
-  }
+internal fun partitionConsentsAndLocalConsents(consents: List<Consent>): Pair<List<Consent>, List<Consent>> {
+  val localConsentIds = LocalConsentOptions.getLocalConsents().first.map(Consent::getId)
+  return consents.partition { consent -> consent.id !in localConsentIds }
 }
 
 private fun DialogPanel.addBorder(preferencesMode: Boolean) {
@@ -102,7 +105,7 @@ private fun Panel.createConsentElement(consent: Consent, addCheckBox: Boolean): 
   val forcedState = consentUi.getForcedState()
   lateinit var result: ConsentStateSupplier
 
-  val row = if (addCheckBox) {
+  if (addCheckBox) {
     row {
       val cb = checkBox(consentUi.getCheckBoxText())
         .comment(processCheckboxComment(consentUi.getCheckBoxCommentText()))
@@ -120,44 +123,11 @@ private fun Panel.createConsentElement(consent: Consent, addCheckBox: Boolean): 
   }
 
   val warning = getWarning(forcedState)
-  if (warning == null) {
-    row.bottomGap(BottomGap.SMALL)
-  }
-  else {
+  if (warning != null) {
     addWarningRow(warning)
   }
 
   return result
-}
-
-private fun Panel.createGroupConsentsElement(consentGroup: ConsentGroup): List<ConsentStateSupplier> {
-  val consentGroupUI = ConsentSettingsUi.getConsentGroupUi(consentGroup)
-  if (consentGroupUI == null) return emptyList()
-  val results: MutableList<ConsentStateSupplier> = mutableListOf()
-
-  row {
-    comment(processCheckboxComment(consentGroupUI.commentText), maxLineLength = DEFAULT_COMMENT_WIDTH)
-  }.bottomGap(BottomGap.SMALL)
-
-  for ((consentUI, consent) in consentGroupUI.consentUis zip consentGroup.consents) {
-    val forcedState = consentUI.getForcedState()
-    indent {
-      row {
-        val cb = checkBox(consentUI.getCheckBoxText())
-          .comment(processCheckboxComment(consentUI.getCheckBoxCommentText()))
-          .selected(consent.isAccepted)
-          .component
-        results.add(createConsentStateSupplier(forcedState, cb, consent))
-      }.bottomGap(BottomGap.SMALL)
-    }
-  }
-
-  consentGroupUI.forcedStateDescription?.let { description ->
-    indent {
-      addWarningRow(description)
-    }
-  }
-  return results
 }
 
 private fun createConsentStateSupplier(
@@ -194,7 +164,7 @@ private fun Panel.addWarningRow(warning: @NlsSafe String) {
       .gap(RightGap.SMALL)
       .align(AlignY.TOP)
     comment(warning, maxLineLength = DEFAULT_COMMENT_WIDTH)
-  }.bottomGap(BottomGap.SMALL)
+  }
 }
 
 private fun processCheckboxComment(text: @NlsSafe String): @NlsSafe String {

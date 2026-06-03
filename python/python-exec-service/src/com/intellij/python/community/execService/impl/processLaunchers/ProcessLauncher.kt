@@ -2,8 +2,10 @@
 package com.intellij.python.community.execService.impl.processLaunchers
 
 import com.intellij.openapi.diagnostic.fileLogger
-import com.intellij.platform.eel.provider.utils.ProcessFunctions
+import com.intellij.platform.eel.impl.base.ProcessFunctions
 import com.intellij.python.community.execService.Args
+import com.intellij.python.community.execService.ConcurrentProcessWeight
+import com.intellij.python.community.execService.DownloadConfig
 import com.intellij.python.community.execService.TtySize
 import com.intellij.python.community.execService.impl.LoggingProcess
 import com.jetbrains.python.Result
@@ -20,22 +22,24 @@ internal class ProcessLauncher(
   val args: List<String>,
   private val processCommands: ProcessCommands,
 ) {
-  suspend fun start(): Result<LoggingProcess, ExecErrorReason.CantStart> =
+  suspend fun start(weight: ConcurrentProcessWeight? = null): Result<LoggingProcess, ExecErrorReason.CantStart> =
     processCommands.start()
       .mapSuccess {
         LoggingProcess(
           it,
+          weight,
           processCommands.scopeToBind.coroutineContext[TraceContext.Key],
           Clock.System.now(),
-          processCommands.cwd,
+          processCommands.info.cwd,
           exeForError,
           args,
-          processCommands.env,
+          processCommands.info.env,
+          processCommands.info.target,
         )
       }
 
   suspend fun killAndJoin() {
-    processCommands.processFunctions.killAndJoin(logger, exeForError.toString())
+    processCommands.processFunctions.killAndJoin({ logger.warn(it) }, exeForError.toString())
   }
 }
 
@@ -43,13 +47,19 @@ internal interface ProcessCommands {
   suspend fun start(): Result<Process, ExecErrorReason.CantStart>
   val processFunctions: ProcessFunctions
   val scopeToBind: CoroutineScope
-  val env: Map<String, String>
-  val cwd: String?
+  val info: ProcessCommandsInfo
 }
+
+internal data class ProcessCommandsInfo(
+  val env: Map<String, String>,
+  val cwd: String?,
+  val target: String,
+)
 
 internal data class LaunchRequest(
   val scopeToBind: CoroutineScope,
   val args: Args,
   val env: Map<String, String>,
   val usePty: TtySize?,
+  val downloadConfig: DownloadConfig? = null,
 )

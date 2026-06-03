@@ -8,16 +8,18 @@ import com.intellij.ide.actions.searcheverywhere.SearchEverywhereManagerImpl;
 import com.intellij.ide.actions.searcheverywhere.statistics.SearchFieldStatisticsCollector;
 import com.intellij.ide.lightEdit.LightEdit;
 import com.intellij.ide.ui.UISettings;
-import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.actionSystem.ex.ActionRuntimeRegistrar;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.RightAlignedToolbarAction;
+import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction;
 import com.intellij.openapi.actionSystem.impl.ActionButton;
-import com.intellij.openapi.actionSystem.impl.ActionConfigurationCustomizer;
 import com.intellij.openapi.application.ReadAction;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.keymap.MacKeymapUtil;
-import com.intellij.openapi.keymap.impl.ModifierKeyDoubleClickHandler;
 import com.intellij.openapi.options.advanced.AdvancedSettings;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.ui.popup.JBPopup;
@@ -25,14 +27,10 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.ui.ExperimentalUI;
 import com.intellij.util.FontUtil;
-import com.intellij.util.JavaCoroutines;
-import kotlin.Unit;
-import kotlin.coroutines.Continuation;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.Dimension;
 import java.awt.event.KeyEvent;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -41,20 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class SearchEverywhereAction extends SearchEverywhereBaseAction
   implements CustomComponentAction, RightAlignedToolbarAction, DumbAware {
-  private static final Logger LOG = Logger.getInstance(SearchEverywhereAction.class);
-
   public static final Key<ConcurrentHashMap<ClientId, JBPopup>> SEARCH_EVERYWHERE_POPUP = new Key<>("SearchEverywherePopup");
-
-  static final class ShortcutTracker implements ActionConfigurationCustomizer, ActionConfigurationCustomizer.LightCustomizeStrategy {
-    @Override
-    public @Nullable Object customize(@NotNull ActionRuntimeRegistrar actionRegistrar,
-                                      @NotNull Continuation<? super Unit> $completion) {
-      return JavaCoroutines.suspendJava(jc -> {
-        ModifierKeyDoubleClickHandler.getInstance().registerAction(IdeActions.ACTION_SEARCH_EVERYWHERE, KeyEvent.VK_SHIFT, -1, false);
-        jc.resume(Unit.INSTANCE);
-      }, $completion);
-    }
-  }
 
   public SearchEverywhereAction() {
     setEnabledInModalContext(false);
@@ -63,10 +48,11 @@ public class SearchEverywhereAction extends SearchEverywhereBaseAction
   @Override
   public @NotNull JComponent createCustomComponent(@NotNull Presentation presentation, @NotNull String place) {
     return new ActionButton(this, presentation, place, () -> getMinimumSize(place)) {
-      @Override protected void updateToolTipText() {
+      @Override
+      protected void updateToolTipText() {
         String shortcutText = getShortcut();
 
-        String classesTabName = String.join("/",GotoClassPresentationUpdater.getActionTitlePluralized());
+        String classesTabName = String.join("/", GotoClassPresentationUpdater.getActionTitlePluralized());
         if (UISettings.isIdeHelpTooltipEnabled()) {
           HelpTooltip.dispose(this);
 
@@ -111,7 +97,6 @@ public class SearchEverywhereAction extends SearchEverywhereBaseAction
       }
     }
 
-    ReadAction.run(() -> showInSearchEverywherePopup(SearchEverywhereManagerImpl.ALL_CONTRIBUTORS_GROUP_ID, newEvent, true, true));
+    ReadAction.runBlocking(() -> showInSearchEverywherePopup(SearchEverywhereManagerImpl.ALL_CONTRIBUTORS_GROUP_ID, newEvent, true, true));
   }
 }
-

@@ -3,10 +3,14 @@
 
 package com.jetbrains.python.packaging.management
 
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.jetbrains.python.NON_INTERACTIVE_ROOT_TRACE_CONTEXT
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.errorProcessing.PyResult
+import com.jetbrains.python.orLogException
 import com.jetbrains.python.packaging.PyPackageName
 import com.jetbrains.python.packaging.PyRequirement
 import com.jetbrains.python.packaging.common.PythonPackage
@@ -30,8 +34,8 @@ fun PythonPackageManager.waitInitBlocking() {
 @ApiStatus.Internal
 fun PythonPackageManager.reloadPackagesBlocking() {
   runBlockingMaybeCancellable {
-    withContext(NON_INTERACTIVE_ROOT_TRACE_CONTEXT) {
-      reloadPackages().orThrow()
+    withContext(NON_INTERACTIVE_ROOT_TRACE_CONTEXT + ModalityState.any().asContextElement()) {
+      reloadPackages().orLogException(thisLogger())
     }
   }
 }
@@ -41,8 +45,12 @@ fun PythonPackageManager.reloadPackagesBlocking() {
 suspend fun PythonPackageManager.installPackages(vararg packages: String): PyResult<List<PythonPackage>> {
   waitForInit()
   val specifications = packages.map {
-    findPackageSpecification(PyPackageName.normalizePackageName(it))
-    ?: return PyResult.localizedError(PyBundle.message("python.packaging.installing.error.failed.to.find.specification", it))
+    val packageName = PyPackageName.normalizePackageName(it)
+    findPackageSpecification(packageName) ?: let {
+      val repository = repositoryManager.repositories.firstOrNull()
+      repository ?: return@let null
+      PythonRepositoryPackageSpecification(repository, pyRequirement(packageName))
+    } ?: return PyResult.localizedError(PyBundle.message("python.packaging.installing.error.failed.to.find.specification", it))
   }
   return installPackage(PythonPackageInstallRequest.ByRepositoryPythonPackageSpecifications(specifications))
 }

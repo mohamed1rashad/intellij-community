@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.util.side;
 
 import com.intellij.diff.DiffContext;
@@ -6,7 +6,7 @@ import com.intellij.diff.EditorDiffViewer;
 import com.intellij.diff.actions.ProxyUndoRedoAction;
 import com.intellij.diff.actions.impl.FocusOppositePaneAction;
 import com.intellij.diff.actions.impl.OpenInEditorWithMouseAction;
-import com.intellij.diff.actions.impl.SetEditorSettingsAction;
+import com.intellij.diff.actions.impl.SetEditorSettingsActionGroup;
 import com.intellij.diff.contents.DocumentContent;
 import com.intellij.diff.requests.ContentDiffRequest;
 import com.intellij.diff.requests.DiffRequest;
@@ -25,7 +25,6 @@ import com.intellij.diff.util.Side;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataSink;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.editor.event.DocumentEvent;
@@ -38,14 +37,14 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.List;
 
 public abstract class TwosideTextDiffViewer extends TwosideDiffViewer<TextEditorHolder> implements EditorDiffViewer {
   private final @NotNull List<? extends EditorEx> myEditableEditors;
   private @Nullable List<? extends EditorEx> myEditors;
 
-  protected final @NotNull SetEditorSettingsAction myEditorSettingsAction;
+  protected final @NotNull SetEditorSettingsActionGroup myEditorSettingsAction;
 
   private final @NotNull MyVisibleAreaListener myVisibleAreaListener = new MyVisibleAreaListener();
 
@@ -57,7 +56,7 @@ public abstract class TwosideTextDiffViewer extends TwosideDiffViewer<TextEditor
     new MyFocusOppositePaneAction(true).install(myPanel);
     new MyFocusOppositePaneAction(false).install(myPanel);
 
-    myEditorSettingsAction = new SetEditorSettingsAction(getTextSettings(), getEditors());
+    myEditorSettingsAction = new SetEditorSettingsActionGroup(getTextSettings(), getEditors());
     myEditorSettingsAction.applyDefaults();
 
     new MyOpenInEditorWithMouseAction().install(getEditors());
@@ -267,7 +266,7 @@ public abstract class TwosideTextDiffViewer extends TwosideDiffViewer<TextEditor
     Side side = getCurrentSide();
 
     EditorEx editor = getEditor(side);
-    LineCol position = ReadAction.compute(() -> LineCol.fromCaret(editor));
+    LineCol position = LineCol.fromCaret(editor);
     Navigatable navigatable = getContent(side).getNavigatable(position);
     if (navigatable != null) return navigatable;
 

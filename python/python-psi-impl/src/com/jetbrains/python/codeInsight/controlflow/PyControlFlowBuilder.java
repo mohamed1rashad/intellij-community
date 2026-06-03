@@ -16,6 +16,7 @@
 package com.jetbrains.python.codeInsight.controlflow;
 
 import com.google.common.collect.Lists;
+import com.intellij.codeInsight.controlflow.ControlFlow;
 import com.intellij.codeInsight.controlflow.ControlFlowBuilder;
 import com.intellij.codeInsight.controlflow.Instruction;
 import com.intellij.codeInsight.controlflow.TransparentInstruction;
@@ -30,9 +31,86 @@ import com.intellij.psi.util.QualifiedName;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.PyTokenTypes;
-import com.jetbrains.python.psi.*;
-import com.jetbrains.python.psi.impl.*;
-import com.jetbrains.python.psi.types.PyNeverType;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyAnnotation;
+import com.jetbrains.python.psi.PyAsPattern;
+import com.jetbrains.python.psi.PyAssertStatement;
+import com.jetbrains.python.psi.PyAssignmentExpression;
+import com.jetbrains.python.psi.PyAssignmentStatement;
+import com.jetbrains.python.psi.PyAugAssignmentStatement;
+import com.jetbrains.python.psi.PyBinaryExpression;
+import com.jetbrains.python.psi.PyBoolLiteralExpression;
+import com.jetbrains.python.psi.PyBreakStatement;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCapturePattern;
+import com.jetbrains.python.psi.PyCaseClause;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyClassPattern;
+import com.jetbrains.python.psi.PyComprehensionComponent;
+import com.jetbrains.python.psi.PyComprehensionElement;
+import com.jetbrains.python.psi.PyComprehensionForComponent;
+import com.jetbrains.python.psi.PyComprehensionIfComponent;
+import com.jetbrains.python.psi.PyConditionalExpression;
+import com.jetbrains.python.psi.PyConditionalStatementPart;
+import com.jetbrains.python.psi.PyContinueStatement;
+import com.jetbrains.python.psi.PyDecorator;
+import com.jetbrains.python.psi.PyDecoratorList;
+import com.jetbrains.python.psi.PyDelStatement;
+import com.jetbrains.python.psi.PyElement;
+import com.jetbrains.python.psi.PyElementType;
+import com.jetbrains.python.psi.PyElsePart;
+import com.jetbrains.python.psi.PyExceptPart;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFinallyPart;
+import com.jetbrains.python.psi.PyForPart;
+import com.jetbrains.python.psi.PyForStatement;
+import com.jetbrains.python.psi.PyFromImportStatement;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyGroupPattern;
+import com.jetbrains.python.psi.PyIfPart;
+import com.jetbrains.python.psi.PyIfStatement;
+import com.jetbrains.python.psi.PyImportElement;
+import com.jetbrains.python.psi.PyImportStatement;
+import com.jetbrains.python.psi.PyImportStatementBase;
+import com.jetbrains.python.psi.PyKeywordArgument;
+import com.jetbrains.python.psi.PyLambdaExpression;
+import com.jetbrains.python.psi.PyLoopStatement;
+import com.jetbrains.python.psi.PyMatchStatement;
+import com.jetbrains.python.psi.PyNamedParameter;
+import com.jetbrains.python.psi.PyNoneLiteralExpression;
+import com.jetbrains.python.psi.PyOrPattern;
+import com.jetbrains.python.psi.PyParameterList;
+import com.jetbrains.python.psi.PyPassStatement;
+import com.jetbrains.python.psi.PyPattern;
+import com.jetbrains.python.psi.PyPrefixExpression;
+import com.jetbrains.python.psi.PyQualifiedExpression;
+import com.jetbrains.python.psi.PyRaiseStatement;
+import com.jetbrains.python.psi.PyRecursiveElementVisitor;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PyReturnStatement;
+import com.jetbrains.python.psi.PyStarImportElement;
+import com.jetbrains.python.psi.PyStatement;
+import com.jetbrains.python.psi.PyStatementList;
+import com.jetbrains.python.psi.PyStatementPart;
+import com.jetbrains.python.psi.PySubscriptionExpression;
+import com.jetbrains.python.psi.PyTargetExpression;
+import com.jetbrains.python.psi.PyTryExceptStatement;
+import com.jetbrains.python.psi.PyTryPart;
+import com.jetbrains.python.psi.PyTupleExpression;
+import com.jetbrains.python.psi.PyTypeAliasStatement;
+import com.jetbrains.python.psi.PyTypeDeclarationStatement;
+import com.jetbrains.python.psi.PyTypeParameterList;
+import com.jetbrains.python.psi.PyValuePattern;
+import com.jetbrains.python.psi.PyWhileStatement;
+import com.jetbrains.python.psi.PyWithStatement;
+import com.jetbrains.python.psi.PyYieldExpression;
+import com.jetbrains.python.psi.impl.ParamHelper;
+import com.jetbrains.python.psi.impl.PyAugAssignmentStatementNavigator;
+import com.jetbrains.python.psi.impl.PyEvaluator;
+import com.jetbrains.python.psi.impl.PyImportStatementNavigator;
+import com.jetbrains.python.psi.impl.PyPsiUtils;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeUtilKt;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -43,16 +121,27 @@ import java.util.List;
 public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
 
   private final ControlFlowBuilder myBuilder = new ControlFlowBuilder();
+  private final @Nullable LanguageLevel myLanguageLevel;
 
   private @Nullable TrueFalseNodes myTrueFalseNodes;
-  
+
   // see com.jetbrains.python.PyPatternTypeTest.testMatchClassPatternShadowingCapture
   private final @NotNull List<String> myPatternBindingNames = new ArrayList<>();
 
-  private record TrueFalseNodes(@NotNull Instruction trueNode, @NotNull Instruction falseNode) {}
+  public PyControlFlowBuilder(@Nullable LanguageLevel languageLevel) { myLanguageLevel = languageLevel; }
+
+  private record TrueFalseNodes(@NotNull Instruction trueNode, @NotNull Instruction falseNode) {
+  }
 
   public PyControlFlow buildControlFlow(final @NotNull ScopeOwner owner) {
-    return new PyControlFlow(myBuilder.build(this, owner));
+    ControlFlow flow = myBuilder.build(this, owner);
+    Instruction[] instructions = flow.getInstructions();
+    for (int i = 0; i < instructions.length; i++) {
+      if (i != instructions[i].num()) {
+        throw new IllegalStateException();
+      }
+    }
+    return new PyControlFlow(instructions);
   }
 
   protected @NotNull ControlFlowBuilder getBuilder() {
@@ -169,10 +258,13 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       return;
     }
 
-    final ReadWriteInstruction.ACCESS access = PyAugAssignmentStatementNavigator.getStatementByTarget(node) != null
-                                               ? ReadWriteInstruction.ACCESS.READWRITE
-                                               : ReadWriteInstruction.ACCESS.READ;
-    final ReadWriteInstruction readWriteInstruction = ReadWriteInstruction.newInstruction(myBuilder, node, getName(node), access);
+    final ReadWriteInstruction readWriteInstruction;
+    if (PyAugAssignmentStatementNavigator.getStatementByTarget(node) != null) {
+      readWriteInstruction = ReadWriteInstruction.readWrite(myBuilder, node, getName(node), augAssignmentTypeCallback(node));
+    }
+    else {
+      readWriteInstruction = ReadWriteInstruction.newInstruction(myBuilder, node, getName(node), ReadWriteInstruction.ACCESS.READ);
+    }
     myBuilder.addNodeAndCheckPending(readWriteInstruction);
   }
 
@@ -346,15 +438,15 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     for (PyCaseClause clause : matchStatement.getCaseClauses()) {
       myBuilder.prevInstruction = nextClause;
       nextClause = addTransparentInstruction();
-      
+
       myPatternBindingNames.clear();
-      
+
       PyPattern pattern = clause.getPattern();
       if (pattern != null) {
         pattern.accept(this);
         addTypeAssertionNodes(clause, true, myPatternBindingNames);
       }
-      
+
       PyExpression guard = clause.getGuardCondition();
       if (guard != null) {
         TransparentInstruction trueNode = addTransparentInstruction();
@@ -364,7 +456,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       }
 
       if (unreachable) {
-        addAssertTypeNever();
+        myBuilder.addNode(new PyUnreachableInstruction(myBuilder, false));
       }
       if (pattern != null && pattern.isIrrefutable() && (guard == null || PyEvaluator.evaluateAsBooleanNoResolve(guard, false))) {
         unreachable = true;
@@ -483,7 +575,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
     myBuilder.startNode(node);
 
     List<Instruction> exitInstructions = new ArrayList<>();
-    boolean unreachable = false;
+    @Nullable PyExpression alwaysTrueCondition = null;
     for (PyIfPart ifPart : StreamEx.of(node.getIfPart()).append(node.getElifParts())) {
       TransparentInstruction thenNode = addTransparentInstruction();
       TransparentInstruction elseNode = addTransparentInstruction();
@@ -493,34 +585,82 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       }
       myBuilder.prevInstruction = thenNode;
 
-      Boolean conditionResult = PyEvaluator.evaluateAsBooleanNoResolve(condition);
-      if (unreachable || Boolean.FALSE.equals(conditionResult)) {
-        // Condition is always False, or some previous condition is always True.
-        addAssertTypeNever();
+      Boolean conditionResult = PyEvaluator.evaluateAsBooleanNoResolve(condition, myLanguageLevel);
+      boolean unreachable = alwaysTrueCondition != null || Boolean.FALSE.equals(conditionResult);
+      if (unreachable) {
+        boolean isUnreachableForTypeChecking;
+        if (alwaysTrueCondition != null) {
+          isUnreachableForTypeChecking = isTypeCheckingCondition(alwaysTrueCondition);
+        }
+        else {
+          isUnreachableForTypeChecking = isTypeCheckingCondition(condition);
+        }
+        myBuilder.addNode(new PyUnreachableInstruction(myBuilder, isUnreachableForTypeChecking));
       }
       if (Boolean.TRUE.equals(conditionResult)) {
-        unreachable = true;
+        alwaysTrueCondition = condition;
       }
       visitPyStatementPart(ifPart);
 
-      exitInstructions.add(myBuilder.prevInstruction);
+      if (!unreachable) {
+        exitInstructions.add(myBuilder.prevInstruction);
+      }
       myBuilder.prevInstruction = elseNode;
     }
 
     final PyElsePart elsePart = node.getElsePart();
     if (elsePart != null) {
-      if (unreachable) {
-        addAssertTypeNever();
+      if (alwaysTrueCondition != null) {
+        myBuilder.addNode(new PyUnreachableInstruction(myBuilder, isTypeCheckingCondition(alwaysTrueCondition)));
       }
       visitPyStatementPart(elsePart);
     }
 
-    exitInstructions.add(myBuilder.prevInstruction);
+    if (alwaysTrueCondition == null) {
+      exitInstructions.add(myBuilder.prevInstruction);
+    }
     myBuilder.prevInstruction = addTransparentInstruction(node);
 
     for (Instruction exitInstruction : Lists.reverse(exitInstructions)) {
       myBuilder.addEdge(exitInstruction, myBuilder.prevInstruction);
     }
+  }
+
+  private static boolean isTypeCheckingCondition(@Nullable PyExpression expression) {
+    return isTypeCheckingCheck(expression) || isVersionCheck(expression);
+  }
+
+  private static boolean isTypeCheckingCheck(@Nullable PyExpression expression) {
+    expression = PyPsiUtils.flattenParens(expression);
+    if (expression instanceof PyPrefixExpression prefixExpression && prefixExpression.getOperator() == PyTokenTypes.NOT_KEYWORD) {
+      return isTypeCheckingCondition(prefixExpression.getOperand());
+    }
+    return PyEvaluator.isTypeCheckingExpression(expression);
+  }
+
+  private static boolean isVersionCheck(@Nullable PyExpression expression) {
+    expression = PyPsiUtils.flattenParens(expression);
+    if (expression instanceof PyPrefixExpression prefixExpression && prefixExpression.getOperator() == PyTokenTypes.NOT_KEYWORD) {
+      return isVersionCheck(prefixExpression.getOperand());
+    }
+    if (expression instanceof PyBinaryExpression binaryExpression) {
+      PyElementType op = binaryExpression.getOperator();
+      if (PyTokenTypes.AND_KEYWORD.equals(op) || PyTokenTypes.OR_KEYWORD.equals(op)) {
+        return isVersionCheck(binaryExpression.getLeftExpression()) &&
+               isVersionCheck(binaryExpression.getRightExpression());
+      }
+      if (PyTokenTypes.RELATIONAL_OPERATIONS.contains(op)) {
+        if (PyEvaluator.isSysVersionInfoExpression(binaryExpression.getLeftExpression()) &&
+            PyPsiUtils.flattenParens(binaryExpression.getRightExpression()) instanceof PyTupleExpression) {
+          return true;
+        }
+        if (PyPsiUtils.flattenParens(binaryExpression.getLeftExpression()) instanceof PyTupleExpression &&
+            PyEvaluator.isSysVersionInfoExpression(binaryExpression.getRightExpression())) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   @Override
@@ -650,7 +790,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
       elsePart.accept(this);
       myBuilder.addPendingEdge(node, myBuilder.prevInstruction);
     }
-    
+
 
     myBuilder.flowAbrupted();
     collectInternalPendingEdges(node);
@@ -958,7 +1098,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
         myBuilder.addEdge(myBuilder.prevInstruction, i);
       }
     }
-    
+
     collectInternalPendingEdges(node);
   }
 
@@ -1119,6 +1259,14 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
              || element instanceof PyStatementList);
   }
 
+  private static @NotNull InstructionTypeCallback augAssignmentTypeCallback(@NotNull PyReferenceExpression target) {
+    final PyAugAssignmentStatement statement = PsiTreeUtil.getParentOfType(target, PyAugAssignmentStatement.class);
+    return context -> {
+      PyType assignmentType = statement != null ? context.getType(statement) : null;
+      return Ref.create(!PyTypeUtilKt.isUnknown(assignmentType) ? assignmentType : context.getType(target));
+    };
+  }
+
   private void addTypeAssertionNodes(@NotNull PyElement condition, boolean positive) {
     addTypeAssertionNodes(condition, positive, null);
   }
@@ -1147,7 +1295,7 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
   private TransparentInstruction addTransparentInstruction() {
     return addTransparentInstruction(null);
   }
-  
+
   private TransparentInstruction addTransparentInstruction(@Nullable PsiElement element) {
     TransparentInstructionImpl instruction = new TransparentInstructionImpl(myBuilder, element, "");
     myBuilder.instructions.add(instruction);
@@ -1155,18 +1303,11 @@ public class PyControlFlowBuilder extends PyRecursiveElementVisitor {
   }
 
   /**
-   * Can be used to mark a branch as unreachable.
-   */
-  private void addAssertTypeNever() {
-    myBuilder.addNode(ReadWriteInstruction.assertType(myBuilder, null, null, context -> Ref.create(PyNeverType.NEVER)));
-  }
-
-  /**
-   * Can be used to collect all pending edges  
+   * Can be used to collect all pending edges
    * that we used to build CFG for `node`,
    * but are not relevant to other elements.
    * Is almost equivalent to this:
-   * 
+   *
    * <pre>{@code
    * visitPy...(node);
    * myBuilder.startNode(node.nextSibling); // collectInternalPendingEdges does this, without needing nextSibling

@@ -2,7 +2,6 @@
 package org.jetbrains.kotlin.testGenerator.model
 
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
-import org.jetbrains.kotlin.idea.artifacts.TestKotlinArtifacts
 import org.jetbrains.kotlin.idea.base.test.KotlinRoot
 import org.jetbrains.kotlin.testGenerator.model.GroupCategory.UNCATEGORIZED
 import java.io.File
@@ -24,7 +23,6 @@ interface TGroup {
 
     val suites: List<TSuite>
 
-    val isCompilerTestData: Boolean
 }
 
 interface MutableTGroup : TGroup {
@@ -80,9 +78,6 @@ fun MutableTWorkspace.testGroup(
 
         override val category: GroupCategory
             get() = category
-
-        override val isCompilerTestData: Boolean =
-            testDataPath.startsWith(TestKotlinArtifacts.compilerTestDataDir.toFile().canonicalPath)
 
         override val kotlinRoot: File
             get() = KotlinRoot.DIR

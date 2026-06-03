@@ -19,9 +19,20 @@ import com.intellij.util.ui.StartupUiUtil
 import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.Nls
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Dimension
+import java.awt.Graphics
+import java.awt.Image
+import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.MouseEvent
-import javax.swing.*
+import javax.swing.Action
+import javax.swing.JComponent
+import javax.swing.JPanel
+import javax.swing.JRootPane
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
+import javax.swing.border.Border
 
 /**
  * @author Alexander Lobas
@@ -41,15 +52,14 @@ abstract class LicenseExpirationDialog(project: Project?, private val imagePath:
       Point(location.x + (rootPane.width - window.width) / 2, (location.y + rootPane.height * 0.25).toInt())
     }
 
+    setUndecorated(true)
     init()
 
     val pane = contentPane as JComponent
-    pane.border = null
     pane.isOpaque = true
     pane.background = JBColor.white
     UIUtil.uiChildren(pane).forEach { (it as JComponent).isOpaque = false }
 
-    setUndecorated(true)
     rootPane.windowDecorationStyle = JRootPane.NONE
     rootPane.border = PopupBorder.Factory.create(true, true)
 
@@ -93,6 +103,8 @@ abstract class LicenseExpirationDialog(project: Project?, private val imagePath:
 
     WindowRoundedCornersManager.configure(this)
   }
+
+  override fun createContentPaneBorder(): Border? = JBUI.Borders.empty()
 
   override fun createCenterPanel(): JComponent {
     val panel = JPanel(BorderLayout())

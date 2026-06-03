@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.tooling.core.withLinearClosure
 import org.jetbrains.kotlin.util.capitalizeDecapitalize.decapitalizeAsciiOnly
 import org.junit.runner.Description
 import java.io.File
+import java.nio.file.Path
 import kotlin.io.path.Path
 import kotlin.io.path.exists
 
@@ -30,13 +31,13 @@ import kotlin.io.path.exists
  *   e.g. 'multiplatform' for `$PROJECT/allTests/gradle/multiplatform`
  *
  * - Last part is either test name without 'test' or @TestMetadata on test method
- *   Tip: @TestMetadata on method if you want to have test method name to be different from the folder.
- *   This is most often useful when you want to run several tests against same testdata.
+ *   Tip: @TestMetadata on method if you want to have the test method name to be different from the folder.
+ *   This is most often useful when you want to run several tests against the same testdata.
  *
  * Such an elaborate algorithm is used mostly to comply with DevKit heuristics, which,
  * specifically, enables 'Navigate To Testdata' actions & gutters.
  */
-fun computeTestDataDirectory(testDescription: Description, strict: Boolean = true): File {
+fun computeTestDataDirectoryPath(testDescription: Description, strict: Boolean = true): Path {
     require(testDescription.methodName.startsWith("test")) {
         "Test method names are expected to start with 'test', actual name: ${testDescription.methodName}\n" +
                 "Please add 'test' prefix, as it helps DevKit to work (e.g. provide " +
@@ -77,8 +78,11 @@ fun computeTestDataDirectory(testDescription: Description, strict: Boolean = tru
         )
     }
 
-    return testFolderFullPath.toFile()
+    return testFolderFullPath
 }
+
+fun computeTestDataDirectory(testDescription: Description, strict: Boolean = true): File =
+    computeTestDataDirectoryPath(testDescription,strict).toFile()
 
 private fun getTestDataPathAnnotationValueWithOwner(description: Description): Pair<String, Class<*>> {
     val result = generateSequence(description.testClass) { it.superclass }
@@ -88,12 +92,12 @@ private fun getTestDataPathAnnotationValueWithOwner(description: Description): P
         "@TestDataPath annotation is expected to be present either on the class itself, or one the one of the superclasses"
     }
 
-    require(!result.first.contains("\$CONTENT_ROOT")) {
-        "\$CONTENT_ROOT pattern in @TestDataPath is not supported yet in MPP Test suites\n" +
-                "Please, use \$PROJECT_ROOT instead"
+    require(!result.first.contains($$"$CONTENT_ROOT")) {
+        $$"$CONTENT_ROOT pattern in @TestDataPath is not supported yet in MPP Test suites\n" +
+                $$"Please, use $PROJECT_ROOT instead"
     }
 
-    return result.first.replace("\$PROJECT_ROOT", KotlinRoot.REPO.canonicalPath) to result.second
+    return result.first.replace($$"$PROJECT_ROOT", KotlinRoot.REPO.canonicalPath) to result.second
 }
 
 fun getTestFolderName(description: Description): String =

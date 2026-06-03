@@ -7,7 +7,15 @@ import com.intellij.ide.HelpTooltip
 import com.intellij.ide.actions.ActivateToolWindowAction
 import com.intellij.ide.actions.ToolWindowMoveAction
 import com.intellij.ide.ui.UISettings
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionButtonComponent
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareToggleAction
@@ -19,14 +27,28 @@ import com.intellij.toolWindow.StripeButtonUi
 import com.intellij.toolWindow.ToolWindowEventSource
 import com.intellij.toolWindow.ToolWindowLeftToolbar
 import com.intellij.toolWindow.ToolWindowToolbar
-import com.intellij.ui.*
+import com.intellij.ui.ColorUtil
+import com.intellij.ui.ComponentUtil
+import com.intellij.ui.MouseDragHelper
+import com.intellij.ui.PopupHandler
+import com.intellij.ui.RelativeFont
+import com.intellij.ui.UIBundle
+import com.intellij.ui.icons.HoledIcon
+import com.intellij.ui.icons.IconReplacer
 import com.intellij.ui.icons.loadIconCustomVersionOrScale
 import com.intellij.ui.icons.toStrokeIcon
 import com.intellij.util.concurrency.SynchronizedClearableLazy
 import com.intellij.util.ui.JBInsets
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Dimension
+import java.awt.GradientPaint
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
 import java.util.function.Supplier
@@ -135,10 +157,11 @@ internal class SquareStripeButton(action: SquareAnActionButton, val toolWindow: 
           val texts = getStripeSplitText()
           val button = this@SquareStripeButton
           val insets = button.insets
-          val textOffset = if (UISettings.Companion.getInstance().compactMode) 4 else 6
-          val x = insets.left + JBUI.scale(textOffset)
+          val textPadding = if (UISettings.getInstance().compactMode) 4 else 6
+          val textOffset = JBUI.CurrentTheme.Toolbar.stripeToolbarTextOffset(button.isOnTheLeftStripe())
+          val x = insets.left + JBUI.scale(textPadding + textOffset)
           var y = iconPosition.y + JBUI.scale(3)
-          val totalWidth = button.width - insets.left - insets.right - JBUI.scale(textOffset * 2)
+          val totalWidth = button.width - insets.left - insets.right - JBUI.scale(textPadding * 2)
           val textHeight = fm.height
           var firstX: Int? = null
 
@@ -256,7 +279,7 @@ internal class SquareStripeButton(action: SquareAnActionButton, val toolWindow: 
   override fun updateToolTipText() {
     @Suppress("DialogTitleCapitalization")
     HelpTooltip()
-      .setTitle(toolWindow.stripeTitleProvider)
+      .setPlainTextTitle(toolWindow.stripeTitleProvider)
       .setLocation(getAlignment(toolWindow.anchor, toolWindow.isSplitMode))
       .setShortcut(ActionManager.getInstance().getKeyboardShortcut(ActivateToolWindowAction.Manager.getActionIdForToolWindow(toolWindow.id)))
       .setInitialDelay(0)
@@ -310,7 +333,16 @@ private fun createPresentation(toolWindow: ToolWindowImpl): Presentation {
 
 private fun scaleIcon(icon: ScalableIcon): Icon {
   val iconSize = JBUI.CurrentTheme.Toolbar.stripeToolbarButtonIconSize()
-  return loadIconCustomVersionOrScale(icon = icon, size = iconSize)
+  return if (icon is HoledIcon && icon.icon is ScalableIcon) {
+    icon.replaceBy(object : IconReplacer {
+      override fun replaceIcon(icon: Icon): Icon {
+        return loadIconCustomVersionOrScale(icon = icon as ScalableIcon, size = iconSize)
+      }
+    })
+  }
+  else {
+    loadIconCustomVersionOrScale(icon = icon, size = iconSize)
+  }
 }
 
 private fun createPopupGroup(toolWindow: ToolWindowImpl): DefaultActionGroup {
@@ -325,7 +357,7 @@ private fun createPopupGroup(toolWindow: ToolWindowImpl): DefaultActionGroup {
   return group
 }
 
-private class HideAction(private val toolWindow: ToolWindowImpl)
+internal class HideAction(private val toolWindow: ToolWindowImpl)
   : AnAction(UIBundle.messagePointer("tool.window.new.stripe.hide.action.name")), DumbAware {
   override fun actionPerformed(e: AnActionEvent) {
     toolWindow.toolWindowManager.hideToolWindow(id = toolWindow.id,

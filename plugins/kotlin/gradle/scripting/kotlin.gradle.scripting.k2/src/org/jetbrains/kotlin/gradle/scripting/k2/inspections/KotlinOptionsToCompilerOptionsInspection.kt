@@ -24,7 +24,15 @@ import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.Replacement
 import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.containsNonReplaceableOperation
 import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.getReplacementForOldKotlinOptionIfNeeded
 import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.kotlinVersionIsEqualOrHigher
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtReferenceExpression
+import org.jetbrains.kotlin.psi.KtVisitorVoid
 import org.jetbrains.kotlin.psi.psiUtil.referenceExpression
 
 private val kotlinCompileTasksNames = setOf(
@@ -38,9 +46,7 @@ internal class KotlinOptionsToCompilerOptionsInspection : AbstractKotlinInspecti
     override fun isAvailableForFile(file: PsiFile): Boolean {
         val virtualFile = (file as? KtFile)?.alwaysVirtualFile ?: return false
         if (virtualFile.name == "settings.gradle.kts") return false
-        return virtualFile.name.endsWith(".gradle.kts")
-                && (ApplicationManager.getApplication().isUnitTestMode() // Inspection tests don't treat tested build script files properly, and thus they ignore Kotlin versions used in scripts
-                || kotlinVersionIsEqualOrHigher(major = 2, minor = 0, patch = 0, file))
+        return virtualFile.name.endsWith(".gradle.kts") && kotlinVersionIsEqualOrHigher(major = 2, minor = 0, patch = 0, file)
     }
 
     override fun buildVisitor(
@@ -121,7 +127,7 @@ internal class KotlinOptionsToCompilerOptionsInspection : AbstractKotlinInspecti
     }
 }
 
-private class ReplaceKotlinOptionsWithCompilerOptionsFix() : KotlinModCommandQuickFix<KtExpression>() {
+private class ReplaceKotlinOptionsWithCompilerOptionsFix : KotlinModCommandQuickFix<KtExpression>() {
     override fun getFamilyName(): @IntentionFamilyName String = KotlinBundle.message("replace.kotlin.options.with.compiler.options")
 
     override fun applyFix(

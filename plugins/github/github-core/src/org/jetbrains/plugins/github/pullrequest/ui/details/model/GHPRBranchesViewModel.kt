@@ -1,24 +1,37 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.github.pullrequest.ui.details.model
 
-import com.intellij.collaboration.async.*
+import com.intellij.collaboration.async.childScope
+import com.intellij.collaboration.async.launchNow
+import com.intellij.collaboration.async.mapState
+import com.intellij.collaboration.async.modelFlow
+import com.intellij.collaboration.async.withInitial
 import com.intellij.collaboration.ui.codereview.details.model.CodeReviewBranches
 import com.intellij.collaboration.ui.codereview.details.model.CodeReviewBranchesViewModel
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import git4idea.GitStandardRemoteBranch
+import git4idea.remote.GitRemoteUrlCoordinates
+import git4idea.remote.hosting.GitHostingUrlUtil.getUriFromRemoteUrl
 import git4idea.remote.hosting.GitRemoteBranchesUtil
 import git4idea.remote.hosting.HostedGitRepositoryRemote
 import git4idea.remote.hosting.changesSignalFlow
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.plugins.github.api.GithubServerPath
 import org.jetbrains.plugins.github.api.data.GHRepository
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequest
 import org.jetbrains.plugins.github.pullrequest.GHPRStatisticsCollector
 import org.jetbrains.plugins.github.util.GHGitRepositoryMapping
+import java.net.URI
+
+private val LOG = logger<GHPRBranchesViewModel>()
 
 @ApiStatus.Experimental
 class GHPRBranchesViewModel internal constructor(
@@ -47,7 +60,7 @@ class GHPRBranchesViewModel internal constructor(
 
   override val isCheckedOut: SharedFlow<Boolean> = gitRepository.changesSignalFlow().withInitial(Unit)
     .combine(detailsState) { _, details ->
-      val remote = details.getHeadRemoteDescriptor(mapping.repository.serverPath) ?: return@combine false
+      val remote = details.getHeadRemoteDescriptor(mapping.remote) ?: return@combine false
       GitRemoteBranchesUtil.isRemoteBranchCheckedOut(gitRepository, remote, details.headRefName)
     }.modelFlow(cs, thisLogger())
 
@@ -55,11 +68,10 @@ class GHPRBranchesViewModel internal constructor(
   override val showBranchesRequests: SharedFlow<CodeReviewBranches> = _showBranchesRequests
 
   override fun fetchAndCheckoutRemoteBranch() {
+    val details = detailsState.value
     cs.launch {
-      val details = detailsState.first()
-      val remoteDescriptor = details.getHeadRemoteDescriptor(mapping.repository.serverPath) ?: return@launch
-      val localPrefix = if (details.headRepository?.isFork == true) "fork/${details.headRepository.owner.login}" else null
-      GitRemoteBranchesUtil.fetchAndCheckoutRemoteBranch(gitRepository, remoteDescriptor, details.headRefName, localPrefix)
+      fetchAndCheckoutBranch(mapping.remote, details)
+      GHPRStatisticsCollector.logDetailsBranchCheckedOut(project)
     }
   }
 
@@ -68,9 +80,9 @@ class GHPRBranchesViewModel internal constructor(
     cs.launch {
       val details = detailsState.first()
 
-      val headRemote = details.getHeadRemoteDescriptor(mapping.repository.serverPath)
+      val headRemote = details.getHeadRemoteDescriptor(mapping.remote)
                          ?.let { GitRemoteBranchesUtil.findRemote(gitRepository, it) } ?: return@launch
-      val baseRemote = details.getBaseRemoteDescriptor(mapping.repository.serverPath)
+      val baseRemote = details.getBaseRemoteDescriptor(mapping.remote)
                          ?.let { GitRemoteBranchesUtil.findRemote(gitRepository, it) } ?: return@launch
 
       val headBranch = GitStandardRemoteBranch(headRemote, details.headRefName)
@@ -90,13 +102,42 @@ class GHPRBranchesViewModel internal constructor(
   }
 
   companion object {
-    fun GHRepository.getRemoteDescriptor(server: GithubServerPath): HostedGitRepositoryRemote =
-      HostedGitRepositoryRemote(owner.login, server.toURI(), nameWithOwner, url, sshUrl)
 
-    fun GHPullRequest.getHeadRemoteDescriptor(server: GithubServerPath): HostedGitRepositoryRemote? =
-      headRepository?.getRemoteDescriptor(server)
+    // Used as a default value for HostedGitRepositoryRemote serverUri when it's not possible to find an existing remote.
+    // Path is removed, to match to every URL with the same host.
+    private fun GitRemoteUrlCoordinates.toServerUri(): URI = getUriFromRemoteUrl(url)?.resolve("/")
+                                                             ?: throw IllegalArgumentException("Invalid remote URL: $url")
 
-    fun GHPullRequest.getBaseRemoteDescriptor(server: GithubServerPath): HostedGitRepositoryRemote? =
-      baseRepository?.getRemoteDescriptor(server)
+    /**
+     * Server URI should correspond to the existing remote, otherwise use the default server URI without a path.
+     */
+    private fun GHRepository.getRemoteDescriptor(defaultCoordinates: GitRemoteUrlCoordinates): HostedGitRepositoryRemote {
+      val serverUri = defaultCoordinates.toServerUri()
+      return HostedGitRepositoryRemote(owner.login, serverUri, nameWithOwner, url, sshUrl)
+    }
+
+    fun GHPullRequest.getHeadRemoteDescriptor(remoteUrlCoordinates: GitRemoteUrlCoordinates): HostedGitRepositoryRemote? =
+      headRepository?.getRemoteDescriptor(remoteUrlCoordinates)
+
+    fun GHPullRequest.getBaseRemoteDescriptor(remoteUrlCoordinates: GitRemoteUrlCoordinates): HostedGitRepositoryRemote? =
+      baseRepository?.getRemoteDescriptor(remoteUrlCoordinates)
+
+    internal suspend fun fetchAndCheckoutBranch(remoteUrlCoordinates: GitRemoteUrlCoordinates, details: GHPullRequest) {
+      val baseRepository = details.baseRepository ?: run {
+        LOG.warn("Can't checkout remote branch for PR ${details.number} because base repository is missing")
+        return
+      }
+      val headRepository = details.headRepository ?: run {
+        LOG.warn("Can't checkout remote branch for PR ${details.number} because head repository is missing")
+        return
+      }
+      val isFork = headRepository != baseRepository && details.headRepository.isFork
+      val localPrefix = if (isFork) "fork/${details.headRepository.owner.login}" else null
+      val remoteDescriptor = headRepository.getRemoteDescriptor(remoteUrlCoordinates)
+      GitRemoteBranchesUtil.fetchAndCheckoutRemoteBranch(remoteUrlCoordinates.repository,
+                                                         remoteDescriptor,
+                                                         details.headRefName,
+                                                         localPrefix)
+    }
   }
 }

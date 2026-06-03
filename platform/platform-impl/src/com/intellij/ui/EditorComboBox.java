@@ -15,6 +15,7 @@ import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.TextComponentAccessor;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBInsets;
@@ -22,9 +23,18 @@ import com.intellij.util.ui.StartupUiUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.ComboBoxEditor;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.KeyStroke;
+import java.awt.AWTEvent;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -264,7 +274,7 @@ public class EditorComboBox extends ComboBox implements DocumentListener {
     myEditorField = createEditorTextField(myDocument, myProject, myFileType, myIsViewer);
     final ComboBoxEditor editor = new MyEditor();
     setEditor(editor);
-    setRenderer(new EditorComboBoxRenderer(editor));
+    setRenderer(BuilderKt.comboBoxEditorRenderer(editor));
   }
 
   protected ComboboxEditorTextField createEditorTextField(Document document, Project project, FileType fileType, boolean isViewer) {

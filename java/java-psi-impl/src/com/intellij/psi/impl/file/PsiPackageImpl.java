@@ -1,7 +1,8 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.file;
 
 import com.intellij.codeInsight.completion.scope.JavaCompletionHints;
+import com.intellij.codeInsight.multiverse.CodeInsightContext;
 import com.intellij.codeInsight.multiverse.CodeInsightContexts;
 import com.intellij.core.CoreJavaDirectoryService;
 import com.intellij.lang.Language;
@@ -13,17 +14,46 @@ import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.ui.Queryable;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.RecursionGuard;
+import com.intellij.openapi.util.RecursionManager;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaElementVisitor;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PackageDirectoryProvider;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassOwner;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiImplicitClass;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiNameHelper;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiPackageStatement;
+import com.intellij.psi.ResolveState;
 import com.intellij.psi.impl.JavaPsiFacadeImpl;
 import com.intellij.psi.impl.source.tree.java.PsiCompositeModifierList;
 import com.intellij.psi.scope.ElementClassHint;
 import com.intellij.psi.scope.NameHint;
 import com.intellij.psi.scope.PsiScopeProcessor;
+import com.intellij.psi.search.CodeInsightContextAwareSearchScopes;
+import com.intellij.psi.search.CodeInsightContextByScope;
+import com.intellij.psi.search.CodeInsightContextFileInfo;
+import com.intellij.psi.search.DoesNotContainFileInfo;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiSearchScopeUtil;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.CachedValue;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.PsiClassUtil;
+import com.intellij.psi.util.PsiModificationTracker;
+import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.Processors;
@@ -35,8 +65,15 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.lang.ref.SoftReference;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 import static com.intellij.reference.SoftReference.dereference;
 
@@ -47,7 +84,7 @@ public class PsiPackageImpl extends PsiPackageBase implements PsiPackage, Querya
   private volatile SoftReference<Map<GlobalSearchScope, Map<String, PsiClass[]>>> myClassCache;
   private volatile CachedValue<Collection<PsiDirectory>> myDirectories;
   private volatile CachedValue<Collection<PsiDirectory>> myDirectoriesWithLibSources;
-  private volatile CachedValue<Collection<PsiFile>> myFiles;
+  private volatile CachedValue<Collection<VirtualFile>> myFiles;
   private volatile SoftReference<Map<GlobalSearchScope, Map<String, PsiClass[]>>> myDumbModeFullCache;
   private volatile SoftReference<Map<Pair<GlobalSearchScope, String>, PsiClass[]>> myDumbModePartialCache;
 
@@ -76,22 +113,40 @@ public class PsiPackageImpl extends PsiPackageBase implements PsiPackage, Querya
     if (myFiles == null) {
       myFiles = createCachedFiles();
     }
-    return ContainerUtil.filter(myFiles.getValue(), d -> scope.contains(d.getVirtualFile()));
+
+    Collection<VirtualFile> value = myFiles.getValue();
+    if (value.isEmpty()) {
+      return Collections.emptyList();
+    }
+
+    PsiManager psiManager = PsiManager.getInstance(getProject());
+    return ContainerUtil.mapNotNull(value, file -> {
+      CodeInsightContextFileInfo info = CodeInsightContextAwareSearchScopes.getFileContextInfo(scope, file);
+      if (info instanceof DoesNotContainFileInfo) {
+        return null;
+      }
+      CodeInsightContext context = CodeInsightContextByScope.getCodeInsightContextScopeFile(file, getProject(), scope);
+      return psiManager.findFile(file, context);
+    });
   }
 
   private @NotNull CachedValue<Collection<PsiDirectory>> createCachedDirectories(final boolean includeLibrarySources) {
     return CachedValuesManager.getManager(getProject()).createCachedValue(() -> {
       Collection<PsiDirectory> result = new ArrayList<>();
       Processor<PsiDirectory> processor = Processors.cancelableCollectProcessor(result);
-      getFacade().processPackageDirectories(this, allScope(), processor, includeLibrarySources);
+      for (PackageDirectoryProvider provider : PackageDirectoryProvider.EP_NAME.getExtensions(getProject())) {
+        if (!provider.processPackageDirectories(this, allScope(), processor, includeLibrarySources)) {
+          break;
+        }
+      }
       return CachedValueProvider.Result.create(result, PsiPackageImplementationHelper.getInstance().getDirectoryCachedValueDependencies(this));
     }, false);
   }
 
-  private @NotNull CachedValue<Collection<PsiFile>> createCachedFiles() {
+  private @NotNull CachedValue<Collection<VirtualFile>> createCachedFiles() {
     return CachedValuesManager.getManager(getProject()).createCachedValue(() -> {
-      Collection<PsiFile> result = new ArrayList<>();
-      Processor<PsiFile> processor = Processors.cancelableCollectProcessor(result);
+      Collection<VirtualFile> result = new ArrayList<>();
+      Processor<VirtualFile> processor = Processors.cancelableCollectProcessor(result);
       getFacade().processPackageFiles(this, allScope(), processor);
       return CachedValueProvider.Result.create(result, PsiPackageImplementationHelper.getInstance().getDirectoryCachedValueDependencies(this));
     }, false);
@@ -430,18 +485,20 @@ public class PsiPackageImpl extends PsiPackageBase implements PsiPackage, Querya
     @Override
     public Result<PsiModifierList> compute() {
       List<PsiModifierList> modifiers = new ArrayList<>();
-      for(PsiDirectory directory: getDirectories()) {
-        PsiFile file = directory.findFile(PACKAGE_INFO_FILE);
+      Consumer<PsiFile> processFile = file -> {
         if (file instanceof PsiJavaFile) {
-          PsiPackageStatement stmt = ((PsiJavaFile)file).getPackageStatement();
-          if (stmt != null) {
-            ContainerUtil.addIfNotNull(modifiers, stmt.getAnnotationList());
+          PsiPackageStatement statement = ((PsiJavaFile)file).getPackageStatement();
+          if (statement != null) {
+            ContainerUtil.addIfNotNull(modifiers, statement.getAnnotationList());
           }
         }
+      };
+      for(PsiDirectory directory: getDirectories()) {
+        processFile.accept(directory.findFile(PACKAGE_INFO_FILE));
       }
 
       for (PsiClass aClass : getFacade().findClasses(getQualifiedName() + ".package-info", allScope())) {
-        ContainerUtil.addIfNotNull(modifiers, aClass.getModifierList());
+        processFile.accept(aClass.getContainingFile());
       }
 
       PsiCompositeModifierList result = modifiers.isEmpty() ? null : new PsiCompositeModifierList(getManager(), modifiers);

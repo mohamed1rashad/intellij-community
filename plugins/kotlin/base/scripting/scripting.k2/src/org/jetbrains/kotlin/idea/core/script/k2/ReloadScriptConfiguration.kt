@@ -1,9 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.core.script.k2
 
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
@@ -29,15 +35,15 @@ import kotlinx.coroutines.withContext
 import org.intellij.lang.annotations.Language
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.idea.core.script.k2.ReloadScriptConfigurationService.Companion.TOPIC
-import org.jetbrains.kotlin.idea.core.script.k2.configurations.getConfigurationResolver
-import org.jetbrains.kotlin.idea.core.script.k2.definitions.ScriptDefinitionsModificationTracker
-import org.jetbrains.kotlin.idea.core.script.k2.highlighting.DefaultScriptResolutionStrategy
-import org.jetbrains.kotlin.idea.core.script.k2.modules.KotlinScriptModuleManager.Companion.removeScriptModules
+import org.jetbrains.kotlin.idea.core.script.k2.configurations.KotlinScriptService
 import org.jetbrains.kotlin.idea.core.script.shared.KotlinBaseScriptingBundle
 import org.jetbrains.kotlin.idea.core.script.shared.scriptDiagnostics
 import org.jetbrains.kotlin.idea.core.script.v1.alwaysVirtualFile
+import org.jetbrains.kotlin.idea.core.script.v1.scriptingDebugLog
+import org.jetbrains.kotlin.idea.core.script.v1.scriptingInfoLog
+import org.jetbrains.kotlin.idea.core.script.v1.scriptingWarnLog
 import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.scripting.definitions.findScriptDefinition
+import org.jetbrains.kotlin.scripting.definitions.ScriptConfigurationsProvider
 import org.jetbrains.kotlin.scripting.definitions.isNonScript
 
 @Language("devkit-action-id")
@@ -108,14 +114,31 @@ class ReloadScriptConfigurationService(private val project: Project, private val
     }
 
     fun reloadScriptData(ktFile: KtFile) {
-        val definition = ktFile.findScriptDefinition() ?: return
         val virtualFile = ktFile.alwaysVirtualFile
 
         scope.launch {
-            definition.getConfigurationResolver(project).remove(virtualFile)
-            project.removeScriptModules(listOf(virtualFile))
-            ScriptDefinitionsModificationTracker.getInstance(project).incModificationCount()
-            DefaultScriptResolutionStrategy.getInstance(project).execute(ktFile).join()
+            scriptingDebugLog(virtualFile) { "reloadScriptData started" }
+            KotlinScriptService.getInstance(project).reload(virtualFile)
+            val configurationResult = project.service<ScriptConfigurationsProvider>().getScriptConfigurationResult(ktFile)
+
+            val notificationManager = NotificationGroupManager.getInstance()
+            if (configurationResult != null) {
+                scriptingInfoLog("reloadScriptData succeeded: ${virtualFile.path}")
+                notificationManager.getNotificationGroup("KotlinScriptNotificationGroup")
+                    .createNotification(
+                        KotlinBaseScriptingBundle.message("script.configuration.loading.title"),
+                        KotlinBaseScriptingBundle.message("script.configuration.loading.success", virtualFile.name),
+                        NotificationType.INFORMATION
+                    ).notify(project)
+            } else {
+                scriptingWarnLog("reloadScriptData failed: ${virtualFile.path}")
+                notificationManager.getNotificationGroup("KotlinScriptNotificationGroup")
+                    .createNotification(
+                        KotlinBaseScriptingBundle.message("script.configuration.loading.title"),
+                        KotlinBaseScriptingBundle.message("script.configuration.loading.failed", virtualFile.name),
+                        NotificationType.ERROR
+                    ).notify(project)
+            }
 
             ktFile.putUserData(SHOW_NOTIFICATION, false)
             ApplicationManager.getApplication().messageBus.syncPublisher(TOPIC).onNotificationChanged(virtualFile)

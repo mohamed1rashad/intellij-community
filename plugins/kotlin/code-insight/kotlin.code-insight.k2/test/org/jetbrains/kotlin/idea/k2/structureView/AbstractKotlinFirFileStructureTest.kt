@@ -2,16 +2,16 @@
 package org.jetbrains.kotlin.idea.k2.structureView
 
 import com.intellij.ide.util.InheritedMembersNodeProvider
-import org.jetbrains.kotlin.idea.fir.invalidateCaches
 import org.jetbrains.kotlin.idea.k2.codeinsight.structureView.KotlinFirInheritedMembersNodeProvider
 import org.jetbrains.kotlin.idea.structureView.AbstractKotlinFileStructureTest
 import org.jetbrains.kotlin.idea.test.runAll
+import org.jetbrains.kotlin.test.util.invalidateCaches
 import java.io.File
 
 abstract class AbstractKotlinFirFileStructureTest : AbstractKotlinFileStructureTest() {
 
-    override fun nodeProviderClass(): Class<out InheritedMembersNodeProvider<*>> {
-        return KotlinFirInheritedMembersNodeProvider::class.java
+    override fun nodeProvider(): InheritedMembersNodeProvider<*> {
+        return KotlinFirInheritedMembersNodeProvider()
     }
 
     override fun tearDown() {

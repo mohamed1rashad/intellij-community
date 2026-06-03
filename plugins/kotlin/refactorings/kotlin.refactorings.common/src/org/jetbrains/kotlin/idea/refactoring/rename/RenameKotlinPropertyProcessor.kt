@@ -7,7 +7,11 @@ import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.Pass
-import com.intellij.psi.*
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiReference
+import com.intellij.psi.SyntheticElement
 import com.intellij.psi.search.SearchScope
 import com.intellij.psi.search.searches.OverridingMethodsSearch
 import com.intellij.refactoring.RefactoringBundle
@@ -18,10 +22,16 @@ import com.intellij.refactoring.util.RefactoringUtil
 import com.intellij.usageView.UsageInfo
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisFromWriteAction
-import org.jetbrains.kotlin.asJava.*
+import org.jetbrains.kotlin.asJava.LightClassUtil
 import org.jetbrains.kotlin.asJava.elements.KtLightDeclaration
 import org.jetbrains.kotlin.asJava.elements.KtLightMethod
+import org.jetbrains.kotlin.asJava.getRepresentativeLightMethod
+import org.jetbrains.kotlin.asJava.namedUnwrappedElement
+import org.jetbrains.kotlin.asJava.propertyNameByAccessor
+import org.jetbrains.kotlin.asJava.toLightMethods
+import org.jetbrains.kotlin.asJava.unwrapped
 import org.jetbrains.kotlin.idea.base.psi.KotlinPsiHeuristics
+import org.jetbrains.kotlin.idea.base.psi.isNameBased
 import org.jetbrains.kotlin.idea.base.psi.unquoteKotlinIdentifier
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.base.util.codeUsageScope
@@ -36,7 +46,17 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.name.JvmStandardClassIds
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDestructuringDeclaration
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtPrimaryConstructor
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
 import org.jetbrains.kotlin.psi.psiUtil.isPrivate
 import org.jetbrains.kotlin.psi.psiUtil.quoteIfNeeded
 import org.jetbrains.kotlin.resolve.DataClassResolver
@@ -71,7 +91,10 @@ class RenameKotlinPropertyProcessor : RenameKotlinPsiProcessor() {
     element: PsiElement,
     allReferences: Collection<PsiReference>
   ): Collection<PsiReference> {
-    val references = allReferences.filterNot { it is KtDestructuringDeclarationReference }
+    val references = allReferences.filterNot {  ref ->
+        val entry = (ref as? KtDestructuringDeclarationReference)?.element
+        entry != null && !entry.isNameBased()
+    }
     val (getterJvmName, setterJvmName) = getJvmNames(element)
     return when {
       getterJvmName == null && setterJvmName == null -> references
@@ -201,7 +224,7 @@ class RenameKotlinPropertyProcessor : RenameKotlinPsiProcessor() {
 
         val newPropertyName = if (element is KtLightMethod) propertyNameByAccessor(newName, element) else newName
 
-        val (getterJvmName, setterJvmName) = getJvmNames(namedUnwrappedElement)
+        val (getterJvmName, setterJvmName) = runReadAction { getJvmNames(namedUnwrappedElement) }
 
         val getter = propertyMethods.getter as? KtLightMethod
         val setter = propertyMethods.setter as? KtLightMethod

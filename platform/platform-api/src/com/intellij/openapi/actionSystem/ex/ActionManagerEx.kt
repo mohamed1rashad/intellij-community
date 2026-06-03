@@ -2,7 +2,15 @@
 package com.intellij.openapi.actionSystem.ex
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.AnActionResult
+import com.intellij.openapi.actionSystem.Constraints
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.OverridingAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
@@ -11,7 +19,6 @@ import com.intellij.openapi.components.ComponentManagerEx
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.extensions.PluginId
-import com.intellij.openapi.keymap.KeymapUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -21,20 +28,11 @@ import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.awt.Component
 import java.util.function.Function
-import javax.swing.KeyStroke
 
 abstract class ActionManagerEx : ActionManager() {
   companion object {
     @JvmStatic
     fun getInstanceEx(): ActionManagerEx = getInstance() as ActionManagerEx
-
-    @Internal
-    @ApiStatus.ScheduledForRemoval
-    @Deprecated("Use [KeymapUtil.getKeyStroke(s)]",
-                ReplaceWith("KeymapUtil.getKeyStroke(s)"),
-                DeprecationLevel.ERROR)
-    @JvmStatic
-    fun getKeyStroke(s: String): KeyStroke? = KeymapUtil.getKeyStroke(s)
 
     @Internal
     @JvmStatic

@@ -1,15 +1,9 @@
-- name: lib/modules/intellij.platform.ide.nonModalWelcomeScreen.backend.jar
-  contentModules:
-  - name: intellij.platform.ide.nonModalWelcomeScreen.backend
-- name: lib/modules/intellij.platform.ide.nonModalWelcomeScreen.frontend.jar
-  contentModules:
-  - name: intellij.platform.ide.nonModalWelcomeScreen.frontend
-- name: lib/modules/intellij.platform.ide.nonModalWelcomeScreen.jar
-  contentModules:
-  - name: intellij.platform.ide.nonModalWelcomeScreen
 - name: lib/modules/intellij.python.ast.jar
   contentModules:
   - name: intellij.python.ast
+- name: lib/modules/intellij.python.black.jar
+  contentModules:
+  - name: intellij.python.black
 - name: lib/modules/intellij.python.common.jar
   contentModules:
   - name: intellij.python.common
@@ -31,6 +25,9 @@
 - name: lib/modules/intellij.python.community.helpersLocator.jar
   contentModules:
   - name: intellij.python.community.helpersLocator
+- name: lib/modules/intellij.python.community.impl.conda.jar
+  contentModules:
+  - name: intellij.python.community.impl.conda
 - name: lib/modules/intellij.python.community.impl.huggingFace.jar
   contentModules:
   - name: intellij.python.community.impl.huggingFace
@@ -39,15 +36,13 @@
   - name: intellij.python.community.impl.installer
 - name: lib/modules/intellij.python.community.impl.jar
   projectLibraries:
+  - name: com.jetbrains.fus.reporting.ap.validation.all
+    files:
+    - name: $MAVEN_REPOSITORY$/com/jetbrains/fus/reporting/ap-validation-all/1/ap-validation-all-1.jar
+    reason: <- intellij.python.community.impl
   - name: jsr305
     files:
     - name: $MAVEN_REPOSITORY$/com/google/code/findbugs/jsr305/3/jsr305-3.jar
-    reason: <- intellij.python.community.impl
-  - name: kaml
-    files:
-    - name: $MAVEN_REPOSITORY$/com/charleskorn/kaml/kaml-jvm/0/kaml-jvm-0.jar
-    - name: $MAVEN_REPOSITORY$/it/krzeminski/snakeyaml-engine-kmp-jvm/3/snakeyaml-engine-kmp-jvm-3.jar
-    - name: $MAVEN_REPOSITORY$/net/thauvin/erik/urlencoder/urlencoder-lib-jvm/1/urlencoder-lib-jvm-1.jar
     reason: <- intellij.python.community.impl
   - name: libthrift
     files:
@@ -69,15 +64,6 @@
 - name: lib/modules/intellij.python.community.impl.poetry.common.jar
   contentModules:
   - name: intellij.python.community.impl.poetry.common
-- name: lib/modules/intellij.python.community.impl.uv.backend.jar
-  contentModules:
-  - name: intellij.python.community.impl.uv.backend
-- name: lib/modules/intellij.python.community.impl.uv.common.jar
-  contentModules:
-  - name: intellij.python.community.impl.uv.common
-- name: lib/modules/intellij.python.community.impl.venv.jar
-  contentModules:
-  - name: intellij.python.community.impl.venv
 - name: lib/modules/intellij.python.community.interpreters.jar
   contentModules:
   - name: intellij.python.community.interpreters
@@ -108,6 +94,9 @@
 - name: lib/modules/intellij.python.copyright.jar
   contentModules:
   - name: intellij.python.copyright
+- name: lib/modules/intellij.python.externalIndex.jar
+  contentModules:
+  - name: intellij.python.externalIndex
 - name: lib/modules/intellij.python.featuresTrainer.jar
   contentModules:
   - name: intellij.python.featuresTrainer
@@ -138,12 +127,21 @@
     libraries:
       jetbrains.ml.models.python.imports.ranking.model:
       - name: $MAVEN_REPOSITORY$/com/jetbrains/ml/models/python-imports-ranking-model/coral-panda-republished-6/python-imports-ranking-model-coral-panda-republished-6.jar
+- name: lib/modules/intellij.python.packaging.jar
+  contentModules:
+  - name: intellij.python.packaging
 - name: lib/modules/intellij.python.parser.jar
   contentModules:
   - name: intellij.python.parser
-- name: lib/modules/intellij.python.processOutput.jar
+- name: lib/modules/intellij.python.processOutput.backend.jar
   contentModules:
-  - name: intellij.python.processOutput
+  - name: intellij.python.processOutput.backend
+- name: lib/modules/intellij.python.processOutput.common.jar
+  contentModules:
+  - name: intellij.python.processOutput.common
+- name: lib/modules/intellij.python.processOutput.frontend.jar
+  contentModules:
+  - name: intellij.python.processOutput.frontend
 - name: lib/modules/intellij.python.psi.impl.jar
   contentModules:
   - name: intellij.python.psi.impl
@@ -161,6 +159,15 @@
   - name: $MAVEN_REPOSITORY$/io/consensys/tuweni/tuweni-toml/2/tuweni-toml-2.jar
   - name: $MAVEN_REPOSITORY$/org/antlr/antlr4-runtime/4/antlr4-runtime-4.jar
   reason: <- intellij.python.pyproject
+- name: lib/modules/intellij.python.pytools.jar
+  contentModules:
+  - name: intellij.python.pytools
+- name: lib/modules/intellij.python.pytools.ui.jar
+  contentModules:
+  - name: intellij.python.pytools.ui
+- name: lib/modules/intellij.python.requirements.jar
+  contentModules:
+  - name: intellij.python.requirements
 - name: lib/modules/intellij.python.sdk.jar
   contentModules:
   - name: intellij.python.sdk
@@ -189,9 +196,17 @@
 - name: lib/modules/intellij.python.terminal.jar
   contentModules:
   - name: intellij.python.terminal
+- name: lib/modules/intellij.python.uv.backend.jar
+  contentModules:
+  - name: intellij.python.uv.backend
+- name: lib/modules/intellij.python.uv.common.jar
+  contentModules:
+  - name: intellij.python.uv.common
+- name: lib/modules/intellij.python.venv.jar
+  contentModules:
+  - name: intellij.python.venv
 - name: lib/python-ce.jar
   modules:
   - name: intellij.python.community.plugin
   contentModules:
-  - name: intellij.python.processOutput.impl
   - name: intellij.commandInterface

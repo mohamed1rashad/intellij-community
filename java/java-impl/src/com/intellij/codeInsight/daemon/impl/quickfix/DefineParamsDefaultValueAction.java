@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.codeInsight.daemon.QuickFixBundle;
@@ -11,16 +11,50 @@ import com.intellij.icons.AllIcons;
 import com.intellij.java.JavaBundle;
 import com.intellij.java.syntax.parser.JavaKeywords;
 import com.intellij.lang.java.JavaLanguage;
-import com.intellij.lang.jvm.JvmModifier;
-import com.intellij.modcommand.*;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModCommand;
+import com.intellij.modcommand.ModPsiUpdater;
+import com.intellij.modcommand.ModTemplateBuilder;
+import com.intellij.modcommand.Presentation;
+import com.intellij.modcommand.PsiBasedModCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.GenericsUtil;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiImplicitClass;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiRecordComponent;
+import com.intellij.psi.PsiRecordHeader;
+import com.intellij.psi.PsiReturnStatement;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeCastExpression;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.util.*;
+import com.intellij.psi.impl.light.LightRecordCanonicalConstructor;
+import com.intellij.psi.util.JavaElementKind;
+import com.intellij.psi.util.JavaPsiRecordUtil;
+import com.intellij.psi.util.MethodSignatureUtil;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.RedundantCastUtil;
 import com.intellij.refactoring.util.RefactoringUIUtil;
 import com.intellij.ui.NewUiValue;
 import com.intellij.util.ArrayUtil;
@@ -30,8 +64,15 @@ import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
+/**
+ * @see com.intellij.codeInsight.daemon.impl.quickfix.DelegateWithDefaultParamValueTest
+ */
 public final class DefineParamsDefaultValueAction extends PsiBasedModCommandAction<PsiElement> implements DumbAware {
   private static final Logger LOG = Logger.getInstance(DefineParamsDefaultValueAction.class);
 
@@ -50,7 +91,8 @@ public final class DefineParamsDefaultValueAction extends PsiBasedModCommandActi
     final PsiElement parent = PsiTreeUtil.getParentOfType(element, PsiMethod.class, PsiClass.class, PsiCodeBlock.class);
     String message;
     if (parent instanceof PsiMethod method) {
-      if (!method.hasModifier(JvmModifier.ABSTRACT) && method.getBody() == null) return null;
+      if (!method.hasModifierProperty(PsiModifier.ABSTRACT) && method.getBody() == null) return null;
+      if (method.getNameIdentifier() == null) return null;
       final PsiParameterList parameterList = method.getParameterList();
       if (parameterList.isEmpty()) return null;
       final PsiClass containingClass = method.getContainingClass();
@@ -104,14 +146,12 @@ public final class DefineParamsDefaultValueAction extends PsiBasedModCommandActi
     List<ParameterClassMember> members = ContainerUtil.map(parameters, ParameterClassMember::new);
     int idx = getSelectedIndex(element);
     List<ParameterClassMember> defaultSelection = idx >= 0 ? List.of(members.get(idx)) : members;
-    return ModCommand.chooseMultipleMembers(
-      QuickFixBundle.message("choose.default.value.parameters.popup.title"),
-      members, defaultSelection, 
-      sel -> ModCommand.psiUpdate(context, updater -> {
-        invoke(context.project(), updater.getWritable(method), updater,
-               ContainerUtil.map2Array(sel, PsiParameter.EMPTY_ARRAY,
-                                       s -> updater.getWritable(((ParameterClassMember)s).getParameter())));
-      }));
+    String message = QuickFixBundle.message("choose.default.value.parameters.popup.title");
+    return ModCommand.chooseMultipleMembers(message, members, defaultSelection, sel -> ModCommand.psiUpdate(context, updater -> {
+      invoke(context.project(), updater.getWritable(method), updater,
+             ContainerUtil.map2Array(sel, PsiParameter.EMPTY_ARRAY,
+                                     s -> updater.getWritable(((ParameterClassMember)s).getParameter())));
+    }));
   }
 
   private static int getSelectedIndex(@NotNull PsiElement element) {
@@ -129,11 +169,12 @@ public final class DefineParamsDefaultValueAction extends PsiBasedModCommandActi
     }
   }
 
-  private static void invoke(@NotNull Project project, @NotNull PsiMethod method, 
-                             @NotNull ModPsiUpdater updater, @NotNull PsiParameter @NotNull [] parameters) {
-    PsiParameterList parameterList = method.getParameterList();
-    if (parameters.length == 0) return;
-    final PsiMethod methodPrototype = generateMethodPrototype(method, parameters);
+  private static void invoke(@NotNull Project project,
+                             @NotNull PsiMethod method,
+                             @NotNull ModPsiUpdater updater,
+                             @NotNull PsiParameter @NotNull [] defaultValueParameters) {
+    if (defaultValueParameters.length == 0) return;
+    final PsiMethod methodPrototype = generateMethodPrototype(method, defaultValueParameters);
     final PsiClass containingClass = method.getContainingClass();
     if (containingClass == null) return;
     for (PsiMethod existingMethod : containingClass.findMethodsByName(method.getName(), false)) {
@@ -148,44 +189,45 @@ public final class DefineParamsDefaultValueAction extends PsiBasedModCommandActi
     final PsiMethod prototype = (PsiMethod)containingClass.addBefore(methodPrototype, method);
     CommonJavaRefactoringUtil.fixJavadocsForParams(prototype, Set.of(prototype.getParameterList().getParameters()));
 
-    PsiCodeBlock body = prototype.getBody();
+    PsiParameterList parameterList = method.getParameterList();
     final String callArgs =
-      "(" + StringUtil.join(parameterList.getParameters(), psiParameter -> {
-        if (ArrayUtil.find(parameters, psiParameter) > -1) {
-          PsiType type = GenericsUtil.getVariableTypeByExpressionType(psiParameter.getType());
+      "(" + StringUtil.join(parameterList.getParameters(), parameter -> {
+        if (ArrayUtil.find(defaultValueParameters, parameter) > -1) {
+          PsiType type = GenericsUtil.getVariableTypeByExpressionType(parameter.getType());
           String defaultValue = TypeUtils.getDefaultValue(type);
           return defaultValue.equals(JavaKeywords.NULL) ? "(" + type.getCanonicalText() + ")null" : defaultValue;
         }
-        return psiParameter.getName();
+        return parameter.getName();
       }, ",") + ");";
     final String methodCall;
     if (method.getReturnType() == null) {
       methodCall = "this";
     }
-    else if (!PsiTypes.voidType().equals(method.getReturnType())) {
-      methodCall = "return " + method.getName();
-    }
-    else {
+    else if (PsiTypes.voidType().equals(method.getReturnType())) {
       methodCall = method.getName();
     }
+    else {
+      methodCall = "return " + method.getName();
+    }
+    PsiCodeBlock body = prototype.getBody();
     LOG.assertTrue(body != null);
     body.add(JavaPsiFacade.getElementFactory(project).createStatementFromText(methodCall + callArgs, method));
     body = (PsiCodeBlock)CodeStyleManager.getInstance(project).reformat(body);
     final PsiStatement stmt = body.getStatements()[0];
     final PsiExpression expr;
-    if (stmt instanceof PsiReturnStatement returnStatement) {
-      expr = returnStatement.getReturnValue();
+    if (stmt instanceof PsiReturnStatement statement) {
+      expr = statement.getReturnValue();
     }
-    else if (stmt instanceof PsiExpressionStatement exprStatement) {
-      expr = exprStatement.getExpression();
+    else if (stmt instanceof PsiExpressionStatement statement) {
+      expr = statement.getExpression();
     }
     else {
       expr = null;
     }
     if (expr instanceof PsiMethodCallExpression call) {
-      PsiExpression[] args = call.getArgumentList().getExpressions();
+      PsiExpression[] arguments = call.getArgumentList().getExpressions();
       PsiExpression[] toDefaults =
-        ContainerUtil.map2Array(parameters, PsiExpression.class, (parameter -> args[parameterList.getParameterIndex(parameter)]));
+        ContainerUtil.map2Array(defaultValueParameters, PsiExpression.class, (p -> arguments[parameterList.getParameterIndex(p)]));
       ModTemplateBuilder builder = updater.templateBuilder();
       for (PsiExpression exprToBeDefault : toDefaults) {
         if (exprToBeDefault instanceof PsiTypeCastExpression cast && RedundantCastUtil.isCastRedundant(cast)) {
@@ -197,9 +239,9 @@ public final class DefineParamsDefaultValueAction extends PsiBasedModCommandActi
   }
 
   private static PsiMethod generateMethodPrototype(PsiMethod method, PsiParameter... params) {
-    final PsiMethod prototype = JavaPsiRecordUtil.isCompactConstructor(method) ?
-                                new RecordConstructorMember(method.getContainingClass(), false).generateRecordConstructor() :                            
-                                (PsiMethod)method.copy();
+    final PsiMethod prototype = JavaPsiRecordUtil.isCompactConstructor(method) || method instanceof LightRecordCanonicalConstructor
+                                ? new RecordConstructorMember(method.getContainingClass(), false).generateRecordConstructor()
+                                : (PsiMethod)method.copy();
     final PsiCodeBlock body = prototype.getBody();
     final PsiCodeBlock emptyBody = JavaPsiFacade.getElementFactory(method.getProject()).createCodeBlock();
     final PsiModifierList modifierList = prototype.getModifierList();

@@ -10,7 +10,11 @@ import com.intellij.openapi.project.getProjectDataPath
 import com.intellij.openapi.project.projectsDataDir
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.platform.backend.workspace.*
+import com.intellij.platform.backend.workspace.WorkspaceModel
+import com.intellij.platform.backend.workspace.WorkspaceModelCache
+import com.intellij.platform.backend.workspace.WorkspaceModelChangeListener
+import com.intellij.platform.backend.workspace.WorkspaceModelSerializerHook
+import com.intellij.platform.backend.workspace.WorkspaceModelTopics
 import com.intellij.platform.backend.workspace.impl.WorkspaceModelInternal
 import com.intellij.platform.diagnostic.telemetry.helpers.MillisecondsMeasurer
 import com.intellij.platform.workspace.storage.ImmutableEntityStorage
@@ -22,11 +26,14 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
 import io.opentelemetry.api.metrics.Meter
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
-import org.jetbrains.annotations.ApiStatus
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
 import java.nio.file.Files
@@ -38,7 +45,7 @@ import kotlin.time.measureTime
 import kotlin.time.measureTimedValue
 
 @OptIn(FlowPreview::class)
-@ApiStatus.Internal
+@Internal
 class WorkspaceModelCacheImpl(private val project: Project, coroutineScope: CoroutineScope) : WorkspaceModelCache {
   override val enabled: Boolean
     get() = forceEnableCaching || !ApplicationManager.getApplication().isUnitTestMode
@@ -47,8 +54,10 @@ class WorkspaceModelCacheImpl(private val project: Project, coroutineScope: Coro
   private val saveRequests = MutableSharedFlow<Unit>(replay=1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
   private lateinit var virtualFileUrlManager: VirtualFileUrlManager
-  override val cacheFile by lazy { initCacheFile() }
+  override val cacheFile: Path by lazy { initCacheFile() }
   private val unloadedEntitiesCacheFile by lazy { project.getProjectDataPath(DATA_DIR_NAME).resolve("unloaded-entities-cache.data") }
+
+  private val invalidateProjectCacheMarker = AtomicBoolean(false)
   private val invalidateProjectCacheMarkerFile by lazy { project.getProjectDataPath(DATA_DIR_NAME).resolve(".invalidate") }
 
   private val urlRelativizer =
@@ -120,10 +129,10 @@ class WorkspaceModelCacheImpl(private val project: Project, coroutineScope: Coro
     val storage = prepareStorage(workspaceModel)
     val unloadedStorage = prepareUnloadedStorage(workspaceModel)
     if (!storage.isConsistent || !unloadedStorage.isConsistent) {
-      invalidateProjectCache()
+      invalidateCaches()
     }
 
-    if (!cachesInvalidated.get()) {
+    if (!invalidateProjectCacheMarker.get() && !invalidateCachesMarker.get()) {
       LOG.debug("Saving project model cache to $cacheFile")
 
       // Make sure we don't save the cache that is broken
@@ -172,18 +181,18 @@ class WorkspaceModelCacheImpl(private val project: Project, coroutineScope: Coro
     WorkspaceModelFusLogger.logCacheLoading(if (cache != null) time.inWholeMilliseconds else -1)
     return cache
   }
+
   override fun loadUnloadedEntitiesCache(): MutableEntityStorage? {
-    return cacheSerializer.loadCacheFromFile(unloadedEntitiesCacheFile, invalidateCachesMarkerFile,
-                                             invalidateProjectCacheMarkerFile)
+    return cacheSerializer.loadCacheFromFile(unloadedEntitiesCacheFile, invalidateCachesMarkerFile, invalidateProjectCacheMarkerFile)
   }
 
   override fun setVirtualFileUrlManager(vfuManager: VirtualFileUrlManager) {
     virtualFileUrlManager = vfuManager
   }
 
-  private fun invalidateProjectCache() {
+  override fun invalidateCaches() {
     LOG.info("Invalidating project model cache by creating $invalidateProjectCacheMarkerFile")
-    invalidateCaches(cachesInvalidated, invalidateProjectCacheMarkerFile)
+    invalidateCaches(invalidateProjectCacheMarker, invalidateProjectCacheMarkerFile)
   }
 
   companion object {
@@ -196,12 +205,13 @@ class WorkspaceModelCacheImpl(private val project: Project, coroutineScope: Coro
     @TestOnly
     var testCacheFile: Path? = null
 
-    private val cachesInvalidated = AtomicBoolean(false)
+    private val invalidateCachesMarker = AtomicBoolean(false)
     internal val invalidateCachesMarkerFile: Path = projectsDataDir.resolve(".invalidate")
 
-    fun invalidateCaches() {
+    // Requires IDE restart
+    fun invalidateCachesForAllProjects() {
       LOG.info("Invalidating caches by creating $invalidateCachesMarkerFile")
-      invalidateCaches(cachesInvalidated, invalidateCachesMarkerFile)
+      invalidateCaches(invalidateCachesMarker, invalidateCachesMarkerFile)
     }
 
     @JvmStatic

@@ -21,14 +21,126 @@ import com.intellij.openapi.util.text.HtmlChunk.Element;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
+import com.intellij.psi.PsiAnnotationMethod;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiArrayInitializerExpression;
+import com.intellij.psi.PsiArrayInitializerMemberValue;
+import com.intellij.psi.PsiAssertStatement;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiBreakStatement;
+import com.intellij.psi.PsiCall;
+import com.intellij.psi.PsiCallExpression;
+import com.intellij.psi.PsiCaseLabelElement;
+import com.intellij.psi.PsiCaseLabelElementList;
+import com.intellij.psi.PsiCatchSection;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassInitializer;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiConstructorCall;
+import com.intellij.psi.PsiContinueStatement;
+import com.intellij.psi.PsiDeconstructionList;
+import com.intellij.psi.PsiDeconstructionPattern;
+import com.intellij.psi.PsiDefaultCaseLabelElement;
+import com.intellij.psi.PsiDiamondType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiEnumConstant;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFunctionalExpression;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiIfStatement;
+import com.intellij.psi.PsiImplicitClass;
+import com.intellij.psi.PsiImportModuleStatement;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiJavaModule;
+import com.intellij.psi.PsiJavaModuleReferenceElement;
+import com.intellij.psi.PsiJavaToken;
+import com.intellij.psi.PsiKeyword;
+import com.intellij.psi.PsiLabeledStatement;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLiteralExpression;
+import com.intellij.psi.PsiLiteralValue;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiLoopStatement;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiMethodReferenceExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameValuePair;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiPackageAccessibilityStatement;
+import com.intellij.psi.PsiPackageStatement;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiParameterListOwner;
+import com.intellij.psi.PsiPattern;
+import com.intellij.psi.PsiPatternVariable;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiProvidesStatement;
+import com.intellij.psi.PsiReceiverParameter;
+import com.intellij.psi.PsiRecordComponent;
+import com.intellij.psi.PsiRecordHeader;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiReferenceParameterList;
+import com.intellij.psi.PsiRequiresStatement;
+import com.intellij.psi.PsiResourceListElement;
+import com.intellij.psi.PsiReturnStatement;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiSuperExpression;
+import com.intellij.psi.PsiSwitchBlock;
+import com.intellij.psi.PsiSwitchExpression;
+import com.intellij.psi.PsiSwitchLabelStatementBase;
+import com.intellij.psi.PsiSwitchLabeledRuleStatement;
+import com.intellij.psi.PsiSynchronizedStatement;
+import com.intellij.psi.PsiTemplateExpression;
+import com.intellij.psi.PsiThrowStatement;
+import com.intellij.psi.PsiTryStatement;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeCastExpression;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterList;
+import com.intellij.psi.PsiTypeParameterListOwner;
+import com.intellij.psi.PsiTypeTestPattern;
+import com.intellij.psi.PsiUnaryExpression;
+import com.intellij.psi.PsiUsesStatement;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.PsiYieldStatement;
 import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.tree.TokenSet;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.AccessModifier;
+import com.intellij.psi.util.JavaElementKind;
+import com.intellij.psi.util.PsiFormatUtil;
+import com.intellij.psi.util.PsiFormatUtilBase;
+import com.intellij.psi.util.PsiLiteralUtil;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiTypesUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.refactoring.util.RefactoringChangeUtil;
 import com.intellij.util.JavaPsiConstructorUtil;
 import com.intellij.util.VisibilityUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.PropertyKey;
 
 import java.util.Collection;
 import java.util.List;
@@ -36,7 +148,21 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.intellij.java.codeserver.highlighting.JavaCompilationErrorBundle.message;
-import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.*;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.format;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatArgumentTypes;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatClashMethodMessage;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatClass;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatClassOrType;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatMethod;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatResolvedSymbol;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatResolvedSymbolContainer;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatType;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.formatTypes;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.getClassDeclarationTextRange;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.getMemberDeclarationTextRange;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.getMethodDeclarationTextRange;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.getRange;
+import static com.intellij.java.codeserver.highlighting.errors.JavaErrorFormatUtil.getRecordMethodKind;
 import static com.intellij.util.ObjectUtils.tryCast;
 import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
@@ -605,15 +731,15 @@ public final class JavaErrorKinds {
     parameterized(PsiMethodCallExpression.class, IncompatibleIntersectionContext.class, "type.parameter.incompatible.upper.bounds")
       .withRange((call, ctx) -> getRange(call))
       .withDescription((call, ctx) -> message("type.parameter.incompatible.upper.bounds", ctx.parameter().getName(), ctx.message()));
-  public static final Parameterized<PsiMethodCallExpression, TypeParameterBoundMismatchContext>
+  public static final Parameterized<PsiCallExpression, TypeParameterBoundMismatchContext>
     TYPE_PARAMETER_INFERRED_TYPE_NOT_WITHIN_EXTEND_BOUND =
-    parameterized(PsiMethodCallExpression.class, TypeParameterBoundMismatchContext.class,
+    parameterized(PsiCallExpression.class, TypeParameterBoundMismatchContext.class,
                   "type.parameter.inferred.type.not.within.extend.bound")
       .withDescription((call, ctx) -> message("type.parameter.inferred.type.not.within.extend.bound", formatClass(ctx.parameter()),
                                               formatType(ctx.bound()), formatType(ctx.actualType())));
-  public static final Parameterized<PsiMethodCallExpression, TypeParameterBoundMismatchContext>
+  public static final Parameterized<PsiCallExpression, TypeParameterBoundMismatchContext>
     TYPE_PARAMETER_INFERRED_TYPE_NOT_WITHIN_IMPLEMENT_BOUND =
-    parameterized(PsiMethodCallExpression.class, TypeParameterBoundMismatchContext.class,
+    parameterized(PsiCallExpression.class, TypeParameterBoundMismatchContext.class,
                   "type.parameter.inferred.type.not.within.implement.bound")
       .withDescription((call, ctx) -> message("type.parameter.inferred.type.not.within.implement.bound", formatClass(ctx.parameter()),
                                               formatType(ctx.bound()), formatType(ctx.actualType())));
@@ -638,7 +764,6 @@ public final class JavaErrorKinds {
       .withNavigationShift(1)
       .withDescription((list, owner) -> message("type.parameter.count.mismatch", list.getTypeArgumentCount(),
                                                 owner.getTypeParameters().length));
-  public static final Simple<PsiTypeElement> TYPE_PARAMETER_ACTUAL_INFERRED_MISMATCH = error("type.parameter.actual.inferred.mismatch");
 
   public static final Parameterized<PsiMethod, DuplicateMethodsContext> METHOD_DUPLICATE =
     parameterized(PsiMethod.class, DuplicateMethodsContext.class, "method.duplicate")
@@ -786,7 +911,15 @@ public final class JavaErrorKinds {
 
   public static final Parameterized<PsiElement, Collection<PsiClassType>> EXCEPTION_UNHANDLED =
     error(PsiElement.class, "exception.unhandled")
-      .withRange(JavaErrorFormatUtil::getRange)
+      .withRange(element -> {
+        if (element instanceof PsiMethodReferenceExpression ref) {
+          PsiElement nameElement = ref.getReferenceNameElement();
+          if (nameElement != null) {
+            return nameElement.getTextRangeInParent();
+          }
+        }
+        return getRange(element);
+      })
       .withHighlightType(JavaErrorHighlightType.UNHANDLED_EXCEPTION)
       .<Collection<PsiClassType>>parameterized()
       .withDescription((psi, unhandled) -> message("exception.unhandled", formatTypes(unhandled), unhandled.size()));
@@ -1084,15 +1217,16 @@ public final class JavaErrorKinds {
     error(PsiJavaCodeReferenceElement.class, "expression.qualified.class.expected");
   public static final Simple<PsiTypeElement> EXPRESSION_CLASS_TYPE_PARAMETER = error("expression.class.type.parameter");
   public static final Simple<PsiTypeElement> EXPRESSION_CLASS_PARAMETERIZED_TYPE = error("expression.class.parameterized.type");
-  
+
   public static final Parameterized<PsiExpression, PsiVariable> ASSIGNMENT_DECLARED_OUTSIDE_GUARD =
     parameterized(PsiExpression.class, PsiVariable.class, "assignment.declared.outside.guard")
       .withDescription((expr, variable) -> message("assignment.declared.outside.guard", variable.getName()));
   public static final Parameterized<PsiReferenceExpression, PsiVariable> ASSIGNMENT_TO_FINAL_VARIABLE =
     parameterized(PsiReferenceExpression.class, PsiVariable.class, "assignment.to.final.variable")
       .withDescription((expr, variable) -> message("assignment.to.final.variable", variable.getName()));
-  public static final Simple<PsiExpression> LVALUE_VARIABLE_EXPECTED = error("lvalue.variable.expected"); 
-  
+  public static final Simple<PsiExpression> LVALUE_VARIABLE_EXPECTED = error("lvalue.variable.expected");
+  public static final Simple<PsiExpression> UNARY_OPERATION_VARIABLE_EXPECTED = error("unary.operation.variable.expected");
+
   public static final Parameterized<PsiJavaToken, JavaIncompatibleTypeErrorContext> BINARY_OPERATOR_NOT_APPLICABLE =
     parameterized(PsiJavaToken.class, JavaIncompatibleTypeErrorContext.class, "binary.operator.not.applicable")
       .withAnchor(token -> TypeConversionUtil.convertEQtoOperation(token.getTokenType()) == null ? token.getParent() : token)
@@ -1296,9 +1430,8 @@ public final class JavaErrorKinds {
   public static final Simple<PsiMethodCallExpression> CALL_EXPECTED = error("call.expected");
   public static final Simple<PsiDeconstructionPattern> CALL_PARSED_AS_DECONSTRUCTION_PATTERN =
     error("call.parsed.as.deconstruction.pattern");
-  public static final Simple<PsiJavaCodeReferenceElement> CALL_STATIC_INTERFACE_METHOD_QUALIFIER =
-    error(PsiJavaCodeReferenceElement.class, "call.static.interface.method.qualifier")
-      .withRange(JavaErrorFormatUtil::getRange);
+  public static final Simple<PsiElement> CALL_STATIC_INTERFACE_METHOD_QUALIFIER =
+    error(PsiElement.class, "call.static.interface.method.qualifier");
   public static final Parameterized<PsiCall, PsiClass> CALL_FORMAL_VARARGS_ELEMENT_TYPE_INACCESSIBLE_HERE =
     parameterized(PsiCall.class, PsiClass.class, "call.formal.varargs.element.type.inaccessible.here")
       .withAnchor(call -> requireNonNullElse(call.getArgumentList(), call))

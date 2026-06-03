@@ -1,19 +1,27 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.pluginManager.backend.rpc
 
-import com.intellij.ide.plugins.InstalledPluginsState
-import com.intellij.ide.plugins.PluginManager
+import com.intellij.ide.plugins.CustomPluginRepositoryService
+import com.intellij.ide.plugins.PluginEnabler
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.api.PluginDto
-import com.intellij.ide.plugins.marketplace.*
+import com.intellij.ide.plugins.marketplace.ApplyPluginsStateResult
+import com.intellij.ide.plugins.marketplace.CheckErrorsResult
+import com.intellij.ide.plugins.marketplace.IdeCompatibleUpdate
+import com.intellij.ide.plugins.marketplace.InitSessionResult
+import com.intellij.ide.plugins.marketplace.IntellijPluginMetadata
+import com.intellij.ide.plugins.marketplace.PluginReviewComment
+import com.intellij.ide.plugins.marketplace.PluginSearchResult
+import com.intellij.ide.plugins.marketplace.SetEnabledStateResult
 import com.intellij.ide.plugins.newui.DefaultUiPluginManagerController
 import com.intellij.ide.plugins.newui.PluginInstallationState
 import com.intellij.ide.plugins.newui.PluginManagerSessionService
+import com.intellij.ide.plugins.newui.PluginUiModel
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.updateSettings.impl.UpdateSettings
-import com.intellij.platform.pluginManager.shared.rpc.PluginManagerApi
 import com.intellij.openapi.util.IntellijInternalApi
+import com.intellij.platform.pluginManager.shared.rpc.PluginManagerApi
 import com.intellij.platform.project.ProjectId
 import com.intellij.platform.project.findProjectOrNull
 import kotlinx.coroutines.Dispatchers
@@ -27,23 +35,23 @@ import org.jetbrains.annotations.ApiStatus
 @IntellijInternalApi
 class BackendPluginManagerApi : PluginManagerApi {
   override suspend fun getPlugins(): List<PluginDto> {
-    return PluginManagerCore.plugins.map(PluginDescriptorConverter::toPluginDto)
+    return DefaultUiPluginManagerController.getPlugins().map { PluginDto.fromModel(it) }
   }
 
   override suspend fun getPluginById(pluginId: PluginId): PluginDto? {
-    return PluginManagerCore.getPlugin(pluginId)?.let { PluginDescriptorConverter.toPluginDto(it) }
+    return DefaultUiPluginManagerController.getPlugin(pluginId)?.let { PluginDto.fromModel(it) }
   }
 
   override suspend fun findPlugin(pluginId: PluginId): PluginDto? {
-    return DefaultUiPluginManagerController.findPlugin(pluginId)?.let { PluginDescriptorConverter.toPluginDto(it.getDescriptor()) }
+    return DefaultUiPluginManagerController.findPlugin(pluginId)?.let { PluginDto.fromModel(it) }
   }
 
   override suspend fun getVisiblePlugins(showImplementationDetails: Boolean): List<PluginDto> {
-    return PluginManager.getVisiblePlugins(showImplementationDetails).map { PluginDescriptorConverter.toPluginDto(it) }.toList()
+    return DefaultUiPluginManagerController.getVisiblePlugins(showImplementationDetails).map { PluginDto.fromModel(it) }
   }
 
   override suspend fun getInstalledPlugins(): List<PluginDto> {
-    return InstalledPluginsState.getInstance().installedPlugins.map { PluginDescriptorConverter.toPluginDto(it, true) }
+    return DefaultUiPluginManagerController.getInstalledPlugins().map { PluginDto.fromModel(it, true) }
   }
 
   override suspend fun getUpdates(): List<PluginDto> {
@@ -97,10 +105,29 @@ class BackendPluginManagerApi : PluginManagerApi {
     return DefaultUiPluginManagerController.getCustomRepoTags()
   }
 
-  override suspend fun updateCustomRepositories(repositoryUrls: List<String>) {
-    val list = UpdateSettings.getInstance().storedPluginHosts
-    list.clear()
-    list.addAll(repositoryUrls)
+  override suspend fun updateCustomRepositories(
+    addedRepositoryUrls: List<String>,
+    removedRepositoryUrls: List<String>,
+  ): List<String> {
+    val storedHosts = UpdateSettings.getInstance().storedPluginHosts
+    val removedHosts = removedRepositoryUrls.toSet()
+    if (removedHosts.isNotEmpty()) {
+      storedHosts.removeAll(removedHosts)
+    }
+
+    val storedHostsSet = storedHosts.toMutableSet()
+    for (addedHost in addedRepositoryUrls) {
+      if (storedHostsSet.add(addedHost)) {
+        storedHosts.add(addedHost)
+      }
+    }
+
+    CustomPluginRepositoryService.getInstance().clearCache()
+    return storedHosts.toList()
+  }
+
+  override suspend fun setPluginsAutoUpdateEnabled(enabled: Boolean) {
+    DefaultUiPluginManagerController.setPluginsAutoUpdateEnabled(enabled)
   }
 
   override suspend fun loadDescriptorById(pluginId: PluginId): PluginDto? {
@@ -133,6 +160,14 @@ class BackendPluginManagerApi : PluginManagerApi {
     return withContext(Dispatchers.EDT) {
       DefaultUiPluginManagerController.enablePlugins(sessionId, ids, bool, id?.findProjectOrNull())
     }
+  }
+
+  override suspend fun disablePluginsWithDependencies(pluginIds: List<PluginId>, projectId: ProjectId?): ApplyPluginsStateResult {
+    return DefaultUiPluginManagerController.disablePluginsWithDependencies(pluginIds, projectId?.findProjectOrNull())
+  }
+
+  override suspend fun markPluginsAsDisabled(pluginIds: List<PluginId>) {
+    PluginEnabler.HEADLESS.disableById(pluginIds.toSet())
   }
 
   override suspend fun closeSession(sessionId: String) {
@@ -185,21 +220,10 @@ class BackendPluginManagerApi : PluginManagerApi {
     return DefaultUiPluginManagerController.isNeedUpdate(pluginId)
   }
 
-  override suspend fun subscribeToUpdatesCount(sessionId: String): Flow<Int?> {
-    return channelFlow {
-      DefaultUiPluginManagerController.connectToUpdateServiceWithCounter(sessionId) {
-        trySend(it)
-      }
-      awaitClose()
-    }
-  }
-
   override suspend fun subscribeToPluginUpdates(sessionId: String): Flow<List<PluginDto>> {
     return channelFlow {
-      val session = PluginManagerSessionService.getInstance().getSession(sessionId)
-      session?.updateService?.calculateUpdates { result ->
-        val pluginDtos = result?.map { PluginDto.fromModel(it) } ?: emptyList()
-        trySend(pluginDtos)
+      DefaultUiPluginManagerController.connectToPluginUpdateService(sessionId) { pluginUiModels: List<PluginUiModel>? ->
+        trySend(pluginUiModels?.map { PluginDto.fromModel(it) } ?: emptyList())
       }
       awaitClose()
     }

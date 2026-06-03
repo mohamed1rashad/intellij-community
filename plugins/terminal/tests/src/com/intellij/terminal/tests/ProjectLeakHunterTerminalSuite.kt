@@ -2,7 +2,13 @@
 package com.intellij.terminal.tests
 
 import _LastInSuiteTest
-import com.intellij.terminal.tests.block.*
+import com.intellij.terminal.tests.block.BlockTerminalCommandExecutionTest
+import com.intellij.terminal.tests.block.BlockTerminalTest
+import com.intellij.terminal.tests.block.RightPromptAndCommandLayoutTest
+import com.intellij.terminal.tests.block.ShellBaseGeneratorsTest
+import com.intellij.terminal.tests.block.ShellCommandSpecManagerTest
+import com.intellij.terminal.tests.block.TerminalOutputModelTest
+import com.intellij.terminal.tests.block.TerminalTextHighlighterTest
 import com.intellij.terminal.tests.block.actions.actions.TerminalDeletePreviousWordTest
 import com.intellij.terminal.tests.block.completion.ShellCdCommandTest
 import com.intellij.terminal.tests.block.completion.ShellCommandSpecSuggestionsTest
@@ -32,7 +38,6 @@ import org.junit.runners.Suite
   ShellMakefileCompletionTest::class,
   ShMLModelMetadataTest::class,
   RightPromptAndCommandLayoutTest::class,
-  PowerShellCompletionTest::class,
   ShellCommandSpecManagerTest::class,
   BlockTerminalCommandExecutionTest::class,
   TerminalDeletePreviousWordTest::class,

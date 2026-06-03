@@ -1,4 +1,4 @@
-[![official JetBrains project](http://jb.gg/badges/official.svg)](https://github.com/JetBrains/.github/blob/main/profile/README.md) [![IntelliJ IDEA build status](https://github.com/JetBrains/intellij-community/workflows/IntelliJ%20IDEA/badge.svg)](https://github.com/JetBrains/intellij-community/actions/workflows/IntelliJ_IDEA.yml) [![PyCharm build status](https://github.com/JetBrains/intellij-community/workflows/PyCharm/badge.svg)](https://github.com/JetBrains/intellij-community/actions/workflows/PyCharm.yml)
+[![official JetBrains project](http://jb.gg/badges/official.svg)](https://github.com/JetBrains/.github/blob/main/profile/README.md) [![IntelliJ IDEA build status](https://github.com/JetBrains/intellij-community/actions/workflows/IntelliJ_IDEA.yml/badge.svg?branch=master)](https://github.com/JetBrains/intellij-community/actions/workflows/IntelliJ_IDEA.yml?query=branch%3Amaster) [![PyCharm build status](https://github.com/JetBrains/intellij-community/actions/workflows/PyCharm.yml/badge.svg?branch=master)](https://github.com/JetBrains/intellij-community/actions/workflows/PyCharm.yml?query=branch%3Amaster)
 
 # IntelliJ Open Source Repository
 
@@ -20,7 +20,6 @@ This section will guide you through getting the project sources and help avoid c
 
 #### Prerequisites
 - [Git](https://git-scm.com/) installed
-- ~2GB free disk space
 - Install [IntelliJ IDEA 2023.2](https://www.jetbrains.com/idea/download) or higher.
 - For **Windows** set these git config to avoid common issues during cloning:
   ```
@@ -63,8 +62,16 @@ Run the following script from project root `<IDEA_HOME>` to get the required mod
 
 ---
 ## Building IntelliJ IDEA
+
 These instructions will help you build IntelliJ IDEA from source code, which is the basis for IntelliJ Platform development.
 IntelliJ IDEA '**2023.2**' or newer is required.
+
+> [!IMPORTANT]
+>
+> IntelliJ IDEA project is currently being migrated to the [Bazel](https://bazel.build/) build system. 
+> The migration is still in progress, so you may encounter some rough edges or temporary issues along the way, mostly related to IDE integration.
+> * Building the project using only IDE built-in capabilities is not supported anymore, so make sure the [Bazel plugin](https://plugins.jetbrains.com/plugin/22977-bazel) is installed and enabled.
+> * Known issue: some tests are not yet possible to be run with Bazel. In case of any issues, please depend on the `tests.cmd` script mentioned in the [Running IntelliJ IDEA in CI/CD environment](#running-intellij-idea-in-cicd-environment) section.
 
 ### Opening the IntelliJ IDEA Source Code in the IDE
 Using the latest IntelliJ IDEA, click '**File | Open**', select the `<IDEA_HOME>` directory.
@@ -75,16 +82,16 @@ If IntelliJ IDEA displays a message about a missing or out-of-date required plug
 ### Build Configuration Steps
 1. **JDK Setup**
 
-- Use JetBrains Runtime 21 (without JCEF) to compile
+  - Use JetBrains Runtime 25 (without JCEF) to compile
   - IDE will prompt to download it on the first build
 > [!IMPORTANT]
 >
-> JetBrains Runtime **without** JCEF is required. If `jbr-21` SDK points to JCEF version, change it to the non-JCEF version:
+> JetBrains Runtime **without** JCEF is required. If `jbr-25` SDK points to JCEF version, change it to the non-JCEF version:
 > - Add `idea.is.internal=true` to `idea.properties` and restart the IDE.
 > - Go to '**Project Structure | SDKs**'
 > - Click 'Browse' → 'Download...'
-> - Select version 21 and vendor 'JetBrains Runtime'
-> - To confirm if the JDK is correct, navigate to the SDK page with jbr-21 selected. Search for `jcef`, it should **_NOT_** yield a result.
+> - Select version 25 and vendor 'JetBrains Runtime'
+> - To confirm if the JDK is correct, navigate to the SDK page with jbr-25 selected. Search for `jcef`, it should **_NOT_** yield a result.
 
 2. **Maven Configuration** : If the **Maven** plugin is disabled, [add the path variable](https://www.jetbrains.com/help/idea/absolute-path-variables.html) "**MAVEN_REPOSITORY**" pointing to `<USER_HOME>/.m2/repository` directory.
 
@@ -102,14 +109,12 @@ If IntelliJ IDEA displays a message about a missing or out-of-date required plug
 Options to build installers are passed as system properties to `installers.cmd` command.
 You may find the list of available properties in [BuildOptions.kt](platform/build-scripts/src/org/jetbrains/intellij/build/BuildOptions.kt)
 
+Pass --debug to suspend and wait for debugger at port 5005
+
 Installer build examples:
 ```bash
 # Build installers only for current operating system:
 ./installers.cmd -Dintellij.build.target.os=current
-```
-```bash
-# Build source code _incrementally_ (do not build what was already built before):
-./installers.cmd -Dintellij.build.incremental.compilation=true
 ```
 
 > [!TIP]
@@ -121,15 +126,13 @@ Installer build examples:
 #### Dockerized Build Environment
 To build installation packages inside a Docker container with preinstalled dependencies and tools, run the following command in `<IDEA_HOME>` directory (on Windows, use PowerShell):
 ```bash
-docker run --rm -it --user "$(id -u)" --volume "${PWD}:/community" "$(docker build --quiet . --target intellij_idea)"
+docker build . --target intellij_idea --tag intellij_idea_env
+docker run --rm --user "$(id -u)" --volume "${PWD}:/community" intellij_idea_env
 ```
 > [!NOTE]
 > 
 > Please remember to specify the `--user "$(id -u)"` argument for the container's user to match the host's user.
-> This prevents issues with permissions for the checked-out repository, the build output, and the mounted Maven cache, if any.
-> 
-To reuse the existing Maven cache from the host system, add the following option to `docker run` command:
-`--volume "$HOME/.m2:/home/ide_builder/.m2"`
+> This prevents issues with permissions for the checked-out repository, the build output, if any.
 
 ---
 ## Running IntelliJ IDEA
@@ -147,13 +150,15 @@ Options to run tests are passed as system properties to `tests.cmd` command.
 You may find the list of available properties in [TestingOptions.kt](platform/build-scripts/src/org/jetbrains/intellij/build/TestingOptions.kt)
 
 ```bash
-# Build source code _incrementally_ (do not build what was already built before): `
-./tests.cmd -Dintellij.build.incremental.compilation=true
+# Run specific run configuration:
+./tests.cmd -Dintellij.build.test.configurations=ApiCheckTest
 ```
 ```bash
-#Run a specific test: 
+# Run a specific test: 
 ./tests.cmd -Dintellij.build.test.patterns=com.intellij.util.ArrayUtilTest
 ```
+
+to debug tests use: `-Dintellij.build.test.debug.enabled=true -Dintellij.build.test.debug.suspend=true -Dintellij.build.test.debug.port=5005`
 
 `tests.cmd` is used just to run [CommunityRunTestsBuildTarget](build/src/CommunityRunTestsBuildTarget.kt) from the command line.
 You can also call it directly from IDEA, see run configuration `tests` for an example.

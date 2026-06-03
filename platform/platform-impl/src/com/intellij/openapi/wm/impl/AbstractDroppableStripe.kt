@@ -1,15 +1,24 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.wm.impl
 
+import com.intellij.ide.ui.UISettings
 import com.intellij.openapi.wm.ToolWindowAnchor
+import com.intellij.toolWindow.ResizeStripeManager
 import com.intellij.toolWindow.StripeButtonManager
 import com.intellij.ui.awt.DevicePoint
 import com.intellij.ui.components.JBPanel
 import com.intellij.ui.drag.DragButton
 import com.intellij.ui.paint.RectanglePainter
+import com.intellij.util.ui.JBInsets
 import com.intellij.util.ui.JBUI
 import org.jetbrains.annotations.VisibleForTesting
-import java.awt.*
+import java.awt.BasicStroke
+import java.awt.Dimension
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.LayoutManager
+import java.awt.Point
+import java.awt.Rectangle
 import javax.swing.Icon
 import javax.swing.SwingUtilities
 import kotlin.math.max
@@ -547,18 +556,16 @@ internal abstract class AbstractDroppableStripe(val paneId: String, layoutManage
   override fun paintComponent(g: Graphics) {
     super.paintComponent(g)
     if (!isFinishingDrop && isDroppingButton()) {
-      g.color = if (isNewStripes) JBUI.CurrentTheme.ToolWindow.DragAndDrop.STRIPE_BACKGROUND else background.brighter()
-      g.fillRect(0, 0, width, height)
+      if (!isNewStripes) {
+        g.color = background.brighter()
+        g.fillRect(0, 0, width, height)
+      }
       val rectangle = Rectangle(drawRectangle)
       if (!rectangle.isEmpty) {
         var round: Int? = null
         if (isNewStripes) {
-          val size = JBUI.scale(30)
-          rectangle.x += (rectangle.width - size) / 2
-          rectangle.y += (rectangle.height - size) / 2
-          rectangle.width = size
-          rectangle.height = size
-          round = JBUI.scale(8)
+          JBInsets.removeFrom(rectangle, JBUI.CurrentTheme.Toolbar.stripeToolbarButtonIconPadding(isOnTheLeftStripe(), ResizeStripeManager.isShowNames()))
+          round = JBUI.CurrentTheme.Toolbar.stripeButtonArc(UISettings.getInstance().compactMode).get()
         }
         g.color = if (isNewStripes) JBUI.CurrentTheme.ToolWindow.DragAndDrop.BUTTON_DROP_BACKGROUND else JBUI.CurrentTheme.DragAndDrop.Area.BACKGROUND
         RectanglePainter.FILL.paint(g as Graphics2D, rectangle.x, rectangle.y, rectangle.width, rectangle.height, round)

@@ -1,9 +1,10 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.workspace.storage.testEntities.entities
 
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.SymbolicEntityId
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityWithSymbolicId
 import com.intellij.platform.workspace.storage.annotations.Parent
-import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceList
 
 
 // ------------------------------ Persistent Id ---------------
@@ -87,4 +88,39 @@ interface ComposedIdSoftRefEntity : WorkspaceEntityWithSymbolicId {
   val link: NameId
   override val symbolicId: ComposedId get() = ComposedId(myName, link)
 
+}
+
+// ------------------------------ Persistent Id ---------------
+
+data class ParentNameId(private val name: String) : SymbolicEntityId<ParentEntityWithSymbolicId> {
+  override val presentableName: String
+    get() = name
+
+  override fun toString(): String = name
+}
+
+data class ChildNameIdWithParentId(private val name: String, private val parentId: ParentNameId) : SymbolicEntityId<ChildEntityWithSymbolicId> {
+  override val presentableName: String
+    get() = "$name (${parentId.presentableName})"
+
+  override fun toString(): String = "$name (${parentId.presentableName})"
+}
+
+// ------------------------- Entity with SymbolicId which uses parent's SymbolicId ------------------
+
+interface ParentEntityWithSymbolicId : WorkspaceEntityWithSymbolicId {
+  val myName: String
+  val children: List<ChildEntityWithSymbolicId>
+
+  override val symbolicId: ParentNameId 
+    get() = ParentNameId(myName)
+}
+
+interface ChildEntityWithSymbolicId : WorkspaceEntityWithSymbolicId {
+  val myName: String
+  @Parent
+  val parent: ParentEntityWithSymbolicId
+
+  override val symbolicId: ChildNameIdWithParentId
+    get() = ChildNameIdWithParentId(myName, parent.symbolicId)
 }

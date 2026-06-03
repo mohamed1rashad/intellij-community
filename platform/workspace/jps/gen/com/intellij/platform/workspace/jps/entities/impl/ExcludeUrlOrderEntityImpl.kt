@@ -1,53 +1,44 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:JvmName("RootsExtensions")
+@file:OptIn(EntityStorageInstrumentationApi::class)
 
 package com.intellij.platform.workspace.jps.entities.impl
 
 import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
 import com.intellij.platform.workspace.jps.entities.ExcludeUrlOrderEntity
-import com.intellij.platform.workspace.jps.entities.ModifiableContentRootEntity
-import com.intellij.platform.workspace.jps.entities.ModifiableExcludeUrlOrderEntity
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Parent
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
 import com.intellij.platform.workspace.storage.impl.containers.MutableWorkspaceList
 import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceList
-import com.intellij.platform.workspace.storage.impl.extractOneToOneParent
-import com.intellij.platform.workspace.storage.impl.updateOneToOneParentOfChild
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import org.jetbrains.annotations.ApiStatus.Internal
-import org.jetbrains.annotations.NonNls
 
 @Internal
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrderEntityData) : ExcludeUrlOrderEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrderEntityData) : ExcludeUrlOrderEntity,
+                                                                                              WorkspaceEntityBase(dataSource) {
 
   private companion object {
-    internal val CONTENTROOT_CONNECTION_ID: ConnectionId = ConnectionId.create(ContentRootEntity::class.java,
-                                                                               ExcludeUrlOrderEntity::class.java,
-                                                                               ConnectionId.ConnectionType.ONE_TO_ONE, false)
-
-    private val connections = listOf<ConnectionId>(
-      CONTENTROOT_CONNECTION_ID,
-    )
+    internal val CONTENTROOT_CONNECTION_ID: ConnectionId =
+      ConnectionId.create(ContentRootEntity::class.java, ExcludeUrlOrderEntity::class.java, ConnectionId.ConnectionType.ONE_TO_ONE, false)
+    private val connections = listOf<ConnectionId>(CONTENTROOT_CONNECTION_ID)
 
   }
 
@@ -56,9 +47,9 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
       readField("order")
       return dataSource.order
     }
-
   override val contentRoot: ContentRootEntity
-    get() = snapshot.extractOneToOneParent(CONTENTROOT_CONNECTION_ID, this)!!
+    get() = snapshot.instrumentation.getParent(CONTENTROOT_CONNECTION_ID, this) as? ContentRootEntity
+            ?: error("Parent contentRoot not found for ExcludeUrlOrderEntity")
 
   override val entitySource: EntitySource
     get() {
@@ -71,8 +62,8 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
   }
 
 
-  internal class Builder(result: ExcludeUrlOrderEntityData?) : ModifiableWorkspaceEntityBase<ExcludeUrlOrderEntity, ExcludeUrlOrderEntityData>(
-    result), ExcludeUrlOrderEntity.Builder {
+  internal class Builder(result: ExcludeUrlOrderEntityData?) :
+    ModifiableWorkspaceEntityBase<ExcludeUrlOrderEntity, ExcludeUrlOrderEntityData>(result), ExcludeUrlOrderEntity.Builder {
     internal constructor() : this(ExcludeUrlOrderEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -85,16 +76,14 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
           error("Entity ExcludeUrlOrderEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
       index(this, "order", this.order)
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -108,7 +97,7 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
         error("Field ExcludeUrlOrderEntity#order should be initialized")
       }
       if (_diff != null) {
-        if (_diff.extractOneToOneParent<WorkspaceEntityBase>(CONTENTROOT_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(CONTENTROOT_CONNECTION_ID, this) == null) {
           error("Field ExcludeUrlOrderEntity#contentRoot should be initialized")
         }
       }
@@ -147,7 +136,6 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
         changedProperty.add("entitySource")
 
       }
-
     private val orderUpdater: (value: List<VirtualFileUrl>) -> Unit = { value ->
       val _diff = diff
       if (_diff != null) index(this, "order", value)
@@ -170,17 +158,17 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
         getEntityData(true).order = value
         orderUpdater.invoke(value)
       }
-
-    override var contentRoot: ModifiableContentRootEntity
+    override var contentRoot: ContentRootEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(CONTENTROOT_CONNECTION_ID, this) as? ModifiableContentRootEntity)
-          ?: (this.entityLinks[EntityLink(false, CONTENTROOT_CONNECTION_ID)]!! as ModifiableContentRootEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(CONTENTROOT_CONNECTION_ID, this) as? ContentRootEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, CONTENTROOT_CONNECTION_ID)] as? ContentRootEntityBuilder)
+          ?: error("contentRoot is null for ExcludeUrlOrderEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, CONTENTROOT_CONNECTION_ID)]!! as ModifiableContentRootEntity
+          (this.entityLinks[EntityLink(false, CONTENTROOT_CONNECTION_ID)] as? ContentRootEntityBuilder)
+          ?: error("contentRoot is null for ExcludeUrlOrderEntity")
         }
       }
       set(value) {
@@ -190,18 +178,17 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(true, CONTENTROOT_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToOneParentOfChild(CONTENTROOT_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(CONTENTROOT_CONNECTION_ID, value, this)
         }
         else {
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(true, CONTENTROOT_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, CONTENTROOT_CONNECTION_ID)] = value
         }
         changedProperty.add("contentRoot")
@@ -209,6 +196,7 @@ internal class ExcludeUrlOrderEntityImpl(private val dataSource: ExcludeUrlOrder
 
     override fun getEntityClass(): Class<ExcludeUrlOrderEntity> = ExcludeUrlOrderEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -217,14 +205,13 @@ internal class ExcludeUrlOrderEntityData : WorkspaceEntityData<ExcludeUrlOrderEn
 
   internal fun isOrderInitialized(): Boolean = ::order.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ExcludeUrlOrderEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ExcludeUrlOrderEntity> {
     val modifiable = ExcludeUrlOrderEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ExcludeUrlOrderEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -250,9 +237,9 @@ internal class ExcludeUrlOrderEntityData : WorkspaceEntityData<ExcludeUrlOrderEn
     return ExcludeUrlOrderEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return ExcludeUrlOrderEntity(order, entitySource) {
-      parents.filterIsInstance<ModifiableContentRootEntity>().singleOrNull()?.let { this.contentRoot = it }
+      parents.filterIsInstance<ContentRootEntityBuilder>().singleOrNull()?.let { this.contentRoot = it }
     }
   }
 
@@ -265,9 +252,7 @@ internal class ExcludeUrlOrderEntityData : WorkspaceEntityData<ExcludeUrlOrderEn
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ExcludeUrlOrderEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.order != other.order) return false
     return true
@@ -276,9 +261,7 @@ internal class ExcludeUrlOrderEntityData : WorkspaceEntityData<ExcludeUrlOrderEn
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ExcludeUrlOrderEntityData
-
     if (this.order != other.order) return false
     return true
   }

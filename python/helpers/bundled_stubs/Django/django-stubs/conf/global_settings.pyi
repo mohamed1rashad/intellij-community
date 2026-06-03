@@ -1,13 +1,19 @@
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from re import Pattern
+from typing import Any, Literal, Protocol, TypeAlias, TypedDict, type_check_only
+
+from django.utils.functional import _StrOrPromise
+from typing_extensions import NotRequired
+
+from django_stubs_ext.settings import TemplatesSetting
 
 # This is defined here as a do-nothing function because we can't import
 # django.utils.translation -- that module depends on the settings.
-from typing import Any, Literal, Protocol, TypeAlias, TypedDict, type_check_only
+def gettext_noop(s: str) -> str: ...
 
-from typing_extensions import NotRequired
-
-_Admins: TypeAlias = list[tuple[str, str]]
+# Note: the tuple element format for ADMINS or MANAGERS is deprecated. Use a
+# list of strings instead.
+_Admins: TypeAlias = list[str] | list[tuple[str, str]]
 
 ####################
 # CORE             #
@@ -74,6 +80,10 @@ MANAGERS: _Admins
 # Content-Type header.
 DEFAULT_CHARSET: str
 
+# `SERIALIZATION_MODULES` is a dictionary (`dict[str, str]`) of modules containing serializer definitions.
+# Because Django doesn't define it, we can't provide its type here. Use `getattr` for type-safe access
+# e.g. `getattr(settings, "SERIALIZATION_MODULES")`
+
 # Email address that error messages come from.
 SERVER_EMAIL: str
 
@@ -92,6 +102,10 @@ DATABASE_ROUTERS: list[str | Router]
 # Third-party backends can be specified by providing a Python path
 # to a module that defines an EmailBackend class.
 EMAIL_BACKEND: str
+
+# `EMAIL_FILE_PATH` is a `str` indicating the directory used by the file email backend to store output files.
+# Because Django doesn't define it, we can't provide its type here. Use `getattr` for type-safe access
+# e.g. `getattr(settings, "EMAIL_FILE_PATH")`
 
 # Host for sending email.
 EMAIL_HOST: str
@@ -114,15 +128,10 @@ EMAIL_TIMEOUT: int | None
 # List of strings representing installed apps.
 INSTALLED_APPS: list[str]
 
-TEMPLATES: list[dict[str, Any]]
+TEMPLATES: list[TemplatesSetting]
 
 # Default form rendering class.
 FORM_RENDERER: str
-
-# RemovedInDjango60Warning: It's a transitional setting helpful in early
-# adoption of "https" as the new default value of forms.URLField.assume_scheme.
-# Set to True to assume "https" during the Django 5.x release cycle.
-FORMS_URLFIELD_ASSUME_HTTPS: bool
 
 # Default email address to use for various automated correspondence from
 # the site managers.
@@ -167,6 +176,10 @@ ABSOLUTE_URL_OVERRIDES: dict[str, Any]
 #    ]
 IGNORABLE_404_URLS: list[Pattern[str]]
 
+# `ROOT_URLCONF` is a string representing the full Python import path to the root `URLconf`.
+# Because Django doesn't define it, we can't provide its type here. Use `getattr` for type-safe access
+# e.g. `getattr(settings, "ROOT_URLCONF")`
+
 # A secret key for this particular Django installation. Used in secret-key
 # hashing algorithms. Set this in your settings, or Django will complain
 # loudly.
@@ -185,6 +198,10 @@ MEDIA_ROOT: str
 # URL that handles the media served from MEDIA_ROOT.
 # Examples: "http://example.com/media/", "http://media.example.com/"
 MEDIA_URL: str
+
+# `SITE_ID` is the ID, as an integer, of the current site in the `django_site` database table.
+# Because Django doesn't define it, we can't provide its type here. Use `getattr` for type-safe access
+# e.g. `getattr(settings, "SITE_ID")`
 
 # Absolute path to the directory static files should be collected to.
 # Example: "/var/www/example.com/static/"
@@ -234,34 +251,34 @@ FILE_UPLOAD_DIRECTORY_PERMISSIONS: int | None
 FORMAT_MODULE_PATH: str | None
 
 # Default formatting for date objects. See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 DATE_FORMAT: str
 
 # Default formatting for datetime objects. See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 DATETIME_FORMAT: str
 
 # Default formatting for time objects. See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 TIME_FORMAT: str
 
 # Default formatting for date objects when only the year and month are relevant.
 # See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 YEAR_MONTH_FORMAT: str
 
 # Default formatting for date objects when only the month and day are relevant.
 # See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 MONTH_DAY_FORMAT: str
 
 # Default short formatting for date objects. See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 SHORT_DATE_FORMAT: str
 
 # Default short formatting for datetime objects.
 # See all available format strings here:
-# https://docs.djangoproject.com/en/dev/ref/templates/builtins/#date
+# https://docs.djangoproject.com/en/stable/ref/templates/builtins/#date
 SHORT_DATETIME_FORMAT: str
 
 # Default formats to be used when parsing dates from input boxes, in order
@@ -389,11 +406,11 @@ AUTH_USER_MODEL: str
 
 AUTHENTICATION_BACKENDS: Sequence[str]
 
-LOGIN_URL: str
+LOGIN_URL: _StrOrPromise
 
-LOGIN_REDIRECT_URL: str
+LOGIN_REDIRECT_URL: _StrOrPromise
 
-LOGOUT_REDIRECT_URL: str | None
+LOGOUT_REDIRECT_URL: _StrOrPromise | None
 
 # The number of seconds a password reset link is valid for
 PASSWORD_RESET_TIMEOUT: int
@@ -522,3 +539,19 @@ SECURE_REDIRECT_EXEMPT: list[str]
 SECURE_REFERRER_POLICY: str
 SECURE_SSL_HOST: str | None
 SECURE_SSL_REDIRECT: bool
+
+##################
+# CSP MIDDLEWARE #
+##################
+SECURE_CSP: Mapping[str, Collection[str] | str]
+SECURE_CSP_REPORT_ONLY: Mapping[str, Collection[str] | str]
+
+# RemovedInDjango70Warning: A transitional setting helpful in early adoption of
+# HTTPS as the default protocol in urlize and urlizetrunc when no protocol is
+# provided. Set to True to assume HTTPS during the Django 6.x release cycle.
+URLIZE_ASSUME_HTTPS: bool
+
+#########
+# TASKS #
+#########
+TASKS: dict[str, dict[str, Any]]

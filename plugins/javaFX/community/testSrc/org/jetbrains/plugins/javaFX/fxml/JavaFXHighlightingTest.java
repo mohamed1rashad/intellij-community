@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.javaFX.fxml;
 
 import com.intellij.codeInsight.daemon.impl.analysis.XmlPathReferenceInspection;
@@ -7,7 +7,11 @@ import com.intellij.codeInspection.htmlInspections.RequiredAttributesInspection;
 import com.intellij.openapi.application.PluginPathManager;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.registry.RegistryValue;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.ArrayUtilRt;
 import org.jetbrains.annotations.NotNull;
@@ -296,6 +300,22 @@ public class JavaFXHighlightingTest extends AbstractJavaFXTestCase {
   }
 
   public void testExpressionBinding() {
+    doTest();
+  }
+
+  public void testExpressionBindingArithmetic() {
+    doTest();
+  }
+
+  public void testExpressionBindingComparison() {
+    doTest();
+  }
+
+  public void testExpressionBindingLiterals() {
+    doTest();
+  }
+
+  public void testExpressionBindingMismatchedParens() {
     doTest();
   }
 

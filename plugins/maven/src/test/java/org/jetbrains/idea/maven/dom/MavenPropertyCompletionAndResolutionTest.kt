@@ -282,14 +282,16 @@ class MavenPropertyCompletionAndResolutionTest : MavenDomTestCase() {
 
   @Test
   fun testResolutionToProjectParent() = runBlocking {
-    updateProjectPom("""
-                       <groupId>test</groupId<artifactId>project</artifactId>
+    updateProjectPom($$"""
+                       <groupId>test</groupId>
+                       <artifactId>project</artifactId>
                        <version>1</version>
                        <parent>
-                         <groupId>test</groupId  <artifactId>parent</artifactId>
+                         <groupId>test</groupId>
+                         <artifactId>parent</artifactId>
                          <version>1</version>
                        </parent>
-                       <name>${'$'}{<caret>project.parent.version}</name>
+                       <name>${<caret>project.parent.version}</name>
                        """.trimIndent())
 
     assertResolved(projectPom, findTag("project.parent.version"))
@@ -677,17 +679,18 @@ class MavenPropertyCompletionAndResolutionTest : MavenDomTestCase() {
                        </profiles>
                        """.trimIndent())
 
-    updateProjectPom("""
+    updateProjectPom($$"""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
                        <version>1</version>
-                       <name>${'$'}{foo}</name>
+                       <name>${foo}</name>
                        """.trimIndent())
 
     readWithProfiles("two")
 
-    moveCaretTo(projectPom, "<name>${'$'}{<caret>foo}</name>")
-    assertResolved(projectPom, findTag(profiles, "settings.profiles[1].properties.foo", MavenDomSettingsModel::class.java))
+    val tag = findTag(profiles, "settings.profiles[1].properties.foo", MavenDomSettingsModel::class.java)
+    moveCaretTo(projectPom, $$"<name>${<caret>foo}</name>")
+    assertResolved(projectPom, tag)
   }
 
   @Test
@@ -1031,15 +1034,6 @@ class MavenPropertyCompletionAndResolutionTest : MavenDomTestCase() {
                        </profiles>
                        """.trimIndent())
 
-    createProfilesXml("""
-                        <profile>
-                          <id>one</id>
-                          <properties>
-                            <profilesXmlProp>value</profilesXmlProp>
-                          </properties>
-                        </profile>
-                        """.trimIndent())
-
     createModulePom("parent",
                     """
                       <groupId>test</groupId>
@@ -1112,11 +1106,8 @@ class MavenPropertyCompletionAndResolutionTest : MavenDomTestCase() {
                        """.trimIndent())
 
     val variants = getCompletionVariants(projectPom)
-    assertContain(variants, "pomProp", "pomProfilesProp", "profilesXmlProp")
-    assertContain(variants,
-                  "parentPomProp",
-                  "parentPomProfilesProp",
-                  "parentProfilesXmlProp")
+    assertContain(variants, "pomProp", "pomProfilesProp")
+    assertContain(variants, "parentPomProp", "parentPomProfilesProp")
     assertContain(variants, "artifactId", "project.artifactId", "pom.artifactId")
     assertContain(variants, "basedir", "project.basedir", "pom.basedir", "project.baseUri", "pom.basedir")
     assertDoNotContain(variants, "baseUri")
@@ -1129,7 +1120,7 @@ class MavenPropertyCompletionAndResolutionTest : MavenDomTestCase() {
     assertDoNotContain(variants, "project.maven.build.timestamp")
     assertContain(variants, "settingsXmlProp")
     assertContain(variants, "settings.localRepository")
-    assertContain(variants, "user.home", "env." + envVar)
+    assertContain(variants, "user.home", "env.$envVar")
   }
 
   @Test
@@ -1205,6 +1196,165 @@ class MavenPropertyCompletionAndResolutionTest : MavenDomTestCase() {
                        """.trimIndent())
 
     assertCompletionVariantsDoNotInclude(projectPom, "project.groupId")
+  }
+
+
+  @Test
+  fun testCompletingMaven4Specific() = runBlocking {
+    assumeModel_4_1_0("applicable for maven4")
+    updateProjectPom("""
+                       <groupId>test</groupId>
+                       <artifactId>project</artifactId>
+                       <version>1</version>
+                       <name>${'$'}{project.<caret></name>
+                       """.trimIndent())
+
+    val variants = getCompletionVariants(projectPom)
+    assertContain(variants, "project.rootDirectory")
+
+    updateProjectPom("""
+                       <groupId>test</groupId>
+                       <artifactId>project</artifactId>
+                       <version>1</version>
+                       <name>${'$'}{session.<caret></name>
+                       """.trimIndent())
+    val sessionVariants = getCompletionVariants(projectPom)
+    assertContain(sessionVariants, "session.rootDirectory", "session.topDirectory")
+  }
+
+  @Test
+  fun testResolveMaven4SpecificRootDir() = runBlocking {
+    assumeModel_4_1_0("applicable for maven4")
+
+    updateProjectPom("""
+                       <groupId>test</groupId>
+                       <artifactId>project</artifactId>
+                       <version>1</version>
+                       <properties>
+                           <myProp>${'$'}{<caret>project.rootDirectory}</myProp>
+                       </properties>
+
+                       """.trimIndent())
+
+    val rootDirectory = readAction { PsiManager.getInstance(project).findDirectory(projectPom.getParent())!! }
+    assertResolved(projectPom, rootDirectory)
+  }
+
+  @Test
+  fun testResolveMaven4SpecificRootDirForSubmodules() = runBlocking {
+    assumeModel_4_1_0("applicable for maven4")
+    createModulePom("m1",
+                    """
+                                       <parent>
+                                          <groupId>test</groupId>
+                                          <artifactId>project</artifactId>
+                                          <version>1</version>
+                                       </parent>
+                                       <artifactId>m1</artifactId>
+                                       """.trimIndent())
+    updateProjectPom("""
+                    <groupId>test</groupId>
+                    <artifactId>project</artifactId>
+                    <version>1</version>
+                    <packaging>pom</packaging>
+                    <modules>
+                      <module>m1</module>
+                    </modules>
+                    """.trimIndent())
+    updateAllProjects()
+
+    val m1 = updateModulePom("m1",
+                             """
+                                       <parent>
+                                          <groupId>test</groupId>
+                                          <artifactId>project</artifactId>
+                                          <version>1</version>
+                                       </parent>
+                                       <artifactId>m1</artifactId>
+                                       <properties>
+                                         <myDir>${'$'}{<caret>project.rootDirectory}</myDir>
+                                       </properties>
+                                       """.trimIndent())
+    val rootDirectory = readAction { PsiManager.getInstance(project).findDirectory(projectPom.getParent()) }
+    assertResolved(m1, rootDirectory!!)
+  }
+
+  @Test
+  fun testResolveMaven4SpecificSessionRootDirForSubmodules() = runBlocking {
+    assumeModel_4_1_0("applicable for maven4")
+    createModulePom("m1",
+                    """
+                                       <parent>
+                                          <groupId>test</groupId>
+                                          <artifactId>project</artifactId>
+                                          <version>1</version>
+                                       </parent>
+                                       <artifactId>m1</artifactId>
+                                       """.trimIndent())
+    updateProjectPom("""
+                    <groupId>test</groupId>
+                    <artifactId>project</artifactId>
+                    <version>1</version>
+                    <packaging>pom</packaging>
+                    <modules>
+                      <module>m1</module>
+                    </modules>
+                    """.trimIndent())
+    updateAllProjects()
+
+    val m1 = updateModulePom("m1",
+                             """
+                                       <parent>
+                                          <groupId>test</groupId>
+                                          <artifactId>project</artifactId>
+                                          <version>1</version>
+                                       </parent>
+                                       <artifactId>m1</artifactId>
+                                       <properties>
+                                         <myDir>${'$'}{<caret>session.rootDirectory}</myDir>
+                                       </properties>
+                                       """.trimIndent())
+    val rootDirectory = readAction { PsiManager.getInstance(project).findDirectory(projectPom.getParent()) }
+    assertResolved(m1, rootDirectory!!)
+  }
+
+  @Test
+  fun testResolveMaven4SpecificSessionTopDirForSubmodules() = runBlocking {
+    assumeModel_4_1_0("applicable for maven4")
+    createModulePom("m1",
+                    """
+                                       <parent>
+                                          <groupId>test</groupId>
+                                          <artifactId>project</artifactId>
+                                          <version>1</version>
+                                       </parent>
+                                       <artifactId>m1</artifactId>
+                                       """.trimIndent())
+    updateProjectPom("""
+                    <groupId>test</groupId>
+                    <artifactId>project</artifactId>
+                    <version>1</version>
+                    <packaging>pom</packaging>
+                    <modules>
+                      <module>m1</module>
+                    </modules>
+                    """.trimIndent())
+    updateAllProjects()
+
+    val m1 = updateModulePom("m1",
+                             """
+                                       <parent>
+                                          <groupId>test</groupId>
+                                          <artifactId>project</artifactId>
+                                          <version>1</version>
+                                       </parent>
+                                       <artifactId>m1</artifactId>
+                                       <properties>
+                                         <myDir>${'$'}{<caret>session.topDirectory}</myDir>
+                                       </properties>
+                                       """.trimIndent())
+    val rootDirectory = readAction { PsiManager.getInstance(project).findDirectory(projectPom.getParent()) }
+    assertResolved(m1, rootDirectory!!)
   }
 
   private suspend fun readWithProfiles(vararg profiles: String) {

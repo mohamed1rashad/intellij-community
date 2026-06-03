@@ -8,7 +8,13 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vcs.*;
+import com.intellij.openapi.vcs.AbstractVcs;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.FileStatus;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import com.intellij.openapi.vcs.VcsApplicationSettings;
+import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFileSystem;
@@ -16,14 +22,21 @@ import com.intellij.pom.Navigatable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashingStrategy;
 import com.intellij.util.containers.JBIterable;
-import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 public final class ChangesUtil {
   private static final Key<Boolean> INTERNAL_OPERATION_KEY = Key.create("internal vcs operation");
@@ -81,16 +94,6 @@ public final class ChangesUtil {
 
   public static @Nullable AbstractVcs getVcsForFile(@NotNull VirtualFile file, @NotNull Project project) {
     return ProjectLevelVcsManager.getInstance(project).getVcsFor(file);
-  }
-
-  /**
-   * @deprecated This method will detect {@link FilePath#isDirectory()} using NIO.
-   * Avoid using the method, if {@code isDirectory} is known from context or not important.
-   */
-  @ApiStatus.Internal
-  @Deprecated(forRemoval = true)
-  public static @Nullable AbstractVcs getVcsForFile(@NotNull File file, @NotNull Project project) {
-    return ProjectLevelVcsManager.getInstance(project).getVcsFor(VcsUtil.getFilePath(file));
   }
 
   public static @Unmodifiable @NotNull List<FilePath> getPaths(@NotNull Collection<? extends Change> changes) {
@@ -157,7 +160,7 @@ public final class ChangesUtil {
 
   public static FilePath getLocalPath(@NotNull Project project, FilePath filePath) {
     // check if the file has just been renamed (IDEADEV-15494)
-    Change change = ReadAction.compute(() -> {
+    Change change = ReadAction.computeBlocking(() -> {
       if (project.isDisposed()) throw new ProcessCanceledException();
       return ChangeListManager.getInstance(project).getChange(filePath);
     });
@@ -195,7 +198,7 @@ public final class ChangesUtil {
    */
   @Deprecated
   private static @Nullable VirtualFile getValidParentUnderReadAction(@NotNull FilePath filePath) {
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       VirtualFile result = null;
       FilePath parent = filePath;
       LocalFileSystem lfs = LocalFileSystem.getInstance();
@@ -243,11 +246,11 @@ public final class ChangesUtil {
                                            @NotNull VcsSeparator<? super T> separator,
                                            @NotNull PerVcsProcessor<T> processor) {
     Map<AbstractVcs, List<T>> changesByVcs = new HashMap<>();
-    ReadAction.run(() -> {
+    ReadAction.runBlocking(() -> {
       for (T item : items) {
         AbstractVcs vcs = separator.getVcsFor(item);
         if (vcs != null) {
-          changesByVcs.computeIfAbsent(vcs, __ -> new ArrayList<>()).add(item);
+          changesByVcs.computeIfAbsent(vcs, _ -> new ArrayList<>()).add(item);
         }
       }
     });

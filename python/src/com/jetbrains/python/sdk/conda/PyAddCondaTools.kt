@@ -2,46 +2,62 @@
 package com.jetbrains.python.sdk.conda
 
 import com.intellij.execution.Platform
-import com.intellij.execution.process.CapturingProcessHandler
-import com.intellij.execution.process.ProcessIOExecutorService
-import com.intellij.execution.process.ProcessOutput
-import com.intellij.execution.processTools.getResultStdoutStr
-import com.intellij.execution.processTools.mapFlat
-import com.intellij.execution.target.*
-import com.intellij.execution.target.local.LocalTargetEnvironmentRequest
-import com.intellij.openapi.application.edtWriteAction
-import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.progress.EmptyProgressIndicator
-import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.execution.target.FullPathOnTarget
+import com.intellij.execution.target.TargetEnvironmentConfiguration
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.projectRoots.impl.SdkConfigurationUtil
-import com.intellij.platform.util.progress.RawProgressReporter
+import com.intellij.platform.eel.provider.localEel
+import com.intellij.python.community.execService.BinOnEel
+import com.intellij.python.community.execService.BinOnTarget
 import com.jetbrains.python.conda.loadLocalPythonCondaPath
 import com.jetbrains.python.conda.saveLocalPythonCondaPath
 import com.jetbrains.python.errorProcessing.PyResult
-import com.jetbrains.python.errorProcessing.asPythonResult
-import com.jetbrains.python.errorProcessing.emit
 import com.jetbrains.python.getOrThrow
-import com.jetbrains.python.onFailure
 import com.jetbrains.python.psi.LanguageLevel
-import com.jetbrains.python.run.PythonInterpreterTargetEnvironmentFactory
 import com.jetbrains.python.sdk.PythonSdkAdditionalData
 import com.jetbrains.python.sdk.PythonSdkType
+import com.jetbrains.python.sdk.SdkCreationRequest
+import com.jetbrains.python.sdk.ToolCommandExecutor
+import com.jetbrains.python.sdk.ToolSearchPath
+import com.jetbrains.python.sdk.add.v2.EelFileSystem
+import com.jetbrains.python.sdk.add.v2.FileSystem
+import com.jetbrains.python.sdk.add.v2.PathHolder
+import com.jetbrains.python.sdk.conda.execution.CondaExecutor
+import com.jetbrains.python.sdk.createSdk
 import com.jetbrains.python.sdk.flavors.PyFlavorAndData
-import com.jetbrains.python.sdk.flavors.conda.*
+import com.jetbrains.python.sdk.flavors.conda.CondaEnvSdkFlavor
+import com.jetbrains.python.sdk.flavors.conda.NewCondaEnvRequest
+import com.jetbrains.python.sdk.flavors.conda.PyCondaCommand
+import com.jetbrains.python.sdk.flavors.conda.PyCondaEnv
+import com.jetbrains.python.sdk.flavors.conda.PyCondaEnvIdentity
+import com.jetbrains.python.sdk.flavors.conda.PyCondaFlavorData
+import com.jetbrains.python.sdk.pyRichSdk
 import com.jetbrains.python.target.PyTargetAwareAdditionalData
-import com.jetbrains.python.util.ShowingMessageErrorSync
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.future.await
-import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Path
-import java.util.concurrent.CompletableFuture
-import kotlin.coroutines.CoroutineContext
-import kotlin.io.path.isExecutable
+import kotlin.io.path.Path
 import kotlin.io.path.pathString
+
+private val CONDA_TOOL: ToolCommandExecutor = ToolCommandExecutor(
+  "conda",
+  additionalSearchPaths = listOf(
+    ToolSearchPath.RelativePathFromHome(listOf("anaconda3", "bin"), Platform.UNIX),
+    ToolSearchPath.RelativePathFromHome(listOf("miniconda3", "bin"), Platform.UNIX),
+    ToolSearchPath.AbsolutePath("/usr/local/bin", Platform.UNIX),
+    ToolSearchPath.RelativePathFromHome(listOf("opt", "miniconda3", "bin"), Platform.UNIX),
+    ToolSearchPath.RelativePathFromHome(listOf("opt", "anaconda3", "bin"), Platform.UNIX),
+    ToolSearchPath.AbsolutePath("/opt/miniconda3/condabin", Platform.UNIX),
+    ToolSearchPath.AbsolutePath("/opt/conda/bin", Platform.UNIX),
+    ToolSearchPath.AbsolutePath("/opt/anaconda3/condabin", Platform.UNIX),
+    ToolSearchPath.AbsolutePath("/opt/homebrew/anaconda3/bin", Platform.UNIX),
+    ToolSearchPath.RelativePath("ALLUSERSPROFILE", listOf("Anaconda3", "condabin"), Platform.WINDOWS),
+    ToolSearchPath.RelativePath("ALLUSERSPROFILE", listOf("Miniconda3", "condabin"), Platform.WINDOWS),
+    ToolSearchPath.RelativePath("USERPROFILE", listOf("Anaconda3", "condabin"), Platform.WINDOWS),
+    ToolSearchPath.RelativePath("USERPROFILE", listOf("Miniconda3", "condabin"), Platform.WINDOWS),
+  ),
+  getToolPathFromSettings = { loadLocalPythonCondaPath()?.pathString }
+)
 
 /**
  * Levels to be used for new conda envs
@@ -56,42 +72,46 @@ val condaLatestSupportedLanguage: LanguageLevel
     condaSupportedLanguages.maxWith(LanguageLevel.VERSION_COMPARATOR)
 
 
-/**
- * See `com.jetbrains.env.python.conda.PyCondaSdkTest`
- */
+@Deprecated("Use `createCondaSdkFromExistingEnvironment` instead")
 suspend fun PyCondaCommand.createCondaSdkFromExistingEnv(
   condaIdentity: PyCondaEnvIdentity,
   existingSdks: List<Sdk>,
-  project: Project?,
-): Sdk {
+  @Suppress("unused", "UNUSED_PARAMETER") project: Project? = null,
+): Sdk = createCondaSdkFromExistingEnvironment(condaIdentity, existingSdks).getOrThrow()
+
+
+/**
+ * See `com.jetbrains.env.python.conda.PyCondaSdkTest`
+ */
+suspend fun PyCondaCommand.createCondaSdkFromExistingEnvironment(
+  condaIdentity: PyCondaEnvIdentity,
+  existingSdks: List<Sdk>,
+): PyResult<Sdk> {
   val condaEnv = PyCondaEnv(condaIdentity, fullCondaPathOnTarget)
   val flavorAndData = PyFlavorAndData(PyCondaFlavorData(condaEnv), CondaEnvSdkFlavor)
+  val interpreterPath = getCondaPythonBinaryPath(condaEnv, targetConfig).getOr { return it }
 
-  val (additionalData, customSdkSuggestedName) = when (targetConfig) {
-    null -> PythonSdkAdditionalData(flavorAndData) to condaIdentity.userReadableName
-    else -> {
-      val data = PyTargetAwareAdditionalData(flavorAndData, targetConfig)
-      val name = PythonInterpreterTargetEnvironmentFactory.findDefaultSdkName(project, data, condaIdentity.userReadableName)
-      data to name
+  val targetConfig = targetConfig
+  val creationRequest = if (targetConfig == null) {
+    SdkCreationRequest.EelSdk(Path(interpreterPath), PythonSdkAdditionalData(flavorAndData))
+  }
+  else {
+    val addData = PyTargetAwareAdditionalData(flavorAndData, targetConfig).also {
+      it.interpreterPath = interpreterPath
     }
+    SdkCreationRequest.TargetSdk(interpreterPath, addData)
   }
 
-  val sdk = ProjectJdkTable.getInstance().createSdk(
-    SdkConfigurationUtil.createUniqueSdkName(customSdkSuggestedName, existingSdks),
-    PythonSdkType.getInstance()
-  )
-  val sdkModificator = sdk.sdkModificator
-  sdkModificator.sdkAdditionalData = additionalData
-  // homePath is not required by conda, but used by lots of tools all over the code and required by CondaPathFix
-  // Because homePath is not set yet, CondaPathFix does not work
-  sdkModificator.homePath = getCondaPythonBinaryPath(project, condaEnv, targetConfig).onFailure {
-    ShowingMessageErrorSync.emit(it, project)
-  }.getOrThrow()
-  edtWriteAction {
-    sdkModificator.commitChanges()
+  val sdkType = PythonSdkType.getInstance()
+  val name = SdkConfigurationUtil.createUniqueSdkName(sdkType.suggestSdkName(null, interpreterPath), existingSdks)
+  val sdk = creationRequest.createSdk( name).getOr { return it }
+
+  sdk.pyRichSdk()
+  if (targetConfig == null) {
+    saveLocalPythonCondaPath(Path.of(fullCondaPathOnTarget))
   }
-  saveLocalPythonCondaPath(Path.of(fullCondaPathOnTarget))
-  return sdk
+  sdkType.setupSdkPaths(sdk)
+  return PyResult.success(sdk)
 }
 
 private const val PRINT_SYS_EXECUTABLE_SCRIPT = "import sys; print(sys.executable)"
@@ -100,34 +120,16 @@ private const val PRINT_SYS_EXECUTABLE_SCRIPT = "import sys; print(sys.executabl
  * @return path to Conda interpreter binary on target
  */
 private suspend fun getCondaPythonBinaryPath(
-  project: Project?,
   condaEnv: PyCondaEnv,
   targetConfig: TargetEnvironmentConfiguration?,
-): PyResult<FullPathOnTarget> =
-  getCondaInterpreterOutput(project, condaEnv, EmptyProgressIndicator(), PRINT_SYS_EXECUTABLE_SCRIPT, targetConfig).mapSuccess { it.trim() }
-
-/**
- * Runs python [command] and returns stdout or error
- */
-private suspend fun getCondaInterpreterOutput(
-  project: Project?,
-  condaEnv: PyCondaEnv,
-  indicator: ProgressIndicator,
-  command: String,
-  targetConfig: TargetEnvironmentConfiguration?,
-): PyResult<String> {
-  val targetEnvRequest = targetConfig?.createEnvironmentRequest(project) ?: LocalTargetEnvironmentRequest()
-
-  val cmdBuilder = TargetedCommandLineBuilder(targetEnvRequest)
-  addCondaPythonToTargetCommandLine(cmdBuilder, condaEnv, sdk = null)
-  cmdBuilder.addParameter("-c")
-  cmdBuilder.addParameter(command)
-  val cmd = cmdBuilder.build()
-
-  val environment = targetEnvRequest.prepareEnvironment(TargetProgressIndicatorAdapter(indicator))
-  return withContext(Dispatchers.IO) {
-    environment.createProcessWithResult(cmd).mapFlat { it.getResultStdoutStr() }.asPythonResult()
+): PyResult<FullPathOnTarget> {
+  val binaryToExec = when (targetConfig) {
+    null -> BinOnEel(Path(condaEnv.fullCondaPathOnTarget))
+    else -> BinOnTarget(condaEnv.fullCondaPathOnTarget, targetConfig)
   }
+  return CondaExecutor.runPythonInCondaEnv(
+    binaryToExec, condaEnv.envIdentity, "-c", PRINT_SYS_EXECUTABLE_SCRIPT
+  ).mapSuccess { it.trim() }
 }
 
 /**
@@ -135,18 +137,16 @@ private suspend fun getCondaInterpreterOutput(
  */
 suspend fun PyCondaCommand.createCondaSdkAlongWithNewEnv(
   newCondaEnvInfo: NewCondaEnvRequest,
-  uiContext: CoroutineContext,
   existingSdks: List<Sdk>,
-  project: Project,
-  reporter: RawProgressReporter? = null,
 ): PyResult<Sdk> {
   PyCondaEnv.createEnv(this, newCondaEnvInfo).getOr { return it }
-  val sdk = createCondaSdkFromExistingEnv(
+  val sdk = createCondaSdkFromExistingEnvironment(
     condaIdentity = newCondaEnvInfo.toIdentity(),
     existingSdks = existingSdks,
-    project = project,
-  )
-  saveLocalPythonCondaPath(Path.of(this@createCondaSdkAlongWithNewEnv.fullCondaPathOnTarget))
+  ).getOr { return it }
+  if (targetConfig == null) {
+    saveLocalPythonCondaPath(Path.of(this@createCondaSdkAlongWithNewEnv.fullCondaPathOnTarget))
+  }
 
   return PyResult.success(sdk)
 }
@@ -158,114 +158,12 @@ private fun NewCondaEnvRequest.toIdentity(): PyCondaEnvIdentity =
   }
 
 /**
- * Detects conda binary in well-known locations on the local machine.
+ * Detects conda binary in PATH and then well-known locations on the local machine.
  */
-suspend fun suggestCondaPath(filter: (FullPathOnTarget) -> Boolean = { true }): FullPathOnTarget? {
-  return suggestCondaPath(TargetEnvironmentRequestCommandExecutor(LocalTargetEnvironmentRequest()), filter)
-}
+suspend fun findCondaLocal(filter: (PathHolder.Eel) -> Boolean = { true }): PathHolder.Eel? = findConda(EelFileSystem(localEel), filter)
 
 /**
- * Detects conda binary in well-known locations on target
+ * Detects conda binary in PATH and then well-known locations on the provided FileSystem
  */
-internal suspend fun suggestCondaPath(targetCommandExecutor: TargetCommandExecutor, filter: (FullPathOnTarget) -> Boolean = { true }): FullPathOnTarget? {
-  val targetPlatform = withContext(Dispatchers.IO) {
-    targetCommandExecutor.targetPlatform.await()
-  }
-  var possiblePaths: Array<FullPathOnTarget> = when (targetPlatform.platform) {
-    Platform.UNIX -> arrayOf(
-      "~/anaconda3/bin/conda",
-      "~/miniconda3/bin/conda",
-      "/usr/local/bin/conda",
-      "~/opt/miniconda3/condabin/conda",
-      "~/opt/anaconda3/condabin/conda",
-      "/opt/miniconda3/condabin/conda",
-      "/opt/conda/bin/conda",
-      "/opt/anaconda3/condabin/conda",
-      "/opt/homebrew/anaconda3/bin/conda",
-    )
-    Platform.WINDOWS -> arrayOf(
-      "%ALLUSERSPROFILE%\\Anaconda3\\condabin\\conda.bat",
-      "%ALLUSERSPROFILE%\\Miniconda3\\condabin\\conda.bat",
-      "%USERPROFILE%\\Anaconda3\\condabin\\conda.bat",
-      "%USERPROFILE%\\Miniconda3\\condabin\\conda.bat",
-    )
-  }
-  // If conda is local then store path
-  if (targetCommandExecutor.isLocalMachineExecutor) {
-    loadLocalPythonCondaPath()?.let {
-      possiblePaths = arrayOf(it.pathString) + possiblePaths
-    }
-  }
-  return possiblePaths.firstNotNullOfOrNull { targetCommandExecutor.getExpandedPathIfExecutable(it)?.takeIf { filter(it) } }
-}
-
-private val TargetCommandExecutor.isLocalMachineExecutor: Boolean
-  get() = this is TargetEnvironmentRequestCommandExecutor && request is LocalTargetEnvironmentRequest
-
-private fun TargetCommandExecutor.executeShellCommand(command: String): CompletableFuture<ProcessOutput> =
-  targetPlatform
-    .thenApply { targetPlatform -> command.asCommandInShell(targetPlatform) }
-    .thenCompose { commandInShell -> execute(commandInShell) }
-
-private fun String.asCommandInShell(targetPlatform: TargetPlatform): List<String> =
-  if (targetPlatform.platform == Platform.WINDOWS) listOf("cmd.exe", "/c", this)
-  else listOf("sh", "-c", this)
-
-/**
- * If [file] is executable returns it in expanded (env vars resolved) manner.
- */
-private suspend fun TargetCommandExecutor.getExpandedPathIfExecutable(file: FullPathOnTarget): FullPathOnTarget? = withContext(
-  Dispatchers.IO) {
-  if (isLocalMachineExecutor) {
-    val expandedPath = expandPathLocally(file)
-    return@withContext if (Path.of(expandedPath).isExecutable()) expandedPath else null
-  }
-  else {
-    val expandedPath = executeShellCommand("echo $file").thenApply(ProcessOutput::getStdout).thenApply(String::trim).await()
-    // TODO: Should we test with browsable target as well?
-
-    if (targetPlatform.await().platform == Platform.WINDOWS) {
-      logger<TargetCommandExecutor>().warn("Remote windows target not supported")
-      return@withContext null
-    }
-    return@withContext if (executeShellCommand("test -x $expandedPath").await().exitCode == 0) expandedPath
-    else null
-  }
-}
-
-@ApiStatus.Internal
-interface TargetCommandExecutor {
-  val targetPlatform: CompletableFuture<TargetPlatform>
-  fun execute(command: List<String>): CompletableFuture<ProcessOutput>
-
-  /**
-   * Command will be executed on local machine
-   */
-  val local: Boolean
-}
-
-@ApiStatus.Internal
-class TargetEnvironmentRequestCommandExecutor(internal val request: TargetEnvironmentRequest) : TargetCommandExecutor {
-  override val targetPlatform: CompletableFuture<TargetPlatform> = CompletableFuture.completedFuture(request.targetPlatform)
-  override val local: Boolean = request is LocalTargetEnvironmentRequest
-  override fun execute(command: List<String>): CompletableFuture<ProcessOutput> {
-    val commandLineBuilder = TargetedCommandLineBuilder(request)
-    commandLineBuilder.setExePath(command.first())
-    commandLineBuilder.addParameters(command.subList(fromIndex = 1, toIndex = command.size))
-    val process = request.prepareEnvironment(TargetProgressIndicator.EMPTY).createProcess(commandLineBuilder.build())
-    return CompletableFuture.supplyAsync({ process.captureProcessOutput(command) }, ProcessIOExecutorService.INSTANCE)
-  }
-}
-
-private fun Process.captureProcessOutput(commandLine: List<String>): ProcessOutput {
-  val commandLineString = commandLine.joinToString(separator = " ")
-  return CapturingProcessHandler(this, Charsets.UTF_8, commandLineString).runProcess()
-}
-
-internal class IntrospectableCommandExecutor(private val introspectable: LanguageRuntimeType.Introspectable) : TargetCommandExecutor {
-  override val local: Boolean = false // we never introspect local machine for now
-  override val targetPlatform: CompletableFuture<TargetPlatform>
-    get() = introspectable.targetPlatform
-
-  override fun execute(command: List<String>): CompletableFuture<ProcessOutput> = introspectable.promiseExecuteScript(command)
-}
+internal suspend fun <P : PathHolder> findConda(fileSystem: FileSystem<P>, filter: (P) -> Boolean = { true }): P? =
+  CONDA_TOOL.getToolExecutable(fileSystem, null, filter)

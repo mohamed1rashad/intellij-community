@@ -7,15 +7,46 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDirectoryService;
+import com.intellij.psi.JavaDocTokenType;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiJavaModule;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiPackageStatement;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.codeStyle.JavaFileCodeStyleFacade;
 import com.intellij.psi.impl.source.javadoc.PsiDocMethodOrFieldRef;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.javadoc.PsiDocFragmentRef;
 import com.intellij.psi.javadoc.PsiDocTagValue;
+import com.intellij.psi.javadoc.PsiDocToken;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.templateLanguages.TemplateLanguageUtil;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.MethodSignature;
+import com.intellij.psi.util.MethodSignatureUtil;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
@@ -107,21 +138,25 @@ public final class JavaDocUtil {
 
     int poundIndex = refTextCorrected.indexOf('#');
     if (poundIndex < 0) {
-      return findClassOrPackage(manager, context, useNavigationElement, facade, refTextCorrected);
+      PsiElement maybeClass = findClassOrPackage(manager, context, useNavigationElement, facade, refTextCorrected);
+      if (maybeClass != null) return maybeClass;
     }
-    else {
-      int fragmentIndex = refTextCorrected.indexOf("##");
-      String classRef = refTextCorrected.substring(0, poundIndex).trim();
-      PsiClass aClass = classRef.isEmpty()
-                        ? PsiTreeUtil.getParentOfType(context, PsiClass.class, false)
-                        : findClassFromRef(manager, facade, classRef, context);
-      if (aClass == null) return null;
-      if (fragmentIndex >= 0) {
-        return findFragmentOwner(aClass, useNavigationElement, refTextCorrected, fragmentIndex, manager);
-      } else {
-        return findReference(aClass, useNavigationElement, refTextCorrected, poundIndex);
-      }
+
+    int fragmentIndex = refTextCorrected.indexOf("##");
+    String classRef = refTextCorrected.substring(0, Math.max(poundIndex, 0)).trim();
+    PsiClass aClass = classRef.isEmpty()
+                      ? PsiTreeUtil.getParentOfType(context, PsiClass.class, false)
+                      : findClassFromRef(manager, facade, classRef, context);
+    while (aClass != null) {
+      PsiElement reference = fragmentIndex >= 0
+                             ? findFragmentOwner(aClass, useNavigationElement, refTextCorrected, fragmentIndex, manager)
+                             : findReference(aClass, context, useNavigationElement, refTextCorrected, poundIndex);
+      if (reference != null) return reference;
+
+      aClass = PsiTreeUtil.getParentOfType(aClass, PsiClass.class, true);
     }
+    return null;
+
   }
 
   private static @Nullable PsiElement findClassOrPackage(@NotNull PsiManager manager,
@@ -140,11 +175,19 @@ public final class JavaDocUtil {
     return null;
   }
 
+  /// Find a field or method referenced by `refClass`
+  ///
+  /// @param poundIndex the index where `#` is in `refTextCorrected`.
   private static @Nullable PsiElement findReference(@NotNull PsiClass refClass,
+                                                    PsiElement context,
                                                     boolean useNavigationElement,
                                                     String refTextCorrected,
                                                     int poundIndex) {
-    PsiElement member = findReferencedMember(refClass, refTextCorrected.substring(poundIndex + 1), refClass);
+    PsiElement member = findReferencedMember(refClass, refTextCorrected.substring(poundIndex + 1), context);
+    if (poundIndex >= 0 && member instanceof PsiClass && member != refClass) {
+      // Psi subclasses class cannot be referred through `#` but the same class implicit constructor can
+      return null;
+    }
     return useNavigationElement && member != null ? member.getNavigationElement() : member;
   }
 
@@ -203,6 +246,9 @@ public final class JavaDocUtil {
       for (PsiMethod method : methods) {
         if (method.getName().equals(name)) return method;
       }
+      // Implicit constructor is not part of the methods
+      if (memberRefText.equals(aClass.getName())) return aClass;
+
       return null;
     }
     else {
@@ -246,7 +292,13 @@ public final class JavaDocUtil {
 
       PsiMethod[] methods = PsiDocMethodOrFieldRef.findMethods(methodSignature, aClass, name, allMethods);
 
-      if (methods.length == 0) return null;
+      if (methods.length == 0) {
+        // Check for implicit constructor
+        if (types.length == 0 && name.equals(aClass.getName())) {
+          return aClass;
+        }
+        return null;
+      }
 
       PsiMethod found = methods[0];
 
@@ -474,7 +526,7 @@ public final class JavaDocUtil {
   }
 
   public static boolean isInsidePackageInfo(@Nullable PsiDocComment containingComment) {
-    return containingComment != null && containingComment.getOwner() == null && containingComment.getParent() instanceof PsiJavaFile;
+    return containingComment != null && "package-info.java".equals(containingComment.getContainingFile().getName());
   }
 
   public static boolean isDanglingDocComment(@NotNull PsiDocComment comment, boolean ignoreCopyright) {
@@ -482,8 +534,7 @@ public final class JavaDocUtil {
       return false;
     }
     if (isInsidePackageInfo(comment) &&
-        PsiTreeUtil.skipWhitespacesAndCommentsForward(comment) instanceof PsiPackageStatement &&
-        "package-info.java".equals(comment.getContainingFile().getName())) {
+        PsiTreeUtil.skipWhitespacesAndCommentsForward(comment) instanceof PsiPackageStatement) {
       return false;
     }
     if (ignoreCopyright && comment.getPrevSibling() == null && comment.getParent() instanceof PsiFile) {
@@ -510,5 +561,55 @@ public final class JavaDocUtil {
 
   public static boolean shouldRunInspectionOnOldMarkdownComment(@NotNull PsiElement element) {
     return shouldRunInspectionOnOldMarkdownComment(PsiTreeUtil.getParentOfType(element, PsiDocComment.class, false, PsiMember.class));
+  }
+
+  /// @param tagName The name, expected to be in lowercase
+  /// @param strict  If `true`, the method expects the `tagName` to be the only text right before the `element`
+  public static boolean isInHtmlTag(@NotNull PsiElement element, CharSequence tagName, boolean strict) {
+    // Check tag before element
+    PsiElement sibling = element.getPrevSibling();
+    previousSiblingStrictBreak:
+    while (sibling != null) {
+      if (sibling instanceof PsiDocToken && sibling.getNode().getElementType() != JavaDocTokenType.DOC_COMMENT_LEADING_ASTERISKS) {
+        String text = StringUtil.toLowerCase(sibling.getText());
+        int pos = text.lastIndexOf(tagName + ">");
+        if (pos > 0) {
+          char startChar = text.charAt(pos - 1);
+          if (startChar == '<') {
+            if (!strict) return true;
+            // previous tag is good, check for forward tag
+            if (text.trim().endsWith(tagName + ">")) break previousSiblingStrictBreak;
+          }
+          if (startChar == '/') {
+            // Found a closing tag
+            return false;
+          }
+        }
+        else if (strict && !text.trim().isEmpty()) {
+          return false;
+        }
+      }
+      sibling = sibling.getPrevSibling();
+    }
+
+    if (strict) {
+      // Check closing tag after element
+      sibling = element.getNextSibling();
+      while (sibling != null) {
+        if (sibling instanceof PsiDocToken && sibling.getNode().getElementType() != JavaDocTokenType.DOC_COMMENT_LEADING_ASTERISKS) {
+          String text = StringUtil.toLowerCase(sibling.getText());
+          int pos = text.indexOf(tagName + ">");
+          if (pos > 0 && text.charAt(pos - 1) == '/' && text.trim().startsWith("</" + tagName + ">")) {
+            return true;
+          }
+          else if (!text.trim().isEmpty()) {
+            return false;
+          }
+        }
+        sibling = sibling.getNextSibling();
+      }
+    }
+
+    return false;
   }
 }

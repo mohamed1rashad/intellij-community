@@ -404,15 +404,6 @@ c:com.intellij.codeInsight.completion.PlainTextSymbolCompletionContributorEP
 - com.intellij.lang.LanguageExtensionPoint
 - <init>():V
 - s:forLanguage(com.intellij.lang.Language):com.intellij.codeInsight.completion.PlainTextSymbolCompletionContributor
-c:com.intellij.codeInsight.completion.SkipAutopopupInComments
-- com.intellij.codeInsight.completion.CompletionConfidence
-- <init>():V
-- shouldSkipAutopopup(com.intellij.psi.PsiElement,com.intellij.psi.PsiFile,I):com.intellij.util.ThreeState
-c:com.intellij.codeInsight.completion.SkipAutopopupInStrings
-- com.intellij.codeInsight.completion.CompletionConfidence
-- <init>():V
-- s:isInStringLiteral(com.intellij.psi.PsiElement):Z
-- shouldSkipAutopopup(com.intellij.psi.PsiElement,com.intellij.psi.PsiFile,I):com.intellij.util.ThreeState
 c:com.intellij.codeInsight.completion.StartOnlyMatcher
 - com.intellij.codeInsight.completion.PrefixMatcher
 - <init>(com.intellij.codeInsight.completion.PrefixMatcher):V
@@ -449,12 +440,10 @@ c:com.intellij.codeInsight.daemon.LineMarkerInfo
 - separatorPlacement:com.intellij.openapi.editor.markup.SeparatorPlacement
 - f:startOffset:I
 - updatePass:I
-- <init>(com.intellij.psi.PsiElement,I,javax.swing.Icon,I,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,I,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment,java.util.function.Supplier):V
-- p:<init>(com.intellij.psi.SmartPsiElementPointer,com.intellij.openapi.util.TextRange,javax.swing.Icon,java.util.function.Supplier,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment):V
 - createGutterRenderer():com.intellij.openapi.editor.markup.GutterIconRenderer
 - getEditorFilter():com.intellij.openapi.editor.markup.MarkupEditorFilter
 - getElement():com.intellij.psi.PsiElement
@@ -513,7 +502,6 @@ c:com.intellij.codeInsight.daemon.NavigateAction
 - s:setNavigateAction(com.intellij.codeInsight.daemon.LineMarkerInfo,java.lang.String,java.lang.String,javax.swing.Icon):com.intellij.codeInsight.daemon.LineMarkerInfo
 c:com.intellij.codeInsight.daemon.RelatedItemLineMarkerInfo
 - com.intellij.codeInsight.daemon.MergeableLineMarkerInfo
-- <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,I,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment,com.intellij.openapi.util.NotNullLazyValue):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment,com.intellij.openapi.util.NotNullFactory):V
 - <init>(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,javax.swing.Icon,com.intellij.util.Function,com.intellij.util.Function,com.intellij.codeInsight.daemon.GutterIconNavigationHandler,com.intellij.openapi.editor.markup.GutterIconRenderer$Alignment,com.intellij.openapi.util.NotNullFactory,java.util.function.Supplier):V
 - canMergeWith(com.intellij.codeInsight.daemon.MergeableLineMarkerInfo):Z
@@ -879,7 +867,6 @@ f:com.intellij.codeInsight.hints.declarative.PsiPointerInlayActionNavigationHand
 - sf:Companion:com.intellij.codeInsight.hints.declarative.PsiPointerInlayActionNavigationHandler$Companion
 - sf:HANDLER_ID:java.lang.String
 - <init>():V
-- handleClick(com.intellij.openapi.editor.Editor,com.intellij.codeInsight.hints.declarative.InlayActionPayload):V
 f:com.intellij.codeInsight.hints.declarative.PsiPointerInlayActionNavigationHandler$Companion
 f:com.intellij.codeInsight.hints.declarative.PsiPointerInlayActionPayload
 - com.intellij.codeInsight.hints.declarative.InlayActionPayload
@@ -1161,9 +1148,6 @@ c:com.intellij.codeInspection.ui.SingleIntegerFieldOptionsPanel
 - <init>(java.lang.String,com.intellij.codeInspection.InspectionProfileEntry,java.lang.String,I):V
 - s:createIntegerFieldTrackingValue(com.intellij.codeInspection.InspectionProfileEntry,java.lang.String,I):javax.swing.JFormattedTextField
 - s:setupIntegerFieldTrackingValue(javax.swing.JFormattedTextField,com.intellij.codeInspection.InspectionProfileEntry,java.lang.String):V
-c:com.intellij.execution.ExecutionAdapter
-- com.intellij.execution.ExecutionListener
-- <init>():V
 a:com.intellij.execution.ExecutionTargetProvider
 - sf:EXTENSION_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - <init>():V
@@ -2114,17 +2098,7 @@ f:com.intellij.ide.bookmark.FileBookmarksListener
 a:com.intellij.ide.favoritesTreeView.FavoriteNodeProvider
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - <init>():V
-- createNode(com.intellij.openapi.project.Project,java.lang.Object,com.intellij.ide.projectView.ViewSettings):com.intellij.ide.util.treeView.AbstractTreeNode
-- a:createPathFromUrl(com.intellij.openapi.project.Project,java.lang.String,java.lang.String):java.lang.Object[]
-- a:elementContainsFile(java.lang.Object,com.intellij.openapi.vfs.VirtualFile):Z
-- a:getElementLocation(java.lang.Object):java.lang.String
-- a:getElementModuleName(java.lang.Object):java.lang.String
-- a:getElementUrl(java.lang.Object):java.lang.String
-- a:getElementWeight(java.lang.Object,Z):I
-- a:getFavoriteNodes(com.intellij.openapi.actionSystem.DataContext,com.intellij.ide.projectView.ViewSettings):java.util.Collection
 - a:getFavoriteTypeId():java.lang.String
-- getPsiElement(java.lang.Object):com.intellij.psi.PsiElement
-- a:isInvalidElement(java.lang.Object):Z
 c:com.intellij.ide.fileTemplates.FileTemplateGroupDescriptor
 - com.intellij.ide.fileTemplates.FileTemplateDescriptor
 - <init>(java.lang.String,javax.swing.Icon):V
@@ -2192,15 +2166,6 @@ com.intellij.ide.projectView.ProjectViewSelectionListener
 - a:onChanged():V
 f:com.intellij.ide.projectView.ProjectViewSelectionTopicKt
 - sf:PROJECT_VIEW_SELECTION_TOPIC:com.intellij.util.messages.Topic
-Fa:com.intellij.ide.projectView.impl.AbstractUrl
-- a:createPath(com.intellij.openapi.project.Project):java.lang.Object[]
-- createUrl(java.lang.String,java.lang.String,java.lang.String):com.intellij.ide.projectView.impl.AbstractUrl
-- a:createUrlByElement(java.lang.Object):com.intellij.ide.projectView.impl.AbstractUrl
-- equals(java.lang.Object):Z
-- getType():java.lang.String
-- getURL():java.lang.String
-- hashCode():I
-- write(org.jdom.Element):V
 c:com.intellij.ide.todo.TodoPanelSettings
 - areFlattenPackages:Z
 - areModulesShown:Z
@@ -2239,7 +2204,7 @@ a:com.intellij.ide.util.frameworkSupport.FrameworkSupportConfigurable
 c:com.intellij.ide.util.frameworkSupport.FrameworkSupportConfigurableBase
 - com.intellij.ide.util.frameworkSupport.FrameworkSupportConfigurable
 - pf:myFrameworkSupportModel:com.intellij.ide.util.frameworkSupport.FrameworkSupportModel
-- b:$$$getRootComponent$$$():javax.swing.JComponent
+- $$$getRootComponent$$$():javax.swing.JComponent
 - <init>(com.intellij.ide.util.frameworkSupport.FrameworkSupportProviderBase,com.intellij.ide.util.frameworkSupport.FrameworkSupportModel):V
 - <init>(com.intellij.ide.util.frameworkSupport.FrameworkSupportProviderBase,com.intellij.ide.util.frameworkSupport.FrameworkSupportModel,java.util.List,java.lang.String):V
 - addSupport(com.intellij.openapi.module.Module,com.intellij.openapi.roots.ModifiableRootModel,com.intellij.openapi.roots.libraries.Library):V
@@ -2334,11 +2299,6 @@ a:com.intellij.lang.ExpressionTypeProvider
 - a:getExpressionsAt(com.intellij.psi.PsiElement):java.util.List
 - a:getInformationHint(com.intellij.psi.PsiElement):java.lang.String
 - hasAdvancedInformation():Z
-f:com.intellij.lang.LangBundle
-- sf:BUNDLE:java.lang.String
-- s:getLocale():java.util.Locale
-- s:message(java.lang.String,java.lang.Object[]):java.lang.String
-- s:messagePointer(java.lang.String,java.lang.Object[]):java.util.function.Supplier
 f:com.intellij.lang.LanguageDependentMembersRefactoringSupport
 - com.intellij.lang.LanguageExtension
 - sf:INSTANCE:com.intellij.lang.LanguageDependentMembersRefactoringSupport
@@ -2351,11 +2311,6 @@ f:com.intellij.lang.LanguagePsiElementExternalizer
 f:com.intellij.lang.LanguageSurrounders
 - com.intellij.lang.LanguageExtension
 - sf:INSTANCE:com.intellij.lang.LanguageSurrounders
-f:com.intellij.lang.LanguageWordCompletion
-- com.intellij.lang.LanguageExtension
-- sf:INSTANCE:com.intellij.lang.LanguageWordCompletion
-- isEnabledIn(com.intellij.psi.tree.IElementType):Z
-- isWordCompletionInDumbModeEnabled(com.intellij.lang.Language):Z
 com.intellij.lang.PsiElementExternalizer
 - a:findByQualifiedName(com.intellij.openapi.project.Project,java.lang.String):com.intellij.psi.PsiElement
 - a:getQualifiedName(com.intellij.psi.PsiElement):java.lang.String
@@ -3589,7 +3544,6 @@ f:com.intellij.openapi.module.ModuleTypeEP
 - setPluginDescriptor(com.intellij.openapi.extensions.PluginDescriptor):V
 f:com.intellij.openapi.module.ModuleUtil
 - com.intellij.openapi.module.ModuleUtilCore
-- s:getModuleType(com.intellij.openapi.module.Module):com.intellij.openapi.module.ModuleType
 - s:getModulesOfType(com.intellij.openapi.project.Project,com.intellij.openapi.module.ModuleType):java.util.Collection
 - s:hasModulesOfType(com.intellij.openapi.project.Project,com.intellij.openapi.module.ModuleType):Z
 - s:hasTestSourceRoots(com.intellij.openapi.project.Project):Z
@@ -3671,11 +3625,6 @@ c:com.intellij.openapi.projectRoots.ui.PathEditor
 - p:setEnabled(Z):V
 - p:setModified(Z):V
 - p:setSelectedRoots(com.intellij.openapi.vfs.VirtualFile[]):V
-pc:com.intellij.openapi.projectRoots.ui.PathEditor$PathCellRenderer
-- com.intellij.ui.ColoredListCellRenderer
-- p:<init>():V
-- p:customizeCellRenderer(javax.swing.JList,com.intellij.openapi.vfs.VirtualFile,I,Z,Z):V
-- p:getItemIcon(com.intellij.openapi.vfs.VirtualFile):javax.swing.Icon
 c:com.intellij.openapi.projectRoots.ui.SdkPathEditor
 - com.intellij.openapi.projectRoots.ui.PathEditor
 - <init>(java.lang.String,com.intellij.openapi.roots.OrderRootType,com.intellij.openapi.fileChooser.FileChooserDescriptor):V
@@ -3701,7 +3650,6 @@ a:com.intellij.openapi.roots.ui.configuration.LibrarySettingsProvider
 - s:getAdditionalSettingsConfigurable(com.intellij.openapi.project.Project,com.intellij.openapi.roots.libraries.LibraryKind):com.intellij.openapi.options.Configurable
 - a:getLibraryKind():com.intellij.openapi.roots.libraries.LibraryKind
 c:com.intellij.openapi.roots.ui.configuration.ProjectSettingsService
-- <init>():V
 - canOpenContentEntriesSettings():Z
 - canOpenLibraryOrSdkSettings(com.intellij.openapi.roots.OrderEntry):Z
 - canOpenModuleDependenciesSettings():Z
@@ -4387,8 +4335,9 @@ a:com.intellij.psi.impl.include.FileIncludeManager
 - a:resolveFileInclude(com.intellij.psi.impl.include.FileIncludeInfo,com.intellij.psi.PsiFile):com.intellij.psi.PsiFileSystemItem
 a:com.intellij.psi.impl.include.FileIncludeProvider
 - <init>():V
-- a:acceptFile(com.intellij.openapi.vfs.VirtualFile):Z
+- acceptFile(com.intellij.openapi.vfs.VirtualFile):Z
 - acceptFile(com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.project.Project):Z
+- acceptFile(com.intellij.util.indexing.IndexedFile):Z
 - a:getId():java.lang.String
 - a:getIncludeInfos(com.intellij.util.indexing.FileContent):com.intellij.psi.impl.include.FileIncludeInfo[]
 - getIncludeName(com.intellij.psi.PsiFile,java.lang.String):java.lang.String
@@ -4937,7 +4886,7 @@ a:com.intellij.task.ProjectTaskRunner
 - <init>():V
 - canRun(com.intellij.openapi.project.Project,com.intellij.task.ProjectTask):Z
 - canRun(com.intellij.openapi.project.Project,com.intellij.task.ProjectTask,com.intellij.task.ProjectTaskContext):Z
-- a:canRun(com.intellij.task.ProjectTask):Z
+- canRun(com.intellij.task.ProjectTask):Z
 - createExecutionEnvironment(com.intellij.openapi.project.Project,com.intellij.task.ExecuteRunConfigurationTask,com.intellij.execution.Executor):com.intellij.execution.runners.ExecutionEnvironment
 - run(com.intellij.openapi.project.Project,com.intellij.task.ProjectTaskContext,com.intellij.task.ProjectTask[]):org.jetbrains.concurrency.Promise
 a:com.intellij.ui.FileColorManager
@@ -5005,7 +4954,6 @@ c:com.intellij.ui.popup.util.SplitterItem
 a:com.intellij.util.ActionRunner
 - <init>():V
 - s:runInsideWriteAction(com.intellij.util.ActionRunner$InterruptibleRunnable):V
-- s:runInsideWriteAction(com.intellij.util.ActionRunner$InterruptibleRunnableWithResult):java.lang.Object
 f:com.intellij.util.PsiNavigateUtil
 - <init>():V
 - s:getNavigatable(com.intellij.psi.PsiElement):com.intellij.pom.Navigatable

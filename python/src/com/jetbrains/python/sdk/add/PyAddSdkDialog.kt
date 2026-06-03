@@ -16,14 +16,18 @@ import com.intellij.ui.components.DialogPanel
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.sdk.DialogAction
 import com.jetbrains.python.sdk.ModuleOrProject
-import com.jetbrains.python.sdk.add.PyAddSdkDialog.Companion.show
 import com.jetbrains.python.sdk.collectAddInterpreterActions
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.util.function.Consumer
-import javax.swing.*
+import javax.swing.BorderFactory
+import javax.swing.Icon
+import javax.swing.JComboBox
+import javax.swing.JComponent
+import javax.swing.JList
+import javax.swing.JPanel
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -90,6 +94,7 @@ class PyAddSdkDialog private constructor(
     }
 
     cards.forEach { panel ->
+      panel.dialog.stripCustomFrameHeader()
       Disposer.register(disposable, panel.dialog.disposable)
       Disposer.register(panel.dialog.disposable, Disposable {
         close(panel.dialog.exitCode)
@@ -146,5 +151,12 @@ class PyAddSdkDialog private constructor(
       val dialog = PyAddSdkDialog(project = project, module = module, sdkAddedCallback)
       dialog.show()
     }
+  }
+}
+
+private fun DialogWrapper.stripCustomFrameHeader() {
+  val contentPane = this.contentPane ?: return
+  (contentPane.layout as? BorderLayout)?.getLayoutComponent(BorderLayout.NORTH)?.let {
+    contentPane.remove(it)
   }
 }

@@ -2,14 +2,9 @@
 package com.intellij.platform.testFramework.junit5.projectStructure.fixture.impl
 
 import com.intellij.openapi.application.edtWriteAction
-import com.intellij.openapi.application.writeAction
 import com.intellij.openapi.module.Module
-import com.intellij.openapi.project.Project
-import com.intellij.openapi.projectRoots.ProjectJdkTable
-import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.projectRoots.SdkTypeId
 import com.intellij.openapi.roots.ModuleRootModificationUtil
-import com.intellij.openapi.roots.OrderRootType
+import com.intellij.openapi.util.io.NioFiles
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.testFramework.junit5.fixture.TestFixture
 import com.intellij.testFramework.junit5.fixture.testFixture
@@ -23,9 +18,7 @@ import org.jetbrains.jps.model.java.JavaResourceRootType
 import org.jetbrains.jps.model.java.JavaSourceRootType
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType
 import java.nio.file.Path
-import kotlin.io.path.Path
 import kotlin.io.path.exists
-import kotlin.io.path.pathString
 import kotlin.io.path.writeText
 
 @TestOnly
@@ -66,33 +59,50 @@ internal fun TestFixture<Module>.customSourceRootFixture(
   initialized(path) {}
 }
 
-@TestOnly
-internal fun dirFixture(dir: Path): TestFixture<Path> = testFixture("dirFixture") {
-  val tempDir = withContext(Dispatchers.IO) {
+private suspend fun createDirectory(dir: Path) {
+  withContext(Dispatchers.IO) {
     if (!dir.exists()) {
       dir.createDirectories()
     }
-    dir
   }
-  initialized(tempDir) {
-    withContext(Dispatchers.IO) {
-      if (tempDir.exists()) {
-        tempDir.delete(recursively = true)
-      }
+}
+
+private suspend fun deleteDirectory(dir: Path) {
+  withContext(Dispatchers.IO) {
+    if (dir.exists()) {
+      dir.delete(recursively = true)
     }
+  }
+}
+
+@TestOnly
+internal fun dirFixture(dir: Path, vararg dependencies: TestFixture<*>): TestFixture<Path> = testFixture("dirFixture") {
+  dependencies.forEach { it.init() }
+  createDirectory(dir)
+  initialized(dir) {
+    deleteDirectory(dir)
   }
 }
 
 @TestOnly
 internal fun TestFixture<Path>.subDirFixture(name: String): TestFixture<Path> = testFixture("subDirFixture") {
   val path = this@subDirFixture.init().resolve(name)
-  val result = dirFixture(path).init()
-  initialized(result) {}
+  createDirectory(path)
+  initialized(path) {
+    deleteDirectory(path)
+  }
 }
 
 @TestOnly
 internal fun TestFixture<Path>.fileFixture(fileName: String, content: CharSequence): TestFixture<Path> =
   fileFixture(fileName) { it.writeText(content) }
+
+@TestOnly
+fun TestFixture<Path>.executableFileFixture(fileName: String, content: CharSequence): TestFixture<Path> =
+  fileFixture(fileName) {
+    it.writeText(content)
+    NioFiles.setExecutable(it)
+  }
 
 @TestOnly
 internal fun TestFixture<Path>.fileFixture(fileName: String, content: ByteArray): TestFixture<Path> =
@@ -119,26 +129,7 @@ private fun TestFixture<Path>.fileFixture(fileName: String, content: (file: Path
 }
 
 
-@TestOnly
-internal fun TestFixture<Project>.sdkFixture(name: String, type: SdkTypeId, pathFixture: TestFixture<Path>): TestFixture<Sdk> = testFixture("sdkFixture $name") {
-  val project = this@sdkFixture.init()
-  val jdkTable = ProjectJdkTable.getInstance(project)
-  val homePath = pathFixture.init().pathString
-  val sdk = jdkTable.createSdk(name, type)
-  val root = requireNotNull(VfsUtil.findFile(Path(homePath), true))
-  edtWriteAction {
-    val sdkModificator = sdk.sdkModificator
-    sdkModificator.homePath = homePath
-    sdkModificator.addRoot(root, OrderRootType.CLASSES)
-    sdkModificator.commitChanges()
-    jdkTable.addJdk(sdk)
-  }
-  initialized(sdk) {
-    writeAction {
-      ProjectJdkTable.getInstance(project).removeJdk(sdk)
-    }
-  }
-}
+
 
 private fun getSourceRootType(isTestSource: Boolean, isResource: Boolean): JpsModuleSourceRootType<*> = when {
   isTestSource && isResource -> JavaResourceRootType.TEST_RESOURCE

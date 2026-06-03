@@ -5,42 +5,83 @@ import com.intellij.codeInsight.highlighting.HighlightUsagesHandlerBase
 import com.intellij.codeInsight.highlighting.HighlightUsagesHandlerFactoryBase
 import com.intellij.find.FindManager
 import com.intellij.find.findUsages.FindUsagesHandler
-import com.intellij.find.impl.FindManagerImpl
-import com.intellij.lang.ASTNode
+import com.intellij.find.impl.FindManagerBase
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.progress.ProgressIndicatorProvider
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiNameIdentifierOwner
 import com.intellij.psi.PsiRecursiveVisitor
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.elementType
 import com.intellij.util.Consumer
+import org.jetbrains.kotlin.analysis.api.analyze
+import org.jetbrains.kotlin.analysis.api.resolution.KaExplicitReceiverValue
+import org.jetbrains.kotlin.analysis.api.resolution.KaImplicitReceiverValue
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.symbols.KaReceiverParameterSymbol
+import org.jetbrains.kotlin.idea.codeinsight.utils.StandardKotlinNames
+import org.jetbrains.kotlin.idea.codeinsight.utils.doesBelongToLoop
 import org.jetbrains.kotlin.idea.codeinsight.utils.findRelevantLoopForExpression
+import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.idea.references.unwrappedTargets
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.name.CallableId
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtBreakExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtContainerNode
+import org.jetbrains.kotlin.psi.KtContinueExpression
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtDoWhileExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtExpressionWithLabel
+import org.jetbrains.kotlin.psi.KtForExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtLabelReferenceExpression
+import org.jetbrains.kotlin.psi.KtLabeledExpression
+import org.jetbrains.kotlin.psi.KtLambdaArgument
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtLoopExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtReturnExpression
+import org.jetbrains.kotlin.psi.KtThisExpression
+import org.jetbrains.kotlin.psi.KtThrowExpression
+import org.jetbrains.kotlin.psi.KtTryExpression
+import org.jetbrains.kotlin.psi.KtValueArgument
+import org.jetbrains.kotlin.psi.KtValueArgumentList
+import org.jetbrains.kotlin.psi.KtVisitorVoid
+import org.jetbrains.kotlin.psi.KtWhenExpression
+import org.jetbrains.kotlin.psi.KtWhileExpression
 import org.jetbrains.kotlin.psi.psiUtil.parents
 import org.jetbrains.kotlin.utils.addIfNotNull
-import java.util.*
 
 abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsagesHandlerFactoryBase() {
     private fun getOnReturnOrThrowOrLambdaUsageHandler(editor: Editor, file: PsiFile, target: PsiElement): HighlightUsagesHandlerBase<*>? {
         val expression = when (val parent = target.parent) {
-            is KtNamedFunction -> parent.takeIf { (target as? ASTNode)?.elementType == KtTokens.FUN_KEYWORD }
+            is KtNamedFunction -> parent.takeIf { target.elementType == KtTokens.FUN_KEYWORD }
             is KtPropertyAccessor -> parent
             is KtReturnExpression, is KtThrowExpression -> parent
-            is KtFunctionLiteral -> parent.takeIf { with((target as? ASTNode)?.elementType) { this == KtTokens.LBRACE || this == KtTokens.RBRACE } }
-            is KtLabelReferenceExpression ->
-                PsiTreeUtil.getParentOfType(
-                    target, KtReturnExpression::class.java, KtThrowExpression::class.java, KtFunction::class.java
-                )?.takeUnless {
-                    it is KtFunction
-                }
+            is KtFunctionLiteral -> parent.takeIf { target is PsiWhiteSpace || target.elementType == KtTokens.LBRACE || target.elementType == KtTokens.RBRACE }
+            is KtLabelReferenceExpression -> PsiTreeUtil.getParentOfType(
+                target, KtReturnExpression::class.java, KtThrowExpression::class.java, KtFunction::class.java
+            )?.takeUnless {
+                it is KtFunction
+            }
 
             else -> null
-        } as? KtExpression ?: return null
+        } ?: return null
         return OnExitUsagesHandler(editor, file, null, expression, false)
     }
 
@@ -54,9 +95,32 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
         return OnLoopUsagesHandler(editor, file, expression)
     }
 
+    private fun getOnGeneratorUsageHandler(editor: Editor, file: PsiFile, target: PsiElement): HighlightUsagesHandlerBase<*>? {
+        val expression = when (target.elementType) {
+            in BUILDER_OPERATOR_TOKENS ->
+                target.parent?.parent as? KtBinaryExpression
+
+            KtTokens.IDENTIFIER -> {
+                val parent = target.parent as? KtNameReferenceExpression
+                parent?.takeIf { it.text in BUILDER_KEYWORDS }?.parent as? KtCallExpression
+            }
+
+            else -> null
+        } ?: return null
+
+        return OnGeneratorUsagesHandler(editor, file, expression)
+    }
+
     override fun createHighlightUsagesHandler(editor: Editor, file: PsiFile, target: PsiElement): HighlightUsagesHandlerBase<*>? {
-        return getOnReturnOrThrowOrLambdaUsageHandler(editor, file, target)
+        val handler = getOnReturnOrThrowOrLambdaUsageHandler(editor, file, target)
             ?: getOnBreakOrContinueUsageHandler(editor, file, target)
+        if (handler != null) return handler
+
+        return if (Registry.`is`("kotlin.highlight.stdlib.dsl.exit.points")) {
+            getOnGeneratorUsageHandler(editor, file, target)
+        } else {
+            null
+        }
     }
 
     protected abstract fun getRelevantReturnDeclaration(returnExpression: KtReturnExpression): KtDeclarationWithBody?
@@ -95,8 +159,7 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
         val referenceExpression: KtNameReferenceExpression?,
         val target: KtExpression,
         val highlightReferences: Boolean
-    ) :
-        HighlightUsagesHandlerBase<PsiElement>(editor, file) {
+    ) : HighlightUsagesHandlerBase<PsiElement>(editor, file) {
 
         override fun getTargets(): List<KtExpression> = listOf(target)
 
@@ -105,13 +168,12 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
         }
 
         override fun computeUsages(targets: List<PsiElement>) {
-            val relevantFunction: KtDeclarationWithBody? =
-                when (target) {
-                    is KtFunctionLiteral -> target
-                    is KtPropertyAccessor -> target
-                    is KtNamedFunction -> target
-                    else -> getRelevantDeclaration(target)
-                }
+            val relevantFunction: KtDeclarationWithBody? = when (target) {
+                is KtFunctionLiteral -> target
+                is KtPropertyAccessor -> target
+                is KtNamedFunction -> target
+                else -> getRelevantDeclaration(target)
+            }
 
             var targetOccurrenceAdded = false
             if (target is KtReturnExpression || target is KtThrowExpression || target is KtNamedFunction || target is KtPropertyAccessor) {
@@ -135,11 +197,9 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
             }
 
             val lastStatementExpressions =
-                if ((relevantFunction is KtFunctionLiteral && hasNonUnitReturnType(relevantFunction)) ||
-                    (relevantFunction is KtNamedFunction && relevantFunction.bodyBlockExpression == null)
-                ) {
+                if ((relevantFunction is KtFunctionLiteral && hasNonUnitReturnType(relevantFunction)) || (relevantFunction is KtNamedFunction && relevantFunction.bodyBlockExpression == null)) {
                     val lastStatements = mutableSetOf<PsiElement>(relevantFunction)
-                    relevantFunction.acceptChildren(object : KtVisitorVoid(),PsiRecursiveVisitor {
+                    relevantFunction.acceptChildren(object : KtVisitorVoid(), PsiRecursiveVisitor {
                         override fun visitKtElement(element: KtElement) {
                             ProgressIndicatorProvider.checkCanceled()
                             element.acceptChildren(this)
@@ -202,7 +262,7 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
                     emptySet()
                 }
 
-            relevantFunction?.accept(object : KtVisitorVoid(),PsiRecursiveVisitor {
+            relevantFunction?.accept(object : KtVisitorVoid(), PsiRecursiveVisitor {
                 override fun visitKtElement(element: KtElement) {
                     ProgressIndicatorProvider.checkCanceled()
                     element.acceptChildren(this)
@@ -258,7 +318,7 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
                     when (expression.returnedExpression) {
                         is KtIfExpression, is KtWhenExpression, is KtTryExpression -> {
                             addOccurrence(expression.returnKeyword)
-                            expression.acceptChildren(object : KtVisitorVoid(),PsiRecursiveVisitor {
+                            expression.acceptChildren(object : KtVisitorVoid(), PsiRecursiveVisitor {
                                 override fun visitKtElement(element: KtElement) {
                                     ProgressIndicatorProvider.checkCanceled()
                                     element.acceptChildren(this)
@@ -279,10 +339,9 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
                                             }
                                         }
 
-                                        is KtWhenExpression ->
-                                            expression.entries.forEach { whenEntry ->
-                                                whenEntry.expression?.let { visitExpression(it) }
-                                            }
+                                        is KtWhenExpression -> expression.entries.forEach { whenEntry ->
+                                            whenEntry.expression?.let { visitExpression(it) }
+                                        }
 
                                         else -> addOccurrence(expression)
                                     }
@@ -309,9 +368,11 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
                     (target as? PsiNameIdentifierOwner)?.nameIdentifier.takeIf { target.containingFile == containingFile }
                         ?.let(::addOccurrence)
 
-                    val handler: FindUsagesHandler? = (FindManager.getInstance(relevantFunction.project) as FindManagerImpl)
-                        .findUsagesManager
-                        .getFindUsagesHandler(target, true)
+                    val handler: FindUsagesHandler? =
+                        (FindManager.getInstance(relevantFunction.project) as FindManagerBase).findUsagesManager.getFindUsagesHandler(
+                            target,
+                            true
+                        )
                     handler?.findReferencesToHighlight(target, LocalSearchScope(containingFile)).let { ref ->
                         ref?.forEach { addOccurrence(it.element) }
                     }
@@ -322,7 +383,7 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
         override fun highlightReferences(): Boolean = highlightReferences
     }
 
-    private inner class OnLoopUsagesHandler(editor: Editor, file: PsiFile, val target: KtExpression) :
+    private class OnLoopUsagesHandler(editor: Editor, file: PsiFile, val target: KtExpression) :
         HighlightUsagesHandlerBase<PsiElement>(editor, file) {
         override fun getTargets(): List<KtExpression> = listOf(target)
 
@@ -340,50 +401,149 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
                 is KtWhileExpression -> relevantLoop.node.findChildByType(KtTokens.WHILE_KEYWORD)?.psi?.let(::addOccurrence)
             }
 
-
-
-            relevantLoop.accept(object : KtVisitorVoid(),PsiRecursiveVisitor {
-                var nestedLoopExpressions = Stack<KtLoopExpression>()
-
+            relevantLoop.accept(object : KtVisitorVoid(), PsiRecursiveVisitor {
                 override fun visitKtElement(element: KtElement) {
                     ProgressIndicatorProvider.checkCanceled()
                     element.acceptChildren(this)
                 }
 
                 override fun visitExpression(expression: KtExpression) {
-                    val nestedLoopFound = if (expression != relevantLoop && expression is KtLoopExpression) {
-                        val nestedLoopLabelName = (expression.parent as? KtLabeledExpression)?.getLabelName()
-                        // no reasons to step into another loop with the same label name or no label name
-                        if (loopLabelName == null || loopLabelName == nestedLoopLabelName) return
+                    when (expression) {
+                        is KtBlockExpression -> {
+                            val containerNode = expression.parent as? KtContainerNode
+                            val loopExpression = containerNode?.parent as? KtLoopExpression
 
-                        nestedLoopExpressions.push(expression)
-                        true
-                    } else {
-                        false
-                    }
-
-                    if (expression is KtBreakExpression || expression is KtContinueExpression) {
-                        val expressionLabelName = (expression as? KtExpressionWithLabel)?.getLabelName()
-                        if (nestedLoopExpressions.isEmpty()) {
-                            if (expressionLabelName == null || expressionLabelName == loopLabelName) {
-                                addOccurrence(expression)
+                            if (loopExpression != null && loopExpression != relevantLoop) {
+                                val nestedLoopLabelName = (loopExpression.parent as? KtLabeledExpression)?.getLabelName()
+                                // no reasons to step into another loop with the same label name or no label name
+                                if (loopLabelName == nestedLoopLabelName) return
+                                if (loopLabelName == null) return
                             }
-                        } else if (expressionLabelName == loopLabelName) {
-                            addOccurrence(expression)
+                        }
+
+                        is KtBreakExpression, is KtContinueExpression -> {
+                            val expressionLabelName = (expression as? KtExpressionWithLabel)?.getLabelName()
+                            if (expressionLabelName != null && expressionLabelName == loopLabelName) {
+                                addOccurrence(expression)
+                            } else {
+                                if (expressionLabelName == null && expression.doesBelongToLoop(relevantLoop)) {
+                                    addOccurrence(expression)
+                                }
+                            }
                         }
                     }
 
-                    try {
-                        super.visitExpression(expression)
-                    } finally {
-                        if (nestedLoopFound) {
-                            nestedLoopExpressions.pop()
-                        }
-                    }
+                    super.visitExpression(expression)
                 }
             })
         }
 
+    }
+
+    private inner class OnGeneratorUsagesHandler(editor: Editor, file: PsiFile, val target: KtExpression) :
+        HighlightUsagesHandlerBase<PsiElement>(editor, file) {
+
+        override fun getTargets(): List<KtExpression> = listOf(target)
+
+        override fun selectTargets(targets: List<PsiElement>, selectionConsumer: Consumer<in List<PsiElement>>) {
+            selectionConsumer.consume(targets)
+        }
+
+        override fun computeUsages(targets: List<PsiElement>) {
+
+            val (generatorCall, builderPoints) = findGeneratorCall(target) ?: return
+            // Handles both trailing lambda syntax: sequence { } and parenthesized: sequence({ })
+            val generatorLambda =
+                generatorCall.lambdaArguments.firstOrNull()?.getLambdaExpression() ?: (generatorCall.valueArguments.firstOrNull()
+                    ?.getArgumentExpression() as? KtLambdaExpression) ?: return
+
+            // Highlight "sequence" keyword
+            generatorCall.calleeExpression?.let { addOccurrence(it) }
+
+            // Find all yield/yieldAll for current sequence lambda
+            generatorLambda.accept(object : KtVisitorVoid(), PsiRecursiveVisitor {
+                override fun visitKtElement(element: KtElement) {
+                    element.acceptChildren(this)
+                }
+
+                override fun visitCallExpression(expression: KtCallExpression) {
+                    super.visitCallExpression(expression)
+                    if (isExitPointOnLambdaReceiver(expression, builderPoints.single + builderPoints.multiple, generatorLambda)
+                    ) {
+                        expression.calleeExpression?.let { addOccurrence(it) }
+                    }
+                }
+
+                override fun visitBinaryExpression(expression: KtBinaryExpression) {
+                    super.visitBinaryExpression(expression)
+                    if (isExitPointOnLambdaReceiver(expression, BUILDER_OPERATOR_CALLABLE_IDS, generatorLambda)
+                    ) {
+                        addOccurrence(expression.operationReference)
+                    }
+                }
+            })
+        }
+    }
+
+    private fun findGeneratorCall(expression: KtExpression): Pair<KtCallExpression, BuilderPoint>? {
+        // If clicked the generator keyword
+        if (expression is KtCallExpression) {
+            findMatchingBuilderPoints(expression)?.let { return expression to it }
+        }
+
+        // Clicked exitPoints methods -> Find enclosing call, exitPoints
+        return expression.parents.filterIsInstance<KtLambdaExpression>().firstNotNullOfOrNull { lambdaExpr ->
+            val lambdaArg = lambdaExpr.parent
+            val call = when (lambdaArg) {
+                is KtLambdaArgument -> lambdaArg.parent as? KtCallExpression
+                is KtValueArgument -> (lambdaArg.parent as? KtValueArgumentList)?.parent as? KtCallExpression
+                else -> null
+            } ?: return@firstNotNullOfOrNull null
+
+            val builderPoints = findMatchingBuilderPoints(call) ?: return@firstNotNullOfOrNull null
+
+            val expectedCallables = when (expression) {
+                is KtBinaryExpression -> BUILDER_OPERATOR_CALLABLE_IDS
+                is KtCallExpression -> builderPoints.single + builderPoints.multiple
+                else -> return@firstNotNullOfOrNull null
+            }
+            if (!isExitPointOnLambdaReceiver(expression, expectedCallables, lambdaExpr)) {
+                return@firstNotNullOfOrNull null
+            }
+
+            call to builderPoints
+        }
+    }
+
+    private fun findMatchingBuilderPoints(call: KtCallExpression): BuilderPoint? {
+        val callableId = analyze(call) {
+            call.resolveToCall()?.successfulFunctionCallOrNull()
+                ?.signature?.symbol?.callableId
+        } ?: return null
+        return generatorPairs[callableId]
+    }
+
+    private fun isExitPointOnLambdaReceiver(
+        expression: KtExpression,
+        expectedCallables: Collection<CallableId>,
+        generatorLambda: KtLambdaExpression
+    ): Boolean = analyze(expression) {
+        val call = expression.resolveToCall()?.singleFunctionCallOrNull() ?: return@analyze false
+        if (call.signature.symbol.callableId !in expectedCallables) return@analyze false
+
+        val receiver = call.extensionReceiver ?: call.dispatchReceiver ?: return@analyze false
+
+        val ownerPsi: PsiElement? = when (receiver) {
+            is KaImplicitReceiverValue ->
+                (receiver.symbol as? KaReceiverParameterSymbol)?.containingSymbol?.psi
+
+            is KaExplicitReceiverValue ->
+                (receiver.expression as? KtThisExpression)
+                    ?.instanceReference?.mainReference?.resolve()
+
+            else -> null
+        }
+        ownerPsi === generatorLambda.functionLiteral
     }
 
     private fun MutableSet<PsiElement>.addIfNotNullAndNotBlock(element: PsiElement?) {
@@ -399,5 +559,74 @@ abstract class AbstractKotlinHighlightExitPointsHandlerFactory : HighlightUsages
         }
         return expression
     }
+
+    companion object {
+        private val BUILDER_KEYWORDS = setOf(
+            "yield", "yieldAll", "sequence",
+            "emit", "emitAll", "flow",
+            "add", "addAll", "buildList", "buildSet",
+            "put", "putAll", "buildMap",
+            "append", "appendAll", "buildString"
+        )
+        private val BUILDER_OPERATOR_CALLABLE_IDS = setOf(
+            StandardKotlinNames.Collections.plusAssign,
+            StandardKotlinNames.Collections.minusAssign,
+        )
+        private val BUILDER_OPERATOR_TOKENS = setOf(
+            KtTokens.PLUSEQ,
+            KtTokens.MINUSEQ,
+        )
+    }
+
+    data class BuilderPoint(
+        val single: List<CallableId>,
+        val multiple: List<CallableId>
+    )
+
+    val generatorPairs: Map<CallableId, BuilderPoint> = mapOf(
+        StandardKotlinNames.Sequences.sequence to BuilderPoint(
+            single = listOf(StandardKotlinNames.Sequences.yield),
+            multiple = listOf(StandardKotlinNames.Sequences.yieldAll)
+        ),
+        StandardKotlinNames.BuildScope.buildList to BuilderPoint(
+            single = listOf(
+                StandardKotlinNames.BuildScope.addList,
+                StandardKotlinNames.BuildScope.addCollection
+            ),
+            multiple = listOf(
+                StandardKotlinNames.BuildScope.addAllList,
+                StandardKotlinNames.BuildScope.addAllCollection,
+                StandardKotlinNames.BuildScope.addAllExtension
+            )
+        ),
+        StandardKotlinNames.BuildScope.buildSet to BuilderPoint(
+            single = listOf(
+                StandardKotlinNames.BuildScope.addSet,
+                StandardKotlinNames.BuildScope.addCollection
+            ),
+            multiple = listOf(
+                StandardKotlinNames.BuildScope.addAllSet,
+                StandardKotlinNames.BuildScope.addAllCollection,
+                StandardKotlinNames.BuildScope.addAllExtension
+            )
+        ),
+        StandardKotlinNames.BuildScope.buildMap to BuilderPoint(
+            single = listOf(
+                StandardKotlinNames.BuildScope.put
+            ),
+            multiple = listOf(StandardKotlinNames.BuildScope.putAll)
+        ),
+        StandardKotlinNames.BuildScope.buildString to BuilderPoint(
+            single = listOf(
+                StandardKotlinNames.BuildScope.append,
+                StandardKotlinNames.BuildScope.appendRange
+            ),
+            multiple = listOf(StandardKotlinNames.BuildScope.appendLine)
+        ),
+        StandardKotlinNames.Flow.flow to BuilderPoint(
+            single = listOf(StandardKotlinNames.Flow.emit),
+            multiple = listOf(StandardKotlinNames.Flow.emitAll)
+        ),
+    )
 
 }

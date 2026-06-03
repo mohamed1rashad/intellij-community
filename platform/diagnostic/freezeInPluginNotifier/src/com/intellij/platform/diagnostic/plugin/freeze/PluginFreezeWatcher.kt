@@ -3,12 +3,14 @@ package com.intellij.platform.diagnostic.plugin.freeze
 
 import com.intellij.diagnostic.LogMessage
 import com.intellij.diagnostic.ThreadDump
+import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.PluginUtilImpl
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.diagnostic.freezeAnalyzer.FreezeAnalyzer
 import com.intellij.threadDumpParser.ThreadState
 import com.intellij.util.application
@@ -16,7 +18,7 @@ import com.intellij.util.application
 @Service(Service.Level.APP)
 internal class PluginFreezeWatcher {
   @Volatile
-  private var reason: FreezeReason? = null
+  private var currentFreeze: FreezeReason? = null
 
   private val stackTracePattern: Regex = """at (\S+)\.(\S+)\(([^:]+):(\d+)\)""".toRegex()
 
@@ -25,34 +27,44 @@ internal class PluginFreezeWatcher {
     fun getInstance(): PluginFreezeWatcher = service()
   }
 
-  fun getFreezeReason(): FreezeReason? = reason
+  fun getFreezeReason(): FreezeReason? = currentFreeze
 
   fun reset() {
-    reason = null
+    currentFreeze = null
   }
 
-  fun dumpedThreads(event: LogMessage, dump: ThreadDump, durationMs: Long) : FreezeReason? {
+  fun dumpedThreads(event: LogMessage, dump: ThreadDump, durationMs: Long): FreezeReason? {
     val freezeCausingThreads = FreezeAnalyzer.analyzeFreeze(dump.rawDump, null)?.threads.orEmpty()
     val pluginIds = freezeCausingThreads.mapNotNull { analyzeFreezeCausingPlugin(it) }
-    val frozenPlugin = pluginIds.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: return null
+    val frozenPlugin = pluginIds.groupingBy { it }
+                         .eachCount()
+                         .maxByOrNull { it.value }
+                         ?.key ?: return null
 
     val pluginDescriptor = PluginManagerCore.getPlugin(frozenPlugin) ?: return null
 
-    if (pluginDescriptor.isImplementationDetail || ApplicationInfoImpl.getShadowInstance().isEssentialPlugin(frozenPlugin)) {
-      return FreezeReason(frozenPlugin, event, durationMs, reportToUser = false)
-    }
-
-    if (pluginDescriptor.isBundled && !application.isInternal && !application.isEAP) {
+    if (!isWorthReportingToUser(pluginDescriptor, frozenPlugin)) {
       return FreezeReason(frozenPlugin, event, durationMs, reportToUser = false)
     }
 
     val freezeStorageService = PluginsFreezesService.getInstance()
-    if (freezeStorageService.shouldBeIgnored(frozenPlugin)) return null
+    if (freezeStorageService.shouldBeIgnored(frozenPlugin)) {
+      return FreezeReason(frozenPlugin, event, durationMs, reportToUser = false)
+    }
     freezeStorageService.setLatestFreezeDate(frozenPlugin)
 
-    reason = FreezeReason(frozenPlugin, event, durationMs, reportToUser = true)
+    currentFreeze = FreezeReason(frozenPlugin, event, durationMs, reportToUser = true)
 
-    return reason
+    return currentFreeze
+  }
+
+  private fun isWorthReportingToUser(plugin: IdeaPluginDescriptor, frozenPlugin: PluginId): Boolean {
+    if (application.isInternal || application.isEAP) return true
+    if (Registry.`is`("ide.diagnostics.notification.freezes.in.bundled.plugins")) return true
+
+    return !plugin.isBundled
+           && !plugin.isImplementationDetail
+           && !ApplicationInfoImpl.getShadowInstance().isEssentialPlugin(frozenPlugin)
   }
 
   private fun analyzeFreezeCausingPlugin(threadInfo: ThreadState): PluginId? {

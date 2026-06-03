@@ -22,7 +22,7 @@ import org.jetbrains.plugins.gradle.service.syncAction.GradleSyncExtension
 import org.jetbrains.plugins.gradle.service.syncAction.GradleSyncListener
 import org.jetbrains.plugins.gradle.service.syncAction.GradleSyncPhase
 import org.jetbrains.plugins.gradle.util.GradleConstants
-import java.util.*
+import java.util.TreeSet
 
 private val TELEMETRY: Tracer
   get() = ExternalSystemTelemetryUtil.getTracer(GradleConstants.SYSTEM_ID)
@@ -44,6 +44,9 @@ object GradleSyncProjectConfigurator {
   fun createModelFetchResultHandler(context: ProjectResolverContext): GradleModelFetchActionListener {
     return object : GradleModelFetchActionListener {
 
+      // Model fetch callbacks can cover overlapping phase ranges.
+      // The shared runner keeps phase execution ordered and at most once.
+      // If retry support is introduced in the future, it should be explicit in this handler.
       private val syncRunner = GradleSyncActionRunner()
 
       override suspend fun onModelFetchPhaseCompleted(phase: GradleModelFetchPhase) {
@@ -76,7 +79,7 @@ object GradleSyncProjectConfigurator {
 
 private class GradleSyncActionRunner {
 
-  private var lastCompletedPhase: GradleSyncPhase? = null
+  private var lastClaimedPhase: GradleSyncPhase? = null
   private var storage = ImmutableEntityStorage.empty()
 
   fun performSyncContributorsBlocking(
@@ -98,8 +101,9 @@ private class GradleSyncActionRunner {
     val phases = GradleSyncContributor.EP_NAME.mapExtensionSafe { it.phase }
       .filterTo(TreeSet(), predicate)
     for (phase in phases) {
-      if (lastCompletedPhase.let { it != null && it >= phase }) continue
-      lastCompletedPhase = phase
+      // Claim each phase before execution. Later callbacks skip already claimed phases.
+      if (lastClaimedPhase.let { it != null && it >= phase }) continue
+      lastClaimedPhase = phase
 
       performSyncContributors(context, phase)
     }
@@ -109,7 +113,7 @@ private class GradleSyncActionRunner {
     context: ProjectResolverContext,
     phase: GradleSyncPhase,
   ) {
-    TELEMETRY.spanBuilder(phase.name).use {
+    TELEMETRY.spanBuilder(phase.name + "-idea").use {
       GradleSyncContributor.EP_NAME.forEachExtensionSafeAsync { contributor ->
         if (contributor.phase == phase) {
           TELEMETRY.spanBuilder(contributor.name).use {

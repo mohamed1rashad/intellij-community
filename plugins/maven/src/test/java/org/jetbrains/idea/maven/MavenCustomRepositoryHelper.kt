@@ -18,9 +18,15 @@ package org.jetbrains.idea.maven
 import com.intellij.openapi.application.PluginPathManager
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.vfs.LocalFileSystem
+import kotlinx.coroutines.delay
 import org.jetbrains.idea.maven.utils.MavenLog
 import java.io.IOException
-import java.nio.file.*
+import java.nio.file.FileVisitResult
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.BasicFileAttributes
 
 class MavenCustomRepositoryHelper(tempDir: Path, vararg subFolders: String) {
@@ -110,6 +116,24 @@ class MavenCustomRepositoryHelper(tempDir: Path, vararg subFolders: String) {
     }
 
     LocalFileSystem.getInstance().refreshNioFiles(mutableSetOf<Path?>(to))
+  }
+
+  // replace a file in repo; on Windows the file might be used by Maven process, hence multiple attempts
+  suspend fun replaceFile(fromRelativePath: String, toRelativePath: String, nAttempts: Int = 5) {
+    repeat(nAttempts) { attempt ->
+      try {
+        copy(fromRelativePath, toRelativePath)
+        return
+      }
+      catch (e: Throwable) {
+        if (attempt < nAttempts - 1) {
+          delay(1000L)
+        }
+        else {
+          throw e
+        }
+      }
+    }
   }
 
   companion object {

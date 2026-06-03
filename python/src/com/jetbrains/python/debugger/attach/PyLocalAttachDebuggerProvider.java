@@ -12,11 +12,15 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.xdebugger.attach.*;
+import com.intellij.xdebugger.attach.LocalAttachHost;
+import com.intellij.xdebugger.attach.XAttachDebugger;
+import com.intellij.xdebugger.attach.XAttachDebuggerProvider;
+import com.intellij.xdebugger.attach.XAttachHost;
+import com.intellij.xdebugger.attach.XAttachPresentationGroup;
 import com.jetbrains.python.debugger.PyDebuggerOptionsProvider;
 import com.jetbrains.python.run.AbstractPythonRunConfiguration;
 import com.jetbrains.python.sdk.PreferredSdkComparator;
-import com.jetbrains.python.sdk.PySdkExtKt;
+import com.jetbrains.python.sdk.SdkExtKt;
 import com.jetbrains.python.sdk.PythonSdkType;
 import com.jetbrains.python.sdk.legacy.PythonSdkUtil;
 import org.jetbrains.annotations.NotNull;
@@ -63,7 +67,7 @@ public class PyLocalAttachDebuggerProvider implements XAttachDebuggerProvider {
     final List<XAttachDebugger> result = PythonSdkUtil.getAllLocalCPythons()
       .stream()
       .filter(sdk -> sdk != selectedSdk)
-      .filter(sdk -> PySdkExtKt.getSdkSeemsValid(sdk))
+      .filter(sdk -> SdkExtKt.isSdkSeemsValid(sdk))
       .sorted(PreferredSdkComparator.INSTANCE)
       .map(PyLocalAttachDebugger::new)
       .collect(Collectors.toList());

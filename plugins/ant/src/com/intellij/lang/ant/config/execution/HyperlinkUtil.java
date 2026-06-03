@@ -1,11 +1,15 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.lang.ant.config.execution;
 
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
@@ -91,19 +95,17 @@ final class HyperlinkUtil {
                                          final int lparenthIndex,
                                          final int rparenthIndex) {
     final PlaceInfo[] info = new PlaceInfo[1];
-    ApplicationManager.getApplication().runReadAction(
-      () -> {
-        PsiClass aClass = JavaPsiFacade.getInstance(project).findClass(className, GlobalSearchScope.allScope(project));
-        if (aClass == null) return;
-        PsiFile file = aClass.getContainingFile();
-        String fileName1 = fileName.replace(File.separatorChar, '/');
-        int slashIndex = fileName1.lastIndexOf('/');
-        String shortFileName = slashIndex < 0 ? fileName : fileName.substring(slashIndex + 1);
-        final String name = file.getName();
-        if (!name.equalsIgnoreCase(shortFileName)) return;
-        info[0] = new PlaceInfo(file.getVirtualFile(), line, 1, lparenthIndex, rparenthIndex);
-      }
-    );
+    ReadAction.runBlocking(() -> {
+      PsiClass aClass = JavaPsiFacade.getInstance(project).findClass(className, GlobalSearchScope.allScope(project));
+      if (aClass == null) return;
+      PsiFile file = aClass.getContainingFile();
+      String fileName1 = fileName.replace(File.separatorChar, '/');
+      int slashIndex = fileName1.lastIndexOf('/');
+      String shortFileName = slashIndex < 0 ? fileName : fileName.substring(slashIndex + 1);
+      final String name = file.getName();
+      if (!name.equalsIgnoreCase(shortFileName)) return;
+      info[0] = new PlaceInfo(file.getVirtualFile(), line, 1, lparenthIndex, rparenthIndex);
+    });
     return info[0];
   }
 
@@ -137,7 +139,7 @@ final class HyperlinkUtil {
     final PsiFile[] psiFile = new PsiFile[1];
 
     final PsiManager psiManager = PsiManager.getInstance(project);
-    ApplicationManager.getApplication().runReadAction(() -> {
+    ReadAction.runBlocking(() -> {
       PsiClass psiClass =
         JavaPsiFacade.getInstance(psiManager.getProject()).findClass(possibleTestClassName, GlobalSearchScope.allScope(project));
       if (psiClass == null) return;

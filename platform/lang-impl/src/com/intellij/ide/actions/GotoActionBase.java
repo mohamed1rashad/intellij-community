@@ -3,8 +3,19 @@
 package com.intellij.ide.actions;
 
 import com.intellij.ide.IdeBundle;
-import com.intellij.ide.util.gotoByName.*;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.ide.util.gotoByName.ChooseByNameFilter;
+import com.intellij.ide.util.gotoByName.ChooseByNameItemProvider;
+import com.intellij.ide.util.gotoByName.ChooseByNameModel;
+import com.intellij.ide.util.gotoByName.ChooseByNameModelEx;
+import com.intellij.ide.util.gotoByName.ChooseByNamePopup;
+import com.intellij.ide.util.gotoByName.ChooseByNamePopupComponent;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -26,15 +37,20 @@ import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.SearchTextField;
 import com.intellij.ui.speedSearch.SpeedSearchSupply;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
-import java.awt.*;
+import java.awt.Component;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * Author: msk
@@ -91,9 +107,14 @@ public abstract class GotoActionBase extends AnAction {
   }
 
   public static @Nullable PsiElement getPsiContext(final AnActionEvent e) {
-    PsiFile file = e.getData(CommonDataKeys.PSI_FILE);
+    return getPsiContext(e.getDataContext());
+  }
+
+  @ApiStatus.Internal
+  public static @Nullable PsiElement getPsiContext(final DataContext dataContext) {
+    PsiFile file = dataContext.getData(CommonDataKeys.PSI_FILE);
     if (file != null) return file;
-    Project project = e.getData(CommonDataKeys.PROJECT);
+    Project project = dataContext.getData(CommonDataKeys.PROJECT);
     return getPsiContext(project);
   }
 

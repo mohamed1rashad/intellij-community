@@ -20,7 +20,7 @@ internal data class OptimizeLibraryContext(@JvmField val tempDir: Path, @JvmFiel
 
 private data class LibDescriptor(@JvmField val id: String, @JvmField val version: String, @JvmField val jbVersion: Int)
 
-private val fastUtil = LibDescriptor(id = "fastutil", version = "8.5.16", jbVersion = 1)
+private val fastUtil = LibDescriptor(id = "fastutil", version = "8.5.18", jbVersion = 1)
 
 @Suppress("unused")
 internal object FastutilInstall {
@@ -85,7 +85,6 @@ internal object LibraryCodeOptimizer {
       Files.deleteIfExists(output)
     }
 
-    //val input = m2.resolve("com/github/weisj/jsvg/1.3.0-jb.3/jsvg-1.3.0-jb.3.jar")
     val input = m2.resolve("it/unimi/dsi/fastutil/$version/fastutil-$version.jar")
     val mapping = outDir.resolve("fastutil-proguard-map.txt")
     val duration = measureTime {

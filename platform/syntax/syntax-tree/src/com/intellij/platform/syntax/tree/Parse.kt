@@ -1,29 +1,26 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:ApiStatus.Experimental
-
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.syntax.tree
 
 import com.intellij.platform.syntax.CancellationProvider
 import com.intellij.platform.syntax.LanguageSyntaxDefinition
 import com.intellij.platform.syntax.Logger
 import com.intellij.platform.syntax.SyntaxElementTypeSet
-import com.intellij.platform.syntax.element.SyntaxTokenTypes
+import com.intellij.platform.syntax.SyntaxLanguage
 import com.intellij.platform.syntax.extensions.currentExtensionSupport
 import com.intellij.platform.syntax.lexer.Lexer
 import com.intellij.platform.syntax.lexer.TokenList
-import com.intellij.platform.syntax.lexer.buildTokenList
 import com.intellij.platform.syntax.lexer.performLexing
 import com.intellij.platform.syntax.parser.DefaultWhitespaceBindingPolicy
 import com.intellij.platform.syntax.parser.SyntaxTreeBuilder
 import com.intellij.platform.syntax.parser.SyntaxTreeBuilderFactory
 import com.intellij.platform.syntax.parser.WhitespaceOrCommentBindingPolicy
 import com.intellij.platform.syntax.util.language.SyntaxElementLanguageProvider
-import org.jetbrains.annotations.ApiStatus
 
 fun parse(
   text: CharSequence,
   syntaxDefinition: LanguageSyntaxDefinition,
-  languageMapper: SyntaxElementLanguageProvider,
+  documentLanguage: SyntaxLanguage,
+  languageProvider: SyntaxElementLanguageProvider,
   cancellationProvider: CancellationProvider? = null,
   logger: Logger? = null,
 ): KmpSyntaxNode {
@@ -33,7 +30,8 @@ fun parse(
     parser = syntaxDefinition::parse,
     whitespaces = syntaxDefinition.whitespaces,
     comments = syntaxDefinition.comments,
-    languageMapper = languageMapper,
+    documentLanguage = documentLanguage,
+    languageProvider = languageProvider,
     cancellationProvider = cancellationProvider,
     logger = logger,
     whitespaceOrCommentBindingPolicy = syntaxDefinition.whitespaceOrCommentBindingPolicy,
@@ -46,7 +44,8 @@ fun parse(
   parser: (SyntaxTreeBuilder) -> Unit,
   whitespaces: SyntaxElementTypeSet,
   comments: SyntaxElementTypeSet,
-  languageMapper: SyntaxElementLanguageProvider,
+  documentLanguage: SyntaxLanguage,
+  languageProvider: SyntaxElementLanguageProvider,
   cancellationProvider: CancellationProvider? = null,
   logger: Logger? = null,
   tokenizationPolicy: TokenizationPolicy = defaultTokenizationPolicy(logger),
@@ -74,7 +73,8 @@ fun parse(
     text,
     markers,
     tokens = builder.tokens,
-    languageProvider = languageMapper,
+    documentLanguage = documentLanguage,
+    languageProvider = languageProvider,
     tokenizationPolicy = tokenizationPolicy,
     lexer = lexer,
     builderFactory = SyntaxBuilderFactory { text, tokens, startLexeme ->
@@ -86,14 +86,4 @@ fun parse(
 
 fun defaultTokenizationPolicy(logger: Logger?): TokenizationPolicy = TokenizationPolicy { text, lexer, cancellation ->
   performLexing(text, lexer, cancellation, logger)
-}
-
-@Deprecated("to be moved to Fleet codebase")
-fun fleetTokenizationPolicy(logger: Logger?): TokenizationPolicy = TokenizationPolicy { text, lexer, cancellation ->
-  val result = performLexing(text, lexer, cancellation, logger)
-  val isEmpty = result.tokenCount == 0
-  when (isEmpty) {
-    true -> buildTokenList { token("", SyntaxTokenTypes.WHITE_SPACE) }
-    false -> result
-  }
 }

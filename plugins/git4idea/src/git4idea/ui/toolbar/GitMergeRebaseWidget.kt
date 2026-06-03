@@ -1,7 +1,13 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package git4idea.ui.toolbar
 
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionButtonComponent
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.DecorativeElement
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
@@ -19,9 +25,9 @@ import javax.swing.JComponent
 
 class GitMergeRebaseWidget : DecorativeElement(), DumbAware, CustomComponentAction {
   override fun createCustomComponent(presentation: Presentation, place: String): JComponent {
-    val component = createToolbar().component
-    component.border = JBUI.Borders.empty()
-    return component
+   return createToolbar().component.apply {
+      border = JBUI.Borders.empty()
+    }
   }
 }
 
@@ -45,7 +51,9 @@ private fun createToolbar(): ActionToolbar {
 
 private val RESOLVE_ACTIONS: Set<String> = setOf(
   "Git.ResolveConflicts",
-  "Git.Rebase.Continue"
+  "Git.Rebase.Continue",
+  "Git.CherryPick.Continue",
+  "Git.Merge.Commit"
 )
 
 private val ABORT_ACTIONS: Set<String> = setOf(
@@ -67,7 +75,7 @@ private class ColoredActionButtonLook : HeaderToolbarButtonLook() {
     }
 
     return when (state) {
-      ActionButtonComponent.NORMAL -> buttonColor
+      ActionButtonComponent.NORMAL, ActionButtonComponent.SELECTED -> buttonColor
       ActionButtonComponent.PUSHED -> ColorUtil.alphaBlending(JBUI.CurrentTheme.RunWidget.PRESSED_BACKGROUND, buttonColor)
       else -> ColorUtil.alphaBlending(JBUI.CurrentTheme.RunWidget.HOVER_BACKGROUND, buttonColor)
     }
@@ -104,7 +112,6 @@ private class ColoredActionButtonLook : HeaderToolbarButtonLook() {
 
 private val AnAction.id: String?
   get() = ActionManager.getInstance().getId(this)
-
 
 private const val GIT_MERGE_REBASE_WIDGET_GROUP = "GitMergeRebaseWidgetGroup"
 

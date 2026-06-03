@@ -15,7 +15,6 @@ import com.intellij.openapi.externalSystem.service.execution.AbstractExternalSys
 import com.intellij.openapi.externalSystem.service.project.ExternalSystemProjectResolver;
 import com.intellij.openapi.externalSystem.task.ExternalSystemTaskManager;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
-import com.intellij.openapi.externalSystem.util.ExternalSystemOperationTestUtil;
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -24,19 +23,25 @@ import com.intellij.openapi.util.KeyWithDefaultValue;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.registry.RegistryValue;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.platform.externalSystem.testFramework.ExternalSystemTestObservation;
 import com.intellij.platform.externalSystem.testFramework.TestExternalProjectSettings;
 import com.intellij.platform.externalSystem.testFramework.TestExternalSystemExecutionSettings;
 import com.intellij.platform.externalSystem.testFramework.TestExternalSystemManager;
 import com.intellij.task.ProjectTaskManager;
 import com.intellij.task.ProjectTaskRunner;
-import com.intellij.testFramework.*;
+import com.intellij.testFramework.ExtensionTestUtil;
+import com.intellij.testFramework.HeavyPlatformTestCase;
+import com.intellij.testFramework.PlatformTestUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.concurrency.Promise;
 
 import java.util.Collections;
 
-import static com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemTaskActivator.Phase.*;
+import static com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemTaskActivator.Phase.AFTER_COMPILE;
+import static com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemTaskActivator.Phase.AFTER_REBUILD;
+import static com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemTaskActivator.Phase.BEFORE_COMPILE;
+import static com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemTaskActivator.Phase.BEFORE_REBUILD;
 import static com.intellij.openapi.externalSystem.util.ExternalSystemConstants.USE_IN_PROCESS_COMMUNICATION_REGISTRY_KEY_SUFFIX;
 import static com.intellij.platform.externalSystem.testFramework.ExternalSystemTestUtil.TEST_EXTERNAL_SYSTEM_ID;
 
@@ -59,7 +64,7 @@ public class ExternalSystemTaskActivatorTest extends HeavyPlatformTestCase {
     String projectPath = "/project/path";
     TestExternalProjectSettings projectSettings = new TestExternalProjectSettings();
     projectSettings.setExternalProjectPath(projectPath);
-    ExternalSystemOperationTestUtil.waitForProjectActivity(myProject, () ->
+    ExternalSystemTestObservation.waitForProjectActivity(myProject, () ->
       ExternalSystemUtil.linkExternalProject(projectSettings, new ImportSpecBuilder(myProject, TEST_EXTERNAL_SYSTEM_ID))
     );
   }

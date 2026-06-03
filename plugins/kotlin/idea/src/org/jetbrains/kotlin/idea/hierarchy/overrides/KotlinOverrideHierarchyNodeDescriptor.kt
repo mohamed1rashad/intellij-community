@@ -5,7 +5,6 @@ package org.jetbrains.kotlin.idea.hierarchy.overrides
 import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.hierarchy.HierarchyNodeDescriptor
-import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.roots.ui.util.CompositeAppearance
 import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.Iconable
@@ -15,7 +14,14 @@ import com.intellij.psi.PsiMember
 import com.intellij.psi.createSmartPointer
 import com.intellij.ui.LayeredIcon
 import com.intellij.ui.RowIcon
-import org.jetbrains.kotlin.descriptors.*
+import org.jetbrains.kotlin.K1Deprecation
+import org.jetbrains.kotlin.descriptors.CallableMemberDescriptor
+import org.jetbrains.kotlin.descriptors.ClassDescriptor
+import org.jetbrains.kotlin.descriptors.DeclarationDescriptor
+import org.jetbrains.kotlin.descriptors.FunctionDescriptor
+import org.jetbrains.kotlin.descriptors.MemberDescriptor
+import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.descriptors.PackageFragmentDescriptor
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.caches.resolve.unsafeResolveToDescriptor
 import org.jetbrains.kotlin.idea.caches.resolve.util.getJavaMemberDescriptor
@@ -25,9 +31,9 @@ import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.descriptorUtil.parents
 import org.jetbrains.kotlin.util.findCallableMemberBySignature
-import java.awt.Font
 import javax.swing.Icon
 
+@K1Deprecation
 class KotlinOverrideHierarchyNodeDescriptor(
     parentNode: HierarchyNodeDescriptor?,
     klass: PsiElement,
@@ -119,10 +125,7 @@ class KotlinOverrideHierarchyNodeDescriptor(
         val oldText = myHighlightedText
 
         myHighlightedText = CompositeAppearance()
-        var classNameAttributes: TextAttributes? = null
-        if (myColor != null) {
-            classNameAttributes = TextAttributes(myColor, null, null, null, Font.PLAIN)
-        }
+        val classNameAttributes = textAttributesFor(classPsi)
 
         with(myHighlightedText.ending) {
             @NlsSafe val classDescriptorAsString = classDescriptor.name.asString()
@@ -138,7 +141,7 @@ class KotlinOverrideHierarchyNodeDescriptor(
 
                     is PackageFragmentDescriptor -> {
                         @NlsSafe val parentDescriptorAsString = parentDescriptor.fqName.asString()
-                        addText("  ($parentDescriptorAsString)", getPackageNameAttributes())
+                        addText(" ($parentDescriptorAsString)", getPackageNameAttributes())
                         return@forEach
                     }
                 }

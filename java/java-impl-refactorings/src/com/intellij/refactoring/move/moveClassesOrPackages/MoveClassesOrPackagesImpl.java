@@ -7,6 +7,7 @@ import com.intellij.ide.util.DirectoryChooser;
 import com.intellij.ide.util.PlatformPackageUtil;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressManager;
@@ -16,10 +17,21 @@ import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDirectoryService;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiPackage;
 import com.intellij.psi.presentation.java.SymbolPresentationUtil;
 import com.intellij.psi.util.PsiUtilCore;
-import com.intellij.refactoring.*;
+import com.intellij.refactoring.BaseRefactoringProcessor;
+import com.intellij.refactoring.HelpID;
+import com.intellij.refactoring.JavaRefactoringSettings;
+import com.intellij.refactoring.PackageWrapper;
+import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.move.MoveCallback;
 import com.intellij.refactoring.rename.DirectoryAsPackageRenameHandlerBase;
 import com.intellij.refactoring.rename.RenameUtil;
@@ -35,7 +47,12 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 public final class MoveClassesOrPackagesImpl {
@@ -294,7 +311,7 @@ public final class MoveClassesOrPackagesImpl {
     final PsiDirectory selectedTarget = chooser.getSelectedDirectory();
     if (selectedTarget == null) return;
     final MultiMap<PsiElement, String> conflicts = new MultiMap<>();
-    final Runnable analyzeConflicts = () -> ApplicationManager.getApplication().runReadAction(() -> {
+    final Runnable analyzeConflicts = () -> ReadAction.runBlocking(() -> {
       final Collection<? extends PsiElement> scopes = Arrays.asList(directories);
       final VirtualFile vFile = PsiUtilCore.getVirtualFile(selectedTarget);
       if (vFile != null) {

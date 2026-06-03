@@ -1,45 +1,73 @@
-JSFile:Simple3.json
-  JSArrayLiteralExpression
-    PsiElement(JS:LBRACKET)('[')
-    PsiErrorElement:expression expected
+JsonFile: Simple3.json
+  JsonArray
+    PsiElement([)('[')
+    PsiWhiteSpace(' ')
+    PsiErrorElement:<literal>, IDENTIFIER, '[' or '{' expected, got '+'
+      PsiElement(BAD_CHARACTER)('+')
+    PsiElement(BAD_CHARACTER)('+')
+    PsiErrorElement:<value> or ']' expected, got 'IDENTIFIER'
       <empty list>
-  PsiWhiteSpace(' ')
-  PsiElement(BAD_CHARACTER)('++')
-  PsiElement(JS:IDENTIFIER)('x')
-  PsiElement(JS:COMMA)(',')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:STRING_LITERAL)('"x value"')
-  PsiElement(JS:COMMA)(',')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:IDENTIFIER)('y')
-  PsiWhiteSpace(' ')
-  PsiElement(BAD_CHARACTER)('+')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:STRING_LITERAL)('"y value"')
-  PsiElement(JS:COMMA)(',')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:IDENTIFIER)('z')
-  PsiElement(JS:COMMA)(',')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:STRING_LITERAL)('"z value"')
-  PsiElement(JS:COMMA)(',')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:IDENTIFIER)('z2')
-  PsiElement(JS:COMMA)(',')
-  PsiElement(JS:LBRACKET)('[')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:IDENTIFIER)('a')
-  PsiWhiteSpace(' ')
-  PsiElement(BAD_CHARACTER)('=')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:IDENTIFIER)('b')
-  PsiElement(JS:RBRACKET)(']')
-  PsiElement(JS:COMMA)(',')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:LBRACE)('{')
-  PsiElement(JS:IDENTIFIER)('z')
-  PsiElement(BAD_CHARACTER)('=')
-  PsiElement(JS:IDENTIFIER)('c')
-  PsiElement(JS:RBRACE)('}')
-  PsiWhiteSpace(' ')
-  PsiElement(JS:RBRACKET)(']')
+    JsonReferenceExpression
+      PsiElement(IDENTIFIER)('x')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    PsiWhiteSpace(' ')
+    JsonStringLiteral
+      PsiElement(DOUBLE_QUOTED_STRING)('"x value"')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    PsiWhiteSpace(' ')
+    JsonReferenceExpression
+      PsiElement(IDENTIFIER)('y')
+    PsiWhiteSpace(' ')
+    PsiErrorElement:'+' unexpected
+      PsiElement(BAD_CHARACTER)('+')
+    PsiWhiteSpace(' ')
+    JsonStringLiteral
+      PsiElement(DOUBLE_QUOTED_STRING)('"y value"')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    PsiWhiteSpace(' ')
+    JsonReferenceExpression
+      PsiElement(IDENTIFIER)('z')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    PsiWhiteSpace(' ')
+    JsonStringLiteral
+      PsiElement(DOUBLE_QUOTED_STRING)('"z value"')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    PsiWhiteSpace(' ')
+    JsonReferenceExpression
+      PsiElement(IDENTIFIER)('z2')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    JsonArray
+      PsiElement([)('[')
+      PsiWhiteSpace(' ')
+      JsonReferenceExpression
+        PsiElement(IDENTIFIER)('a')
+      PsiErrorElement:',' or ']' expected, got '='
+        <empty list>
+      PsiWhiteSpace(' ')
+      JsonReferenceExpression
+        PsiElement(IDENTIFIER)('=')
+      PsiErrorElement:',' or ']' expected, got 'b'
+        <empty list>
+      PsiWhiteSpace(' ')
+      JsonReferenceExpression
+        PsiElement(IDENTIFIER)('b')
+      PsiElement(])(']')
+    PsiErrorElement:',' unexpected
+      PsiElement(,)(',')
+    PsiWhiteSpace(' ')
+    JsonObject
+      PsiElement({)('{')
+      JsonProperty
+        JsonReferenceExpression
+          PsiElement(IDENTIFIER)('z=c')
+        PsiErrorElement:':' expected, got '}'
+          <empty list>
+      PsiElement(})('}')
+    PsiWhiteSpace(' ')
+    PsiElement(])(']')

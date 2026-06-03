@@ -1,16 +1,23 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.testFramework.junit5.eel.impl
 
-import com.intellij.platform.eel.*
+import com.intellij.platform.eel.EelArchiveApi
+import com.intellij.platform.eel.EelDescriptor
+import com.intellij.platform.eel.EelExecApi
+import com.intellij.platform.eel.EelExecPosixApi
+import com.intellij.platform.eel.EelPlatform
+import com.intellij.platform.eel.EelPosixApi
+import com.intellij.platform.eel.EelResult
+import com.intellij.platform.eel.EelTunnelsPosixApi
+import com.intellij.platform.eel.EelUserPosixInfo
 import com.intellij.platform.eel.fs.EelFileSystemApi
-import com.intellij.platform.eel.impl.fs.PosixNioBasedEelFileSystemApi
+import com.intellij.platform.eel.impl.local.PosixNioBasedEelFileSystemApi
 import com.intellij.platform.eel.path.EelPath
 import com.intellij.platform.eel.provider.asEelPath
 import com.intellij.platform.eel.provider.utils.toEelArch
 import com.intellij.platform.testFramework.junit5.eel.impl.nio.EelUnitTestFileSystem
 import com.intellij.util.system.CpuArch
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Deferred
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -30,8 +37,8 @@ internal class EelTestPosixApi(override val descriptor: EelTestDescriptor, fileS
       override val descriptor: EelDescriptor get() = this@EelTestPosixApi.descriptor
       override suspend fun spawnProcess(generatedBuilder: EelExecApi.ExecuteProcessOptions) = TODO()
       override suspend fun fetchLoginShellEnvVariables(): Map<String, String> = emptyMap()
-      override fun environmentVariables(opts: EelExecApi.EnvironmentVariablesOptions): Deferred<Map<String, String>> =
-        CompletableDeferred(emptyMap())
+      override fun environmentVariables(opts: EelExecApi.EnvironmentVariablesOptions): EelExecApi.EnvironmentVariablesDeferred =
+        EelExecApi.EnvironmentVariablesDeferred(CompletableDeferred(emptyMap()))
       override suspend fun findExeFilesInPath(binaryName: String) = TODO()
       override suspend fun createExternalCli(options: EelExecApi.ExternalCliOptions): EelExecApi.ExternalCliEntrypoint = TODO()
     }

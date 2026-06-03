@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.execution.build;
 
 import com.intellij.execution.Executor;
@@ -20,7 +20,16 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactProperties;
 import com.intellij.packaging.artifacts.ArtifactPropertiesProvider;
-import com.intellij.task.*;
+import com.intellij.task.ExecuteRunConfigurationTask;
+import com.intellij.task.ModuleBuildTask;
+import com.intellij.task.ModuleFilesBuildTask;
+import com.intellij.task.ModuleResourcesBuildTask;
+import com.intellij.task.ProjectModelBuildTask;
+import com.intellij.task.ProjectTask;
+import com.intellij.task.ProjectTaskContext;
+import com.intellij.task.ProjectTaskNotification;
+import com.intellij.task.ProjectTaskResult;
+import com.intellij.task.ProjectTaskRunner;
 import com.intellij.task.impl.JpsProjectTaskRunner;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -33,7 +42,12 @@ import org.jetbrains.idea.maven.model.MavenExplicitProfiles;
 import org.jetbrains.idea.maven.project.MavenProject;
 import org.jetbrains.idea.maven.project.MavenProjectsManager;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static java.util.Collections.emptyList;
 import static java.util.stream.Collectors.joining;
@@ -55,30 +69,20 @@ public final class MavenProjectTaskRunner extends ProjectTaskRunner {
   }
 
   @Override
-  public boolean canRun(@NotNull ProjectTask projectTask) {
-    throw new UnsupportedOperationException("MavenProjectTaskRunner#canRun(ProjectTask)");
-  }
-
-  @Override
   public boolean canRun(@NotNull Project project, @NotNull ProjectTask projectTask, @Nullable ProjectTaskContext context) {
     if (context != null && context.getRunConfiguration() instanceof JavaScratchConfiguration) {
       return false;
     }
-    return canRun(project, projectTask);
-  }
 
-  @Override
-  public boolean canRun(@NotNull Project project, @NotNull ProjectTask projectTask) {
     if (!MavenRunner.getInstance(project).getSettings().isDelegateBuildToMaven()) {
       return false;
     }
 
-    if (projectTask instanceof ModuleBuildTask) {
-      Module module = ((ModuleBuildTask)projectTask).getModule();
-      return isMavenModule(module);
+    if (projectTask instanceof ModuleBuildTask moduleBuildTask) {
+      return isMavenModule(moduleBuildTask.getModule());
     }
 
-    if (projectTask instanceof ProjectModelBuildTask buildTask) {
+    if (projectTask instanceof ProjectModelBuildTask<?> buildTask) {
       if (buildTask.getBuildableElement() instanceof Artifact artifact) {
         MavenArtifactProperties properties = null;
         for (ArtifactPropertiesProvider provider : artifact.getPropertiesProviders()) {

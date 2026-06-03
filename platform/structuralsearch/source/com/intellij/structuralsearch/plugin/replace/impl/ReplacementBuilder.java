@@ -9,7 +9,12 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
-import com.intellij.structuralsearch.*;
+import com.intellij.structuralsearch.MalformedPatternException;
+import com.intellij.structuralsearch.MatchResult;
+import com.intellij.structuralsearch.PatternContextInfo;
+import com.intellij.structuralsearch.StructuralSearchScriptEngine;
+import com.intellij.structuralsearch.StructuralSearchProfile;
+import com.intellij.structuralsearch.StructuralSearchUtil;
 import com.intellij.structuralsearch.impl.matcher.MatcherImplUtil;
 import com.intellij.structuralsearch.impl.matcher.PatternTreeContext;
 import com.intellij.structuralsearch.impl.matcher.predicates.ScriptSupport;
@@ -19,11 +24,14 @@ import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
-import groovy.lang.Script;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author maxim
@@ -163,7 +171,7 @@ public final class ReplacementBuilder {
       final String name = info.getName();
       final String scriptText = StringUtil.unquoteString(constraint);
       try {
-        final Script script = ScriptSupport.buildScript(name, scriptText, options.getMatchOptions());
+        final StructuralSearchScriptEngine.CompiledScript script = ScriptSupport.buildScript(myProject, name, scriptText, options.getMatchOptions());
         scriptSupport = new ScriptSupport(myProject, script, name, variableNames);
         replacementVarsMap.put(info.getName(), scriptSupport);
       } catch (MalformedPatternException e) {

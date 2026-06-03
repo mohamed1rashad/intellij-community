@@ -7,7 +7,18 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream;
 import com.intellij.openapi.util.io.ByteArraySequence;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeMapper;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeVisitor;
 import com.intellij.psi.impl.compiled.ClsClassImpl;
 import com.intellij.psi.impl.java.stubs.PsiJavaFileStub;
 import com.intellij.psi.impl.light.LightMethodBuilder;
@@ -22,6 +33,7 @@ import com.intellij.util.gist.VirtualFileGist;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.plugins.groovy.config.GroovyConfigUtils;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory;
 import org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.annotation.GrAnnotation;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrField;
@@ -35,10 +47,17 @@ import org.jetbrains.plugins.groovy.lang.resolve.GroovyTraitFieldsFileIndex.Trai
 import org.jetbrains.plugins.groovy.lang.resolve.GroovyTraitMethodsFileIndex;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static com.intellij.psi.PsiModifier.ABSTRACT;
-import static org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierFlags.*;
+import static org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierFlags.PRIVATE_MASK;
+import static org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierFlags.PUBLIC_MASK;
+import static org.jetbrains.plugins.groovy.lang.psi.api.auxiliary.modifiers.GrModifierFlags.STATIC_MASK;
 import static org.jetbrains.plugins.groovy.lang.psi.impl.synthetic.MirrorsKt.withType;
 import static org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames.GROOVY_TRAIT;
 import static org.jetbrains.plugins.groovy.lang.psi.util.GroovyCommonClassNames.GROOVY_TRAIT_IMPLEMENTED;
@@ -62,7 +81,12 @@ public final class GrTraitUtil {
 
   public static boolean isMethodAbstract(@NotNull PsiMethod method) {
     return method.getModifierList().hasExplicitModifier(ABSTRACT) ||
-           isInterface(method.getContainingClass()) && !method.hasModifierProperty(PsiModifier.DEFAULT);
+           isInterface(method.getContainingClass()) && !method.hasModifierProperty(PsiModifier.DEFAULT) && !isGroovy5Method(method);
+  }
+
+  private static boolean isGroovy5Method(@NotNull PsiMethod method) {
+    if (!GroovyConfigUtils.isAtLeastGroovy50(method)) return false;
+    return method.hasModifierProperty(PsiModifier.DEFAULT) || method.hasModifierProperty(PsiModifier.STATIC) || method.hasModifierProperty(PsiModifier.PRIVATE);
   }
 
   public static List<PsiClass> getSelfTypeClasses(@NotNull PsiClass trait) {

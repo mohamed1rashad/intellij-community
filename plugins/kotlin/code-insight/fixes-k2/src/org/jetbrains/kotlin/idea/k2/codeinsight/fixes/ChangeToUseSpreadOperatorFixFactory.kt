@@ -10,6 +10,7 @@ import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.types.KaCapturedType
 import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.analysis.api.types.KaErrorType
+import org.jetbrains.kotlin.analysis.api.types.KaFlexibleType
 import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
@@ -35,7 +36,7 @@ internal object ChangeToUseSpreadOperatorFixFactory {
         }
 
         val buildType = substituteErrorAndTypeParameterTypesWithStarTypeProjections(diagnostic.expectedType) ?: return@ModCommandBased emptyList()
-        if (!arrayElementType.isSubtypeOf(buildType)) return@ModCommandBased emptyList()
+        if (arrayElementType !is KaErrorType && !arrayElementType.isSubtypeOf(buildType)) return@ModCommandBased emptyList()
 
         listOf(
             ChangeToUseSpreadOperatorFix(element)
@@ -55,17 +56,19 @@ private fun KaType.unwrap(): KaType {
 @OptIn(KaExperimentalApi::class)
 private fun KaSession.substituteErrorAndTypeParameterTypesWithStarTypeProjections(type: KaType): KaType? {
     return when (type) {
-        is KaClassType -> buildClassType(type.symbol) {
+        is KaClassType -> typeCreator.classType(type.symbol) {
             type.typeArguments.mapNotNull { it.type }.forEach {
                 if (it is KaTypeParameterType || it is KaErrorType) {
-                    argument(buildStarTypeProjection())
+                    typeArgument(starTypeProjection())
                 } else {
-                    substituteErrorAndTypeParameterTypesWithStarTypeProjections(it)?.let { type ->
-                        argument(type)
+                    substituteErrorAndTypeParameterTypesWithStarTypeProjections(it)?.let { argumentType ->
+                        invariantTypeArgument(argumentType)
                     }
                 }
             }
         }
+
+        is KaFlexibleType -> substituteErrorAndTypeParameterTypesWithStarTypeProjections(type.lowerBound)
 
         else -> null
     }

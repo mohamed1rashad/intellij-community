@@ -14,20 +14,33 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.unit.dp
+import com.intellij.platform.icons.modifiers.IconModifier
+import com.intellij.platform.icons.modifiers.scale
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.samples.showcase.ShowcaseIcons
+import org.jetbrains.jewel.ui.component.CheckboxRow
 import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.Image
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.icon.badge
+import org.jetbrains.jewel.ui.icon.circle
+import org.jetbrains.jewel.ui.icon.fitArea
+import org.jetbrains.jewel.ui.icon.iconKey
+import org.jetbrains.jewel.ui.icon.stroke
 import org.jetbrains.jewel.ui.icons.AllIconsKeys
 import org.jetbrains.jewel.ui.painter.badge.DotBadgeShape
 import org.jetbrains.jewel.ui.painter.hints.Badge
+import org.jetbrains.jewel.ui.painter.hints.EmbeddedToInlineCssStyleSvgPatchHint
 import org.jetbrains.jewel.ui.painter.hints.Size
 import org.jetbrains.jewel.ui.painter.hints.Stroke
 import org.jetbrains.jewel.ui.theme.colorPalette
@@ -97,6 +110,75 @@ public fun Icons(modifier: Modifier = Modifier) {
                 Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
                     Icon(key = AllIconsKeys.Nodes.ConfigFolder, contentDescription = "taskGroup", hint = Size(20))
                 }
+            }
+        }
+
+        Column {
+            Text("Icon Modifiers & Layers: (new api)")
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                    Icon(contentDescription = "taskGroup") { iconKey(AllIconsKeys.Nodes.ConfigFolder) }
+                }
+                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                    Icon(contentDescription = "taskGroup") {
+                        iconKey(AllIconsKeys.Nodes.ConfigFolder)
+                        badge(Color.Red, circle(3.2.dp))
+                    }
+                }
+                val backgroundColor =
+                    if (JewelTheme.isDark) {
+                        JewelTheme.colorPalette.blueOrNull(4) ?: Color(0xFF375FAD)
+                    } else {
+                        JewelTheme.colorPalette.blueOrNull(4) ?: Color(0xFF3574F0)
+                    }
+                Box(
+                    Modifier.size(24.dp).background(backgroundColor, shape = RoundedCornerShape(4.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(contentDescription = "taskGroup") {
+                        iconKey(AllIconsKeys.Nodes.ConfigFolder, modifier = IconModifier.stroke(Color.White))
+                    }
+                }
+                Box(
+                    Modifier.size(24.dp).background(backgroundColor, shape = RoundedCornerShape(4.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(contentDescription = "taskGroup") {
+                        iconKey(AllIconsKeys.Nodes.ConfigFolder, modifier = IconModifier.stroke(Color.White))
+                        badge(Color.Red, circle(3.2.dp))
+                    }
+                }
+                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+                    Icon(contentDescription = "taskGroup") {
+                        iconKey(AllIconsKeys.Nodes.ConfigFolder, modifier = IconModifier.scale(fitArea(20.dp, 20.dp)))
+                    }
+                }
+            }
+        }
+
+        Column {
+            var checked by remember { mutableStateOf(true) }
+
+            // See JEWEL-1072
+            CheckboxRow(
+                text = "Enable embedded CSS styles inlining:",
+                checked = checked,
+                onCheckedChange = { checked = it },
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Image(
+                    iconKey = ShowcaseIcons.sunny,
+                    contentDescription = "Icon with embedded CSS styles",
+                    hints = if (checked) arrayOf(EmbeddedToInlineCssStyleSvgPatchHint) else emptyArray(),
+                    modifier = Modifier.size(96.dp),
+                )
             }
         }
 

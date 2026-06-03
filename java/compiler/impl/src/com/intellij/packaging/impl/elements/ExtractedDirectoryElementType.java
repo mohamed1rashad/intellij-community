@@ -16,7 +16,7 @@ import com.intellij.packaging.ui.ArtifactEditorContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -45,7 +45,7 @@ public class ExtractedDirectoryElementType extends PackagingElementType<Extracte
         if (file == null || (file.isInLocalFileSystem() && file.isDirectory())) return false;
         return super.isFileSelectable(file);
       }
-    };
+    }.withEnvironmentRestricted(true);
     final VirtualFile[] files = FileChooser.chooseFiles(descriptor, context.getProject(), null);
     final List<PackagingElement<?>> list = new ArrayList<>();
     final PackagingElementFactory factory = PackagingElementFactory.getInstance();

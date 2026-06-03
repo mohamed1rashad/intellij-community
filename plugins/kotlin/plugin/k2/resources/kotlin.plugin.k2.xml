@@ -19,11 +19,11 @@
   <xi:include href="kotlin-core.xml"/>
   <xi:include href="searching-base.xml"/>
   <xi:include href="statistics.xml"/>
-  <xi:include href="kotlin.highlighting.shared.xml"/>
+  <xi:include href="highlighting-shared.xml"/>
   <xi:include href="light-classes.xml"/>
   <xi:include href="parcelize.k2.xml"/>
   <xi:include href="jvm-debugger.xml"/>
-  <xi:include href="jvm-debugger-k2.xml"/>
+  <xi:include href="jvm-debugger-evaluation.xml"/>
   <xi:include href="dep-spellchecker.xml"/>
   <xi:include href="scripting-v1.xml"/>
   <xi:include href="native.xml"/>
@@ -31,7 +31,7 @@
   <xi:include href="facets-base.xml"/>
   <xi:include href="jvm.xml"/>
   <xi:include href="searching-k2.xml"/>
-  <xi:include href="intellij.kotlin.base.codeInsight.minimal.xml"/>
+  <xi:include href="base-codeInsight-minimal.xml"/>
 
   <xi:include href="extensions.xml"/>
 
@@ -61,13 +61,12 @@
     <uastLanguagePlugin implementation="org.jetbrains.uast.kotlin.FirKotlinUastLanguagePlugin"/>
     <analysis.uastAnalysisPlugin implementation="org.jetbrains.uast.kotlin.FirKotlinUastAnalysisPlugin"/>
     <generate.uastCodeGenerationPlugin implementation="org.jetbrains.uast.kotlin.IdeaFirKotlinUastCodeGenerationPlugin"/>
+    <evaluation.uastEvaluatorExtension implementation="org.jetbrains.uast.kotlin.evaluation.KotlinEvaluatorExtension"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij">
     <resolveScopeEnlarger implementation="org.jetbrains.kotlin.idea.base.analysis.builtins.KotlinBuiltInsResolveScopeEnlarger" />
 
-    <applicationActivity implementation="org.jetbrains.kotlin.idea.base.plugin.K2UnsupportedPluginsNotificationActivity"/>
-    <notificationGroup id="Plugins Incompatible With Kotlin Plugin in K2 Mode" displayType="BALLOON" bundle="messages.KotlinBasePluginBundle" key="plugins.incompatible.with.k2.title"/>
 
     <lang.parserDefinition language="kotlin" implementationClass="org.jetbrains.kotlin.idea.base.analysisApiPlatform.IDEKotlinK2KotlinParserDefinition"/>
 
@@ -107,48 +106,15 @@
 
     <!-- shared completion -->
     <projectService serviceImplementation="org.jetbrains.kotlin.idea.completion.implCommon.LookupCancelService"/>
-    <!-- k2 completion -->
-    <lookup.charFilter implementation="org.jetbrains.kotlin.idea.completion.impl.k2.K2CompletionCharFilter"/>
-    <completion.contributor language="kotlin"
-                            id="KotlinCompletionContributor"
-                            order="first"
-                            implementationClass="org.jetbrains.kotlin.idea.completion.KotlinFirCompletionContributor"/>
-
-    <completion.contributor language="kotlin"
-                            order="last, before default"
-                            implementationClass="org.jetbrains.kotlin.idea.completion.impl.k2.KotlinChainCompletionContributor"/>
-
-    <registryKey key="kotlin.k2.chain.completion.enabled"
-                 description="Allow chained completion items in Kotlin"
-                 defaultValue="true"
-                 restartRequired="true"/>
 
     <registryKey key="kotlin.k2.dot.add.enabled"
                  description="Allow adding '.' to completion lookup"
                  defaultValue="true"
                  restartRequired="false"/>
 
-    <registryKey key="kotlin.k2.smart.completion.enabled"
-                 description="Enable smart completion for Kotlin in K2 mode"
-                 defaultValue="true"
-                 restartRequired="true"/>
-
-    <registryKey key="kotlin.k2.parallel.completion.enabled"
-                 description="Allow Kotlin contributors to run in parallel"
-                 defaultValue="true"
-                 restartRequired="false"/>
-
-    <registryKey key="kotlin.k2.complete.top.level.packages"
-                 description="Allows completion of top level packages"
-                 defaultValue="true"
-                 restartRequired="false"/>
-
     <weigher key="proximity" implementationClass="org.jetbrains.kotlin.idea.completion.implCommon.weighers.PreferKotlinxLibrariesWeigher"
              id="kotlin.preferKotlinx"
              order="after sameModule, before knownElement"/>
-
-    <applicationService serviceImplementation="org.jetbrains.kotlin.idea.completion.FirCompletionDummyIdentifierProviderService"
-                        serviceInterface="org.jetbrains.kotlin.idea.completion.api.CompletionDummyIdentifierProviderService"/>
 
     <!-- -->
     <codeInsight.typeInfo language="kotlin"
@@ -185,8 +151,6 @@
   <extensions defaultExtensionNs="com.intellij">
     <iconProvider implementation="org.jetbrains.kotlin.idea.FirKotlinIconProvider"/>
 
-    <projectService serviceInterface="org.jetbrains.kotlin.load.kotlin.MetadataFinderFactory"
-                    serviceImplementation="org.jetbrains.kotlin.idea.vfilefinder.IdeVirtualFileFinderFactory"/>
     <projectService serviceInterface="org.jetbrains.kotlin.load.kotlin.VirtualFileFinderFactory"
                     serviceImplementation="org.jetbrains.kotlin.idea.vfilefinder.IdeVirtualFileFinderFactory"/>
 
@@ -208,13 +172,15 @@
     <applicationService
             serviceInterface="org.jetbrains.kotlin.idea.inspections.suppress.KotlinSuppressionChecker"
             serviceImplementation="org.jetbrains.kotlin.idea.inspections.suppress.KotlinK2SuppressionChecker"/>
+    <projectSettings
+            service="org.jetbrains.kotlin.idea.base.projectStructure.libraryToSourceAnalysis.KotlinLibraryToSourceAnalysisStateComponent"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij">
     <buildProcess.parametersProvider implementation="org.jetbrains.kotlin.idea.jvm.shared.compiler.configuration.KotlinBuildProcessParametersProvider"/>
 
     <configurationType implementation="org.jetbrains.kotlin.idea.run.KotlinRunConfigurationType"/>
-    <runConfigurationProducer implementation="org.jetbrains.kotlin.idea.run.KotlinRunConfigurationProducer"/>
+    <runConfigurationProducer implementation="org.jetbrains.kotlin.idea.run.KotlinRunConfigurationProducer" id="kotlinMain"/>
   </extensions>
 
   <content namespace="jetbrains">
@@ -231,6 +197,7 @@
     <module name="intellij.kotlin.git"/>
     <module name="intellij.kotlin.grazie"/>
     <module name="intellij.kotlin.gradle.tooling"/>
+    <module name="intellij.kotlin.lombok"/>
     <module name="intellij.kotlin.maven"/>
     <module name="intellij.kotlin.completion.ml"/>
     <module name="intellij.kotlin.runConfigurations.junit"/>
@@ -248,6 +215,7 @@
 
     <module name="intellij.kotlin.onboarding"/>
     <module name="intellij.kotlin.onboarding.gradle"/>
+    <module name="intellij.kotlin.onboarding.maven"/>
 
     <module name="intellij.kotlin.projectWizard.idea"/>
     <module name="intellij.kotlin.projectWizard.gradle"/>
@@ -262,7 +230,9 @@
     <module name="intellij.kotlin.jvm"/>
 
     <module name="intellij.kotlin.base.scripting"/>
+    <module name="intellij.kotlin.base.scripting.main.kts"/>
     <module name="intellij.kotlin.base.scripting.shared"/>
+    <module name="intellij.kotlin.base.scripting.scratch.definition"/>
 
     <module name="kotlin.code-insight.intentions.shared"/>
     <module name="kotlin.code-insight.inspections.shared"/>
@@ -275,11 +245,12 @@
     <module name="intellij.kotlin.codeInsight.postfixTemplates"/>
     <module name="intellij.kotlin.codeInsight.structuralSearch"/>
 
+    <module name="intellij.kotlin.completion.impl"/>
+
     <module name="intellij.kotlin.jvm.debugger.evaluation"/>
 
     <module name="intellij.kotlin.searching"/>
     <module name="intellij.kotlin.refactorings"/>
-    <module name="intellij.kotlin.refactorings.move"/>
     <module name="intellij.kotlin.refactorings.rename"/>
 
     <module name="intellij.kotlin.navigation"/>
@@ -291,16 +262,22 @@
 
     <module name="intellij.kotlin.compilerPlugins.assignment.fixes"/>
     <module name="intellij.kotlin.compilerPlugins.scripting"/>
+    <module name="intellij.kotlin.compilerPlugins.support.gradle"/>
     <module name="intellij.kotlin.compilerPlugins.support.maven"/>
     <module name="intellij.kotlin.compilerPlugins.allopen.maven"/>
     <module name="intellij.kotlin.compilerPlugins.noarg.maven"/>
+    <module name="intellij.kotlin.compilerPlugins.noarg.gradle"/>
     <module name="intellij.kotlin.compilerPlugins.samWithReceiver.maven"/>
     <module name="intellij.kotlin.compilerPlugins.kapt"/>
     <module name="intellij.kotlin.compilerPlugins.serialization"/>
+    <module name="intellij.kotlin.compilerPlugins.serialization.gradle"/>
     <module name="intellij.kotlin.compilerPlugins.serialization.maven"/>
     <module name="intellij.kotlin.compilerPlugins.dataframe.maven"/>
     <module name="intellij.kotlin.compilerPlugins.lombok.maven"/>
+    <module name="intellij.kotlin.compilerPlugins.lombok.gradle"/>
     <module name="intellij.kotlin.compilerPlugins.assignment.maven"/>
+    <module name="intellij.kotlin.compilerPlugins.assignment.gradle"/>
+    <module name="intellij.kotlin.compilerPlugins.powerAssert.gradle"/>
 
     <module name="intellij.kotlin.injection"/>
     <module name="kotlin.base.injection"/>

@@ -1,30 +1,25 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.hatch.sdk
 
-import com.intellij.openapi.application.EDT
 import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.util.NlsSafe
 import com.intellij.python.hatch.BasePythonExecutableNotFoundHatchError
 import com.intellij.python.hatch.HatchVirtualEnvironment
 import com.intellij.python.hatch.PythonVirtualEnvironment
-import com.intellij.python.hatch.getHatchEnvVirtualProjectPath
 import com.jetbrains.python.Result
 import com.jetbrains.python.errorProcessing.PyResult
-import com.jetbrains.python.sdk.impl.resolvePythonBinary
-import com.jetbrains.python.sdk.legacy.PythonSdkUtil
 import com.jetbrains.python.sdk.add.v2.PathHolder
 import com.jetbrains.python.sdk.createSdk
-import com.jetbrains.python.sdk.persist
+import com.jetbrains.python.sdk.impl.resolvePythonBinary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Path
-import kotlin.io.path.name
 
 @ApiStatus.Internal
 suspend fun HatchVirtualEnvironment.createSdk(workingDirectoryPath: Path): PyResult<Sdk> {
-  val existingPythonEnvironment = pythonVirtualEnvironment as? PythonVirtualEnvironment.Existing
-                                  ?: return Result.failure(BasePythonExecutableNotFoundHatchError(null as String?))
+  if (pythonVirtualEnvironment !is PythonVirtualEnvironment.Existing) {
+    return Result.failure(BasePythonExecutableNotFoundHatchError(null as String?))
+  }
   val pythonHomePath = pythonVirtualEnvironment?.pythonHomePath
   val pythonBinary = pythonHomePath?.let {
     withContext(Dispatchers.IO) { it.resolvePythonBinary() }
@@ -33,24 +28,9 @@ suspend fun HatchVirtualEnvironment.createSdk(workingDirectoryPath: Path): PyRes
   val hatchSdkAdditionalData = HatchSdkAdditionalData(workingDirectoryPath, this.hatchEnvironment.name)
   val sdk = createSdk(
     pythonBinaryPath = PathHolder.Eel(pythonBinary),
-    existingSdks = PythonSdkUtil.getAllSdks(),
-    associatedProjectPath = workingDirectoryPath.toString(),
-    suggestedSdkName = existingPythonEnvironment.suggestHatchSdkName(),
     sdkAdditionalData = hatchSdkAdditionalData
   ).getOr { return it }
 
-  withContext(Dispatchers.EDT) {
-    sdk.persist()
-  }
 
   return Result.success(sdk)
-}
-
-private fun PythonVirtualEnvironment.Existing.suggestHatchSdkName(): @NlsSafe String {
-  val normalizedProjectName = pythonHomePath.getHatchEnvVirtualProjectPath().name
-  val nonDefaultEnvName = pythonHomePath.name.takeIf { it != normalizedProjectName }
-
-  val envNamePrefix = nonDefaultEnvName?.let { "$it@" } ?: ""
-  val sdkName = "Hatch ($envNamePrefix$normalizedProjectName) [$pythonVersion]"
-  return sdkName
 }

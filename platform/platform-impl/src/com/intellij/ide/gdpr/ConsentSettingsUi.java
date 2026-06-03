@@ -2,7 +2,14 @@
 package com.intellij.ide.gdpr;
 
 import com.intellij.ide.BrowserUtil;
-import com.intellij.ide.gdpr.ui.consents.*;
+import com.intellij.ide.gdpr.localConsents.LocalConsentOptions;
+import com.intellij.ide.gdpr.ui.consents.AiDataCollectionConsentUi;
+import com.intellij.ide.gdpr.ui.consents.ConsentUi;
+import com.intellij.ide.gdpr.ui.consents.DefaultConsentUi;
+import com.intellij.ide.gdpr.ui.consents.ErrorsAutoReportConsentUi;
+import com.intellij.ide.gdpr.ui.consents.TraceDataCollectionConsentUI;
+import com.intellij.ide.gdpr.ui.consents.UsageStatisticsConsentUi;
+import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.options.ConfigurableUi;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
@@ -11,20 +18,20 @@ import com.intellij.ui.HyperlinkAdapter;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.scale.JBUIScale;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.SwingHelper;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JEditorPane;
+import javax.swing.JPanel;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.StyleSheet;
-import java.awt.*;
+import java.awt.GridLayout;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,16 +39,22 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.Supplier;
 
-import static com.intellij.ide.gdpr.ui.consents.ConsentGroup.DATA_COLLECTION_GROUP_ID;
 import static javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED;
 import static javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED;
 
 public class ConsentSettingsUi extends JPanel implements ConfigurableUi<List<Consent>> {
   private final Collection<ConsentStateSupplier> consentMapping = new ArrayList<>();
   private final boolean myPreferencesMode;
+  private final boolean myIsJetBrainsVendor;
 
   public ConsentSettingsUi(boolean preferencesMode) {
+    this(preferencesMode, ApplicationInfoImpl.getShadowInstance().isVendorJetBrains());
+  }
+
+  @ApiStatus.Internal
+  public ConsentSettingsUi(boolean preferencesMode, boolean isJetBrainsVendor) {
     myPreferencesMode = preferencesMode;
+    myIsJetBrainsVendor = isJetBrainsVendor;
     setLayout(new GridLayout(1, 1));
   }
 
@@ -55,8 +68,9 @@ public class ConsentSettingsUi extends JPanel implements ConfigurableUi<List<Con
       return;
     }
 
-    JBScrollPane scrollPane = new JBScrollPane(ConsentSettingsBodyKt.createConsentSettings(consentMapping, myPreferencesMode, consents),
-                                               VERTICAL_SCROLLBAR_AS_NEEDED, HORIZONTAL_SCROLLBAR_AS_NEEDED);
+    JBScrollPane scrollPane =
+      new JBScrollPane(ConsentSettingsBodyKt.createConsentSettings(consentMapping, myPreferencesMode, myIsJetBrainsVendor, consents),
+                       VERTICAL_SCROLLBAR_AS_NEEDED, HORIZONTAL_SCROLLBAR_AS_NEEDED);
     scrollPane.setBorder(JBUI.Borders.empty());
     add(scrollPane);
   }
@@ -107,19 +121,17 @@ public class ConsentSettingsUi extends JPanel implements ConfigurableUi<List<Con
     if (ConsentOptions.condUsageStatsConsent().test(consent)) {
       return new UsageStatisticsConsentUi(consent);
     }
-    if (ConsentOptions.condTraceDataCollectionComConsent().test(consent) ||
-        ConsentOptions.condTraceDataCollectionNonComConsent().test(consent)) {
+    if (ConsentOptions.condAiDataCollectionConsent().test(consent)) {
+      return new AiDataCollectionConsentUi(consent);
+    }
+    if (LocalConsentOptions.condTraceDataCollectionComLocalConsent().test(consent) ||
+        LocalConsentOptions.condTraceDataCollectionNonComLocalConsent().test(consent)) {
       return new TraceDataCollectionConsentUI(consent);
     }
-    return new DefaultConsentUi(consent);
-  }
-
-  @ApiStatus.Internal
-  public static @Nullable ConsentGroupUi getConsentGroupUi(ConsentGroup consentGroup) {
-    if (DATA_COLLECTION_GROUP_ID.equals(consentGroup.getId())) {
-      return new DataCollectionConsentGroupUI(ContainerUtil.map(consentGroup.getConsents(), ConsentSettingsUi::getConsentUi));
+    if (ConsentOptions.condEAAutoReportConsent().test(consent)) {
+      return new ErrorsAutoReportConsentUi(consent);
     }
-    return null;
+    return new DefaultConsentUi(consent);
   }
 
   @Contract(pure = true)

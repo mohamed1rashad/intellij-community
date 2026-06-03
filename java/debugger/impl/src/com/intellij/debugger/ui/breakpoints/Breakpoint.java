@@ -6,10 +6,27 @@
  */
 package com.intellij.debugger.ui.breakpoints;
 
-import com.intellij.debugger.*;
+import com.intellij.debugger.DebuggerInvocationUtil;
+import com.intellij.debugger.DebuggerManagerEx;
+import com.intellij.debugger.EvaluatingComputable;
+import com.intellij.debugger.InstanceFilter;
+import com.intellij.debugger.JavaDebuggerBundle;
+import com.intellij.debugger.SourcePosition;
 import com.intellij.debugger.actions.ThreadDumpAction;
-import com.intellij.debugger.engine.*;
-import com.intellij.debugger.engine.evaluation.*;
+import com.intellij.debugger.engine.AsyncStacksUtils;
+import com.intellij.debugger.engine.ContextUtil;
+import com.intellij.debugger.engine.DebugProcess;
+import com.intellij.debugger.engine.DebugProcessImpl;
+import com.intellij.debugger.engine.DebugProcessListener;
+import com.intellij.debugger.engine.DebuggerUtils;
+import com.intellij.debugger.engine.JavaDebugProcess;
+import com.intellij.debugger.engine.SuspendContext;
+import com.intellij.debugger.engine.SuspendContextImpl;
+import com.intellij.debugger.engine.evaluation.EvaluateException;
+import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
+import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
+import com.intellij.debugger.engine.evaluation.TextWithImports;
+import com.intellij.debugger.engine.evaluation.TextWithImportsImpl;
 import com.intellij.debugger.engine.evaluation.expression.EvaluatorBuilderImpl;
 import com.intellij.debugger.engine.evaluation.expression.ExpressionEvaluator;
 import com.intellij.debugger.engine.evaluation.expression.UnsupportedExpressionException;
@@ -26,7 +43,10 @@ import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.debugger.statistics.DebuggerStatistics;
 import com.intellij.debugger.ui.impl.watch.CompilingEvaluatorImpl;
 import com.intellij.debugger.ui.overhead.OverheadProducer;
+import com.intellij.execution.process.ProcessOutputType;
+import com.intellij.execution.ui.ConsoleViewContentType;
 import com.intellij.icons.AllIcons;
+import com.intellij.java.JavaPluginDisposable;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
@@ -48,30 +68,41 @@ import com.intellij.util.SlowOperations;
 import com.intellij.util.ThreeState;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.xdebugger.BreakpointErrorData;
+import com.intellij.xdebugger.DapMode;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebuggerManager;
 import com.intellij.xdebugger.XExpression;
 import com.intellij.xdebugger.breakpoints.SuspendPolicy;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
-import com.intellij.xdebugger.impl.evaluate.XEvaluationOrigin;
 import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.impl.XDebuggerHistoryManager;
-import com.intellij.xdebugger.impl.XDebuggerUtilImpl;
+import com.intellij.xdebugger.impl.XDebuggerManagerImpl;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase;
 import com.intellij.xdebugger.impl.breakpoints.XBreakpointUtil;
 import com.intellij.xdebugger.impl.breakpoints.XExpressionImpl;
 import com.intellij.xdebugger.impl.breakpoints.ui.XBreakpointActionsPanel;
-import com.sun.jdi.*;
+import com.intellij.xdebugger.impl.evaluate.XEvaluationOrigin;
+import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
+import com.sun.jdi.Location;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.ReferenceType;
+import com.sun.jdi.VMDisconnectedException;
+import com.sun.jdi.Value;
+import com.sun.jdi.VoidValue;
 import com.sun.jdi.event.LocatableEvent;
 import com.sun.jdi.request.EventRequest;
 import one.util.streamex.StreamEx;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.java.debugger.breakpoints.properties.JavaBreakpointProperties;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -82,6 +113,19 @@ import java.util.stream.Stream;
 public abstract class Breakpoint<P extends JavaBreakpointProperties> implements FilteredRequestor, ClassPrepareRequestor, OverheadProducer {
   private static final ExecutorService RELOAD_EXECUTOR = AppExecutorUtil.createBoundedApplicationPoolExecutor("Breakpoint reload", 1);
   public static final Key<Breakpoint<?>> DATA_KEY = Key.create("JavaBreakpoint");
+
+  /**
+   * Output type for logging breakpoint messages. It keeps regular system-output styling while letting listeners distinguish
+   * logging breakpoint output from unrelated debugger system messages.
+   */
+  @ApiStatus.Internal
+  public static final ProcessOutputType LOGGING_BREAKPOINT_OUTPUT_TYPE =
+    new ProcessOutputType("logging breakpoint", ProcessOutputType.SYSTEM);
+
+  static {
+    ConsoleViewContentType.registerNewConsoleViewType(LOGGING_BREAKPOINT_OUTPUT_TYPE, ConsoleViewContentType.SYSTEM_OUTPUT);
+  }
+
   private static final Key<Long> HIT_COUNTER = Key.create("HIT_COUNTER");
 
   final XBreakpoint<P> myXBreakpoint;
@@ -97,6 +141,10 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
 
   public @NotNull Project getProject() {
     return myProject;
+  }
+
+  private @NotNull BreakpointManager getBreakpointManager() {
+    return DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager();
   }
 
   protected @NotNull P getProperties() {
@@ -117,13 +165,11 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
   public abstract void createRequest(DebugProcessImpl debugProcess);
 
   static boolean shouldCreateRequest(Requestor requestor, XBreakpoint xBreakpoint, DebugProcessImpl debugProcess, boolean forPreparedClass) {
-    return ReadAction.compute(() -> {
-      JavaDebugProcess process = debugProcess.getXdebugProcess();
-      return process != null
-             && debugProcess.isAttached()
-             && (xBreakpoint == null || ((XDebugSessionImpl)process.getSession()).isBreakpointActive(xBreakpoint))
-             && (forPreparedClass || debugProcess.getRequestsManager().findRequests(requestor).isEmpty());
-    });
+    JavaDebugProcess process = debugProcess.getXdebugProcess();
+    return process != null
+           && debugProcess.isAttached()
+           && (xBreakpoint == null || ((XDebugSessionImpl)process.getSession()).isBreakpointActive(xBreakpoint))
+           && (forPreparedClass || debugProcess.getRequestsManager().findRequests(requestor).isEmpty());
   }
 
   protected final boolean shouldCreateRequest(DebugProcessImpl debugProcess, boolean forPreparedClass) {
@@ -228,7 +274,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
         breakpoint.emitBreakpointChanged();
       })
       .coalesceBy(myProject, this)
-      .expireWith(myProject)
+      .expireWith(JavaPluginDisposable.getInstance(myProject))
       .submit(RELOAD_EXECUTOR);
   }
 
@@ -279,7 +325,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
    */
   protected void createOrWaitPrepare(DebugProcessImpl debugProcess, String classToBeLoaded) {
     debugProcess.getRequestsManager().callbackOnPrepareClasses(this, classToBeLoaded);
-    VirtualMachineProxyImpl virtualMachineProxy = debugProcess.getVirtualMachineProxy();
+    VirtualMachineProxyImpl virtualMachineProxy = VirtualMachineProxyImpl.getCurrent();
     if (virtualMachineProxy.canBeModified()) {
       processClassesPrepare(debugProcess, virtualMachineProxy.classesByName(classToBeLoaded).stream());
     }
@@ -288,7 +334,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
   protected void createOrWaitPrepare(final DebugProcessImpl debugProcess, final @NotNull SourcePosition classPosition) {
     long startTimeNs = System.nanoTime();
     debugProcess.getRequestsManager().callbackOnPrepareClasses(this, classPosition);
-    if (debugProcess.getVirtualMachineProxy().canBeModified() && !isObsolete()) {
+    if (VirtualMachineProxyImpl.getCurrent().canBeModified() && !isObsolete()) {
       List<ReferenceType> classes = debugProcess.getPositionManager().getAllClasses(classPosition);
       long timeMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startTimeNs);
       DebuggerStatistics.logBreakpointInstallSearchOverhead(this, timeMs);
@@ -339,8 +385,8 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
       runAction(evaluationContext, event);
     }
     catch (final EvaluateException ex) {
-      if (ApplicationManager.getApplication().isUnitTestMode()) {
-        System.out.println(ex.getMessage());
+      if (ApplicationManager.getApplication().isUnitTestMode() && !DapMode.isDap()) {
+        context.getDebugProcess().printToConsole(ex.getMessage() + "\n");
         return false;
       }
 
@@ -359,6 +405,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
       CallTracer.get(debugProcess).stop(event.thread());
     }
     if (isLogEnabled() || isLogExpressionEnabled() || isLogStack()) {
+      getBreakpointManager().beforeLoggingBreakpoint(context.getSuspendContext());
       StringBuilder buf = new StringBuilder();
       if (myXBreakpoint.isLogMessage()) {
         buf.append(getEventMessage(event)).append("\n");
@@ -387,18 +434,48 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
         }
         catch (EvaluateException e) {
           JavaDebuggerEvaluatorStatisticsCollector.logEvaluationResult(myProject, evaluator, false, XEvaluationOrigin.BREAKPOINT_LOG);
-          buf.append(JavaDebuggerBundle.message("error.unable.to.evaluate.expression"))
-            .append(" \"").append(logMessage).append("\"")
-            .append(" : ").append(e.getMessage());
+          String errorMessage = JavaDebuggerBundle.message("error.unable.to.evaluate.expression") +
+                                " \"" + logMessage + "\"" +
+                                " : " + e.getMessage();
+          buf.append(errorMessage);
+
+          XDebugSession session = debugProcess.getSession().getXDebugSession();
+          if (session != null) {
+            XDebuggerManagerImpl debuggerManager = (XDebuggerManagerImpl)XDebuggerManager.getInstance(myProject);
+            debuggerManager.getBreakpointManager().fireBreakpointError(getXBreakpoint(),
+                                                                       session,
+                                                                       new BreakpointErrorData(JavaDebuggerBundle.message("title.error.evaluating.breakpoint.action"),
+                                                                                               errorMessage,
+                                                                                               e));
+          }
         }
         buf.append("\n");
       }
       if (!buf.isEmpty()) {
-        debugProcess.printToConsole(buf.toString());
+        var msg = buf.toString();
+        // TODO IDEA-389143 Provide stack for non-instrumented breakpoints?
+        printLoggingBreakpointMessage(this, debugProcess, msg, null);
       }
     }
     if (isRemoveAfterHit()) {
       handleTemporaryBreakpointHit(debugProcess);
+    }
+  }
+
+  @ApiStatus.Internal
+  public static void printLoggingBreakpointMessage(@Nullable Breakpoint<?> breakpoint,
+                                                   @NotNull DebugProcessImpl debugProcess,
+                                                   @NotNull String message,
+                                                   @Nullable List<StackFrameItem> stack) {
+    if (breakpoint != null) {
+      breakpoint.getBreakpointManager().multicastLogMessage(breakpoint, message, debugProcess, stack);
+    }
+    var processHandler = debugProcess.getProcessHandler();
+    if (processHandler == null || breakpoint == null) {
+      debugProcess.printToConsole(message);
+    }
+    else {
+      processHandler.notifyTextAvailable(message, LOGGING_BREAKPOINT_OUTPUT_TYPE);
     }
   }
 
@@ -622,7 +699,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
       }
 
       private void removeBreakpoint() {
-        AppUIUtil.invokeOnEdt(() -> DebuggerManagerEx.getInstanceEx(myProject).getBreakpointManager().removeBreakpoint(Breakpoint.this));
+        AppUIUtil.invokeOnEdt(() -> getBreakpointManager().removeBreakpoint(Breakpoint.this));
         debugProcess.removeDebugProcessListener(this);
       }
     });
@@ -695,7 +772,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
   }
 
   protected boolean isLogExpressionEnabled() {
-    if (XDebuggerUtilImpl.isEmptyExpression(myXBreakpoint.getLogExpressionObject())) {
+    if (DebuggerUIUtil.isEmptyExpression(myXBreakpoint.getLogExpressionObject())) {
       return false;
     }
     return !getLogMessage().isEmpty();
@@ -817,7 +894,7 @@ public abstract class Breakpoint<P extends JavaBreakpointProperties> implements 
   @Override
   public boolean isConditionEnabled() {
     XExpression condition = myXBreakpoint.getConditionExpression();
-    if (XDebuggerUtilImpl.isEmptyExpression(condition)) {
+    if (DebuggerUIUtil.isEmptyExpression(condition)) {
       return false;
     }
     return !getCondition().isEmpty();

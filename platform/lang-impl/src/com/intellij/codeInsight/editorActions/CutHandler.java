@@ -4,7 +4,11 @@ package com.intellij.codeInsight.editorActions;
 
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Caret;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorModificationUtil;
+import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
 import com.intellij.openapi.editor.actionSystem.EditorWriteActionHandler;
@@ -54,7 +58,7 @@ public final class CutHandler extends EditorWriteActionHandler {
     final List<TextRange> selections = new ArrayList<>();
     if (editor.getCaretModel().supportsMultipleCarets()) {
       editor.getCaretModel().runForEachCaret(
-        __ -> selections.add(new TextRange(selectionModel.getSelectionStart(), selectionModel.getSelectionEnd())));
+        _ -> selections.add(new TextRange(selectionModel.getSelectionStart(), selectionModel.getSelectionEnd())));
     }
 
     EditorActionManager.getInstance().getActionHandler(IdeActions.ACTION_EDITOR_COPY).execute(editor, null, dataContext);
@@ -63,7 +67,7 @@ public final class CutHandler extends EditorWriteActionHandler {
 
       Collections.reverse(selections);
       final Iterator<TextRange> it = selections.iterator();
-      editor.getCaretModel().runForEachCaret(__ -> {
+      editor.getCaretModel().runForEachCaret(_ -> {
         TextRange range = it.next();
         editor.getCaretModel().moveToOffset(range.getStartOffset());
         selectionModel.removeSelection();

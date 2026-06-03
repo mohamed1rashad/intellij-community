@@ -18,6 +18,8 @@
     <fileTypeUsageSchemaDescriptor schema="micronaut" implementationClass="com.intellij.internal.statistic.MicronautFileTypeUsageDescriptor"/>
     <fileTypeUsageSchemaDescriptor schema="quarkus" implementationClass="com.intellij.internal.statistic.QuarkusFileTypeUsageDescriptor"/>
     <fileTypeUsageSchemaDescriptor schema="ktor" implementationClass="com.intellij.internal.statistic.KtorFileTypeUsageDescriptor"/>
+    <projectSettings service="com.intellij.internal.statistic.libraryUsage.LibraryUsageStatisticsStorageService"/>
+    <projectSettings service="com.intellij.internal.statistic.libraryUsage.ProcessedFilesStorageService"/>
   </extensions>
 
   <projectListeners>
@@ -25,6 +27,8 @@
               topic="com.intellij.codeInsight.daemon.DaemonCodeAnalyzer$DaemonListener"/>
   </projectListeners>
 
+
+  <resource-bundle>messages.ActionsBundle</resource-bundle>
   <actions>
     <action internal="true" id="LibraryUsageStatistics" class="com.intellij.internal.statistic.libraryUsage.LibraryUsageStatisticsAction"/>
     <action internal="true"

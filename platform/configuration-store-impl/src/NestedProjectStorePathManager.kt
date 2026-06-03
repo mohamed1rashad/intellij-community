@@ -4,7 +4,12 @@ package com.intellij.configurationStore
 import com.intellij.diagnostic.PluginException
 import com.intellij.ide.highlighter.ProjectFileType
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.StateSplitterEx
+import com.intellij.openapi.components.StateStorageOperation
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
@@ -31,7 +36,7 @@ private val DEPRECATED_PROJECT_FILE_STORAGE_ANNOTATION = FileStorageAnnotation(S
 /**
  * For cases when the project configuration store resides in the project root directory - the default
  */
-private class NestedProjectStorePathManager : ProjectStorePathManager {
+internal class NestedProjectStorePathManager : ProjectStorePathManager {
   override fun getStoreDescriptor(projectRoot: Path): ProjectStoreDescriptor {
     val suitableDescriptors = ArrayList<ProjectStoreDescriptor>()
     for (descriptor in EP_NAME.filterableLazySequence()) {
@@ -61,9 +66,26 @@ private class NestedProjectStorePathManager : ProjectStorePathManager {
       return IprProjectStoreDescriptor(userBaseDir, projectRoot)
     }
 
-    val useParent = System.getProperty("store.basedir.parent.detection", "true").toBoolean() &&
-                    (projectRoot.fileName?.toString()?.startsWith("${Project.DIRECTORY_STORE_FOLDER}.") == true)
-    return DotIdeaProjectStoreDescriptor(projectRoot = projectRoot, historicalProjectBasePath = if (useParent) projectRoot.parent.parent else projectRoot)
+    return if (Files.isRegularFile(projectRoot)) {
+      DotIdeaProjectStoreDescriptor(
+        projectIdentityFile = projectRoot.parent,
+        historicalProjectBasePath = projectRoot.parent,
+      )
+    }
+    else if (Files.isDirectory(projectRoot)
+             && System.getProperty("store.basedir.parent.detection", "true").toBoolean()
+             && (projectRoot.fileName?.toString()?.startsWith("${Project.DIRECTORY_STORE_FOLDER}.") == true)) {
+      DotIdeaProjectStoreDescriptor(
+        projectIdentityFile = projectRoot,
+        historicalProjectBasePath = projectRoot.parent.parent,
+      )
+    }
+    else {
+      DotIdeaProjectStoreDescriptor(
+        projectIdentityFile = projectRoot,
+        historicalProjectBasePath = projectRoot,
+      )
+    }
   }
 
   override fun getStoreDirectory(projectRoot: VirtualFile): VirtualFile? {
@@ -72,13 +94,13 @@ private class NestedProjectStorePathManager : ProjectStorePathManager {
 }
 
 private class DotIdeaProjectStoreDescriptor(
-  projectRoot: Path,
+  override val projectIdentityFile: Path,
   override val historicalProjectBasePath: Path,
 ) : ProjectStoreDescriptor {
   private var lastSavedProjectName: String? = null
 
-  override val projectIdentityFile = projectRoot
-  override val dotIdea: Path = projectRoot.resolve(Project.DIRECTORY_STORE_FOLDER)
+
+  override val dotIdea: Path = projectIdentityFile.resolve(Project.DIRECTORY_STORE_FOLDER)
 
   override fun getJpsBridgeAwareStorageSpec(filePath: String, project: Project): Storage {
     return doGetJpsBridgeAwareStorageSpec(filePath, project)

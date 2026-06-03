@@ -5,20 +5,29 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.default
 import com.google.gson.JsonObject
 import com.google.gson.JsonSerializationContext
-import com.intellij.cce.core.*
+import com.intellij.cce.core.CodeFragment
+import com.intellij.cce.core.CodeFragmentWithPsi
+import com.intellij.cce.core.CodeTokenWithPsi
+import com.intellij.cce.core.Language
+import com.intellij.cce.core.Session
+import com.intellij.cce.core.TokenProperties
 import com.intellij.cce.evaluable.EvaluableFeature
 import com.intellij.cce.evaluable.EvaluableFeatureBase
 import com.intellij.cce.evaluable.EvaluationStrategy
 import com.intellij.cce.evaluable.StrategySerializer
 import com.intellij.cce.evaluable.common.getEditorSafe
 import com.intellij.cce.evaluable.completion.BaseCompletionActionsInvoker
-import com.intellij.cce.evaluation.*
+import com.intellij.cce.evaluation.BackgroundStepFactory
+import com.intellij.cce.evaluation.EvaluationProcess
+import com.intellij.cce.evaluation.EvaluationRootInfo
+import com.intellij.cce.evaluation.EvaluationStep
 import com.intellij.cce.evaluation.step.SetupStatsCollectorStep
 import com.intellij.cce.filter.EvaluationFilter
 import com.intellij.cce.filter.EvaluationFilterReader
 import com.intellij.cce.interpreter.FeatureInvoker
 import com.intellij.cce.metric.Metric
-import com.intellij.cce.processor.GenerateActionsProcessor
+import com.intellij.cce.processor.ActionGenerator
+import com.intellij.cce.processor.AsyncActionGenerator
 import com.intellij.cce.report.GeneratorDirectories
 import com.intellij.cce.report.MultiLineFileReportGenerator
 import com.intellij.cce.util.FilesHelper
@@ -29,6 +38,7 @@ import com.intellij.cce.workspace.ConfigFactory
 import com.intellij.cce.workspace.EvaluationWorkspace
 import com.intellij.cce.workspace.storages.FeaturesStorage
 import com.intellij.cce.workspace.storages.FullLineLogsStorage
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.editor.Document
@@ -41,7 +51,7 @@ import com.intellij.psi.util.endOffset
 import com.intellij.psi.util.startOffset
 import java.lang.reflect.Type
 import java.nio.file.Paths
-import java.util.*
+import java.util.Random
 
 internal class ContextCollectionEvaluationCommand : CompletionEvaluationStarter.EvaluationCommand(
   name = "context",
@@ -52,7 +62,7 @@ internal class ContextCollectionEvaluationCommand : CompletionEvaluationStarter.
     help = "Path to config"
   ).default(ConfigFactory.DEFAULT_CONFIG_NAME)
 
-  override fun run() {
+  override suspend fun asyncRun() {
     val feature = EvaluableFeature.forFeature(featureName) ?: error("There is no support for the $featureName")
     val config = loadConfig(Paths.get(configPath), feature.getStrategySerializer())
     val workspace = EvaluationWorkspace.create(config, SetupStatsCollectorStep.statsCollectorLogsDirectory)
@@ -73,10 +83,10 @@ internal class ContextCollectionEvaluationCommand : CompletionEvaluationStarter.
         feature.name,
         environment.featureInvoker
       ) {
-        override fun prepareDataset(datasetContext: DatasetContext, progress: Progress) {
-          val files = runReadAction {
-            FilesHelper.getFilesOfLanguage(project, actions.evaluationRoots, actions.ignoreFileNames, actions.language)
-          }.sortedBy { it.name }
+        override suspend fun prepareDataset(datasetContext: DatasetContext, progress: Progress) {
+          val files = readAction {
+            FilesHelper.getFilesOfLanguage(project, actions.evaluationRoots, actions.ignoreFileNames, actions.language).sortedBy { it.name }
+          }
           val strategy = config.strategy as CompletionContextCollectionStrategy
           val sampled = files.shuffled(Random(strategy.samplingSeed)).take(strategy.samplesCount).sortedBy { it.name }
           generateActions(datasetContext, actions.language, sampled, evaluationRootInfo, progress)
@@ -142,12 +152,12 @@ private class ContextCollectionActionsInvoker(
   }
 }
 
-private class ContextCollectionMultiLineProcessor(private val strategy: CompletionContextCollectionStrategy) : GenerateActionsProcessor() {
-  override fun process(code: CodeFragment) {
+private class ContextCollectionMultiLineProcessor(private val strategy: CompletionContextCollectionStrategy) : AsyncActionGenerator() {
+  override suspend fun process(code: CodeFragment) {
     actions {
-      runReadAction {
+      readAction {
         check(code is CodeFragmentWithPsi)
-        val file = code.psi.dereference() as? PsiFile ?: return@runReadAction
+        val file = code.psi.dereference() as? PsiFile ?: return@readAction
         val project = file.project
         val document = PsiDocumentManager.getInstance(project).getDocument(file)
         checkNotNull(document) { "There should've been a document instance for $file (${file.virtualFile})" }
@@ -278,7 +288,7 @@ private class ContextCollectionStrategySerializer : StrategySerializer<Completio
 }
 
 internal class ContextCollectionFeature : EvaluableFeatureBase<CompletionContextCollectionStrategy>("completion-context") {
-  override fun getGenerateActionsProcessor(strategy: CompletionContextCollectionStrategy, project: Project): GenerateActionsProcessor {
+  override fun getGenerateActionsProcessor(strategy: CompletionContextCollectionStrategy, project: Project): ActionGenerator {
     return ContextCollectionMultiLineProcessor(strategy)
   }
 

@@ -1,22 +1,25 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.workspaceModel.core.fileIndex.impl
 
 import com.intellij.injected.editor.VirtualFileWindow
 import com.intellij.notebook.editor.BackedVirtualFile
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.diagnostic.ThrottledLogger
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ContentIteratorEx
 import com.intellij.openapi.roots.impl.DirectoryIndexImpl
-import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.LowMemoryWatcher
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.VfsUtilCore
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.VirtualFileFilter
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.VirtualFileVisitor
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.NewVirtualFile
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.backend.workspace.virtualFile
@@ -29,22 +32,45 @@ import com.intellij.util.Query
 import com.intellij.util.ThreeState
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.containers.TreeNodeProcessingResult
-import com.intellij.workspaceModel.core.fileIndex.*
+import com.intellij.workspaceModel.core.fileIndex.EntityStorageKind
+import com.intellij.workspaceModel.core.fileIndex.WorkspaceFileIndexContributor
+import com.intellij.workspaceModel.core.fileIndex.WorkspaceFileSet
+import com.intellij.workspaceModel.core.fileIndex.WorkspaceFileSetData
+import com.intellij.workspaceModel.core.fileIndex.WorkspaceFileSetWithCustomData
 import com.intellij.workspaceModel.core.fileIndex.impl.WorkspaceFileInternalInfo.NonWorkspace
 import kotlinx.coroutines.CoroutineScope
 import java.util.concurrent.TimeUnit.MINUTES
 import java.util.concurrent.atomic.AtomicReference
 
-class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: CoroutineScope) : WorkspaceFileIndexEx, Disposable.Default {
+class WorkspaceFileIndexImpl : WorkspaceFileIndexEx, Disposable.Default {
   companion object {
+    @JvmField
     val EP_NAME: ExtensionPointName<WorkspaceFileIndexContributor<*>> = ExtensionPointName("com.intellij.workspaceModel.fileIndexContributor")
   }
 
-  private val indexDataReference = AtomicReference<WorkspaceFileIndexData>(EmptyWorkspaceFileIndexData.NOT_INITIALIZED)
-  private val throttledLogger = ThrottledLogger(thisLogger(), MINUTES.toMillis(1))
+  private val project: Project
+  private val indexDataReference: AtomicReference<WorkspaceFileIndexData> = AtomicReference<WorkspaceFileIndexData>(EmptyWorkspaceFileIndexData.NOT_INITIALIZED)
+  private val throttledLogger: ThrottledLogger = ThrottledLogger(thisLogger(), MINUTES.toMillis(1))
+
+  constructor(project: Project, coroutineScope: CoroutineScope) {
+    this.project = project
+    project.messageBus.simpleConnect().subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
+      override fun after(events: List<VFileEvent>) {
+        if (DirectoryIndexImpl.shouldResetOnEvents(events)) {
+          indexData.clearPackageDirectoryCache()
+          if (events.any(DirectoryIndexImpl::isIgnoredFileCreated)) {
+            indexData.resetFileCache()
+          }
+        }
+      }
+    })
+    LowMemoryWatcher.register({ indexData.onLowMemory() }, project)
+    EP_NAME.addChangeListener(coroutineScope) { indexData = EmptyWorkspaceFileIndexData.RESET }
+  }
 
   @NonInjectable
-  constructor(project: Project, indexData: WorkspaceFileIndexData, coroutineScope: CoroutineScope) : this(project, coroutineScope) {
+  constructor(project: Project, indexData: WorkspaceFileIndexData) {
+    this.project = project
     indexDataReference.set(indexData)
   }
 
@@ -64,51 +90,29 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
       }
     }
 
-  init {
-    project.messageBus.simpleConnect().subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
-      override fun after(events: List<VFileEvent>) {
-        if (DirectoryIndexImpl.shouldResetOnEvents(events)) {
-          indexData.clearPackageDirectoryCache()
-          if (events.any(DirectoryIndexImpl::isIgnoredFileCreated)) {
-            indexData.resetFileCache()
-          }
-        }
-      }
-    })
-    LowMemoryWatcher.register({ indexData.onLowMemory() }, project)
-    EP_NAME.addChangeListener(coroutineScope) { indexData = EmptyWorkspaceFileIndexData.RESET }
-  }
+  override fun isInWorkspace(file: VirtualFile): Boolean = findFileSet(
+    file, honorExclusion = true, includeContentSets = true, includeContentNonIndexableSets = true, includeExternalSets = true,
+    includeExternalSourceSets = true, includeExternalNonIndexableSets = true, includeCustomKindSets = true
+  ) != null
 
-  override fun isInWorkspace(file: VirtualFile): Boolean {
-    return findFileSet(file = file,
-                       honorExclusion = true,
-                       includeContentSets = true,
-                       includeContentNonIndexableSets = true,
-                       includeExternalSets = true,
-                       includeExternalSourceSets = true,
-                       includeCustomKindSets = true) != null
-  }
+  override fun isInContent(file: VirtualFile): Boolean = findFileSet(
+    file, honorExclusion = true, includeContentSets = true, includeContentNonIndexableSets = true, includeExternalSets = false,
+    includeExternalSourceSets = false, includeExternalNonIndexableSets = false, includeCustomKindSets = false
+  ) != null
 
-  override fun isInContent(file: VirtualFile): Boolean {
-    return findFileSet(file = file,
-                       honorExclusion = true,
-                       includeContentSets = true,
-                       includeContentNonIndexableSets = true,
-                       includeExternalSets = false,
-                       includeExternalSourceSets = false,
-                       includeCustomKindSets = false) != null
-  }
+  override fun isIndexable(file: VirtualFile): Boolean = findFileSet(
+    file, honorExclusion = true, includeContentSets = true, includeContentNonIndexableSets = false, includeExternalSets = true,
+    includeExternalSourceSets = true, includeExternalNonIndexableSets = false, includeCustomKindSets = true
+  ) != null
 
-  override fun isIndexable(file: VirtualFile): Boolean {
-    return findFileSet(file, true, true, includeContentNonIndexableSets = false, true, true, true) != null
-  }
-
-  override fun getContentFileSetRoot(file: VirtualFile, honorExclusion: Boolean): VirtualFile? {
-    return findFileSet(file, honorExclusion, true, true, false, false, false)?.root
-  }
+  override fun getContentFileSetRoot(file: VirtualFile, honorExclusion: Boolean): VirtualFile? = findFileSet(
+    file, honorExclusion, includeContentSets = true, includeContentNonIndexableSets = true, includeExternalSets = false,
+    includeExternalSourceSets = false, includeExternalNonIndexableSets = false, includeCustomKindSets = false
+  )?.root
 
   override fun isUrlInContent(url: String): ThreeState {
     var currentUrl = url
+    var includeNonRecursive = true
     val fileManager = VirtualFileManager.getInstance()
     val urlManager = WorkspaceModel.getInstance(project).getVirtualFileUrlManager()
     while (currentUrl.isNotEmpty()) {
@@ -118,7 +122,7 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
       }
       val virtualFileUrl = urlManager.findByUrl(currentUrl)
       if (virtualFileUrl != null) {
-        val kinds = getMainIndexData().getNonExistentFileSetKinds(virtualFileUrl)
+        val kinds = getMainIndexData().getNonExistentFileSetKinds(virtualFileUrl, includeNonRecursive)
         if (NonExistingFileSetKind.EXCLUDED_FROM_CONTENT in kinds) {
           return ThreeState.NO
         }
@@ -128,8 +132,41 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
         if (NonExistingFileSetKind.INCLUDED_CONTENT in kinds) {
           return ThreeState.YES
         }
+        if (NonExistingFileSetKind.INCLUDED_CONTENT_NON_INDEXABLE in kinds) {
+          return ThreeState.YES
+        }
       }
       currentUrl = PathUtil.getParentPath(currentUrl)
+      includeNonRecursive = false
+    }
+    return ThreeState.NO
+  }
+
+  override fun isUrlIndexable(url: String, allowNonRecursive: Boolean): ThreeState {
+    var currentUrl = url
+    var includeNonRecursive = allowNonRecursive
+    val fileManager = VirtualFileManager.getInstance()
+    val urlManager = WorkspaceModel.getInstance(project).getVirtualFileUrlManager()
+    while (currentUrl.isNotEmpty()) {
+      val file = fileManager.findFileByUrl(currentUrl)
+      if (file != null) {
+        val filesets = findFileSets(file, true, true, false, true, true, false, true)
+        val isIndexable = filesets.any { allowNonRecursive || (it as? WorkspaceFileSetWithCustomData<*>)?.recursive == true }
+        return ThreeState.fromBoolean(isIndexable)
+      }
+      val virtualFileUrl = urlManager.findByUrl(currentUrl)
+      if (virtualFileUrl != null) {
+        val kinds = getMainIndexData().getNonExistentFileSetKinds(virtualFileUrl, includeNonRecursive)
+        when {
+          NonExistingFileSetKind.EXCLUDED_FROM_CONTENT in kinds -> return ThreeState.NO
+          NonExistingFileSetKind.EXCLUDED_OTHER in kinds -> return ThreeState.UNSURE
+          NonExistingFileSetKind.INCLUDED_CONTENT in kinds -> return ThreeState.YES
+          NonExistingFileSetKind.INCLUDED_OTHER in kinds -> return ThreeState.YES
+          NonExistingFileSetKind.INCLUDED_CONTENT_NON_INDEXABLE in kinds -> return ThreeState.NO
+        }
+      }
+      currentUrl = PathUtil.getParentPath(currentUrl)
+      includeNonRecursive = false
     }
     return ThreeState.NO
   }
@@ -152,29 +189,27 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
   ): Boolean {
     val visitor = object : VirtualFileVisitor<Void?>() {
       override fun visitFileEx(file: VirtualFile): Result {
-        val fileInfo = ApplicationManager.getApplication().runReadAction(Computable {
-          getFileInfo(file = file,
-                      honorExclusion = true,
-                      includeContentSets = true,
-                      includeContentNonIndexableSets = true,
-                      includeExternalSets = false,
-                      includeExternalSourceSets = false,
-                      includeCustomKindSets = false)
-        })
+        val fileInfo = runReadActionBlocking {
+          getFileInfo(
+            file, honorExclusion = true, includeContentSets = true, includeContentNonIndexableSets = true, includeExternalSets = false,
+            includeExternalSourceSets = false, includeExternalNonIndexableSets = false, includeCustomKindSets = false
+          )
+        }
         if (file.isDirectory && fileInfo is NonWorkspace) {
           return when (fileInfo) {
             NonWorkspace.EXCLUDED, NonWorkspace.NOT_UNDER_ROOTS -> {
-              processContentFilesUnderExcludedDirectory(file, processor, customFilter, fileSetFilter, fileOrDir,
-                                                        numberOfExcludedParentDirectories)
+              processContentFilesUnderExcludedDirectory(
+                file, processor, customFilter, fileSetFilter, fileOrDir, numberOfExcludedParentDirectories
+              )
             }
             NonWorkspace.IGNORED, NonWorkspace.INVALID -> {
               SKIP_CHILDREN
             }
           }
         }
-        val accepted = ApplicationManager.getApplication().runReadAction(Computable {
+        val accepted = runReadActionBlocking {
           fileInfo.findFileSet(fileSetFilter) != null && (customFilter == null || customFilter.accept(file))
-        })
+        }
         val status = if (accepted) processor.processFileEx(file) else TreeNodeProcessingResult.CONTINUE
         return when (status) {
           TreeNodeProcessingResult.CONTINUE -> CONTINUE
@@ -184,8 +219,14 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
         }
       }
     }
-    val result = VfsUtilCore.visitChildrenRecursively(fileOrDir, visitor)
-    return result.skipToParent != fileOrDir
+    // wrap non-indexable files as CacheAvoiding to prevent them from loading into VFS
+    val isIndexable = runReadActionBlocking { isIndexable(fileOrDir) }
+    val cacheAvoidingIfNecessary = when {
+      isIndexable -> fileOrDir
+      else -> NewVirtualFile.asCacheAvoiding(fileOrDir)
+    }
+    val result = VfsUtilCore.visitChildrenRecursively(cacheAvoidingIfNecessary, visitor)
+    return result.skipToParent != cacheAvoidingIfNecessary
   }
 
   private fun processContentFilesUnderExcludedDirectory(
@@ -197,8 +238,8 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     numberOfExcludedParentDirectories: Int,
   ): VirtualFileVisitor.Result {
     if (numberOfExcludedParentDirectories > 5) {
-      /* 
-         It seems improbable that there are more than 5 alternations between excluded and non-excluded directories, so it seems that this 
+      /*
+         It seems improbable that there are more than 5 alternations between excluded and non-excluded directories, so it seems that this
          is an infinite recursion.
          However, check should catch such cases in VirtualFileVisitor.allowVisitChildren, so report the details and skip processing.
       */
@@ -212,16 +253,13 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     val virtualFileUrl = virtualFileUrlManager.findByUrl(dir.url) ?: return VirtualFileVisitor.SKIP_CHILDREN
     val processed = virtualFileUrlManager.processChildrenRecursively(virtualFileUrl) { childUrl ->
       val childFile = childUrl.virtualFile ?: return@processChildrenRecursively TreeNodeProcessingResult.SKIP_CHILDREN
-      val isChildInIndexableContent = runReadAction {
-        findFileSet(file = childFile,
-                    honorExclusion = true,
-                    includeContentSets = true,
-                    includeContentNonIndexableSets = false,
-                    includeExternalSets = false,
-                    includeExternalSourceSets = false,
-                    includeCustomKindSets = false) != null
+      val isChildInContent = runReadActionBlocking {
+        findFileSet(
+          childFile, honorExclusion = true, includeContentSets = true, includeContentNonIndexableSets = true, includeExternalSets = false,
+          includeExternalSourceSets = false, includeExternalNonIndexableSets = false, includeCustomKindSets = false
+        ) != null
       }
-      return@processChildrenRecursively if (isChildInIndexableContent) {
+      return@processChildrenRecursively if (isChildInContent) {
         if (processContentUnderDirectory(childFile, processor, customFilter, fileSetFilter, numberOfExcludedParentDirectories + 1)) {
           TreeNodeProcessingResult.SKIP_CHILDREN
         }
@@ -246,9 +284,14 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     includeContentNonIndexableSets: Boolean,
     includeExternalSets: Boolean,
     includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
     includeCustomKindSets: Boolean,
   ): WorkspaceFileSet? {
-    return when (val info = getFileInfo(file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets, includeCustomKindSets)) {
+    val info = getFileInfo(
+      file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
+    )
+    return when (info) {
       is WorkspaceFileSetImpl -> info
       is MultipleWorkspaceFileSets -> info.find(null)
       else -> null
@@ -262,16 +305,12 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     includeContentNonIndexableSets: Boolean,
     includeExternalSets: Boolean,
     includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
     includeCustomKindSets: Boolean,
   ): List<WorkspaceFileSet> {
     val info = getFileInfo(
-      file = file,
-      honorExclusion = honorExclusion,
-      includeContentSets = includeContentSets,
-      includeContentNonIndexableSets = includeContentNonIndexableSets,
-      includeExternalSets = includeExternalSets,
-      includeExternalSourceSets = includeExternalSourceSets,
-      includeCustomKindSets = includeCustomKindSets
+      file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
     )
     return when (info) {
       is WorkspaceFileSetImpl -> listOf(info)
@@ -296,13 +335,7 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     }
   }
 
-  private fun doInitializeBlocking(): WorkspaceFileIndexDataImpl {
-    return blockingInitWorkspaceFileIndexData(
-      contributorList = EP_NAME.extensionList,
-      project = project,
-      parentDisposable = this
-    )
-  }
+  private fun doInitializeBlocking(): WorkspaceFileIndexDataImpl = blockingInitWorkspaceFileIndexData(project, contributorList = EP_NAME.extensionList)
 
   override fun <D : WorkspaceFileSetData> findFileSetWithCustomData(
     file: VirtualFile,
@@ -311,11 +344,15 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     includeContentNonIndexableSets: Boolean,
     includeExternalSets: Boolean,
     includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
     includeCustomKindSets: Boolean,
     customDataClass: Class<out D>,
   ): WorkspaceFileSetWithCustomData<D>? {
-    val result = when (val info = getFileInfo(file, honorExclusion, includeContentSets,
-                                              includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets, includeCustomKindSets)) {
+    val info = getFileInfo(
+      file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
+    )
+    val result = when (info) {
       is WorkspaceFileSetWithCustomData<*> -> info.takeIf { customDataClass.isInstance(it.data) }
       is MultipleWorkspaceFileSets -> info.find(customDataClass)
       else -> null
@@ -331,10 +368,14 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     includeContentNonIndexableSets: Boolean,
     includeExternalSets: Boolean,
     includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
     includeCustomKindSets: Boolean,
     customDataClass: Class<out D>,
   ): List<WorkspaceFileSetWithCustomData<D>> {
-    val info = getFileInfo(file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets, includeCustomKindSets)
+    val info = getFileInfo(
+      file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
+    )
     val result = when (info) {
       is WorkspaceFileSetWithCustomData<*> -> listOfNotNull(info.takeIf { customDataClass.isInstance(it.data) })
       is MultipleWorkspaceFileSets -> info.fileSets.filter { customDataClass.isInstance(it.data) }
@@ -351,25 +392,55 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     includeContentNonIndexableSets: Boolean,
     includeExternalSets: Boolean,
     includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
     includeCustomKindSets: Boolean,
   ): WorkspaceFileInternalInfo {
     val unwrappedFile = BackedVirtualFile.getOriginFileIfBacked((file as? VirtualFileWindow)?.delegate ?: file)
-    return getMainIndexData().getFileInfo(unwrappedFile, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets, includeCustomKindSets)
+    return getMainIndexData().getFileInfo(
+      unwrappedFile, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
+    )
   }
 
-  override fun <E : WorkspaceEntity> findContainingEntities(file: VirtualFile, entityClass: Class<E>, honorExclusion: Boolean, includeContentSets: Boolean, includeContentNonIndexableSets: Boolean, includeExternalSets: Boolean, includeExternalSourceSets: Boolean, includeCustomKindSets: Boolean): Collection<E> {
-    val allEntities = findContainingEntities(file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets, includeCustomKindSets)
+  override fun <E : WorkspaceEntity> findContainingEntities(
+    file: VirtualFile,
+    entityClass: Class<E>,
+    honorExclusion: Boolean,
+    includeContentSets: Boolean,
+    includeContentNonIndexableSets: Boolean,
+    includeExternalSets: Boolean,
+    includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
+    includeCustomKindSets: Boolean,
+  ): Collection<E> {
+    val allEntities = findContainingEntities(
+      file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
+    )
     @Suppress("UNCHECKED_CAST")
     return allEntities.filter { entity -> entity.getEntityInterface() == entityClass } as Collection<E>
   }
 
-  override fun findContainingEntities(file: VirtualFile, honorExclusion: Boolean, includeContentSets: Boolean, includeContentNonIndexableSets: Boolean, includeExternalSets: Boolean, includeExternalSourceSets: Boolean, includeCustomKindSets: Boolean): Collection<WorkspaceEntity> {
-    return when (val fileInfo = getFileInfo(file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets, includeCustomKindSets)) {
-      is WorkspaceFileSetImpl -> listOfNotNull(resolveEntity(fileInfo))
-      is MultipleWorkspaceFileSets -> fileInfo.fileSets.mapNotNull { fileSet ->
+  override fun findContainingEntities(
+    file: VirtualFile,
+    honorExclusion: Boolean,
+    includeContentSets: Boolean,
+    includeContentNonIndexableSets: Boolean,
+    includeExternalSets: Boolean,
+    includeExternalSourceSets: Boolean,
+    includeExternalNonIndexableSets: Boolean,
+    includeCustomKindSets: Boolean,
+  ): Collection<WorkspaceEntity> {
+    val info = getFileInfo(
+      file, honorExclusion, includeContentSets, includeContentNonIndexableSets, includeExternalSets, includeExternalSourceSets,
+      includeExternalNonIndexableSets, includeCustomKindSets
+    )
+    return when (info) {
+      is WorkspaceFileSetImpl -> listOfNotNull(resolveEntity(info))
+      is MultipleWorkspaceFileSets -> info.fileSets.mapNotNull { fileSet ->
         (fileSet as? StoredFileSet?)?.let { resolveEntity(it) }
       }
-      is NonWorkspace -> return emptyList()
+      is NonWorkspace -> emptyList()
     }
   }
 
@@ -383,21 +454,15 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     getMainIndexData().visitFileSets(visitor)
   }
 
-  override fun getPackageName(fileOrDir: VirtualFile): String? {
-    return getMainIndexData().getPackageName(fileOrDir)
-  }
+  override fun getPackageName(fileOrDir: VirtualFile): String? = getMainIndexData().getPackageName(fileOrDir)
 
-  override fun getDirectoriesByPackageName(packageName: String, includeLibrarySources: Boolean): Query<VirtualFile> {
-    return getMainIndexData().getDirectoriesByPackageName(packageName, includeLibrarySources)
-  }
+  override fun getDirectoriesByPackageName(packageName: String, includeLibrarySources: Boolean): Query<VirtualFile> =
+    getMainIndexData().getDirectoriesByPackageName(packageName, includeLibrarySources)
 
-  override fun getDirectoriesByPackageName(packageName: String, scope: GlobalSearchScope): Query<VirtualFile> {
-    return getDirectoriesByPackageName(packageName, true).filtering { scope.contains(it) }
-  }
+  override fun getDirectoriesByPackageName(packageName: String, scope: GlobalSearchScope): Query<VirtualFile> =
+    getDirectoriesByPackageName(packageName, true).filtering { scope.contains(it) }
 
-  override fun getFilesByPackageName(packageName: String): Query<VirtualFile> {
-    return getMainIndexData().getFilesByPackageName(packageName)
-  }
+  override fun getFilesByPackageName(packageName: String): Query<VirtualFile> = getMainIndexData().getFilesByPackageName(packageName)
 
   private fun getMainIndexData(): WorkspaceFileIndexData {
     val indexData = indexData
@@ -407,9 +472,11 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
           throttledLogger.warn("WorkspaceFileIndex must not be queried for the default project", Throwable())
         }
         else {
-          thisLogger().error("WorkspaceFileIndex is not initialized yet, empty data is returned. " +
-                             "Activities which use the project configuration must be postponed until the project is fully loaded." +
-                             "It is possible to check Project.isInitialized to verify that the project is fully loaded.")
+          thisLogger().error(
+            "WorkspaceFileIndex is not initialized yet, empty data is returned. " +
+            "Activities which use the project configuration must be postponed until the project is fully loaded." +
+            "It is possible to check Project.isInitialized to verify that the project is fully loaded."
+          )
         }
       }
       EmptyWorkspaceFileIndexData.RESET -> {
@@ -423,4 +490,3 @@ class WorkspaceFileIndexImpl(private val project: Project, coroutineScope: Corou
     indexData = EmptyWorkspaceFileIndexData.RESET
   }
 }
-

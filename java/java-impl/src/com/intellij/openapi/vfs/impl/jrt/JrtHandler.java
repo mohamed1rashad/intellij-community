@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.impl.jrt;
 
 import com.intellij.openapi.diagnostic.Logger;
@@ -10,7 +10,12 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.ref.SoftReference;
 import java.net.URI;
-import java.nio.file.*;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
 import java.util.HashMap;
@@ -19,7 +24,7 @@ import java.util.Map;
 import static com.intellij.reference.SoftReference.dereference;
 
 /** @see jdk.internal.jrtfs.JrtFileSystemProvider */
-@SuppressWarnings("SynchronizeOnThis")
+@SuppressWarnings({"SynchronizeOnThis", "UseOptimizedEelFunctions"})
 public class JrtHandler extends ArchiveHandler {
   private static final URI ROOT_URI = URI.create("jrt:/");
 

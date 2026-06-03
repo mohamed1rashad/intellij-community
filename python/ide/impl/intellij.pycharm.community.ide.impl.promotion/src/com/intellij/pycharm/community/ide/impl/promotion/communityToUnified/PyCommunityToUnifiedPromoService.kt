@@ -7,7 +7,11 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.updateSettings.UpdateStrategyCustomization
-import com.intellij.openapi.updateSettings.impl.*
+import com.intellij.openapi.updateSettings.impl.ChannelStatus
+import com.intellij.openapi.updateSettings.impl.PlatformUpdates
+import com.intellij.openapi.updateSettings.impl.UpdateCheckerFacade
+import com.intellij.openapi.updateSettings.impl.UpdateSettings
+import com.intellij.openapi.updateSettings.impl.UpdateStrategy
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.pycharm.community.ide.impl.promo.WelcomeToUnifiedWelcomeScreenBanner
 import kotlinx.coroutines.CoroutineScope
@@ -108,8 +112,7 @@ internal class PyCommunityToUnifiedPromoService(val serviceScope: CoroutineScope
             return@withTimeout availableUpdate
           }
 
-          val updateCheckerFacade = service<UpdateCheckerFacade>()
-          val product = updateCheckerFacade.loadProductData(null)
+          val product = UpdateCheckerFacade.getInstance().loadProductData(null)
           if (product == null) {
             LOG.info("Failed to check PY release update: product data is null")
             return@withTimeout null
@@ -122,7 +125,8 @@ internal class PyCommunityToUnifiedPromoService(val serviceScope: CoroutineScope
           }
           val platformUpdates = UpdateStrategy(build, product, updateSettings, customization).checkForUpdates()
           if (platformUpdates is PlatformUpdates.Loaded &&
-              platformUpdates.updatedChannel.status == ChannelStatus.RELEASE &&
+              (platformUpdates.updatedChannel.status == ChannelStatus.RELEASE ||
+               Registry.`is`("py.community.to.unified.test.ignore.release.channel")) &&
               platformUpdates.newBuild.number.baselineVersion >= 253) {
             availableUpdate = platformUpdates
             return@withTimeout platformUpdates

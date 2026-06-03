@@ -1,13 +1,22 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.dsl
 
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil
 import com.intellij.psi.PsiMethod
 import org.gradle.util.GradleVersion
-import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.*
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_ARTIFACTS_CLIENT_MODULE_DEPENDENCY
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_ARTIFACTS_EXTERNAL_MODULE_DEPENDENCY
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_ARTIFACTS_MODULE_DEPENDENCY
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_ARTIFACTS_PROJECT_DEPENDENCY
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_ARTIFACTS_SELF_RESOLVING_DEPENDENCY
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_COMPONENT_METADATA_HANDLER
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_COMPONENT_MODULE_METADATA
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_COMPONENT_MODULE_METADATA_DETAILS
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_COMPONENT_MODULE_METADATA_HANDLER
+import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_DEPENDENCY_HANDLER
 import org.jetbrains.plugins.gradle.testFramework.GradleCodeInsightTestCase
 import org.jetbrains.plugins.gradle.testFramework.annotations.AllGradleVersionsSource
-import org.jetbrains.plugins.gradle.testFramework.util.assumeThatGradleIsOlderThan
+import org.jetbrains.plugins.gradle.tooling.annotation.TargetVersions
 import org.junit.jupiter.params.ParameterizedTest
 
 class GradleDependenciesTest : GradleCodeInsightTestCase() {
@@ -24,18 +33,18 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource("""
-    "dependencies { add('archives', name: 42) { <caret> } }",
-    "dependencies { add('archives', [name:42]) { <caret> } }",
-    "dependencies { add('archives', ':42') { <caret> } }",
-    "dependencies { archives(name: 42) { <caret> } }",
-    "dependencies { archives([name:42]) { <caret> } }",
-    "dependencies { archives(':42') { <caret> } }",
-    "dependencies.add('archives', name: 42) { <caret> }",
-    "dependencies.add('archives', [name:42]) { <caret> }",
-    "dependencies.add('archives', ':42') { <caret> }",
-    "dependencies.archives(name: 42) { <caret> }",
-    "dependencies.archives([name:42]) { <caret> }",
-    "dependencies.archives(':42') { <caret> }"
+    "dependencies { add('implementation', name: 42) { <caret> } }",
+    "dependencies { add('implementation', [name:42]) { <caret> } }",
+    "dependencies { add('implementation', ':42') { <caret> } }",
+    "dependencies { implementation(name: 42) { <caret> } }",
+    "dependencies { implementation([name:42]) { <caret> } }",
+    "dependencies { implementation(':42') { <caret> } }",
+    "dependencies.add('implementation', name: 42) { <caret> }",
+    "dependencies.add('implementation', [name:42]) { <caret> }",
+    "dependencies.add('implementation', ':42') { <caret> }",
+    "dependencies.implementation(name: 42) { <caret> }",
+    "dependencies.implementation([name:42]) { <caret> }",
+    "dependencies.implementation(':42') { <caret> }"
   """)
   fun `test add external module dependency delegate`(gradleVersion: GradleVersion, expression: String) {
     testJavaProject(gradleVersion) {
@@ -47,14 +56,14 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource("""
-    "dependencies { add('archives', files()) { <caret> } }",
-    "dependencies { add('archives', fileTree("libs")) { <caret> } }",
-    "dependencies { archives(files()) { <caret> } }",
-    "dependencies { archives(fileTree('libs')) { <caret> } }",
-    "dependencies.add('archives', files()) { <caret> }",
-    "dependencies.add('archives', fileTree('libs')) { <caret> }",
-    "dependencies.archives(files()) { <caret> }",
-    "dependencies.archives(fileTree('libs')) { <caret> }"
+    "dependencies { add('implementation', files()) { <caret> } }",
+    "dependencies { add('implementation', fileTree("libs")) { <caret> } }",
+    "dependencies { implementation(files()) { <caret> } }",
+    "dependencies { implementation(fileTree('libs')) { <caret> } }",
+    "dependencies.add('implementation', files()) { <caret> }",
+    "dependencies.add('implementation', fileTree('libs')) { <caret> }",
+    "dependencies.implementation(files()) { <caret> }",
+    "dependencies.implementation(fileTree('libs')) { <caret> }"
   """)
   fun `test add self resolving dependency delegate`(gradleVersion: GradleVersion, expression: String) {
     testJavaProject(gradleVersion) {
@@ -66,10 +75,10 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource("""
-      "dependencies { add('archives', project(':')) { <caret> } }",
-      "dependencies { archives(project(':')) { <caret> } }",
-      "dependencies.add('archives', project(':')) { <caret> }",
-      "dependencies.archives(project(':')) { <caret> }"
+      "dependencies { add('implementation', project(':')) { <caret> } }",
+      "dependencies { implementation(project(':')) { <caret> } }",
+      "dependencies.add('implementation', project(':')) { <caret> }",
+      "dependencies.implementation(project(':')) { <caret> }"
   """)
   fun `test add project dependency delegate`(gradleVersion: GradleVersion, expression: String) {
     testJavaProject(gradleVersion) {
@@ -83,7 +92,7 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
   @AllGradleVersionsSource
   fun `test add delegate method setter`(gradleVersion: GradleVersion) {
     testJavaProject(gradleVersion) {
-      testBuildscript("dependencies { add('archives', 'notation') { <caret>transitive(false) } }") {
+      testBuildscript("dependencies { add('implementation', 'notation') { <caret>transitive(false) } }") {
         setterMethodTest("transitive", "setTransitive", GRADLE_API_ARTIFACTS_MODULE_DEPENDENCY)
       }
     }
@@ -91,13 +100,12 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource
+  @TargetVersions(
+    "<9.0",
+    reason = "ClientModule dependencies were a legacy precursor to ComponentMetadataRules, " +
+             "and have since been replaced and removed in Gradle 9.0. See gradle/pull/32743 for more information."
+  )
   fun `test module delegate`(gradleVersion: GradleVersion) {
-    assumeThatGradleIsOlderThan(gradleVersion, "9.0") {
-      """
-      ClientModule dependencies were a legacy precursor to ComponentMetadataRules, and have since been replaced and removed in Gradle 9.0.
-      See gradle/pull/32743 for more information. 
-      """.trimIndent()
-    }
     testJavaProject(gradleVersion) {
       testBuildscript("dependencies { module(':') {<caret>} }") {
         closureDelegateTest(GRADLE_API_ARTIFACTS_CLIENT_MODULE_DEPENDENCY, 1)
@@ -107,13 +115,12 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource
+  @TargetVersions(
+    "<9.0",
+    reason = "ClientModule dependencies were a legacy precursor to ComponentMetadataRules, " +
+             "and have since been replaced and removed in Gradle 9.0. See gradle/pull/32743 for more information. "
+  )
   fun `test module delegate method setter`(gradleVersion: GradleVersion) {
-    assumeThatGradleIsOlderThan(gradleVersion, "9.0") {
-      """
-      ClientModule dependencies were a legacy precursor to ComponentMetadataRules, and have since been replaced and removed in Gradle 9.0.
-      See gradle/pull/32743 for more information. 
-      """.trimIndent()
-    }
     testJavaProject(gradleVersion) {
       testBuildscript("dependencies { module(':') { <caret>changing(true) } }") {
         setterMethodTest("changing", "setChanging", GRADLE_API_ARTIFACTS_EXTERNAL_MODULE_DEPENDENCY)
@@ -166,20 +173,20 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource
-  fun `test archives configuration`(gradleVersion: GradleVersion) {
+  fun `test implementation configuration`(gradleVersion: GradleVersion) {
     testJavaProject(gradleVersion) {
-      testBuildscript("dependencies { <caret>archives('hi') }") {
-        methodTest(resolveTest(PsiMethod::class.java), "archives", GRADLE_API_DEPENDENCY_HANDLER)
+      testBuildscript("dependencies { <caret>implementation('hi') }") {
+        methodTest(resolveTest(PsiMethod::class.java), "implementation", GRADLE_API_DEPENDENCY_HANDLER)
       }
     }
   }
 
   @ParameterizedTest
   @AllGradleVersionsSource
-  fun `test archives configuration via property`(gradleVersion: GradleVersion) {
+  fun `test implementation configuration via property`(gradleVersion: GradleVersion) {
     testJavaProject(gradleVersion) {
-      testBuildscript("dependencies.<caret>archives('hi')") {
-        methodTest(resolveTest(PsiMethod::class.java), "archives", GRADLE_API_DEPENDENCY_HANDLER)
+      testBuildscript("dependencies.<caret>implementation('hi')") {
+        methodTest(resolveTest(PsiMethod::class.java), "implementation", GRADLE_API_DEPENDENCY_HANDLER)
       }
     }
   }
@@ -196,9 +203,9 @@ class GradleDependenciesTest : GradleCodeInsightTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource
-  fun `test buildscript archives configuration`(gradleVersion: GradleVersion) {
+  fun `test buildscript implementation configuration`(gradleVersion: GradleVersion) {
     testJavaProject(gradleVersion) {
-      testBuildscript("buildscript { dependencies { <caret>archives('hi') } }") {
+      testBuildscript("buildscript { dependencies { <caret>implementation('hi') } }") {
         resolveTest<Nothing>(null)
       }
     }

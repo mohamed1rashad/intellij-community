@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.issue.quickfix
 
 import com.intellij.build.SyncViewManager
@@ -7,6 +7,9 @@ import com.intellij.ide.actions.ShowLogAction
 import com.intellij.ide.file.BatchFileChangeListener
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.edtWriteAction
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.externalSystem.model.execution.ExternalSystemTaskExecutionSettings
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration.PROGRESS_LISTENER_KEY
@@ -18,10 +21,15 @@ import com.intellij.openapi.externalSystem.service.notification.NotificationSour
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
 import com.intellij.openapi.externalSystem.util.task.TaskExecutionSpec
 import com.intellij.openapi.externalSystem.util.task.TaskExecutionUtil
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.util.BackgroundTaskUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.UserDataHolderBase
+import com.intellij.openapi.util.text.StringUtil.convertLineSeparators
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.findDocument
+import com.intellij.openapi.vfs.refreshAndFindVirtualFile
+import com.intellij.util.DocumentUtil
 import com.intellij.util.io.createParentDirectories
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -46,6 +54,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CompletableFuture
 import kotlin.io.path.createFile
+import kotlin.io.path.exists
 
 /**
  * @author Vladislav.Soroka
@@ -114,19 +123,39 @@ class GradleVersionQuickFix(
    * This is only a fallback, because immediately after updating `gradle-wrapper.properties` the `wrapper` task will be executed explicitly.
    * The fallback is necessary because if the `wrapper` task fails for some unknown reason, the next interaction with Gradle will download
    * the correct Gradle version.
+   *
+   * This fallback content is tried being written in an undo transparent action.
    */
   private suspend fun updateOrCreateWrapper() {
     withContext(Dispatchers.IO) {
-      var wrapperPropertiesPath = GradleUtil.findDefaultWrapperPropertiesFile(projectPath)
-      val wrapperConfiguration = getWrapperConfiguration(wrapperPropertiesPath, gradleVersion)
+      val projectRoot = Path.of(projectPath)
+      val defaultWrapperPropertiesPath = projectRoot.resolve(Paths.get("gradle", "wrapper", "gradle-wrapper.properties"))
 
-      if (wrapperPropertiesPath == null) {
-        wrapperPropertiesPath = Paths.get(projectPath, "gradle", "wrapper", "gradle-wrapper.properties")
-        wrapperPropertiesPath.createParentDirectories().createFile()
+      val existingWrapperPropertiesPath = GradleUtil.findDefaultWrapperPropertiesFile(projectRoot)
+        ?.also { flushWrapperFile(it) }
+
+      val wrapperConfiguration = getWrapperConfiguration(existingWrapperPropertiesPath, gradleVersion)
+
+      val wrapperPropertiesPath = existingWrapperPropertiesPath ?: defaultWrapperPropertiesPath.also { path ->
+        path.createParentDirectories()
+        if (!path.exists()) path.createFile()
       }
 
-      GradleUtil.writeWrapperConfiguration(wrapperConfiguration, wrapperPropertiesPath)
-      LocalFileSystem.getInstance().refreshNioFiles(listOf(wrapperPropertiesPath))
+      val wrapperPropertiesVirtualFile = wrapperPropertiesPath.refreshAndFindVirtualFile()
+      val wrapperPropertiesDocument = readAction { wrapperPropertiesVirtualFile?.findDocument() }
+      if (wrapperPropertiesDocument != null) {
+        val wrapperPropertiesText = convertLineSeparators(GradleUtil.writeWrapperConfigurationToString(wrapperConfiguration))
+        withContext(Dispatchers.EDT) {
+          DocumentUtil.writeInRunUndoTransparentAction {
+            wrapperPropertiesDocument.setText(wrapperPropertiesText)
+          }
+        }
+      }
+      else {
+        // Fallback: write directly to disk if no document exists
+        GradleUtil.writeWrapperConfiguration(wrapperConfiguration, wrapperPropertiesPath)
+        LocalFileSystem.getInstance().refreshNioFiles(listOf(wrapperPropertiesPath))
+      }
     }
   }
 
@@ -184,6 +213,19 @@ class GradleVersionQuickFix(
     }
     finally {
       publisher.batchChangeCompleted(project)
+    }
+  }
+
+  private suspend fun flushWrapperFile(wrapperPropertiesPath: Path) {
+    val virtualFile = wrapperPropertiesPath.refreshAndFindVirtualFile() ?: return
+    val documentManager = FileDocumentManager.getInstance()
+    val document = readAction {
+      documentManager.getDocument(virtualFile)
+    }
+    if (document != null && documentManager.isDocumentUnsaved(document)) {
+      edtWriteAction {
+        documentManager.saveDocument(document)
+      }
     }
   }
 

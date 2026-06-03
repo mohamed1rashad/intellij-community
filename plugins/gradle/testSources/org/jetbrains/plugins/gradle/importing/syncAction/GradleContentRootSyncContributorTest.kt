@@ -30,6 +30,7 @@ import org.jetbrains.plugins.gradle.testFramework.util.createSettingsFile
 import org.junit.Test
 import org.junit.jupiter.api.Assertions
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.io.path.invariantSeparatorsPathString
 
 class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
 
@@ -41,7 +42,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val externalProjectId = ExternalProjectEntityId(projectRoot.toCanonicalPath())
     val rootBuildUrl = projectRoot.toVirtualFileUrl(myProject.workspaceModel.getVirtualFileUrlManager())
     val rootBuildId = GradleBuildEntityId(externalProjectId, rootBuildUrl)
-    val rootProjectId = GradleProjectEntityId(rootBuildId, rootBuildUrl)
+    val rootProjectId = GradleProjectEntityId(rootBuildId, ":")
 
     Disposer.newDisposable().use { disposable ->
 
@@ -56,7 +57,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
           assertEntities<GradleProjectEntity>(myProject, rootProjectId)
           assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
@@ -83,7 +84,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
       assertEntities<GradleProjectEntity>(myProject, rootProjectId)
       assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
@@ -101,7 +102,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     }
 
     val rootSubprojectUrl = rootBuildUrl.append("module")
-    val rootSubprojectId = GradleProjectEntityId(rootBuildId, rootSubprojectUrl)
+    val rootSubprojectId = GradleProjectEntityId(rootBuildId, ":module")
 
     Disposer.newDisposable().use { disposable ->
 
@@ -121,7 +122,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
             "project.module" to rootSubprojectId
           )
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId, rootSubprojectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
@@ -168,7 +169,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
         "project.module" to rootSubprojectId
       )
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId, rootSubprojectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
@@ -202,11 +203,11 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val externalProjectId = ExternalProjectEntityId(projectRoot.toCanonicalPath())
     val rootBuildUrl = projectRoot.toVirtualFileUrl(myProject.workspaceModel.getVirtualFileUrlManager())
     val rootBuildId = GradleBuildEntityId(externalProjectId, rootBuildUrl)
-    val rootProjectId = GradleProjectEntityId(rootBuildId, rootBuildUrl)
+    val rootProjectId = GradleProjectEntityId(rootBuildId, ":")
 
     val firstIncludedBuildUrl = rootBuildUrl.parent!!.append("includedProject1")
     val firstIncludedBuildId = GradleBuildEntityId(externalProjectId, firstIncludedBuildUrl)
-    val firstIncludedProjectId = GradleProjectEntityId(firstIncludedBuildId, firstIncludedBuildUrl)
+    val firstIncludedProjectId = GradleProjectEntityId(firstIncludedBuildId, ":includedProject1")
 
     Disposer.newDisposable().use { disposable ->
 
@@ -225,14 +226,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
             "includedProject1" to firstIncludedProjectId
           )
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
             linkedProjectId = "project", identityPath = ":",
           )
 
-          assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId, listOf(firstIncludedProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = firstIncludedBuildUrl,
             buildId = firstIncludedBuildId, path = ":",
@@ -275,14 +276,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
         "includedProject1" to firstIncludedProjectId
       )
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
         linkedProjectId = "project", identityPath = ":",
       )
 
-      assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId, listOf(firstIncludedProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = firstIncludedBuildUrl,
         buildId = firstIncludedBuildId, path = ":",
@@ -304,7 +305,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
 
     val secondIncludedBuildUrl = rootBuildUrl.parent!!.append("includedProject2")
     val secondIncludedBuildId = GradleBuildEntityId(externalProjectId, secondIncludedBuildUrl)
-    val secondIncludedProjectId = GradleProjectEntityId(secondIncludedBuildId, secondIncludedBuildUrl)
+    val secondIncludedProjectId = GradleProjectEntityId(secondIncludedBuildId, ":includedProject2")
 
     Disposer.newDisposable().use { disposable ->
 
@@ -330,21 +331,21 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
             "includedProject2" to secondIncludedProjectId
           )
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
             linkedProjectId = "project", identityPath = ":",
           )
 
-          assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId, listOf(firstIncludedProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = firstIncludedBuildUrl,
             buildId = firstIncludedBuildId, path = ":",
             linkedProjectId = ":includedProject1", identityPath = ":includedProject1",
           )
 
-          assertGradleBuildEntity(myProject, secondIncludedBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, secondIncludedBuildUrl, externalProjectId, listOf(secondIncludedProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = secondIncludedBuildUrl,
             buildId = secondIncludedBuildId, path = ":",
@@ -401,21 +402,21 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
         "includedProject2" to secondIncludedProjectId
       )
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
         linkedProjectId = "project", identityPath = ":",
       )
 
-      assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, firstIncludedBuildUrl, externalProjectId, listOf(firstIncludedProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = firstIncludedBuildUrl,
         buildId = firstIncludedBuildId, path = ":",
         linkedProjectId = ":includedProject1", identityPath = ":includedProject1",
       )
 
-      assertGradleBuildEntity(myProject, secondIncludedBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, secondIncludedBuildUrl, externalProjectId, listOf(secondIncludedProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = secondIncludedBuildUrl,
         buildId = secondIncludedBuildId, path = ":",
@@ -451,11 +452,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val externalProjectId = ExternalProjectEntityId(projectRoot.toCanonicalPath())
     val rootBuildUrl = projectRoot.toVirtualFileUrl(myProject.workspaceModel.getVirtualFileUrlManager())
     val rootBuildId = GradleBuildEntityId(externalProjectId, rootBuildUrl)
-    val rootProjectId = GradleProjectEntityId(rootBuildId, rootBuildUrl)
+    val rootProjectId = GradleProjectEntityId(rootBuildId, ":")
 
     val buildSrcBuildUrl = rootBuildUrl.append("buildSrc")
     val buildSrcBuildId = GradleBuildEntityId(externalProjectId, buildSrcBuildUrl)
-    val buildSrcProjectId = GradleProjectEntityId(buildSrcBuildId, buildSrcBuildUrl)
+    val buildSrcProjectId = GradleProjectEntityId(
+      buildId = buildSrcBuildId,
+      identityPath = if (isBuildSrcResolvedOnSecondCall) ":" else ":buildSrc"
+    )
 
     Disposer.newDisposable().use { disposable ->
 
@@ -474,7 +478,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
               assertEntities<GradleProjectEntity>(myProject, rootProjectId)
               assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-              assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+              assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
               assertGradleProjectEntity(
                 myProject, projectUrl = rootBuildUrl,
                 buildId = rootBuildId, path = ":",
@@ -495,14 +499,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
                 "project.buildSrc" to buildSrcProjectId
               )
 
-              assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+              assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
               assertGradleProjectEntity(
                 myProject, projectUrl = rootBuildUrl,
                 buildId = rootBuildId, path = ":",
                 linkedProjectId = "project", identityPath = ":",
               )
 
-              assertGradleBuildEntity(myProject, buildSrcBuildUrl, externalProjectId)
+              assertGradleBuildEntity(myProject, buildSrcBuildUrl, externalProjectId, listOf(buildSrcProjectId))
               assertGradleProjectEntity(
                 myProject,
                 projectUrl = buildSrcBuildUrl,
@@ -528,14 +532,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
                 "project.buildSrc" to buildSrcProjectId
               )
 
-              assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+              assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
               assertGradleProjectEntity(
                 myProject, projectUrl = rootBuildUrl,
                 buildId = rootBuildId, path = ":",
                 linkedProjectId = "project", identityPath = ":"
               )
 
-              assertGradleBuildEntity(myProject, buildSrcBuildUrl, externalProjectId)
+              assertGradleBuildEntity(myProject, buildSrcBuildUrl, externalProjectId, listOf(buildSrcProjectId))
               assertGradleProjectEntity(
                 myProject, projectUrl = buildSrcBuildUrl,
                 buildId = buildSrcBuildId, path = ":",
@@ -578,14 +582,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
         "project.buildSrc" to buildSrcProjectId
       )
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
         linkedProjectId = "project", identityPath = ":",
       )
 
-      assertGradleBuildEntity(myProject, buildSrcBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, buildSrcBuildUrl, externalProjectId, listOf(buildSrcProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = buildSrcBuildUrl,
         buildId = buildSrcBuildId, path = ":",
@@ -708,7 +712,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val externalProjectId = ExternalProjectEntityId(projectRoot.toCanonicalPath())
     val rootBuildUrl = projectRoot.toVirtualFileUrl(myProject.workspaceModel.getVirtualFileUrlManager())
     val rootBuildId = GradleBuildEntityId(externalProjectId, rootBuildUrl)
-    val rootProjectId = GradleProjectEntityId(rootBuildId, rootBuildUrl)
+    val rootProjectId = GradleProjectEntityId(rootBuildId, ":")
 
     Assertions.assertFalse(projectRoot.startsWith(externalProjectRoot)) {
       """
@@ -731,7 +735,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
           assertEntities<GradleProjectEntity>(myProject, rootProjectId)
           assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
@@ -750,7 +754,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
       createBuildFile {
         withJavaPlugin()
         addPostfix("""
-          |sourceSets.main.java.srcDirs += "${externalProjectRoot.resolve("src/main/java")}"
+          |sourceSets.main.java.srcDirs += "${externalProjectRoot.resolve("src/main/java").invariantSeparatorsPathString}"
         """.trimMargin())
       }
 
@@ -763,7 +767,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
       assertEntities<GradleProjectEntity>(myProject, rootProjectId)
       assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
@@ -789,7 +793,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val externalProjectId = ExternalProjectEntityId(projectRoot.toCanonicalPath())
     val rootBuildUrl = projectRoot.toVirtualFileUrl(myProject.workspaceModel.getVirtualFileUrlManager())
     val rootBuildId = GradleBuildEntityId(externalProjectId, rootBuildUrl)
-    val rootProjectId = GradleProjectEntityId(rootBuildId, rootBuildUrl)
+    val rootProjectId = GradleProjectEntityId(rootBuildId, ":")
 
     Disposer.newDisposable().use { disposable ->
 
@@ -804,7 +808,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
           assertEntities<GradleProjectEntity>(myProject, rootProjectId)
           assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
@@ -839,7 +843,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
       assertEntities<GradleProjectEntity>(myProject, rootProjectId)
       assertGradleModuleEntities(myProject, "project" to rootProjectId)
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, externalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
@@ -868,7 +872,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val virtualFileManager = myProject.workspaceModel.getVirtualFileUrlManager()
     val rootBuildUrl = projectRoot.toVirtualFileUrl(virtualFileManager)
     val rootBuildId = GradleBuildEntityId(rootExternalProjectId, rootBuildUrl)
-    val rootProjectId = GradleProjectEntityId(rootBuildId, rootBuildUrl)
+    val rootProjectId = GradleProjectEntityId(rootBuildId, ":")
 
     importProject()
 
@@ -876,7 +880,7 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
     val linkedExternalProjectId = ExternalProjectEntityId(linkedProjectRoot.toCanonicalPath())
     val linkedBuildUrl = linkedProjectRoot.toVirtualFileUrl(virtualFileManager)
     val linkedBuildId = GradleBuildEntityId(linkedExternalProjectId, linkedBuildUrl)
-    val linkedProjectId = GradleProjectEntityId(linkedBuildId, linkedBuildUrl)
+    val linkedProjectId = GradleProjectEntityId(linkedBuildId, ":")
 
     Disposer.newDisposable().use { disposable ->
 
@@ -895,14 +899,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
             "linked-project" to linkedProjectId
           )
 
-          assertGradleBuildEntity(myProject, rootBuildUrl, rootExternalProjectId)
+          assertGradleBuildEntity(myProject, rootBuildUrl, rootExternalProjectId, listOf(rootProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = rootBuildUrl,
             buildId = rootBuildId, path = ":",
             linkedProjectId = "project", identityPath = ":",
           )
 
-          assertGradleBuildEntity(myProject, linkedBuildUrl, linkedExternalProjectId)
+          assertGradleBuildEntity(myProject, linkedBuildUrl, linkedExternalProjectId, listOf(linkedProjectId))
           assertGradleProjectEntity(
             myProject, projectUrl = linkedBuildUrl,
             buildId = linkedBuildId, path = ":",
@@ -939,14 +943,14 @@ class GradleContentRootSyncContributorTest : GradlePhasedSyncTestCase() {
         "linked-project" to linkedProjectId
       )
 
-      assertGradleBuildEntity(myProject, rootBuildUrl, rootExternalProjectId)
+      assertGradleBuildEntity(myProject, rootBuildUrl, rootExternalProjectId, listOf(rootProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = rootBuildUrl,
         buildId = rootBuildId, path = ":",
         linkedProjectId = "project", identityPath = ":",
       )
 
-      assertGradleBuildEntity(myProject, linkedBuildUrl, linkedExternalProjectId)
+      assertGradleBuildEntity(myProject, linkedBuildUrl, linkedExternalProjectId, listOf(linkedProjectId))
       assertGradleProjectEntity(
         myProject, projectUrl = linkedBuildUrl,
         buildId = linkedBuildId, path = ":",

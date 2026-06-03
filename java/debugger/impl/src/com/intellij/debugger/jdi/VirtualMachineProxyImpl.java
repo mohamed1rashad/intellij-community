@@ -5,25 +5,59 @@
  */
 package com.intellij.debugger.jdi;
 
+import com.intellij.debugger.JavaThreadFieldsResolver;
 import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
 import com.intellij.debugger.engine.DebuggerUtils;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
+import com.intellij.debugger.engine.evaluation.EvaluationContext;
+import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
 import com.intellij.debugger.engine.jdi.VirtualMachineProxy;
 import com.intellij.debugger.impl.DebugUtilsKt;
 import com.intellij.debugger.impl.DebuggerUtilsAsync;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.impl.attach.SAJDWPRemoteConnection;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.UserDataHolderBase;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.jdi.ReferenceTypeImpl;
 import com.jetbrains.jdi.ThreadReferenceImpl;
-import com.sun.jdi.*;
+import com.sun.jdi.BooleanValue;
+import com.sun.jdi.ByteValue;
+import com.sun.jdi.CharValue;
+import com.sun.jdi.ClassLoaderReference;
+import com.sun.jdi.DoubleValue;
+import com.sun.jdi.FloatValue;
+import com.sun.jdi.IntegerValue;
+import com.sun.jdi.LongValue;
+import com.sun.jdi.Method;
+import com.sun.jdi.ObjectCollectedException;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.ReferenceType;
+import com.sun.jdi.ShortValue;
+import com.sun.jdi.StringReference;
+import com.sun.jdi.ThreadGroupReference;
+import com.sun.jdi.ThreadReference;
+import com.sun.jdi.VirtualMachine;
+import com.sun.jdi.VoidValue;
 import com.sun.jdi.request.EventRequestManager;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
@@ -42,6 +76,7 @@ public class VirtualMachineProxyImpl extends UserDataHolderBase implements JdiTi
   private boolean myAllThreadsDirty = true;
   private List<ReferenceType> myAllClasses;
   private Map<ReferenceType, List<ReferenceType>> myNestedClassesCache = new HashMap<>();
+  private final JavaThreadFieldsResolver myThreadFieldsResolver = new JavaThreadFieldsResolver();
 
   private final boolean myVersionHigher_15;
   private final boolean myVersionHigher_14;
@@ -71,6 +106,11 @@ public class VirtualMachineProxyImpl extends UserDataHolderBase implements JdiTi
 
   public ClassesByNameProvider getClassesByNameProvider() {
     return this::classesByName;
+  }
+
+  @ApiStatus.Internal
+  public @NotNull JavaThreadFieldsResolver getThreadFieldsResolver() {
+    return myThreadFieldsResolver;
   }
 
   @Override
@@ -319,20 +359,36 @@ public class VirtualMachineProxyImpl extends UserDataHolderBase implements JdiTi
   }
 
   /**
-   * Avoid using directly, as the result may be garbage collected immediately - use {@link com.intellij.debugger.impl.DebuggerUtilsEx#mirrorOfString} instead
+   * Avoid using directly, as the result may be garbage collected immediately -
+   * use {@link com.intellij.debugger.impl.DebuggerUtilsEx#mirrorOfString(String, EvaluationContext)} instead
    */
   @ApiStatus.Obsolete
   public StringReference mirrorOf(String s) {
     return myVirtualMachine.mirrorOf(s);
   }
 
-  public StringReference mirrorOfStringLiteral(String s, ThrowableComputable<StringReference, EvaluateException> generator)
+  @ApiStatus.Internal
+  public StringReference mirrorOfStringLiteral(String s, EvaluationContextImpl context)
     throws EvaluateException {
     StringReference reference = myStringLiteralCache.get(s);
-    if (reference != null && !reference.isCollected()) {
-      return reference;
+    if (reference != null) {
+      try {
+        context.keep(reference);
+        return reference;
+      }
+      catch (ObjectCollectedException ignored) {
+      }
     }
-    reference = generator.compute();
+
+    reference = DebuggerUtilsEx.mirrorOfString(s, context);
+
+    if (Registry.is("debugger.intern.string.literals") && versionHigher("1.7")) {
+      Method internMethod = DebuggerUtils.findMethod(reference.referenceType(), "intern", "()Ljava/lang/String;");
+      if (internMethod != null) {
+        reference = (StringReference)context.getDebugProcess().invokeMethod(context, reference, internMethod, Collections.emptyList());
+      }
+    }
+
     myStringLiteralCache.put(s, reference);
     return reference;
   }
@@ -541,5 +597,13 @@ public class VirtualMachineProxyImpl extends UserDataHolderBase implements JdiTi
       myDebugProcess.logError("Negative global suspend count number!");
     }
     myModelSuspendCount--;
+  }
+
+  /**
+   * Should be called in the debugger manager thread only.
+   */
+  @ApiStatus.Internal
+  public static @NotNull VirtualMachineProxyImpl getCurrent() {
+    return (VirtualMachineProxyImpl)VirtualMachineProxy.getCurrent();
   }
 }

@@ -1,6 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.util.NotNullProducer;
@@ -16,8 +17,11 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.UIManager;
+import java.awt.Color;
+import java.awt.PaintContext;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.color.ColorSpace;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Rectangle2D;
@@ -33,7 +37,9 @@ import static com.intellij.ui.ColorMixture.ENABLE_RUNTIME_COLOR_MIXTURE_WRAPPER_
  */
 @SuppressWarnings("UseJBColor")
 public class JBColor extends Color implements PresentableColor, ComparableColor {
+  private static final Logger LOG = Logger.getInstance(JBColor.class);
   public static final Color PanelBackground = new JBColor("Panel.background", new Color(0xffffff));
+  public static final Color PanelForeground = new JBColor("Panel.foreground", new Color(0x000000));
 
   // do not use method reference here - StartupUiUtil class should be loaded lazy
   private static final SynchronizedClearableLazy<Boolean> DARK = new SynchronizedClearableLazy<>(() -> StartupUiUtil.INSTANCE.isDarkTheme());
@@ -76,7 +82,7 @@ public class JBColor extends Color implements PresentableColor, ComparableColor 
     name = null;
     defaultColor = null;
     darkColor = null;
-    func = function::produce;
+    func = new LegacySupplierWrapper(function);
   }
 
   public JBColor(@NotNull String name, @Nullable Color defaultColor) {
@@ -207,13 +213,34 @@ public class JBColor extends Color implements PresentableColor, ComparableColor 
   @NotNull
   Color getColor() {
     if (func != null) {
-      return func.get();
+      return getColorFromSupplier();
     }
     if (name != null) {
       return calculateColor(name, defaultColor);
     }
 
     return DARK.getValue() ? getDarkVariant() : this;
+  }
+
+  private @NotNull Color getColorFromSupplier() {
+    assert func != null;
+    var result = func.get();
+    if (result == null) {
+      LOG.error(new Throwable("Got null from the supposedly non-null supplier: " + describeSupplier(func)));
+      return Gray.TRANSPARENT; // better to return something rather than cause an NPE
+    }
+    return result;
+  }
+  
+  private static @NotNull String describeSupplier(@NotNull Object supplier) {
+    var result = new StringBuilder();
+    result.append(supplier);
+    if (supplier instanceof PresentableColor presentableFun) {
+      result.append(" (");
+      result.append(presentableFun.getPresentableName());
+      result.append(")");
+    }
+    return result.toString();
   }
 
   Color getColorOrNull() {
@@ -291,7 +318,7 @@ public class JBColor extends Color implements PresentableColor, ComparableColor 
       return new SwingTuneBrighter(this).createColor(true);
     }
     if (func != null) {
-      return lazy(() -> func.get().brighter());
+      return lazy(() -> getColorFromSupplier().brighter());
     }
     if (name != null) {
       return calculateColor(name, defaultColor).brighter();
@@ -306,7 +333,7 @@ public class JBColor extends Color implements PresentableColor, ComparableColor 
       return new SwingTuneDarker(this).createColor(true);
     }
     if (func != null) {
-      return lazy(() -> func.get().darker());
+      return lazy(() -> getColorFromSupplier().darker());
     }
     if (name != null) {
       return calculateColor(name, defaultColor).darker();
@@ -323,6 +350,7 @@ public class JBColor extends Color implements PresentableColor, ComparableColor 
 
   @Override
   public boolean equals(Object obj) {
+    if (this == obj) return true;
     final Color c = getColor();
     return c == this ? super.equals(obj) : c.equals(obj);
   }
@@ -494,5 +522,21 @@ public class JBColor extends Color implements PresentableColor, ComparableColor 
     }
     UIManager.put(key, color);
     return color;
+  }
+  
+  private static class LegacySupplierWrapper implements Supplier<@NotNull Color>, PresentableColor {
+    private final @NotNull NotNullProducer<? extends Color> function;
+
+    private LegacySupplierWrapper(@NotNull NotNullProducer<? extends Color> function) { this.function = function; }
+
+    @Override
+    public @Nullable Color get() { // @Nullable on purpose, to detect misbehaving suppliers!
+      return function.produce();
+    }
+
+    @Override
+    public @NlsSafe @Nullable String getPresentableName() {
+      return describeSupplier(function);
+    }
   }
 }

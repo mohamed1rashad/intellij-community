@@ -1,7 +1,9 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.roots.impl;
 
 import com.intellij.codeInsight.daemon.impl.analysis.JavaModuleGraphUtil;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.CommandProcessor;
@@ -10,7 +12,14 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.RootsChangeRescanningInfo;
 import com.intellij.openapi.projectRoots.ex.JavaSdkUtil;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.DependencyScope;
+import com.intellij.openapi.roots.ExternalLibraryDescriptor;
+import com.intellij.openapi.roots.JavaProjectModelModificationService;
+import com.intellij.openapi.roots.JavaProjectModelModifier;
+import com.intellij.openapi.roots.LanguageLevelModuleExtension;
+import com.intellij.openapi.roots.LanguageLevelProjectExtension;
+import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ex.ProjectRootManagerEx;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
@@ -41,7 +50,8 @@ public final class JavaProjectModelModificationServiceImpl extends JavaProjectMo
     }
 
     promise = promise == null ? Promises.rejectedPromise() : promise;
-    return promise.onSuccess(v -> addJigsawModule(from, to, scope));
+    return promise.onSuccess(
+      _ -> ApplicationManager.getApplication().invokeLater(() -> addJigsawModule(from, to, scope), ModalityState.nonModal()));
   }
 
   @Override
@@ -53,7 +63,8 @@ public final class JavaProjectModelModificationServiceImpl extends JavaProjectMo
     }
 
     promise = promise == null ? Promises.rejectedPromise() : promise;
-    return promise.onSuccess(v -> addJigsawModule(from, library, scope));
+    return promise.onSuccess(
+      _ -> ApplicationManager.getApplication().invokeLater(() -> addJigsawModule(from, library, scope), ModalityState.nonModal()));
   }
 
   @Override
@@ -67,11 +78,11 @@ public final class JavaProjectModelModificationServiceImpl extends JavaProjectMo
     }
 
     promise = promise == null ? Promises.rejectedPromise() : promise;
-    return promise.onSuccess(v -> {
+    return promise.onSuccess(_ -> ApplicationManager.getApplication().invokeLater(() -> {
       Library library = LibraryTablesRegistrar.getInstance().getLibraryTable(myProject)
         .getLibraryByName(libraryDescriptor.getPresentableName());
       from.forEach(m -> addJigsawModule(m, library, scope));
-    });
+    }, ModalityState.nonModal()));
   }
 
   @Override

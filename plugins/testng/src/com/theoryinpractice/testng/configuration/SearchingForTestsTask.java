@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.theoryinpractice.testng.configuration;
 
@@ -36,10 +36,20 @@ import org.testng.xml.Parser;
 import org.testng.xml.SuiteGenerator;
 import org.testng.xml.XmlSuite;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
 
 public class SearchingForTestsTask extends SearchForTestsTask {
   private static final Logger LOG = Logger.getInstance(SearchingForTestsTask.class);
@@ -273,13 +283,13 @@ public class SearchingForTestsTask extends SearchForTestsTask {
     Map<String, String> testParams = new HashMap<>();
 
     // Override with those from the test runner configuration
-    if (myData.PROPERTIES_FILE != null) {
+    if (!StringUtil.isEmptyOrSpaces(myData.PROPERTIES_FILE)) {
       File propertiesFile = new File(myData.PROPERTIES_FILE);
-      if (propertiesFile.exists()) {
+      if (propertiesFile.isFile()) {
 
         Properties properties = new Properties();
-        try {
-          properties.load(new FileInputStream(propertiesFile));
+        try (FileInputStream inputStream = new FileInputStream(propertiesFile)) {
+          properties.load(inputStream);
           properties.forEach((key, value) -> testParams.put((String)key, (String)value));
 
         }

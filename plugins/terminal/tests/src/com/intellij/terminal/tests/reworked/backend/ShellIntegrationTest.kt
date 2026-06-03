@@ -8,15 +8,35 @@ import com.intellij.terminal.tests.reworked.util.TerminalSessionTestUtil
 import com.intellij.terminal.tests.reworked.util.TerminalSessionTestUtil.ENTER_BYTES
 import com.intellij.terminal.tests.reworked.util.TerminalSessionTestUtil.awaitOutputEvent
 import com.intellij.terminal.tests.reworked.util.TerminalTestUtil
-import com.intellij.testFramework.*
+import com.intellij.testFramework.DisposableRule
+import com.intellij.testFramework.DisposeNonLightProjectsRule
+import com.intellij.testFramework.ExtensionTestUtil
+import com.intellij.testFramework.ProjectRule
+import com.intellij.testFramework.RuleChain
 import com.intellij.testFramework.common.timeoutRunBlocking
 import com.jediterm.core.util.TermSize
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.assertj.core.api.Assertions.assertThat
 import org.jetbrains.plugins.terminal.LocalTerminalCustomizer
 import org.jetbrains.plugins.terminal.ShellStartupOptions
-import org.jetbrains.plugins.terminal.session.impl.*
+import org.jetbrains.plugins.terminal.session.impl.TerminalAliasesReceivedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalCloseEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalCommandFinishedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalCommandStartedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalContentUpdatedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalInitialStateEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalInputEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalOutputEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalPromptFinishedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalPromptStartedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalSessionTerminatedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalShellIntegrationEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalWriteBytesEvent
 import org.jetbrains.plugins.terminal.session.impl.dto.toState
 import org.jetbrains.plugins.terminal.session.impl.dto.toStyleRange
 import org.junit.Assume
@@ -390,13 +410,14 @@ internal class ShellIntegrationTest(private val shellPath: Path) {
     block: suspend (SendChannel<TerminalInputEvent>) -> Unit,
   ): List<TerminalOutputEvent> {
     return coroutineScope {
-      val allOptions = if (options.shellCommand != null) {
-        options
-      }
-      else {
-        val shellCommand = TerminalSessionTestUtil.createShellCommand(shellPath.toString())
-        options.builder().shellCommand(shellCommand).build()
-      }
+      val allOptions = options.builder().modify { builder ->
+        if (options.shellCommand == null) {
+          builder.shellCommand(TerminalSessionTestUtil.createShellCommand(shellPath.toString()))
+        }
+        if (options.workingDirectory == null) {
+          builder.workingDirectory(System.getProperty("user.home"))
+        }
+      }.build()
 
       TerminalSessionTestUtil.assumeCommandBlockShellIntegration(allOptions.shellCommand!!)
 
@@ -405,7 +426,7 @@ internal class ShellIntegrationTest(private val shellPath: Path) {
         allOptions,
         isLowLevelSession,
         childScope("TerminalSession"),
-      )
+      ).session
       val inputChannel = session.getInputChannel()
 
       val outputEvents = mutableListOf<TerminalOutputEvent>()

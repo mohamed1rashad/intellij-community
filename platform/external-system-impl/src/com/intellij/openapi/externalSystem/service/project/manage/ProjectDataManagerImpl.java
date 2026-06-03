@@ -5,10 +5,19 @@ import com.intellij.diagnostic.StartUpPerformanceService;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.externalSystem.model.*;
+import com.intellij.openapi.externalSystem.model.DataNode;
+import com.intellij.openapi.externalSystem.model.ExternalProjectInfo;
+import com.intellij.openapi.externalSystem.model.Key;
+import com.intellij.openapi.externalSystem.model.ProjectKeys;
+import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.project.ModuleData;
 import com.intellij.openapi.externalSystem.model.project.ProjectData;
-import com.intellij.openapi.externalSystem.service.project.*;
+import com.intellij.openapi.externalSystem.service.project.ExternalSystemOperationDescriptor;
+import com.intellij.openapi.externalSystem.service.project.IdeModelsProvider;
+import com.intellij.openapi.externalSystem.service.project.IdeModelsProviderImpl;
+import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProvider;
+import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProviderImpl;
+import com.intellij.openapi.externalSystem.service.project.ProjectDataManager;
 import com.intellij.openapi.externalSystem.statistics.ExternalSystemSyncActionsCollector;
 import com.intellij.openapi.externalSystem.statistics.Phase;
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil;
@@ -36,7 +45,12 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
@@ -160,6 +174,7 @@ public final class ProjectDataManagerImpl implements ProjectDataManager {
       ProjectDataService.EP_NAME.forEachExtensionSafe(dataService -> allKeys.add(dataService.getTargetDataKey()));
       WorkspaceDataService.EP_NAME.forEachExtensionSafe(dataService -> allKeys.add(dataService.getTargetDataKey()));
 
+      ProjectDataImportExtension.EP_NAME.forEachExtensionSafe(listener -> listener.prepareImportData(projectData, modelsProvider));
       final ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
       if (indicator != null) {
         indicator.setIndeterminate(false);
@@ -179,6 +194,7 @@ public final class ProjectDataManagerImpl implements ProjectDataManager {
                      postImportTasks, onSuccessImportTasks, onFailureImportTasks);
       }
 
+      ProjectDataImportExtension.EP_NAME.forEachExtensionSafe(listener -> listener.finalizeImportData(projectData, modelsProvider));
       ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "postImportTasks", span -> {
         for (Runnable postImportTask : postImportTasks) {
           postImportTask.run();
@@ -206,11 +222,11 @@ public final class ProjectDataManagerImpl implements ProjectDataManager {
     finally {
       if (importSucceeded) {
         ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "runFinalTasks",
-                                                __ -> runFinalTasks(project, projectPath, onSuccessImportTasks));
+                                                _ -> runFinalTasks(project, projectPath, onSuccessImportTasks));
       }
       else {
         ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "runFinalTasks",
-                                                __ -> runFinalTasks(project, projectPath, onFailureImportTasks));
+                                                _ -> runFinalTasks(project, projectPath, onFailureImportTasks));
       }
       if (!importSucceeded) {
         dispose(modelsProvider, project, true);

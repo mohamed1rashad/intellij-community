@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.actions;
 
 import com.intellij.formatting.service.CoreFormattingService;
@@ -17,7 +17,12 @@ import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.progress.*;
+import com.intellij.openapi.progress.EmptyProgressIndicator;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressIndicatorProvider;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
@@ -26,6 +31,7 @@ import com.intellij.openapi.roots.GeneratedSourcesFilter;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -39,6 +45,7 @@ import com.intellij.util.SequentialTask;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.diff.FilesTooBigForDiffException;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -210,6 +217,45 @@ public abstract class AbstractLayoutCodeProcessor {
     return true;
   }
 
+  /**
+   * Runs {@code writeTask} under a {@link WriteCommandAction} as part of file processing.
+   * <p>
+   * Subclasses can override this method to delegate write wrapping to a language plugin
+   * (see {@link OptimizeImportsProcessor#runTask}, which honours
+   * {@link com.intellij.lang.ImportOptimizer#getActionMode}).
+   *
+   * @param file                            virtual file
+   * @param commandName                     undo-able command name
+   * @param groupId                         undo group id
+   * @param processAllFilesAsSingleUndoStep see {@link #setProcessAllFilesAsSingleUndoStep(boolean)}
+   * @param modifyTask                      task to modify the file
+   */
+  @ApiStatus.Experimental
+  protected void runTask(@NotNull VirtualFile file,
+                         @NotNull @NlsContexts.Command String commandName,
+                         @NotNull String groupId,
+                         boolean processAllFilesAsSingleUndoStep,
+                         @NotNull Runnable modifyTask) {
+    runUnderDefaultWriteCommandAction(myProject, commandName, groupId, processAllFilesAsSingleUndoStep, modifyTask);
+  }
+
+  /**
+   * Default platform wrapping: a plain {@link WriteCommandAction}. Exposed so subclasses that want a different
+   * behaviour in some cases (e.g. {@link OptimizeImportsProcessor}) can still fall back to this exact wrapping.
+   */
+  @ApiStatus.Experimental
+  protected static void runUnderDefaultWriteCommandAction(@NotNull Project project,
+                                                          @NotNull @NlsContexts.Command String commandName,
+                                                          @NotNull String groupId,
+                                                          boolean processAllFilesAsSingleUndoStep,
+                                                          @NotNull Runnable writeTask) {
+    WriteCommandAction.writeCommandAction(project)
+      .withName(commandName)
+      .withGroupId(groupId)
+      .shouldRecordActionForActiveDocument(processAllFilesAsSingleUndoStep)
+      .run(writeTask::run);
+  }
+
   public void run() {
     if (myPsiFile != null) {
       PsiUtilCore.ensureValid(myPsiFile);
@@ -320,22 +366,14 @@ public abstract class AbstractLayoutCodeProcessor {
         }
     };
 
-    if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
-      ProgressManager.getInstance().run(new Task.Modal(myProject, getProgressTitle(), true) {
-        @Override
-        public void run(@NotNull ProgressIndicator indicator) {
-          runnable.accept(indicator);
-        }
-      });
-    }
-    else {
-      ProgressManager.getInstance().run(new Task.Backgroundable(myProject, getProgressTitle(), true) {
-        @Override
-        public void run(@NotNull ProgressIndicator indicator) {
-          runnable.accept(indicator);
-        }
-      });
-    }
+    boolean isModal = ApplicationManager.getApplication().isHeadlessEnvironment();
+    Task.Backgroundable modal = new Task.Backgroundable(myProject, getProgressTitle(), true) {
+      @Override
+      public void run(@NotNull ProgressIndicator indicator) {
+        runnable.accept(indicator);
+      }
+    };
+    ProgressManager.getInstance().run(modal.toModalIfNeeded(isModal));
   }
 
   private @NotNull @NlsContexts.ProgressTitle String getProgressTitle() {
@@ -408,8 +446,10 @@ public abstract class AbstractLayoutCodeProcessor {
     private PsiFile next;
 
     ProcessingTask(@NotNull ProgressIndicator indicator) {
-      myFileTreeIterator = ReadAction.compute(() -> build());
-      myCountingIterator = ReadAction.compute(() -> build());
+      var iteratorPair = ReadAction.computeBlocking(() -> Pair.pair(build(), build()));
+      myFileTreeIterator = iteratorPair.first;
+      myCountingIterator = iteratorPair.second;
+
       myProcessors = getAllProcessors();
       myProgressIndicator = indicator;
     }
@@ -443,7 +483,7 @@ public abstract class AbstractLayoutCodeProcessor {
     private record FileAndStatus(VirtualFile file, @NlsSafe String statusText) {}
 
     private @Nullable FileAndStatus shouldProcessFile(PsiFile psiFile) {
-      return ReadAction.compute(() -> {
+      return ReadAction.computeBlocking(() -> {
         VirtualFile virtualFile = PsiUtilCore.getVirtualFile(psiFile);
         if (virtualFile == null) return null;
 
@@ -471,20 +511,16 @@ public abstract class AbstractLayoutCodeProcessor {
             .executeSynchronously();
         }
         else {
-          PsiFile psiFile = ReadAction.compute(() -> PsiManager.getInstance(myProject).findFile(file));
+          PsiFile psiFile = ReadAction.computeBlocking(() -> PsiManager.getInstance(myProject).findFile(file));
           writeTask = psiFile != null ? processor.prepareTask(psiFile, myProcessChangedTextOnly) : null;
         }
         if (writeTask == null) continue;
 
         ProgressIndicatorProvider.checkCanceled();
 
-        WriteCommandAction.writeCommandAction(myProject)
-          .withName(myCommandName)
-          .withGroupId(groupId)
-          .shouldRecordActionForActiveDocument(myProcessAllFilesAsSingleUndoStep)
-          .run(() -> {
-            AbstractLayoutCodeProcessorWriteInterceptor.getInstance().runFileWrite(writeTask, myProject, myCommandName);
-          });
+        processor.runTask(file, myCommandName, groupId, myProcessAllFilesAsSingleUndoStep, () -> {
+          AbstractLayoutCodeProcessorWriteInterceptor.getInstance().runFileWrite(writeTask, myProject, myCommandName);
+        });
 
         checkStop(writeTask, file);
       }

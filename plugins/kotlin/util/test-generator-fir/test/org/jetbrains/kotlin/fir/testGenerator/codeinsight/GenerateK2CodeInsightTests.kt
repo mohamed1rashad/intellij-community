@@ -4,7 +4,11 @@ package org.jetbrains.kotlin.fir.testGenerator.codeinsight
 import org.jetbrains.kotlin.checkers.AbstractJavaAgainstKotlinBinariesCheckerTest
 import org.jetbrains.kotlin.checkers.AbstractJavaAgainstKotlinSourceCheckerTest
 import org.jetbrains.kotlin.idea.codeInsight.codevision.AbstractKotlinCodeVisionProviderTest
-import org.jetbrains.kotlin.idea.k2.*
+import org.jetbrains.kotlin.idea.k2.AbstractK2ExpressionTypeTest
+import org.jetbrains.kotlin.idea.k2.AbstractKotlinFirBreadcrumbsTest
+import org.jetbrains.kotlin.idea.k2.AbstractKotlinFirJoinLinesTest
+import org.jetbrains.kotlin.idea.k2.AbstractKotlinFirPairMatcherTest
+import org.jetbrains.kotlin.idea.k2.AbstractScriptGotoDeclarationMultifileTest
 import org.jetbrains.kotlin.idea.k2.copyPaste.AbstractK2InsertImportOnPasteTest
 import org.jetbrains.kotlin.idea.k2.generate.AbstractFirGenerateHashCodeAndEqualsActionTest
 import org.jetbrains.kotlin.idea.k2.generate.AbstractFirGenerateSecondaryConstructorActionTest
@@ -12,18 +16,29 @@ import org.jetbrains.kotlin.idea.k2.generate.AbstractFirGenerateTestSupportMetho
 import org.jetbrains.kotlin.idea.k2.generate.AbstractFirGenerateToStringActionTest
 import org.jetbrains.kotlin.idea.k2.hierarchy.AbstractFirHierarchyTest
 import org.jetbrains.kotlin.idea.k2.hierarchy.AbstractFirHierarchyWithLibTest
-import org.jetbrains.kotlin.idea.k2.hints.*
+import org.jetbrains.kotlin.idea.k2.hierarchy.AbstractHierarchyMultiplatformTest
+import org.jetbrains.kotlin.idea.k2.hints.AbstractKtCallChainHintsProviderTest
+import org.jetbrains.kotlin.idea.k2.hints.AbstractKtDefaultParameterInlayHintsProviderTest
+import org.jetbrains.kotlin.idea.k2.hints.AbstractKtLambdasHintsProvider
+import org.jetbrains.kotlin.idea.k2.hints.AbstractKtParameterHintsProviderTest
+import org.jetbrains.kotlin.idea.k2.hints.AbstractKtReferenceTypeHintsProviderTest
+import org.jetbrains.kotlin.idea.k2.hints.AbstractKtValuesHintsProviderTest
+import org.jetbrains.kotlin.idea.k2.hints.compilerPlugins.AbstractCompilerPluginDeclarationHighlighterTest
 import org.jetbrains.kotlin.idea.k2.hints.compilerPlugins.AbstractKtCompilerDeclarationsHintProviderTest
 import org.jetbrains.kotlin.idea.k2.hints.compilerPlugins.AbstractKtCompilerPluginModalityHintProviderTest
 import org.jetbrains.kotlin.idea.k2.hints.compilerPlugins.AbstractKtCompilerSupertypesHintProviderTest
 import org.jetbrains.kotlin.idea.k2.moveUpDown.AbstractFirMoveLeftRightTest
 import org.jetbrains.kotlin.idea.k2.moveUpDown.AbstractKotlinFirMoveStatementTest
 import org.jetbrains.kotlin.idea.k2.quickDoc.AbstractFirRenderingKDocTest
+import org.jetbrains.kotlin.idea.k2.selection.AbstractK2ExpressionSelectionTest
+import org.jetbrains.kotlin.idea.k2.selection.AbstractK2SmartSelectionTest
+import org.jetbrains.kotlin.idea.k2.selection.AbstractK2WordSelectionTest
 import org.jetbrains.kotlin.idea.k2.slicer.AbstractFirSlicerLeafGroupingTest
 import org.jetbrains.kotlin.idea.k2.slicer.AbstractFirSlicerMultiplatformTest
 import org.jetbrains.kotlin.idea.k2.slicer.AbstractFirSlicerNullnessGroupingTest
 import org.jetbrains.kotlin.idea.k2.slicer.AbstractFirSlicerTreeTest
 import org.jetbrains.kotlin.idea.k2.structureView.AbstractKotlinGoToSuperDeclarationsHandlerTest
+import org.jetbrains.kotlin.idea.k2.structureView.AbstractKotlinGotoSuperMultiModuleTest
 import org.jetbrains.kotlin.idea.k2.surroundWith.AbstractKotlinFirSurroundWithTest
 import org.jetbrains.kotlin.idea.k2.unwrap.AbstractKotlinFirUnwrapRemoveTest
 import org.jetbrains.kotlin.idea.navigation.AbstractKotlinGotoImplementationMultiModuleTest
@@ -31,14 +46,18 @@ import org.jetbrains.kotlin.idea.navigation.AbstractKotlinGotoImplementationMult
 import org.jetbrains.kotlin.idea.navigation.AbstractKotlinGotoImplementationTest
 import org.jetbrains.kotlin.idea.navigationToolbar.AbstractKotlinNavBarTest
 import org.jetbrains.kotlin.idea.refactoring.AbstractNameSuggestionProviderTest
-import org.jetbrains.kotlin.testGenerator.model.*
 import org.jetbrains.kotlin.testGenerator.model.GroupCategory.CODE_INSIGHT
+import org.jetbrains.kotlin.testGenerator.model.MutableTWorkspace
 import org.jetbrains.kotlin.testGenerator.model.Patterns.DIRECTORY
 import org.jetbrains.kotlin.testGenerator.model.Patterns.KT
 import org.jetbrains.kotlin.testGenerator.model.Patterns.KT_OR_KTS
 import org.jetbrains.kotlin.testGenerator.model.Patterns.KT_WITHOUT_DOTS
 import org.jetbrains.kotlin.testGenerator.model.Patterns.TEST
 import org.jetbrains.kotlin.testGenerator.model.Patterns.forRegex
+import org.jetbrains.kotlin.testGenerator.model.model
+import org.jetbrains.kotlin.testGenerator.model.or
+import org.jetbrains.kotlin.testGenerator.model.testClass
+import org.jetbrains.kotlin.testGenerator.model.testGroup
 
 internal fun MutableTWorkspace.generateK2CodeInsightTests() {
     generateK2InspectionTests()
@@ -51,8 +70,25 @@ internal fun MutableTWorkspace.generateK2CodeInsightTests() {
 
     testGroup("code-insight/kotlin.code-insight.k2", category = CODE_INSIGHT) {
         testClass<AbstractKotlinGoToSuperDeclarationsHandlerTest> {
-            model("gotoSuperDeclarationsHandler", pattern = Patterns.KT_WITHOUT_DOTS, passTestDataPath = false)
+            model("gotoSuperDeclarationsHandler", pattern = KT_WITHOUT_DOTS, passTestDataPath = false)
         }
+
+        testClass<AbstractK2ExpressionSelectionTest> {
+            model("../../../idea/tests/testData/expressionSelection", testMethodName = "doTestExpressionSelection", pattern = KT_OR_KTS)
+        }
+
+        testClass<AbstractK2SmartSelectionTest> {
+            model("../../../idea/tests/testData/smartSelection", testMethodName = "doTestSmartSelection", pattern = KT_WITHOUT_DOTS)
+        }
+
+        testClass<AbstractK2WordSelectionTest> {
+            model("../../../idea/tests/testData/wordSelection", pattern = DIRECTORY)
+        }
+
+        testClass<AbstractKotlinGotoSuperMultiModuleTest> {
+            model("../../../idea/tests/testData/navigation/gotoSuper/multiModule", isRecursive = false, pattern = DIRECTORY)
+        }
+
         testClass<AbstractKotlinGotoImplementationTest>(generatedClassName = "org.jetbrains.kotlin.idea.k2.navigation.KotlinGotoImplementationTestGenerated") {
             model("../../../idea/tests/testData/navigation/implementations", isRecursive = false)
         }
@@ -87,6 +123,9 @@ internal fun MutableTWorkspace.generateK2CodeInsightTests() {
             model("../../../idea/tests/testData/codeInsight/surroundWith/functionLiteral", testMethodName = "doTestWithFunctionLiteralSurrounder")
             model("../../../idea/tests/testData/codeInsight/surroundWith/withIfExpression", testMethodName = "doTestWithSurroundWithIfExpression")
             model("../../../idea/tests/testData/codeInsight/surroundWith/withIfElseExpression", testMethodName = "doTestWithSurroundWithIfElseExpression")
+            model("../../../idea/tests/testData/codeInsight/surroundWith/while", testMethodName = "doTestWithWhileSurrounder")
+            model("../../../idea/tests/testData/codeInsight/surroundWith/doWhile", testMethodName = "doTestWithDoWhileSurrounder")
+            model("../../../idea/tests/testData/codeInsight/surroundWith/for", testMethodName = "doTestWithForSurrounder")
         }
         testClass<AbstractKotlinFirBreadcrumbsTest> {
             model("../../../idea/tests/testData/codeInsight/breadcrumbs", pattern = KT_OR_KTS)
@@ -170,6 +209,10 @@ internal fun MutableTWorkspace.generateK2CodeInsightTests() {
             model("hints/compilerPlugins/declarations", pattern = inlayHintsFileRegexp)
         }
 
+        testClass<AbstractCompilerPluginDeclarationHighlighterTest> {
+            model("hints/compilerPlugins/highlighger", pattern = inlayHintsFileRegexp)
+        }
+
         testClass<AbstractKtCompilerSupertypesHintProviderTest> {
             model("hints/compilerPlugins/supertypes", pattern = inlayHintsFileRegexp)
         }
@@ -185,14 +228,23 @@ internal fun MutableTWorkspace.generateK2CodeInsightTests() {
         testClass<AbstractFirHierarchyTest> {
             model("../../../idea/tests/testData/hierarchy/calls/callers", pattern = DIRECTORY, isRecursive = false, testMethodName = "doCallerHierarchyTest")
             model("../../../idea/tests/testData/hierarchy/calls/callersJava", pattern = DIRECTORY, isRecursive = false, testMethodName = "doCallerJavaHierarchyTest")
+            model("../../../idea/tests/testData/hierarchy/calls/calleesJava", pattern = DIRECTORY, isRecursive = false, testMethodName = "doCalleeJavaHierarchyTest")
             model("../../../idea/tests/testData/hierarchy/calls/callees", pattern = DIRECTORY, isRecursive = false, testMethodName = "doCalleeHierarchyTest")
             model("../../../idea/tests/testData/hierarchy/class/type", pattern = DIRECTORY, isRecursive = false, testMethodName = "doTypeClassHierarchyTest")
             model("../../../idea/tests/testData/hierarchy/class/super", pattern = DIRECTORY, isRecursive = false, testMethodName = "doSuperClassHierarchyTest")
             model("../../../idea/tests/testData/hierarchy/class/sub", pattern = DIRECTORY, isRecursive = false, testMethodName = "doSubClassHierarchyTest")
             model("../../../idea/tests/testData/hierarchy/overrides", pattern = DIRECTORY, isRecursive = false, testMethodName = "doOverrideHierarchyTest")
         }
+
+
         testClass<AbstractFirHierarchyWithLibTest> {
             model("../../../idea/tests/testData/hierarchy/withLib", pattern = DIRECTORY, isRecursive = false)
+        }
+
+        testClass<AbstractHierarchyMultiplatformTest> {
+            model("../../../idea/tests/testData/hierarchy/kmp/type", testMethodName = "doSubClassHierarchyTest")
+            model("../../../idea/tests/testData/hierarchy/kmp/superType", testMethodName = "doSuperClassHierarchyTest")
+            model("../../../idea/tests/testData/hierarchy/kmp/method", testMethodName = "doMethodHierarchyTest")
         }
 
         testClass<AbstractFirGenerateHashCodeAndEqualsActionTest> {

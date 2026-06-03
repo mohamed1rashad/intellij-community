@@ -1,11 +1,17 @@
 package de.plushnikov.intellij.plugin.processor.clazz;
 
 import com.intellij.openapi.util.text.Strings;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.InheritanceUtil;
-import com.intellij.psi.util.PsiTypesUtil;
-import com.intellij.util.containers.ContainerUtil;
 import de.plushnikov.intellij.plugin.LombokClassNames;
 import de.plushnikov.intellij.plugin.lombokconfig.ConfigDiscovery;
 import de.plushnikov.intellij.plugin.lombokconfig.ConfigKey;
@@ -13,6 +19,7 @@ import de.plushnikov.intellij.plugin.problem.ProblemSink;
 import de.plushnikov.intellij.plugin.psi.LombokLightMethodBuilder;
 import de.plushnikov.intellij.plugin.util.LombokProcessorUtil;
 import de.plushnikov.intellij.plugin.util.PsiClassUtil;
+import de.plushnikov.intellij.plugin.util.PsiMethodUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -82,7 +89,7 @@ public final class StandardExceptionProcessor extends AbstractClassProcessor {
     final String accessVisibility = getAccessVisibility(psiAnnotation);
 
     // default constructor
-    if (noConstructorWithParamsOfTypesDefined(existedConstructors)) {
+    if (PsiMethodUtil.noConstructorWithParamsOfTypesDefined(existedConstructors)) {
       target.add(createConstructor(psiClass, psiAnnotation, psiManager, accessVisibility).withBodyText("this(null, null);"));
     }
 
@@ -93,7 +100,7 @@ public final class StandardExceptionProcessor extends AbstractClassProcessor {
       ConfigDiscovery.getInstance().getBooleanLombokConfigProperty(ConfigKey.ANYCONSTRUCTOR_ADD_CONSTRUCTOR_PROPERTIES, psiClass);
 
     // message constructor
-    if (noConstructorWithParamsOfTypesDefined(existedConstructors, javaLangStringType)) {
+    if (PsiMethodUtil.noConstructorWithParamsOfTypesDefined(existedConstructors, javaLangStringType)) {
       final LombokLightMethodBuilder messageConstructor = createConstructor(psiClass, psiAnnotation, psiManager, accessVisibility)
         .withFinalParameter("message", javaLangStringType)
         .withBodyText("this(message, null);");
@@ -104,7 +111,7 @@ public final class StandardExceptionProcessor extends AbstractClassProcessor {
     }
 
     // cause constructor
-    if (noConstructorWithParamsOfTypesDefined(existedConstructors, javaLangThrowableType)) {
+    if (PsiMethodUtil.noConstructorWithParamsOfTypesDefined(existedConstructors, javaLangThrowableType)) {
       final LombokLightMethodBuilder causeConstructor = createConstructor(psiClass, psiAnnotation, psiManager, accessVisibility)
         .withFinalParameter("cause", javaLangThrowableType)
         .withBodyText("this(cause != null ? cause.getMessage() : null, cause);");
@@ -115,7 +122,7 @@ public final class StandardExceptionProcessor extends AbstractClassProcessor {
     }
 
     // message and cause constructor
-    if (noConstructorWithParamsOfTypesDefined(existedConstructors, javaLangStringType, javaLangThrowableType)) {
+    if (PsiMethodUtil.noConstructorWithParamsOfTypesDefined(existedConstructors, javaLangStringType, javaLangThrowableType)) {
       final LombokLightMethodBuilder messageCauseConstructor = createConstructor(psiClass, psiAnnotation, psiManager, accessVisibility)
         .withFinalParameter("message", javaLangStringType)
         .withFinalParameter("cause", javaLangThrowableType)
@@ -135,25 +142,6 @@ public final class StandardExceptionProcessor extends AbstractClassProcessor {
       accessVisibility = PsiModifier.PUBLIC;
     }
     return accessVisibility;
-  }
-
-  private static boolean noConstructorWithParamsOfTypesDefined(Collection<PsiMethod> existedConstructors, PsiClassType... classTypes) {
-    return !ContainerUtil.exists(existedConstructors, method -> {
-      final PsiParameterList parameterList = method.getParameterList();
-      if (parameterList.getParametersCount() != classTypes.length) {
-        return false;
-      }
-
-      int paramIndex = 0;
-      for (PsiClassType classType : classTypes) {
-        if (!PsiTypesUtil.compareTypes(parameterList.getParameter(paramIndex).getType(), classType, true)) {
-          return false;
-        }
-        paramIndex++;
-      }
-
-      return true;
-    });
   }
 
   private static LombokLightMethodBuilder createConstructor(@NotNull PsiClass psiClass,

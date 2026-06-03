@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.refactoring.rename
 
 import com.intellij.psi.PsiElement
@@ -23,7 +23,13 @@ import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
 import org.jetbrains.kotlin.idea.searching.inheritors.findAllOverridings
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.NameUtils
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClassLikeDeclaration
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtTypeParameter
 import org.jetbrains.kotlin.psi.psiUtil.quoteIfNeeded
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.InvocationKind
@@ -74,8 +80,10 @@ internal class K2RenameRefactoringSupport : KotlinRenameRefactoringSupport {
         if (psiReference !is KtSimpleNameReference) {
             return false
         }
-        return analyze(psiReference.element) {
-            psiReference.isImplicitReferenceToCompanion()
+
+        val element = psiReference.element
+        return analyze(element) {
+            element.isImplicitReferenceToCompanion
         }
     }
 

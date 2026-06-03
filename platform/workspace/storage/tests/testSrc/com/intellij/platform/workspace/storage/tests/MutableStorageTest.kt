@@ -2,7 +2,20 @@
 package com.intellij.platform.workspace.storage.tests
 
 import com.intellij.platform.workspace.storage.MutableEntityStorage
-import com.intellij.platform.workspace.storage.testEntities.entities.*
+import com.intellij.platform.workspace.storage.testEntities.entities.AnotherSource
+import com.intellij.platform.workspace.storage.testEntities.entities.ChildMultipleEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.LeftEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.MySource
+import com.intellij.platform.workspace.storage.testEntities.entities.NamedChildEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.NamedEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.ParentMultipleEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.ParentMultipleEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.SampleEntity2
+import com.intellij.platform.workspace.storage.testEntities.entities.SampleEntity2Builder
+import com.intellij.platform.workspace.storage.testEntities.entities.modifyLeftEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.modifyNamedEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.modifyParentMultipleEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.modifySampleEntity2
 import com.intellij.platform.workspace.storage.toBuilder
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -27,9 +40,9 @@ class MutableStorageTest {
     val newBuilder = MutableEntityStorage.from(builder.toSnapshot())
 
     val entityFromStoreOne = newBuilder.entities(SampleEntity2::class.java).single()
-    val sampleBuilder = entityFromStoreOne.builderFrom(newBuilder) as ModifiableSampleEntity2
+    val sampleBuilder = entityFromStoreOne.builderFrom(newBuilder) as SampleEntity2Builder
     val entityFromStoreTwo = newBuilder.entities(SampleEntity2::class.java).single()
-    val entityTwoBuilder = entityFromStoreTwo.builderFrom(newBuilder) as ModifiableSampleEntity2
+    val entityTwoBuilder = entityFromStoreTwo.builderFrom(newBuilder) as SampleEntity2Builder
 
     newBuilder.modifySampleEntity2(entityFromStoreOne) {
       entitySource = MySource
@@ -84,7 +97,7 @@ class MutableStorageTest {
     builder.addEntity(parentEntity)
 
     val parentEntityFromStore = builder.entities(ParentMultipleEntity::class.java).single()
-    val parentBuilder = parentEntityFromStore.builderFrom(builder) as ModifiableParentMultipleEntity
+    val parentBuilder = parentEntityFromStore.builderFrom(builder) as ParentMultipleEntityBuilder
     assertThrows<IllegalStateException> {
       parentBuilder.parentData = "AnotherParentData"
     }

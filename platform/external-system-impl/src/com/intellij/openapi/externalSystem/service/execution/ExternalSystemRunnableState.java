@@ -1,13 +1,26 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.externalSystem.service.execution;
 
-import com.intellij.build.*;
+import com.intellij.build.BuildBundle;
+import com.intellij.build.BuildConsoleUtils;
+import com.intellij.build.BuildEventDispatcher;
+import com.intellij.build.BuildProgressListener;
+import com.intellij.build.BuildTreeFilters;
+import com.intellij.build.BuildView;
+import com.intellij.build.BuildViewSettingsProvider;
+import com.intellij.build.BuildViewSettingsProviderAdapter;
+import com.intellij.build.DefaultBuildDescriptor;
+import com.intellij.build.WeakFilterableSupplier;
 import com.intellij.build.events.BuildEvent;
 import com.intellij.build.events.impl.FailureResultImpl;
 import com.intellij.build.events.impl.FinishBuildEventImpl;
 import com.intellij.build.events.impl.StartBuildEventImpl;
 import com.intellij.build.events.impl.SuccessResultImpl;
-import com.intellij.execution.*;
+import com.intellij.execution.DefaultExecutionResult;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.ExecutionResult;
+import com.intellij.execution.Executor;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.ParametersList;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.configurations.SimpleJavaParameters;
@@ -60,11 +73,18 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.net.*;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.ServerSocket;
+import java.net.SocketException;
+import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Enumeration;
 
-import static com.intellij.openapi.externalSystem.util.ExternalSystemUtil.*;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemUtil.convert;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemUtil.createFailureResult;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemUtil.getConsoleManagerFor;
 import static com.intellij.openapi.util.text.StringUtil.nullize;
 
 public class ExternalSystemRunnableState extends UserDataHolderBase implements RunProfileState {
@@ -84,9 +104,8 @@ public class ExternalSystemRunnableState extends UserDataHolderBase implements R
   @ApiStatus.Internal
   public static final @NotNull Key<ExternalSystemTaskNotificationListener> TASK_NOTIFICATION_LISTENER_KEY =
     Key.create("TASK_NOTIFICATION_LISTENER");
-
   @ApiStatus.Internal
-  public static final Key<Boolean> NAVIGATE_TO_ERROR = Key.create("NAVIGATE_TO_ERROR");
+  public static final Key<ThreeState> NAVIGATE_TO_ERROR_KEY = Key.create("NAVIGATE_TO_ERROR");
 
   private static final @NotNull String DEFAULT_TASK_PREFIX = ": ";
   private static final @NotNull String DEFAULT_TASK_POSTFIX = "";
@@ -199,6 +218,7 @@ public class ExternalSystemRunnableState extends UserDataHolderBase implements R
     ExternalSystemExecuteTaskTask task = new ExternalSystemExecuteTaskTask(myProject, mySettings, jvmParametersSetup, myConfiguration);
     copyUserDataTo(task);
     addDebugUserDataTo(task);
+
     ExternalSystemTaskNotificationListener listener = myEnv.getUserData(TASK_NOTIFICATION_LISTENER_KEY);
     if (listener != null) {
       ExternalSystemProgressNotificationManager.getInstance().addNotificationListener(task.getId(), listener);
@@ -229,9 +249,9 @@ public class ExternalSystemRunnableState extends UserDataHolderBase implements R
     DefaultBuildDescriptor buildDescriptor =
       new DefaultBuildDescriptor(task.getId(), executionName, task.getExternalProjectPath(), System.currentTimeMillis());
 
-    Boolean navigateToError = task.getUserData(NAVIGATE_TO_ERROR);
+    ThreeState navigateToError = myEnv.getUserData(NAVIGATE_TO_ERROR_KEY);
     if (navigateToError != null) {
-      buildDescriptor.setNavigateToError(navigateToError ? ThreeState.YES : ThreeState.NO);
+      buildDescriptor.setNavigateToError(navigateToError);
     }
 
     Class<? extends BuildProgressListener> progressListenerClazz = task.getUserData(ExternalSystemRunConfiguration.PROGRESS_LISTENER_KEY);

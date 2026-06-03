@@ -1,7 +1,12 @@
 package com.intellij.cce.evaluable.conflictResolution
 
-import com.intellij.cce.actions.*
-import com.intellij.cce.core.*
+import com.intellij.cce.actions.DatasetContext
+import com.intellij.cce.actions.DatasetRef
+import com.intellij.cce.core.Lookup
+import com.intellij.cce.core.Session
+import com.intellij.cce.core.Suggestion
+import com.intellij.cce.core.SuggestionSource
+import com.intellij.cce.core.TokenProperties
 import com.intellij.cce.evaluable.AIA_CONTEXT
 import com.intellij.cce.evaluation.EvaluationChunk
 import com.intellij.cce.evaluation.SimpleFileEnvironment
@@ -36,7 +41,7 @@ class ConflictEnvironment(
     override val name: String = "${fileConflict.hash} - ${fileConflict.fileName}"
     override val datasetName: String = datasetRef.name
 
-    override fun evaluate(
+    override suspend fun evaluate(
       handler: InterpretationHandler,
       filter: InterpretFilter, // TODO should we use it somehow?
       order: InterpretationOrder, // TODO should we use somehow?

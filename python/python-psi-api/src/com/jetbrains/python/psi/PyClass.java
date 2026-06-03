@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.psi;
 
 import com.intellij.psi.PsiElement;
@@ -25,9 +25,10 @@ import java.util.Map;
 /**
  * Represents a class declaration in source.
  */
-public interface PyClass extends PyAstClass, PsiNameIdentifierOwner, PyCompoundStatement, PyDocStringOwner, StubBasedPsiElement<PyClassStub>,
-                                 ScopeOwner, PyDecoratable, PyTypedElement, PyQualifiedNameOwner, PyStatementListContainer, PyWithAncestors,
-                                 PyTypeParameterListOwner, PyDeprecatable {
+public interface PyClass
+  extends PyAstClass, PsiNameIdentifierOwner, PyCompoundStatement, PyDocStringOwner, StubBasedPsiElement<PyClassStub>,
+          ScopeOwner, PyDecoratable, PyTypedElement, PyQualifiedNameOwner, PyStatementListContainer, PyWithAncestors,
+          PyTypeParameterListOwner, PyDeprecatable {
   PyClass[] EMPTY_ARRAY = new PyClass[0];
   ArrayFactory<PyClass> ARRAY_FACTORY = count -> count == 0 ? EMPTY_ARRAY : new PyClass[count];
 
@@ -374,8 +375,8 @@ public interface PyClass extends PyAstClass, PsiNameIdentifierOwner, PyCompoundS
    * @param context eval context
    * @return {@link PyType} casted if it has right type
    */
-  @Nullable
-  PyClassLikeType getType(@NotNull TypeEvalContext context);
+  @Override
+  @Nullable PyClassLikeType getType(@NotNull TypeEvalContext context);
 
   @Override
   default @Nullable PyStringLiteralExpression getDocStringExpression() {

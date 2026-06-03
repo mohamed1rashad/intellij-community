@@ -6,6 +6,7 @@ import com.intellij.ide.ui.UISettings
 import com.intellij.ide.ui.UISettingsListener
 import com.intellij.openapi.application.Application
 import com.intellij.openapi.wm.impl.customFrameDecorations.header.CustomWindowHeaderUtil
+import com.intellij.ui.ExperimentalUI
 import com.intellij.util.system.OS
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.CoroutineScope
@@ -34,8 +35,18 @@ internal object IdeRootPaneBorderHelper {
       installLinuxBorder(app, coroutineScope, frame, frameDecorator, rootPane)
     }
     else {
-      rootPane.border = UIManager.getBorder("Window.border")
+      setWindowBorder(rootPane)
     }
+  }
+
+  fun update(rootPane: JRootPane) {
+    if (!OS.isGenericUnix() && ExperimentalUI.isNewUI()) {
+      setWindowBorder(rootPane)
+    }
+  }
+
+  private fun setWindowBorder(rootPane: JRootPane) {
+    rootPane.border = UIManager.getBorder("Window.border")
   }
 
   private fun installLinuxBorder(

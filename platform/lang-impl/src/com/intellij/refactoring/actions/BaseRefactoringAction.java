@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.actions;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
@@ -11,17 +11,28 @@ import com.intellij.internal.statistic.eventLog.events.EventFields;
 import com.intellij.internal.statistic.eventLog.events.EventPair;
 import com.intellij.lang.ContextAwareActionHandler;
 import com.intellij.lang.Language;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.application.ApplicationBundle;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.UndoConfirmationPolicy;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.actionSystem.DocCommandGroupId;
+import com.intellij.openapi.editor.impl.CaretModelImpl;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsActions;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiCompiledElement;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.RefactoringUsageCollector;
@@ -129,7 +140,8 @@ public abstract class BaseRefactoringAction extends AnAction {
       return;
     }
 
-    if (activeInplaceRenamer == null) {
+    if (activeInplaceRenamer == null &&
+        !(editor != null && editor.getCaretModel() instanceof CaretModelImpl caretModel && caretModel.isIteratingOverCarets())) {
       final LookupEx lookup = LookupManager.getActiveLookup(editor);
       if (lookup instanceof LookupImpl) {
         Runnable command = () -> ((LookupImpl)lookup).finishLookup(Lookup.NORMAL_SELECT_CHAR);
@@ -227,18 +239,18 @@ public abstract class BaseRefactoringAction extends AnAction {
   @ApiStatus.Internal
   public static PsiElement findRefactoringTargetInEditor(@NotNull DataContext dataContext,
                                                          @NotNull Predicate<? super Language> elementLanguagePredicate) {
-    Editor editor = dataContext.getData(CommonDataKeys.EDITOR);
-    PsiFile file = dataContext.getData(CommonDataKeys.PSI_FILE);
     PsiElement element = dataContext.getData(CommonDataKeys.PSI_ELEMENT);
-    Language[] languages = dataContext.getData(LangDataKeys.CONTEXT_LANGUAGES);
-    if (element == null || element instanceof SyntheticElement || !elementLanguagePredicate.test(element.getLanguage())) {
+    if (element == null || !elementLanguagePredicate.test(element.getLanguage())) {
+      Editor editor = dataContext.getData(CommonDataKeys.EDITOR);
+      PsiFile file = dataContext.getData(CommonDataKeys.PSI_FILE);
       if (file == null || editor == null) {
         return null;
       }
       element = getElementAtCaret(editor, file);
     }
 
-    if (element == null || element instanceof SyntheticElement || languages == null) {
+    Language[] languages = dataContext.getData(LangDataKeys.CONTEXT_LANGUAGES);
+    if (element == null || languages == null) {
       return null;
     }
 

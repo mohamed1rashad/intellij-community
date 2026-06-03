@@ -1,7 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.model.psi.impl;
 
-import com.intellij.model.psi.*;
+import com.intellij.model.psi.PsiExternalReferenceHost;
+import com.intellij.model.psi.PsiSymbolReference;
+import com.intellij.model.psi.PsiSymbolReferenceHints;
+import com.intellij.model.psi.PsiSymbolReferenceProviderBean;
+import com.intellij.model.psi.PsiSymbolReferenceService;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.CachedValueProvider.Result;
@@ -11,7 +15,6 @@ import com.intellij.psi.util.ParameterizedCachedValueProvider;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
@@ -20,7 +23,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Supplier;
 
-@Internal
 final class PsiSymbolReferenceServiceImpl implements PsiSymbolReferenceService {
   /**
    * This field is intentionally private.

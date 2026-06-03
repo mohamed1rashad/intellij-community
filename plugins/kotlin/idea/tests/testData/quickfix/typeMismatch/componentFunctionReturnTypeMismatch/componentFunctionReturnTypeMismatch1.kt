@@ -1,4 +1,5 @@
-// "Change return type of called function 'A.component1' to 'Int'" "true"
+// "Specify 'Int' return type for called function 'A.component1'" "true"
+// K2_ERROR: Operator call 'component1()' returns 'Unit', but 'Int' is expected.
 abstract class A {
     abstract operator fun component1()
     abstract operator fun component2(): Int

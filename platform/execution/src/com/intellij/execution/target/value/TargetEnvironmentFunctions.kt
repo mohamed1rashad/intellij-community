@@ -3,7 +3,12 @@
 
 package com.intellij.execution.target.value
 
-import com.intellij.execution.target.*
+import com.intellij.execution.target.ExternallySynchronized
+import com.intellij.execution.target.FullPathOnTarget
+import com.intellij.execution.target.HostPort
+import com.intellij.execution.target.TargetEnvironment
+import com.intellij.execution.target.TargetEnvironmentRequest
+import com.intellij.execution.target.TargetPlatform
 import com.intellij.execution.target.local.LocalTargetEnvironment
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.ProgressIndicator
@@ -78,7 +83,15 @@ abstract class TraceableTargetEnvironmentFunction<R> : TargetEnvironmentFunction
  */
 fun <T> constant(value: T): TargetEnvironmentFunction<T> = Constant(value)
 
-private data class Constant<T>(private val value: T) : TraceableTargetEnvironmentFunction<T>() {
+@ApiStatus.Internal
+fun <T> constantExplicit(value: T): ConstantFun<T> = Constant(value)
+
+@ApiStatus.Internal
+interface ConstantFun<T>: TargetEnvironmentFunction<T> {
+  val value: T
+}
+
+private data class Constant<T>(override val value: T) : TraceableTargetEnvironmentFunction<T>(), ConstantFun<T> {
   override fun applyInner(t: TargetEnvironment): T = value
 }
 

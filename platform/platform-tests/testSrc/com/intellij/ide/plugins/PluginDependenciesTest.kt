@@ -4,12 +4,23 @@ package com.intellij.ide.plugins
 import com.intellij.ide.plugins.cl.PluginClassLoader
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.extensions.PluginId
-import com.intellij.platform.plugins.testFramework.PluginSetTestBuilder
-import com.intellij.platform.testFramework.plugins.*
+import com.intellij.platform.pluginSystem.parser.impl.elements.ModuleLoadingRuleValue
+import com.intellij.platform.pluginSystem.parser.impl.elements.ModuleVisibilityValue
+import com.intellij.platform.pluginSystem.testFramework.PluginSetTestBuilder
+import com.intellij.platform.testFramework.plugins.applicationServiceImpl
+import com.intellij.platform.testFramework.plugins.content
+import com.intellij.platform.testFramework.plugins.dependencies
+import com.intellij.platform.testFramework.plugins.depends
+import com.intellij.platform.testFramework.plugins.installAt
+import com.intellij.platform.testFramework.plugins.module
+import com.intellij.platform.testFramework.plugins.plugin
+import com.intellij.platform.testFramework.plugins.pluginAlias
 import com.intellij.testFramework.LoggedErrorProcessor
 import com.intellij.testFramework.assertions.Assertions.assertThat
+import com.intellij.testFramework.junit5.SystemProperty
 import com.intellij.testFramework.rules.InMemoryFsExtension
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 import java.nio.file.FileVisitResult
@@ -17,6 +28,7 @@ import java.nio.file.FileVisitResult
 internal class PluginDependenciesTest {
   init {
     Logger.setUnitTestMode() // due to warnInProduction use in IdeaPluginDescriptorImpl
+    PluginManagerCore.isUnitTestMode = true // FIXME git rid of this IJPL-220869
   }
 
   @RegisterExtension
@@ -25,6 +37,7 @@ internal class PluginDependenciesTest {
 
   private val rootPath get() = inMemoryFs.fs.getPath("/")
   private val pluginDirPath get() = rootPath.resolve("plugin")
+  private var loadingErrors: List<PluginLoadingError> = emptyList()
 
   @Test
   fun `plugin is loaded when depends dependency is resolved`() {
@@ -67,6 +80,24 @@ internal class PluginDependenciesTest {
   }
 
   @Test
+  fun `optional config for unresolved dependency is not marked for loading`() {
+    foo()
+    plugin("bar") {
+      depends("foo", configFile = "foo.xml") { actions = "" }
+      depends("baz", configFile = "baz.xml") { actions = "" }
+    }.installAt(pluginDirPath)
+
+    val pluginSet = buildPluginSet()
+    assertThat(pluginSet).hasExactlyEnabledPlugins("bar", "foo")
+
+    val bar = pluginSet.findEnabledPlugin(PluginId.getId("bar")) as PluginMainDescriptor
+    val fooDescriptor = bar.dependencies.first { it.pluginId == PluginId.getId("foo") }.subDescriptor!!
+    val bazDescriptor = bar.dependencies.first { it.pluginId == PluginId.getId("baz") }.subDescriptor!!
+    assertThat(fooDescriptor.isMarkedForLoading).isTrue
+    assertThat(bazDescriptor.isMarkedForLoading).isFalse
+  }
+
+  @Test
   fun `plugin is loaded when plugin dependency is resolved, only main module is a classloader parent`() {
     `bar with optional module`()
     `foo plugin-dependency bar`()
@@ -100,11 +131,11 @@ internal class PluginDependenciesTest {
     `foo plugin-dependency bar`()
     plugin("bar") {
       content {
-        module("bar.optional", ModuleLoadingRule.OPTIONAL) { packagePrefix = "bar.optional" }
-        module("bar.required", ModuleLoadingRule.REQUIRED) { packagePrefix = "bar.required" }
-        module("bar.embedded", ModuleLoadingRule.EMBEDDED) { packagePrefix = "bar.embedded" }
+        module("bar.optional", ModuleLoadingRuleValue.OPTIONAL) { packagePrefix = "bar.optional" }
+        module("bar.required", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "bar.required" }
+        module("bar.embedded", ModuleLoadingRuleValue.EMBEDDED) { packagePrefix = "bar.embedded" }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("foo", "bar")
     val (foo, bar) = pluginSet.getEnabledPlugins("foo", "bar")
@@ -117,7 +148,7 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is not loaded if it has a depends dependency on v2 module`() {
     `bar with optional module`()
-    plugin("foo") { depends("bar.module") }.buildDir(pluginDirPath.resolve("foo"))
+    plugin("foo") { depends("bar.module") }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar")
   }
@@ -125,7 +156,7 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is not loaded if it has a plugin dependency on v2 module`() {
     `bar with optional module`()
-    plugin("foo") { dependencies { plugin("bar.module") } }.buildDir(pluginDirPath.resolve("foo"))
+    plugin("foo") { dependencies { plugin("bar.module") } }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar")
   }
@@ -133,7 +164,7 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is loaded if it has a module dependency on v2 module`() {
     `bar with optional module`()
-    plugin("foo") { dependencies { module("bar.module") } }.buildDir(pluginDirPath.resolve("foo"))
+    plugin("foo") { dependencies { module("bar.module") } }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("foo", "bar")
   }
@@ -142,14 +173,14 @@ internal class PluginDependenciesTest {
   fun `plugin is not loaded if required module is not available`() {
     plugin("sample.plugin") {
       content {
-        module("required.module", ModuleLoadingRule.REQUIRED) {
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required"
           dependencies {
             module("unknown")
           }
         }
       }
-    }.buildDir(pluginDirPath.resolve("sample-plugin"))
+    }.installAt(pluginDirPath)
     val result = buildPluginSet()
     assertThat(result).doesNotHaveEnabledPlugins()
     assertFirstErrorContains("sample.plugin", "requires plugin", "unknown")
@@ -160,14 +191,14 @@ internal class PluginDependenciesTest {
     bar()
     plugin("sample.plugin") {
       content {
-        module("required.module", ModuleLoadingRule.REQUIRED) {
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required"
           dependencies {
             plugin("bar")
           }
         }
       }
-    }.buildDir(pluginDirPath.resolve("sample-plugin"))
+    }.installAt(pluginDirPath)
     val result = buildPluginSet(disabledPluginIds = arrayOf("bar"))
     assertThat(result).doesNotHaveEnabledPlugins()
     assertFirstErrorContains("sample.plugin", "requires plugin", "bar")
@@ -179,14 +210,14 @@ internal class PluginDependenciesTest {
     `bar-plugin with module bar`()
     plugin("sample.plugin") {
       content {
-        module("required.module", ModuleLoadingRule.REQUIRED) {
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required"
           dependencies {
             module("bar")
           }
         }
       }
-    }.buildDir(pluginDirPath.resolve("sample-plugin"))
+    }.installAt(pluginDirPath)
     val result = buildPluginSet(disabledPluginIds = arrayOf("bar-plugin"))
     assertThat(result).doesNotHaveEnabledPlugins()
     assertFirstErrorContains("sample.plugin", "requires plugin", "bar-plugin"/*, "to be enabled"*/) //todo fix not loading reason
@@ -205,29 +236,27 @@ internal class PluginDependenciesTest {
   }
 
   private fun assertFirstErrorContains(vararg messagePart: String) {
-    val errors = PluginManagerCore.getAndClearPluginLoadingErrors()
-    assertThat(errors).isNotEmpty
-    assertThat(errors.first().htmlMessage.toString()).contains(*messagePart)
+    assertThat(loadingErrors).isNotEmpty
+    assertThat(loadingErrors.first().htmlMessage.toString()).contains(*messagePart)
   }
 
   @Test
   fun `embedded content module uses same classloader as the main module`() {
-    val samplePluginDir = pluginDirPath.resolve("sample-plugin")
-    plugin("sample.plugin") {
+    val samplePluginDir = plugin("sample.plugin") {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) {
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) {
           packagePrefix = "embedded"
           isSeparateJar = true
         }
-        module("required.module", ModuleLoadingRule.REQUIRED) {
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required"
           isSeparateJar = true
         }
-        module("optional.module", ModuleLoadingRule.OPTIONAL) {
+        module("optional.module", ModuleLoadingRuleValue.OPTIONAL) {
           packagePrefix = "optional"
         }
       }
-    }.buildDir(samplePluginDir)
+    }.installAt(pluginDirPath)
     val result = buildPluginSet()
     assertThat(result).hasExactlyEnabledPlugins("sample.plugin")
     val mainClassLoader = result.getEnabledPlugin("sample.plugin").pluginClassLoader
@@ -245,13 +274,12 @@ internal class PluginDependenciesTest {
   
   @Test
   fun `embedded and required content modules in the core plugin`() {
-    val corePluginDir = pluginDirPath.resolve("core")
     plugin(PluginManagerCore.CORE_PLUGIN_ID) {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) { packagePrefix = "embedded" }
-        module("required.module", ModuleLoadingRule.REQUIRED) { packagePrefix = "required" }
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) { packagePrefix = "embedded" }
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "required" }
       }
-    }.buildDir(corePluginDir)
+    }.installAt(pluginDirPath)
     val result = buildPluginSet()
     assertThat(result).hasExactlyEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID)
     val mainClassLoader = result.getEnabledPlugin(PluginManagerCore.CORE_PLUGIN_ID).pluginClassLoader
@@ -263,27 +291,25 @@ internal class PluginDependenciesTest {
   
   @Test
   fun `required content module with unresolved dependency in the core plugin`() {
-    val corePluginDir = pluginDirPath.resolve("core")
     plugin(PluginManagerCore.CORE_PLUGIN_ID) {
       content {
-        module("required.module", ModuleLoadingRule.REQUIRED) {
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required"
           dependencies { module("unresolved") }
         }
       }
-    }.buildDir(corePluginDir)
+    }.installAt(pluginDirPath)
     buildPluginSet()
     assertFirstErrorContains("requires plugin", "unresolved")
   }
 
   @Test
   fun `embedded content module without package prefix`() {
-    val samplePluginDir = pluginDirPath.resolve("sample-plugin")
     plugin("sample.plugin") {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) {}
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) {}
       }
-    }.buildDir(samplePluginDir)
+    }.installAt(pluginDirPath)
     val result = buildPluginSet()
     assertThat(result).hasExactlyEnabledPlugins("sample.plugin")
     val mainClassLoader = result.getEnabledPlugin("sample.plugin").pluginClassLoader
@@ -293,15 +319,15 @@ internal class PluginDependenciesTest {
 
   @Test
   fun `dependencies of embedded content module are added to the main class loader`() {
-    plugin("dep") {}.buildDir(pluginDirPath.resolve("dep"))
+    plugin("dep") {}.installAt(pluginDirPath)
     plugin("sample.plugin") {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) {
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) {
           packagePrefix = "embedded"
           dependencies { plugin("dep") }
         }
       }
-    }.buildDir(pluginDirPath.resolve("sample-plugin"))
+    }.installAt(pluginDirPath)
     val result = buildPluginSet()
     assertThat(result).hasExactlyEnabledPlugins("sample.plugin", "dep")
     val (sample, dep) = result.getEnabledPlugins("sample.plugin", "dep")
@@ -312,23 +338,23 @@ internal class PluginDependenciesTest {
   fun `dependencies between plugin modules`() {
     plugin("sample.plugin") {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) {
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) {
           packagePrefix = "embedded"
         }
-        module("required.module", ModuleLoadingRule.REQUIRED) {
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required"
           dependencies {
             module("embedded.module")
           }
         }
-        module("required2.module", ModuleLoadingRule.REQUIRED) {
+        module("required2.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "required2"
           dependencies {
             module("required.module")
           }
         }
       }
-    }.buildDir(pluginDirPath.resolve("sample-plugin"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledModulesWithoutMainDescriptors("embedded.module", "required.module", "required2.module")
     val (req, req2, embed) = pluginSet.getEnabledModules("required.module", "required2.module", "embedded.module")
@@ -338,17 +364,16 @@ internal class PluginDependenciesTest {
 
   @Test
   fun `content module in separate JAR`() {
-    val pluginDir = pluginDirPath.resolve("sample-plugin")
-    plugin("sample.plugin") {
+    val pluginDir = plugin("sample.plugin") {
       content {
         module("dep") { isSeparateJar = true }
       }
-    }.buildDir(pluginDir)
+    }.installAt(pluginDirPath)
     val result = buildPluginSet()
     assertThat(result).hasExactlyEnabledPlugins("sample.plugin")
     assertThat(result).hasExactlyEnabledModulesWithoutMainDescriptors("dep")
     val depModuleDescriptor = result.getEnabledModule("dep")
-    assertThat(depModuleDescriptor.jarFiles).containsExactly(pluginDir.resolve("lib/modules/dep.jar"))
+    assertThat(depModuleDescriptor.ownClassPath).containsExactly(pluginDir.resolve("lib/modules/dep.jar"))
   }
 
   @Test
@@ -369,15 +394,15 @@ internal class PluginDependenciesTest {
 
   @Test
   fun `plugin is not loaded when it has a transitive disabled depends dependency`() {
-    plugin("com.intellij.gradle") {}.buildDir(pluginDirPath.resolve("intellij.gradle"))
+    plugin("com.intellij.gradle") {}.installAt(pluginDirPath)
     plugin("org.jetbrains.plugins.gradle") {
       implementationDetail = true
       depends("com.intellij.gradle")
-    }.buildDir(pluginDirPath.resolve("intellij.gradle.java"))
+    }.installAt(pluginDirPath)
     plugin("org.jetbrains.plugins.gradle.maven") {
       implementationDetail = true
       depends("org.jetbrains.plugins.gradle")
-    }.buildDir(pluginDirPath.resolve("intellij.gradle.java.maven"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet(disabledPluginIds = arrayOf("com.intellij.gradle"))
     assertThat(pluginSet).doesNotHaveEnabledPlugins()
   }
@@ -405,7 +430,7 @@ internal class PluginDependenciesTest {
     `foo module-dependency bar`()
     val pluginSet = buildPluginSet(expiredPluginIds = arrayOf("bar-plugin"))
     assertThat(pluginSet).doesNotHaveEnabledPlugins()
-    assertFirstErrorContains("foo", "requires plugin", "bar-plugin", "to be installed")
+    assertFirstErrorContains("foo", "depends", "bar-plugin", "failed to load")
   }
   
   @Test
@@ -494,17 +519,17 @@ internal class PluginDependenciesTest {
   fun `plugin is loaded if it has a depends dependency on plugin alias that is placed in required v2 module and other modules affects sorting`() {
     plugin("baz") {
       content {
-        module("baz.module", ModuleLoadingRule.REQUIRED) {
+        module("baz.module", ModuleLoadingRuleValue.REQUIRED) {
           packagePrefix = "baz.module"
           pluginAlias("bar")
         }
       }
       depends("additional")
-    }.buildDir(pluginDirPath.resolve("baz"))
+    }.installAt(pluginDirPath)
     `foo depends bar`()
     /* an additional module is used to ensure that in the sorted modules list the main module of 'baz' plugin is moved to the end of the 
        list if no explicit edge from 'foo' plugin to it is added */
-    plugin("additional") {}.buildDir(pluginDirPath.resolve("additional"))
+    plugin("additional") {}.installAt(pluginDirPath)
     
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("foo", "baz", "additional")
@@ -544,7 +569,7 @@ internal class PluginDependenciesTest {
     plugin("baz") {
       packagePrefix = "idk"
       pluginAlias("bar")
-    }.buildDir(pluginDirPath.resolve("baz"))
+    }.installAt(pluginDirPath)
     `foo module-dependency bar`()
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("baz")
@@ -553,7 +578,7 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is not loaded if it has a depends dependency on v2 module with package prefix`() {
     `bar with optional module`()
-    plugin("foo") { depends("bar.module") }.buildDir(pluginDirPath.resolve("foo"))
+    plugin("foo") { depends("bar.module") }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar")
   }
@@ -561,7 +586,7 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is not loaded if it has a plugin dependency on v2 module with package prefix`() {
     `bar with optional module`()
-    plugin("foo") { dependencies { plugin("bar.module") } }.buildDir(pluginDirPath.resolve("foo"))
+    plugin("foo") { dependencies { plugin("bar.module") } }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar")
   }
@@ -570,11 +595,11 @@ internal class PluginDependenciesTest {
   fun `plugin is not loaded if it is incompatible with another plugin and they both contain the same module`() {
     plugin("com.intellij.java") {
       content {
-        module("com.intellij.java.debugger.frontend", ModuleLoadingRule.EMBEDDED) {
+        module("com.intellij.java.debugger.frontend", ModuleLoadingRuleValue.EMBEDDED) {
           packagePrefix = "com.intellij.java.debugger.frontend"
         }
       }
-    }.buildDir(pluginDirPath.resolve("intellij.java"))
+    }.installAt(pluginDirPath)
 
     plugin("com.intellij.java.frontend") {
       content {
@@ -583,7 +608,7 @@ internal class PluginDependenciesTest {
         }
       }
       incompatibleWith = listOf("com.intellij.java")
-    }.buildDir(pluginDirPath.resolve("intellij.java.frontend"))
+    }.installAt(pluginDirPath)
 
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("com.intellij.java")
@@ -592,11 +617,14 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is loaded if it has a module dependency on v2 module with slash in its name`() {
     plugin("bar") {
-      content {
-        module("bar/module", ModuleLoadingRule.REQUIRED) { packagePrefix = "bar.module" }
+      content(namespace = "jetbrains") {
+        module("bar/module", ModuleLoadingRuleValue.REQUIRED) {
+          packagePrefix = "bar.module"
+          moduleVisibility = ModuleVisibilityValue.PUBLIC
+        }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
-    plugin("foo") { dependencies { module("bar/module") } }.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
+    plugin("foo") { dependencies { module("bar/module") } }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("foo", "bar")
     assertThat(pluginSet).hasExactlyEnabledModulesWithoutMainDescriptors("bar/module")
@@ -606,10 +634,10 @@ internal class PluginDependenciesTest {
   fun `plugin is not loaded if it has a module dependency on v2 module with slash in its name but dependency has a dot instead`() {
     plugin("bar") {
       content {
-        module("bar/module", ModuleLoadingRule.REQUIRED) { packagePrefix = "bar.module" }
+        module("bar/module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "bar.module" }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
-    plugin("foo") { dependencies { module("bar.module") } }.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
+    plugin("foo") { dependencies { module("bar.module") } }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar")
   }
@@ -619,12 +647,12 @@ internal class PluginDependenciesTest {
     plugin(PluginManagerCore.CORE_PLUGIN_ID) {
       pluginAlias("com.intellij.modules.platform")
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) { packagePrefix = "embedded" }
-        module("required.module", ModuleLoadingRule.REQUIRED) { packagePrefix = "required" }
-        module("optional.module", ModuleLoadingRule.OPTIONAL) { packagePrefix = "optional" }
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) { packagePrefix = "embedded" }
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "required" }
+        module("optional.module", ModuleLoadingRuleValue.OPTIONAL) { packagePrefix = "optional" }
       }
-    }.buildDir(pluginDirPath.resolve("core"))
-    plugin("foo") {}.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
+    plugin("foo") {}.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID, "foo")
     val (core, foo) = pluginSet.getEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID, "foo")
@@ -638,14 +666,14 @@ internal class PluginDependenciesTest {
   fun `plugin is loaded when it has a plugin dependency on core plugin, its content modules are not in classloader parents`() {
     plugin(PluginManagerCore.CORE_PLUGIN_ID) {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) { packagePrefix = "embedded" }
-        module("required.module", ModuleLoadingRule.REQUIRED) { packagePrefix = "required" }
-        module("optional.module", ModuleLoadingRule.OPTIONAL) { packagePrefix = "optional" }
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) { packagePrefix = "embedded" }
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "required" }
+        module("optional.module", ModuleLoadingRuleValue.OPTIONAL) { packagePrefix = "optional" }
       }
-    }.buildDir(pluginDirPath.resolve("core"))
+    }.installAt(pluginDirPath)
     plugin("foo") {
       dependencies { plugin(PluginManagerCore.CORE_PLUGIN_ID) }
-    }.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID, "foo")
     val (core, foo) = pluginSet.getEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID, "foo")
@@ -658,15 +686,18 @@ internal class PluginDependenciesTest {
   @Test
   fun `plugin is loaded when it has a module dependency on content module of core plugin`() {
     plugin(PluginManagerCore.CORE_PLUGIN_ID) {
-      content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) { packagePrefix = "embedded" }
-        module("required.module", ModuleLoadingRule.REQUIRED) { packagePrefix = "required" }
-        module("optional.module", ModuleLoadingRule.OPTIONAL) { packagePrefix = "optional" }
+      content(namespace = "jetbrains") {
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) { packagePrefix = "embedded" }
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "required" }
+        module("optional.module", ModuleLoadingRuleValue.OPTIONAL) {
+          packagePrefix = "optional"
+          moduleVisibility = ModuleVisibilityValue.PUBLIC
+        }
       }
-    }.buildDir(pluginDirPath.resolve("core"))
+    }.installAt(pluginDirPath)
     plugin("foo") {
       dependencies { module("optional.module") }
-    }.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID, "foo")
     val (core, foo) = pluginSet.getEnabledPlugins(PluginManagerCore.CORE_PLUGIN_ID, "foo")
@@ -685,10 +716,10 @@ internal class PluginDependenciesTest {
     plugin("bar") {
       depends("foo", configFile = "foo.xml") {
         depends("baz", configFile = "baz.xml") {
-          appService("service")
+          applicationServiceImpl("service")
         }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar", "foo", "baz")
     val bar = pluginSet.getEnabledPlugin("bar")
@@ -702,12 +733,12 @@ internal class PluginDependenciesTest {
     foo()
     plugin("bar") {
       content {
-        module("content.module", ModuleLoadingRule.REQUIRED) {
+        module("content.module", ModuleLoadingRuleValue.REQUIRED) {
           depends("foo")
           isSeparateJar = true
         }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
+    }.installAt(pluginDirPath)
     val msg = LoggedErrorProcessor.executeAndReturnLoggedError {
       assertThatThrownBy {
         buildPluginSet()
@@ -722,22 +753,25 @@ internal class PluginDependenciesTest {
       pluginAlias("com.intellij.modules.platform")
       pluginAlias("com.intellij.modules.lang")
       pluginAlias("com.intellij.modules.vcs")
-      content {
-        module("intellij.platform.tasks.impl") { packagePrefix = "com.intellij.tasks.impl" }
+      content(namespace = "jetbrains") {
+        module("intellij.platform.tasks.impl") {
+          packagePrefix = "com.intellij.tasks.impl"
+          moduleVisibility = ModuleVisibilityValue.PUBLIC
+        }
       }
-    }.buildDir(pluginDirPath.resolve("core"))
+    }.installAt(pluginDirPath)
     plugin("with-depends") {
       depends("com.intellij.modules.platform")
-    }.buildDir(pluginDirPath.resolve("with-depends"))
+    }.installAt(pluginDirPath)
     plugin("with-depends-on-lang") {
       depends("com.intellij.modules.lang")
-    }.buildDir(pluginDirPath.resolve("with-depends-on-lang"))
+    }.installAt(pluginDirPath)
     plugin("with-dependencies") {
       dependencies { plugin("com.intellij.modules.platform") }
-    }.buildDir(pluginDirPath.resolve("with-dependencies"))
+    }.installAt(pluginDirPath)
     plugin("with-depends-on-vcs") {
       depends("com.intellij.modules.vcs")
-    }.buildDir(pluginDirPath.resolve("with-depends-on-vcs"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     val (withDepends, withDependsOnLang, withDependencies, withDependsOnVcs) = 
       pluginSet.getEnabledPlugins("with-depends", "with-depends-on-lang", "with-dependencies", "with-depends-on-vcs")
@@ -759,7 +793,7 @@ internal class PluginDependenciesTest {
           module("baz.module")
         }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
+    }.installAt(pluginDirPath)
     val (pluginSet, err) = runAndReturnWithLoggedError { buildPluginSet() }
     assertThat(pluginSet).hasExactlyEnabledPlugins("bar", "foo", "baz")
     val (bar, foo, baz) = pluginSet.getEnabledPlugins("bar", "foo", "baz")
@@ -769,7 +803,7 @@ internal class PluginDependenciesTest {
     assertThat(barSub)
       .hasExactDirectParentClassloaders(foo)
       .doesNotHaveTransitiveParentClassloaders(baz, bazModule)
-    assertThat(barSub.moduleDependencies.modules).hasSize(1)
+    assertThat(barSub.moduleDependencies.modules).isEmpty()
     assertThat(err).hasMessageContainingAll("'depends' sub-descriptor", "bar", "<dependencies><module>")
   }
 
@@ -777,9 +811,9 @@ internal class PluginDependenciesTest {
   fun `content module is not loaded if it depends on module from plugin which was not included in explicit loaded subset`() {
     plugin("foo") {
       content {
-        module("foo.embedded", ModuleLoadingRule.EMBEDDED) {}
+        module("foo.embedded", ModuleLoadingRuleValue.EMBEDDED) {}
       }
-    }.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
     plugin("bar") {
       content {
         module("bar.optional") {}
@@ -789,7 +823,7 @@ internal class PluginDependenciesTest {
           }
         }
       }
-    }.buildDir(pluginDirPath.resolve("bar"))
+    }.installAt(pluginDirPath)
     val pluginSet = PluginSetTestBuilder.fromPath(pluginDirPath)
       .withExplicitPluginSubsetToLoad(setOf(PluginId("bar")))
       .build()
@@ -801,11 +835,11 @@ internal class PluginDependenciesTest {
   fun `optional content modules implicitly depend on main module, while required do not`() {
     plugin("foo") {
       content {
-        module("embedded.module", ModuleLoadingRule.EMBEDDED) { packagePrefix = "embedded" }
-        module("required.module", ModuleLoadingRule.REQUIRED) { packagePrefix = "required" }
-        module("optional.module", ModuleLoadingRule.OPTIONAL) { packagePrefix = "optional" }
+        module("embedded.module", ModuleLoadingRuleValue.EMBEDDED) { packagePrefix = "embedded" }
+        module("required.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "required" }
+        module("optional.module", ModuleLoadingRuleValue.OPTIONAL) { packagePrefix = "optional" }
       }
-    }.buildDir(pluginDirPath.resolve("foo"))
+    }.installAt(pluginDirPath)
     val pluginSet = buildPluginSet()
     assertThat(pluginSet).hasExactlyEnabledPlugins("foo")
     val foo = pluginSet.getEnabledPlugin("foo")
@@ -820,42 +854,640 @@ internal class PluginDependenciesTest {
       .doesNotHaveTransitiveParentClassloaders(req)
   }
 
-  private fun foo() = plugin("foo") {}.buildDir(pluginDirPath.resolve("foo"))
-  private fun `foo depends bar`() = plugin("foo") { depends("bar") }.buildDir(pluginDirPath.resolve("foo"))
+  @Nested
+  inner class ImplicitDependencyAdditionTests {
+    @Test
+    fun `legacy plugin gets implicit java dependency when all modules marker is present`() {
+      // marker enables implicit dependencies for legacy plugins
+      plugin("com.intellij.modules.all") {}.installAt(pluginDirPath)
+
+      // provide java alias and backend module
+      plugin(PluginManagerCore.JAVA_PLUGIN_ID.idString) {
+        pluginAlias(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+        content(namespace = "jetbrains") {
+          module("intellij.java.backend") { packagePrefix = "com.intellij.java.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      // legacy plugin: no explicit depends/module deps, non-bundled, no package prefix
+      plugin("legacy.plugin") {}.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      assertThat(pluginSet).hasExactlyEnabledPlugins(
+        "legacy.plugin",
+        PluginManagerCore.JAVA_PLUGIN_ID.idString,
+        PluginManagerCore.ALL_MODULES_MARKER.idString,
+      )
+      val legacy = pluginSet.getEnabledPlugin("legacy.plugin")
+      val java = pluginSet.getEnabledPlugin(PluginManagerCore.JAVA_PLUGIN_ID.idString)
+      val javaBackend = pluginSet.getEnabledModule("intellij.java.backend")
+      assertThat(legacy).hasExactDirectParentClassloaders(java, javaBackend)
+    }
+
+    @Test
+    fun `legacy plugin does not get implicit java dependency without all modules marker`() {
+      plugin(PluginManagerCore.JAVA_PLUGIN_ID.idString) {
+        pluginAlias(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+        content {
+          module("intellij.java.backend") { packagePrefix = "com.intellij.java.backend" }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("legacy.plugin") {}.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val legacy = pluginSet.getEnabledPlugin("legacy.plugin")
+      val javaBackend = pluginSet.getEnabledModule("intellij.java.backend")
+      assertThat(legacy).doesNotHaveDirectParentClassloaders(javaBackend)
+    }
+
+    @Test
+    @SystemProperty(propertyKey = "enable.implicit.json.dependency", propertyValue = "true")
+    fun `non strict plugin gets implicit json backend and collaboration tools`() {
+      // JSON alias + backend
+      plugin("json.provider") {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.json")
+        content(namespace = "jetbrains") {
+          module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      // Collaboration tools module
+      plugin("collab.provider") {
+        vendor = "JetBrains"
+        content(namespace = "jetbrains") {
+          module("intellij.platform.collaborationTools") { packagePrefix = "com.intellij.platform.collaborationTools"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      // VCS module to ensure only non-strict plugins get it implicitly
+      plugin("vcs.provider") {
+        vendor = "JetBrains"
+        content(namespace = "jetbrains") {
+          module("intellij.platform.vcs.impl") { packagePrefix = "com.intellij.vcs.impl"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer.plugin") {}
+        .installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer.plugin")
+      val jsonProvider = pluginSet.getEnabledPlugin("json.provider")
+      val jsonBackend = pluginSet.getEnabledModule("intellij.json.backend")
+      val collab = pluginSet.getEnabledModule("intellij.platform.collaborationTools")
+      val vcsImpl = pluginSet.getEnabledModule("intellij.platform.vcs.impl")
+      assertThat(consumer).hasExactDirectParentClassloaders(jsonProvider, jsonBackend, collab, vcsImpl)
+    }
+
+    @Test
+    @SystemProperty(propertyKey = "enable.implicit.json.dependency", propertyValue = "true")
+    fun `strict plugin does not get non strict implicit deps`() {
+      plugin("json.provider") {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.json")
+        content { module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend" } }
+      }.installAt(pluginDirPath)
+
+      plugin("collab.provider") {
+        vendor = "JetBrains"
+        content { module("intellij.platform.collaborationTools") { packagePrefix = "com.intellij.platform.collaborationTools" } }
+      }.installAt(pluginDirPath)
+
+      plugin("vcs.provider") {
+        vendor = "JetBrains"
+        content { module("intellij.platform.vcs.impl") { packagePrefix = "com.intellij.vcs.impl" } }
+      }.installAt(pluginDirPath)
+
+      plugin("strict.consumer") { vendor = "JetBrains" }
+        .installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("strict.consumer")
+      val jsonBackend = pluginSet.getEnabledModule("intellij.json.backend")
+      val collab = pluginSet.getEnabledModule("intellij.platform.collaborationTools")
+      val vcsImpl = pluginSet.getEnabledModule("intellij.platform.vcs.impl")
+      assertThat(consumer).doesNotHaveDirectParentClassloaders(jsonBackend, collab, vcsImpl)
+    }
+
+    @Test
+    fun `strict plugin gets vcs module only with explicit alias and no json backend`() {
+      plugin("vcs.provider") {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.vcs")
+        content(namespace = "jetbrains") {
+          module("intellij.platform.vcs.impl") {
+            packagePrefix = "com.intellij.vcs.impl"
+            moduleVisibility = ModuleVisibilityValue.PUBLIC
+          }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("json.provider") {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.json")
+        content { module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend" } }
+      }.installAt(pluginDirPath)
+
+      plugin("strict.no.dep") { vendor = "JetBrains" }
+        .installAt(pluginDirPath)
+      plugin("strict.with.dep") {
+        vendor = "JetBrains"
+        dependencies {
+          plugin("com.intellij.modules.vcs")
+          plugin("com.intellij.modules.json")
+        }
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val noDep = pluginSet.getEnabledPlugin("strict.no.dep")
+      val withDep = pluginSet.getEnabledPlugin("strict.with.dep")
+      val vcsImpl = pluginSet.getEnabledModule("intellij.platform.vcs.impl")
+      val jsonBackend = pluginSet.getEnabledModule("intellij.json.backend")
+      assertThat(noDep).doesNotHaveTransitiveParentClassloaders(vcsImpl)
+      assertThat(withDep)
+        .hasTransitiveParentClassloaders(vcsImpl)
+        .doesNotHaveTransitiveParentClassloaders(jsonBackend)
+    }
+
+    @Test
+    fun `compatibility layer adds backend modules for alias dependencies`() {
+      plugin("java.provider") {
+        pluginAlias(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+        content(namespace = "jetbrains") {
+          module("intellij.java.backend") { packagePrefix = "com.intellij.java.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("rider.provider") {
+        pluginAlias("com.intellij.modules.rider")
+        content(namespace = "jetbrains") {
+          module("intellij.rider") { packagePrefix = "com.intellij.rider"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("full.line.provider") {
+        pluginAlias("org.jetbrains.completion.full.line")
+        content(namespace = "jetbrains") {
+          module("intellij.fullLine.core") { packagePrefix = "com.intellij.fullLine.core"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+          module("intellij.fullLine.local") { packagePrefix = "com.intellij.fullLine.local"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+          module("intellij.fullLine.core.impl") { packagePrefix = "com.intellij.fullLine.core.impl"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("cwm.provider") {
+        pluginAlias("com.jetbrains.codeWithMe")
+        content(namespace = "jetbrains") {
+          module("intellij.cwm") { packagePrefix = "com.intellij.cwm"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("cwm.rider.provider") {
+        pluginAlias("intellij.rider.plugins.cwm")
+        content(namespace = "jetbrains") {
+          module("intellij.rider.plugins.cwm") { packagePrefix = "com.intellij.rider.plugins.cwm"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("json.provider") {
+        pluginAlias("com.intellij.modules.json")
+        content(namespace = "jetbrains") {
+          module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer.plugin") {
+        dependencies {
+          plugin(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+          plugin("com.intellij.modules.rider")
+          plugin("org.jetbrains.completion.full.line")
+          plugin("com.jetbrains.codeWithMe")
+          plugin("intellij.rider.plugins.cwm")
+          plugin("com.intellij.modules.json")
+        }
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer.plugin")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("java.provider"),
+        pluginSet.getEnabledPlugin("rider.provider"),
+        pluginSet.getEnabledPlugin("full.line.provider"),
+        pluginSet.getEnabledPlugin("cwm.provider"),
+        pluginSet.getEnabledPlugin("cwm.rider.provider"),
+        pluginSet.getEnabledPlugin("json.provider"),
+        pluginSet.getEnabledModule("intellij.java.backend"),
+        pluginSet.getEnabledModule("intellij.rider"),
+        pluginSet.getEnabledModule("intellij.fullLine.core"),
+        pluginSet.getEnabledModule("intellij.fullLine.local"),
+        pluginSet.getEnabledModule("intellij.fullLine.core.impl"),
+        pluginSet.getEnabledModule("intellij.cwm"),
+        pluginSet.getEnabledModule("intellij.rider.plugins.cwm"),
+        pluginSet.getEnabledModule("intellij.json.backend"),
+      )
+    }
+
+    @Test
+    fun `content module gets backend modules for alias dependencies`() {
+      plugin("java.provider") {
+        vendor = "JetBrains"
+        pluginAlias(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+        content(namespace = "jetbrains") {
+          module("intellij.java.backend") { packagePrefix = "com.intellij.java.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("json.provider") {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.json")
+        content(namespace = "jetbrains") {
+          module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        content {
+          module("consumer.module", ModuleLoadingRuleValue.REQUIRED) {
+            packagePrefix = "consumer.module"
+            dependencies {
+              plugin(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+              plugin("com.intellij.modules.json")
+            }
+          }
+        }
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumerModule = pluginSet.getEnabledModule("consumer.module")
+      assertThat(consumerModule).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("java.provider"),
+        pluginSet.getEnabledPlugin("json.provider"),
+        pluginSet.getEnabledModule("intellij.java.backend"),
+        pluginSet.getEnabledModule("intellij.json.backend"),
+      )
+    }
+
+    @Test
+    fun `external non bundled descriptors get implicit compatibility modules`() {
+      val compatibilityModuleIds = listOf(
+        "intellij.libraries.groovy",
+        "intellij.platform.structureView.impl",
+        "intellij.platform.todo",
+      )
+      plugin("compatibility.modules.provider") {
+        vendor = "JetBrains"
+        content(namespace = "jetbrains") {
+          for (moduleId in compatibilityModuleIds) {
+            module(moduleId) { packagePrefix = moduleId; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+          }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("optional.target") { vendor = "JetBrains" }.installAt(pluginDirPath)
+
+      plugin("external.consumer") {
+        depends("optional.target", configFile = "optional.xml") { applicationServiceImpl("optional.service") }
+        content {
+          module("external.consumer.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "external.consumer.module" }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("jetbrains.consumer") {
+        vendor = "JetBrains"
+        depends("optional.target", configFile = "optional.xml") { applicationServiceImpl("optional.service") }
+        content {
+          module("jetbrains.consumer.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "jetbrains.consumer.module" }
+        }
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val compatibilityModules = compatibilityModuleIds.map { pluginSet.getEnabledModule(it) }.toTypedArray()
+      val optionalTarget = pluginSet.getEnabledPlugin("optional.target")
+      val (externalConsumer, jetbrainsConsumer) = pluginSet.getEnabledPlugins("external.consumer", "jetbrains.consumer")
+      val externalOptionalDescriptor = externalConsumer.dependencies.single { it.pluginId == PluginId.getId("optional.target") }.subDescriptor!!
+      val jetbrainsOptionalDescriptor = jetbrainsConsumer.dependencies.single { it.pluginId == PluginId.getId("optional.target") }.subDescriptor!!
+
+      assertThat(externalConsumer).hasExactDirectParentClassloaders(optionalTarget, *compatibilityModules)
+      assertThat(externalOptionalDescriptor).hasExactDirectParentClassloaders(optionalTarget, *compatibilityModules)
+      assertThat(pluginSet.getEnabledModule("external.consumer.module")).hasExactDirectParentClassloaders(*compatibilityModules)
+      assertThat(jetbrainsConsumer).hasExactDirectParentClassloaders(optionalTarget)
+      assertThat(jetbrainsOptionalDescriptor).hasExactDirectParentClassloaders(optionalTarget)
+      assertThat(pluginSet.getEnabledModule("jetbrains.consumer.module")).doesNotHaveDirectParentClassloaders(*compatibilityModules)
+    }
+
+    @Test
+    @SystemProperty(propertyKey = "enable.implicit.json.dependency", propertyValue = "true")
+    fun `non strict content module gets implicit json backend and collaboration tools`() {
+      plugin("json.provider") {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.json")
+        content(namespace = "jetbrains") {
+          module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("collab.provider") {
+        vendor = "JetBrains"
+        content(namespace = "jetbrains") {
+          module("intellij.platform.collaborationTools") { packagePrefix = "com.intellij.platform.collaborationTools"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("vcs.provider") {
+        vendor = "JetBrains"
+        content(namespace = "jetbrains") {
+          module("intellij.platform.vcs.impl") { packagePrefix = "com.intellij.vcs.impl"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        content {
+          module("consumer.module", ModuleLoadingRuleValue.REQUIRED) { packagePrefix = "consumer.module" }
+        }
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumerModule = pluginSet.getEnabledModule("consumer.module")
+      assertThat(consumerModule).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("json.provider"),
+        pluginSet.getEnabledModule("intellij.json.backend"),
+        pluginSet.getEnabledModule("intellij.platform.collaborationTools"),
+        pluginSet.getEnabledModule("intellij.platform.vcs.impl"),
+      )
+    }
+
+    @Test
+    fun `depends on java alias adds java backend module`() {
+      plugin("java.alias.provider") {
+        pluginAlias(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+      }.installAt(pluginDirPath)
+
+      plugin("java.backend.provider") {
+        content(namespace = "jetbrains") {
+          module("intellij.java.backend") { packagePrefix = "com.intellij.java.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        vendor = "JetBrains"
+        depends(PluginManagerCore.JAVA_PLUGIN_ALIAS_ID.idString)
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("java.alias.provider"),
+        pluginSet.getEnabledModule("intellij.java.backend"),
+      )
+    }
+
+    @Test
+    fun `depends on full line alias adds full line modules`() {
+      plugin("full.line.alias.provider") {
+        pluginAlias("org.jetbrains.completion.full.line")
+      }.installAt(pluginDirPath)
+
+      plugin("full.line.modules") {
+        content(namespace = "jetbrains") {
+          module("intellij.fullLine.core") { packagePrefix = "com.intellij.fullLine.core"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+          module("intellij.fullLine.local") { packagePrefix = "com.intellij.fullLine.local"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+          module("intellij.fullLine.core.impl") { packagePrefix = "com.intellij.fullLine.core.impl"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        vendor = "JetBrains"
+        depends("org.jetbrains.completion.full.line")
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("full.line.alias.provider"),
+        pluginSet.getEnabledModule("intellij.fullLine.core"),
+        pluginSet.getEnabledModule("intellij.fullLine.local"),
+        pluginSet.getEnabledModule("intellij.fullLine.core.impl"),
+      )
+    }
+
+    @Test
+    fun `depends on code with me alias adds remote development module`() {
+      plugin("cwm.alias.provider") {
+        pluginAlias("com.jetbrains.codeWithMe")
+      }.installAt(pluginDirPath)
+
+      plugin("cwm.module.provider") {
+        content(namespace = "jetbrains") {
+          module("intellij.cwm") { packagePrefix = "com.intellij.cwm"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        depends("com.jetbrains.codeWithMe")
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("cwm.alias.provider"),
+        pluginSet.getEnabledModule("intellij.cwm"),
+      )
+    }
+
+    @Test
+    fun `depends on json alias adds json backend without property`() {
+      plugin("json.alias.provider") {
+        pluginAlias("com.intellij.modules.json")
+      }.installAt(pluginDirPath)
+
+      plugin("json.backend.provider") {
+        content(namespace = "jetbrains") {
+          module("intellij.json.backend") { packagePrefix = "com.intellij.json.backend"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        depends("com.intellij.modules.json")
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("json.alias.provider"),
+        pluginSet.getEnabledModule("intellij.json.backend"),
+      )
+    }
+
+    @Test
+    fun `depends on rider alias adds rider module`() {
+      plugin("rider.alias.provider") {
+        pluginAlias("com.intellij.modules.rider")
+      }.installAt(pluginDirPath)
+
+      plugin("rider.module.provider") {
+        content(namespace = "jetbrains") {
+          module("intellij.rider") {
+            packagePrefix = "com.intellij.rider"
+            moduleVisibility = ModuleVisibilityValue.PUBLIC
+          }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        vendor = "JetBrains"
+        depends("com.intellij.modules.rider")
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("rider.alias.provider"),
+        pluginSet.getEnabledModule("intellij.rider"),
+      )
+    }
+
+    @Test
+    fun `depends on code with me rider alias adds remote development rider module`() {
+      plugin("cwm.rider.alias.provider") {
+        pluginAlias("intellij.rider.plugins.cwm")
+      }.installAt(pluginDirPath)
+
+      plugin("cwm.rider.module.provider") {
+        content(namespace = "jetbrains") {
+          module("intellij.rider.plugins.cwm") { packagePrefix = "com.intellij.rider.plugins.cwm"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        depends("intellij.rider.plugins.cwm")
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("cwm.rider.alias.provider"),
+        pluginSet.getEnabledModule("intellij.rider.plugins.cwm"),
+      )
+    }
+
+    @Test
+    fun `depends on vcs alias adds vcs module`() {
+      plugin("vcs.alias.provider") {
+        pluginAlias("com.intellij.modules.vcs")
+      }.installAt(pluginDirPath)
+
+      plugin("vcs.module.provider") {
+        vendor = "JetBrains"
+        content(namespace = "jetbrains") {
+          module("intellij.platform.vcs.impl") {
+            packagePrefix = "com.intellij.vcs.impl"
+            moduleVisibility = ModuleVisibilityValue.PUBLIC
+          }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("consumer") {
+        vendor = "JetBrains"
+        depends("com.intellij.modules.vcs")
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val consumer = pluginSet.getEnabledPlugin("consumer")
+      assertThat(consumer).hasExactDirectParentClassloaders(
+        pluginSet.getEnabledPlugin("vcs.alias.provider"),
+        pluginSet.getEnabledModule("intellij.platform.vcs.impl"),
+      )
+    }
+
+    @Test
+    fun `depends on platform or lang alias adds extracted core content modules`() {
+      val extractedModules = listOf(
+        "intellij.platform.collaborationTools.auth",
+        "intellij.platform.collaborationTools.auth.base",
+        "intellij.platform.tasks",
+        "intellij.platform.tasks.impl",
+        "intellij.platform.scriptDebugger.ui",
+        "intellij.platform.scriptDebugger.backend",
+        "intellij.platform.scriptDebugger.protocolReaderRuntime",
+        "intellij.spellchecker.xml",
+        "intellij.relaxng",
+        "intellij.spellchecker",
+        "intellij.platform.structuralSearch",
+      )
+      plugin(PluginManagerCore.CORE_PLUGIN_ID) {
+        vendor = "JetBrains"
+        pluginAlias("com.intellij.modules.platform")
+        pluginAlias("com.intellij.modules.lang")
+        content(namespace = "jetbrains") {
+          for (moduleId in extractedModules) {
+            module(moduleId) { packagePrefix = "p.${moduleId.replace('/', '.')}"; moduleVisibility = ModuleVisibilityValue.PUBLIC }
+          }
+        }
+      }.installAt(pluginDirPath)
+
+      plugin("with-platform") {
+        vendor = "JetBrains"
+        depends("com.intellij.modules.platform")
+      }.installAt(pluginDirPath)
+
+      plugin("with-lang") {
+        vendor = "JetBrains"
+        depends("com.intellij.modules.lang")
+      }.installAt(pluginDirPath)
+
+      plugin("with-dependencies") {
+        vendor = "JetBrains"
+        dependencies { plugin("com.intellij.modules.platform") }
+      }.installAt(pluginDirPath)
+
+      val pluginSet = buildPluginSet()
+      val moduleDescriptors = extractedModules.map { pluginSet.getEnabledModule(it) }
+      val (withPlatform, withLang, withDependencies) =
+        pluginSet.getEnabledPlugins("with-platform", "with-lang", "with-dependencies")
+      assertThat(withPlatform).hasExactDirectParentClassloaders(*moduleDescriptors.toTypedArray())
+      assertThat(withLang).hasExactDirectParentClassloaders(*moduleDescriptors.toTypedArray())
+      assertThat(withDependencies).hasExactDirectParentClassloaders()
+    }
+  }
+
+  private fun foo() = plugin("foo") {}.installAt(pluginDirPath)
+  private fun `foo depends bar`() = plugin("foo") { depends("bar") }.installAt(pluginDirPath)
   private fun `foo depends-optional bar`() = plugin("foo") {
     depends("bar", configFile = "bar.xml") { actions = "" }
-  }.buildDir(pluginDirPath.resolve("foo"))
+  }.installAt(pluginDirPath)
   private fun `foo plugin-dependency bar`() = plugin("foo") {
     dependencies { plugin("bar") }
-  }.buildDir(pluginDirPath.resolve("foo"))
+  }.installAt(pluginDirPath)
   private fun `foo module-dependency bar`() = plugin("foo") {
     dependencies { module("bar") }
-  }.buildDir(pluginDirPath.resolve("foo"))
+  }.installAt(pluginDirPath)
   private fun `bar-plugin with module bar`() = plugin("bar-plugin") {
-    content {
-      module("bar") {}
+    content(namespace = "jetbrains") {
+      module("bar") { moduleVisibility = ModuleVisibilityValue.PUBLIC }
     }
-  }.buildDir(pluginDirPath.resolve("bar-plugin"))
+  }.installAt(pluginDirPath)
 
 
-  private fun bar() = plugin("bar") {}.buildDir(pluginDirPath.resolve("bar"))
+  private fun bar() = plugin("bar") {}.installAt(pluginDirPath)
   private fun `bar with optional module`() = plugin("bar") {
-    content {
+    content(namespace = "jetbrains") {
       module("bar.module") {
         packagePrefix = "bar.module"
+        moduleVisibility = ModuleVisibilityValue.PUBLIC
       }
     }
-  }.buildDir(pluginDirPath.resolve("bar"))
+  }.installAt(pluginDirPath)
 
-  private fun baz() = plugin("baz") {}.buildDir(pluginDirPath.resolve("baz"))
+  private fun baz() = plugin("baz") {}.installAt(pluginDirPath)
   private fun `baz with alias bar`() = plugin("baz") {
     pluginAlias("bar")
-  }.buildDir(pluginDirPath.resolve("baz"))
+  }.installAt(pluginDirPath)
   private fun `baz with an optional module which has a package prefix`() = plugin("baz") {
     content {
       module("baz.module") { packagePrefix = "baz.module" }
     }
-  }.buildDir(pluginDirPath.resolve("baz"))
+  }.installAt(pluginDirPath)
   private fun `baz with an optional module which has an alias bar and package prefix`() = plugin("baz") {
     content {
       module("baz.module") {
@@ -863,19 +1495,22 @@ internal class PluginDependenciesTest {
         pluginAlias("bar")
       }
     }
-  }.buildDir(pluginDirPath.resolve("baz"))
+  }.installAt(pluginDirPath)
   private fun `baz with a required module which has an alias bar and package prefix`() = plugin("baz") {
     content {
-      module("baz.module", ModuleLoadingRule.REQUIRED) {
+      module("baz.module", ModuleLoadingRuleValue.REQUIRED) {
         packagePrefix = "baz.module"
         pluginAlias("bar")
       }
     }
-  }.buildDir(pluginDirPath.resolve("baz"))
+  }.installAt(pluginDirPath)
 
-  private fun buildPluginSet(expiredPluginIds: Array<String> = emptyArray(), disabledPluginIds: Array<String> = emptyArray()) =
-    PluginSetTestBuilder.fromPath(pluginDirPath)
+  private fun buildPluginSet(expiredPluginIds: Array<String> = emptyArray(), disabledPluginIds: Array<String> = emptyArray()): PluginSet {
+    val state = PluginSetTestBuilder.fromPath(pluginDirPath)
       .withExpiredPlugins(*expiredPluginIds)
       .withDisabledPlugins(*disabledPluginIds)
-      .build()
+      .buildState()
+    loadingErrors = state.loadingErrors
+    return state.pluginSet
+  }
 }

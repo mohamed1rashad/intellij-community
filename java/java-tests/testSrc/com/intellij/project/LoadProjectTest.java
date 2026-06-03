@@ -12,15 +12,17 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
 import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.source.PsiFileImpl;
-import com.intellij.serviceContainer.ComponentManagerImpl;
-import com.intellij.testFramework.*;
+import com.intellij.testFramework.EditorTestUtil;
+import com.intellij.testFramework.HeavyPlatformTestCase;
+import com.intellij.testFramework.LeakHunter;
+import com.intellij.testFramework.PlatformTestUtil;
+import com.intellij.testFramework.ServiceContainerUtil;
 import com.intellij.testFramework.fixtures.impl.CodeInsightTestFixtureImpl;
 
 import java.nio.file.Path;
@@ -33,18 +35,15 @@ public class LoadProjectTest extends HeavyPlatformTestCase {
     String projectPath = PathManagerEx.getTestDataPath() + "/model/model.ipr";
     myProject = PlatformTestUtil.loadAndOpenProject(Path.of(projectPath), getTestRootDisposable());
     FileEditorManagerImpl editorManager = new FileEditorManagerImpl(myProject, ((ComponentManagerEx)myProject).getCoroutineScope());
-    ServiceContainerUtil.registerServiceInstance(myProject, FileEditorManager.class, editorManager);
-    ((ComponentManagerImpl)myProject).replaceServiceInstance(FileEditorManager.class, editorManager, getTestRootDisposable());
+    ServiceContainerUtil.replaceService(myProject, FileEditorManager.class, editorManager, getTestRootDisposable());
   }
 
   @Override
   protected void tearDown() {
     Project project = myProject;
-    myProject = null;
 
     runAll(
       () -> ((FileEditorManagerEx)FileEditorManager.getInstance(project)).closeAllFiles(),
-      () -> ProjectManagerEx.getInstanceEx().forceCloseProject(project),
       () -> super.tearDown(),
       () -> checkNoPsiFilesInProjectReachable(project)
     );

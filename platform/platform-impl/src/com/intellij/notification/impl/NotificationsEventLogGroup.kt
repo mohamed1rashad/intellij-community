@@ -3,14 +3,22 @@ package com.intellij.notification.impl
 
 import com.intellij.internal.statistic.collectors.fus.actions.persistence.ActionsEventLogGroup
 import com.intellij.internal.statistic.eventLog.EventLogGroup
-import com.intellij.internal.statistic.eventLog.events.*
+import com.intellij.internal.statistic.eventLog.events.BooleanEventField
+import com.intellij.internal.statistic.eventLog.events.EnumEventField
+import com.intellij.internal.statistic.eventLog.events.EventField
+import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.eventLog.events.EventFields.Boolean
 import com.intellij.internal.statistic.eventLog.events.EventFields.Enum
 import com.intellij.internal.statistic.eventLog.events.EventFields.StringValidatedByCustomRule
 import com.intellij.internal.statistic.eventLog.events.EventFields.StringValidatedByInlineRegexp
+import com.intellij.internal.statistic.eventLog.events.ObjectEventField
+import com.intellij.internal.statistic.eventLog.events.StringEventField
+import com.intellij.internal.statistic.eventLog.events.VarargEventId
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
 import com.intellij.notification.NotificationDisplayType
-import com.intellij.notification.impl.NotificationCollector.*
+import com.intellij.notification.impl.NotificationCollector.NotificationGroupValidator
+import com.intellij.notification.impl.NotificationCollector.NotificationPlace
+import com.intellij.notification.impl.NotificationCollector.NotificationSeverity
 import org.jetbrains.annotations.ApiStatus
 import java.util.stream.Collectors
 
@@ -19,7 +27,7 @@ object NotificationsEventLogGroup : CounterUsagesCollector() {
   override fun getGroup(): EventLogGroup = GROUP
 
   @JvmField
-  val GROUP: EventLogGroup = EventLogGroup("notifications", 70)
+  val GROUP: EventLogGroup = EventLogGroup("notifications", 71)
 
   @JvmField
   val DISPLAY_TYPE: EnumEventField<NotificationDisplayType> = Enum("display_type", NotificationDisplayType::class.java)

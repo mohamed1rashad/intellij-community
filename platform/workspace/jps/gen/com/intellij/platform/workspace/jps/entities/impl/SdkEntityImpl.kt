@@ -1,11 +1,19 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.jps.entities.impl
 
-import com.intellij.platform.workspace.jps.entities.ModifiableSdkEntity
 import com.intellij.platform.workspace.jps.entities.SdkEntity
 import com.intellij.platform.workspace.jps.entities.SdkId
 import com.intellij.platform.workspace.jps.entities.SdkRoot
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.ConnectionId
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
+import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
+import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
@@ -15,8 +23,6 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
-import java.io.Serializable
-import org.jetbrains.annotations.NonNls
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
@@ -25,9 +31,7 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -38,31 +42,26 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
       readField("name")
       return dataSource.name
     }
-
   override val type: String
     get() {
       readField("type")
       return dataSource.type
     }
-
   override val version: String?
     get() {
       readField("version")
       return dataSource.version
     }
-
   override val homePath: VirtualFileUrl?
     get() {
       readField("homePath")
       return dataSource.homePath
     }
-
   override val roots: List<SdkRoot>
     get() {
       readField("roots")
       return dataSource.roots
     }
-
   override val additionalData: String
     get() {
       readField("additionalData")
@@ -93,17 +92,15 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
           error("Entity SdkEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
       index(this, "homePath", this.homePath)
       indexSdkRoots(roots)
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -165,7 +162,6 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
         changedProperty.add("entitySource")
 
       }
-
     override var name: String
       get() = getEntityData().name
       set(value) {
@@ -173,7 +169,6 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
         getEntityData(true).name = value
         changedProperty.add("name")
       }
-
     override var type: String
       get() = getEntityData().type
       set(value) {
@@ -181,7 +176,6 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
         getEntityData(true).type = value
         changedProperty.add("type")
       }
-
     override var version: String?
       get() = getEntityData().version
       set(value) {
@@ -189,7 +183,6 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
         getEntityData(true).version = value
         changedProperty.add("version")
       }
-
     override var homePath: VirtualFileUrl?
       get() = getEntityData().homePath
       set(value) {
@@ -199,14 +192,11 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
         val _diff = diff
         if (_diff != null) index(this, "homePath", value)
       }
-
     private val rootsUpdater: (value: List<SdkRoot>) -> Unit = { value ->
-
       val _diff = diff
       if (_diff != null) {
         indexSdkRoots(value)
       }
-
       changedProperty.add("roots")
     }
     override var roots: MutableList<SdkRoot>
@@ -226,7 +216,6 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
         getEntityData(true).roots = value
         rootsUpdater.invoke(value)
       }
-
     override var additionalData: String
       get() = getEntityData().additionalData
       set(value) {
@@ -237,6 +226,7 @@ internal class SdkEntityImpl(private val dataSource: SdkEntityData) : SdkEntity,
 
     override fun getEntityClass(): Class<SdkEntity> = SdkEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -253,14 +243,13 @@ internal class SdkEntityData : WorkspaceEntityData<SdkEntity>() {
   internal fun isRootsInitialized(): Boolean = ::roots.isInitialized
   internal fun isAdditionalDataInitialized(): Boolean = ::additionalData.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<SdkEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<SdkEntity> {
     val modifiable = SdkEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): SdkEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -286,7 +275,7 @@ internal class SdkEntityData : WorkspaceEntityData<SdkEntity>() {
     return SdkEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return SdkEntity(name, type, roots, additionalData, entitySource) {
       this.version = this@SdkEntityData.version
       this.homePath = this@SdkEntityData.homePath
@@ -301,9 +290,7 @@ internal class SdkEntityData : WorkspaceEntityData<SdkEntity>() {
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as SdkEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.name != other.name) return false
     if (this.type != other.type) return false
@@ -317,9 +304,7 @@ internal class SdkEntityData : WorkspaceEntityData<SdkEntity>() {
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as SdkEntityData
-
     if (this.name != other.name) return false
     if (this.type != other.type) return false
     if (this.version != other.version) return false

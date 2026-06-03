@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.importing;
 
 import com.intellij.execution.executors.DefaultRunExecutor;
@@ -14,23 +14,37 @@ import com.intellij.openapi.externalSystem.service.notification.ExternalSystemPr
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil;
 import com.intellij.openapi.externalSystem.util.task.TaskExecutionSpec;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.DependencyScope;
+import com.intellij.openapi.roots.JavadocOrderRootType;
+import com.intellij.openapi.roots.LibraryOrderEntry;
+import com.intellij.openapi.roots.ModuleOrderEntry;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.impl.libraries.LibraryEx;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.platform.backend.workspace.WorkspaceModel;
+import com.intellij.platform.workspace.jps.entities.LibraryId;
+import com.intellij.platform.workspace.jps.entities.LibraryTableId;
+import com.intellij.platform.workspace.jps.entities.ModuleId;
 import com.intellij.testFramework.RunAll;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.PathUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.workspaceModel.ide.impl.legacyBridge.library.LibraryBridgeImpl;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.jps.util.JpsPathUtil;
 import org.jetbrains.plugins.gradle.frameworkSupport.buildscript.GradleBuildScriptBuilderUtil;
 import org.jetbrains.plugins.gradle.service.resolve.VersionCatalogsLocator;
+import org.jetbrains.plugins.gradle.service.syncAction.GradleEntitySource;
+import org.jetbrains.plugins.gradle.service.syncAction.GradleSyncPhase;
 import org.jetbrains.plugins.gradle.settings.GradleSystemSettings;
 import org.jetbrains.plugins.gradle.tooling.annotation.TargetJavaVersion;
 import org.jetbrains.plugins.gradle.tooling.annotation.TargetVersions;
@@ -39,15 +53,32 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.BiPredicate;
 
-import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.*;
-import static com.intellij.openapi.util.text.StringUtil.*;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.getExternalProjectId;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.getExternalProjectPath;
+import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.getExternalProjectVersion;
+import static com.intellij.openapi.util.text.StringUtil.capitalize;
+import static com.intellij.openapi.util.text.StringUtil.endsWith;
+import static com.intellij.openapi.util.text.StringUtil.join;
+import static com.intellij.openapi.util.text.StringUtil.trimEnd;
+import static com.intellij.openapi.util.text.StringUtil.trimStart;
 import static com.intellij.util.containers.ContainerUtil.ar;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
@@ -241,7 +272,7 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
   }
   
   @Test
-  @TargetVersions("<=6.9")
+  @TargetVersions("<=6.9.x")
   public void testTransitiveNonTransitiveDependencyScopeMerge() throws Exception {
     createSettingsFile(including("project1", "project2"));
 
@@ -481,6 +512,112 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
       assertTrue("Dependency must be module level: " + libDep.toString(), libDep.isModuleLevel());
       assertEquals("Wrong library dependency", depP2Jar.getUrl(), libDep.getLibrary().getUrls(OrderRootType.CLASSES)[0]);
     }
+  }
+
+  @Test
+  public void testLocalFileDepsImportedAsModuleLibraries_existingPath() throws Exception {
+    Registry.get("gradle.phased.sync.bridge.disabled").setValue(true, getTestRootDisposable());
+
+    var jarPath = "deps/dep.jar";
+    createProjectJarSubFile(jarPath);
+    var expectedPath = JpsPathUtil.getLibraryRootUrl(getProjectPath(jarPath));
+
+    String config = createBuildScriptBuilder()
+      .allprojects(p -> {
+        p
+          .withJavaPlugin()
+          .addImplementationDependency(p.code("files('" + jarPath + "')"));
+      })
+      .generate();
+
+    importProject(config);
+
+    assertModules("project", "project.main", "project.test");
+
+    var moduleLibDeps = getModuleLibDeps("project.main", "Gradle: dep.jar");
+    assertEquals("Should have a single module level dependency", 1, moduleLibDeps.size());
+
+    var libDep = moduleLibDeps.getFirst();
+    assertTrue("Dependency must be module level: " + libDep.toString(), libDep.isModuleLevel());
+    assertEquals("URLs must be in the correct format", expectedPath, libDep.getLibrary().getUrls(OrderRootType.CLASSES)[0]);
+
+    // Try another import attempt and make sure it doesn't throw anything
+    importProject();
+    assertModules("project", "project.main", "project.test");
+
+    moduleLibDeps = getModuleLibDeps("project.main", "Gradle: dep.jar");
+    assertEquals("Should have a single module level dependency", 1, moduleLibDeps.size());
+
+    libDep = moduleLibDeps.getFirst();
+    assertTrue("Dependency must be module level: " + libDep.toString(), libDep.isModuleLevel());
+    assertEquals("URLs must be in the correct format", expectedPath, libDep.getLibrary().getUrls(OrderRootType.CLASSES)[0]);
+    ((LibraryBridgeImpl) libDep.getLibrary()).getLibrarySnapshot$intellij_platform_projectModel_impl().getLibraryEntity().getEntitySource();
+
+    // Try another import attempt and make sure it doesn't throw anything
+    importProject();
+    assertModules("project", "project.main", "project.test");
+
+    moduleLibDeps = getModuleLibDeps("project.main", "Gradle: dep.jar");
+    assertEquals("Should have a single module level dependency", 1, moduleLibDeps.size());
+
+    libDep = moduleLibDeps.getFirst();
+    assertTrue("Dependency must be module level: " + libDep.toString(), libDep.isModuleLevel());
+    assertEquals("URLs must be in the correct format", expectedPath, libDep.getLibrary().getUrls(OrderRootType.CLASSES)[0]);
+  }
+
+  @Test
+  public void testLocalFileDepsImportedAsModuleLibraries_nonExistentPath() throws Exception {
+    Registry.get("gradle.phased.sync.bridge.disabled").setValue(true, getTestRootDisposable());
+
+    var jarPath = "deps/dep.jar";
+    var expectedPath = JpsPathUtil.getLibraryRootUrl(getProjectPath(jarPath));
+    var expectedLibraryId = new LibraryId("Gradle: dep.jar",
+                                          new LibraryTableId.ModuleLibraryTableId(new ModuleId("project.main")));
+
+
+    String config = createBuildScriptBuilder()
+      .allprojects(p -> {
+        p
+          .withJavaPlugin()
+          .addImplementationDependency(p.code("files('" + jarPath + "')"));
+      })
+      .generate();
+
+      importProject(config);
+
+      assertModules("project", "project.main", "project.test");
+
+      var moduleLibDeps = getModuleLibDeps("project.main", "Gradle: dep.jar");
+      assertEquals("Should have a single module level dependency", 1, moduleLibDeps.size());
+
+      var libDep = moduleLibDeps.getFirst();
+      assertTrue("Dependency must be module level: " + libDep.toString(), libDep.isModuleLevel());
+      assertEquals("URLs must be in the correct format", expectedPath, libDep.getLibrary().getUrls(OrderRootType.CLASSES)[0]);
+
+      var libraryEntity = WorkspaceModel.getInstance(getMyProject()).getCurrentSnapshot().resolve(expectedLibraryId);
+      assertNotNull("Library entity must exists", libraryEntity);
+      assertTrue("Library entity source must be from data services",
+                 (libraryEntity.getEntitySource()) instanceof GradleEntitySource
+                 && ((GradleEntitySource) libraryEntity.getEntitySource()).getPhase() == GradleSyncPhase.DATA_SERVICES_PHASE
+      );
+
+      // Try another import attempt and make sure it doesn't throw anything
+      importProject();
+      assertModules("project", "project.main", "project.test");
+
+      moduleLibDeps = getModuleLibDeps("project.main", "Gradle: dep.jar");
+      assertEquals("Should have a single module level dependency", 1, moduleLibDeps.size());
+
+      libDep = moduleLibDeps.getFirst();
+      assertTrue("Dependency must be module level: " + libDep.toString(), libDep.isModuleLevel());
+      assertEquals("URLs must be in the correct format", expectedPath, libDep.getLibrary().getUrls(OrderRootType.CLASSES)[0]);
+
+      libraryEntity = WorkspaceModel.getInstance(getMyProject()).getCurrentSnapshot().resolve(expectedLibraryId);
+      assertNotNull("Library entity must exists", libraryEntity);
+      assertTrue("Library entity source must be from data services",
+                 (libraryEntity.getEntitySource()) instanceof GradleEntitySource
+                 && ((GradleEntitySource) libraryEntity.getEntitySource()).getPhase() == GradleSyncPhase.DATA_SERVICES_PHASE
+      );
   }
 
   @Test
@@ -764,10 +901,8 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
               task.code("from sourceSets.test.output");
               return null;
             })
-            .addPostfix("artifacts {",
-                        "    tests testJar",
-                        "    archives testJar",
-                        "}")
+            .addPostfix("artifacts { tests testJar }")
+            .addPostfix("assemble.dependsOn(testJar)")
             .addTestImplementationDependency("junit:junit:4.11");
         })
         .project(":impl", it -> {
@@ -1023,7 +1158,7 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
   }
 
   @Test
-  @TargetVersions("6.8 <=> 7.5")
+  @TargetVersions("6.8 <=> 7.5.x")
   @TargetJavaVersion(value = "<22", reason = "Spring Boot 2 Compatibility")
   @TestFor(issues = "IDEA-339492")
   public void testProjectDependencyOnBootJar2Artifact() throws Exception {
@@ -1178,10 +1313,8 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
               task.code("from project.sourceSets.test.output");
               return null;
             })
-            .addPostfix("artifacts {",
-                        "    tests testJar",
-                        "    archives testJar",
-                        "}")
+            .addPostfix("artifacts { tests testJar }")
+            .addPostfix("assemble.dependsOn(testJar)")
             .addTestImplementationDependency("junit:junit:4.11");
         })
         .project(":project2", it -> {
@@ -1217,7 +1350,7 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
   }
 
   @Test
-  @TargetVersions("<=6.9")
+  @TargetVersions("<=6.9.x")
   public void testDependencyOnDefaultConfigurationWithAdditionalArtifact() throws Exception {
     createSettingsFile(including("project1", "project2"));
     createProjectSubFile("project1/build.gradle",
@@ -1650,7 +1783,7 @@ public class GradleDependenciesImportingTest extends GradleImportingTestCase {
 
 
   @Test
-  @TargetVersions("<=6.9")
+  @TargetVersions("<=6.9.x")
   public void testNonTransitiveConfiguration() throws Exception {
     importProject(
       createBuildScriptBuilder()

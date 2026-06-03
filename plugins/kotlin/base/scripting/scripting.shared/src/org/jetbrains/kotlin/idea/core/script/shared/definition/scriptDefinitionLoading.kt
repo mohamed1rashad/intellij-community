@@ -12,15 +12,14 @@ import com.intellij.openapi.util.io.toNioPathOrNull
 import com.intellij.util.ExceptionUtil
 import com.intellij.util.PathUtil
 import com.intellij.util.lang.UrlClassLoader
-import org.jetbrains.kotlin.idea.core.script.v1.logger
+import org.jetbrains.kotlin.idea.core.script.v1.kotlinScriptLogger
 import org.jetbrains.kotlin.idea.core.script.v1.scriptingErrorLog
 import org.jetbrains.kotlin.idea.core.script.v1.scriptingInfoLog
 import org.jetbrains.kotlin.idea.core.script.v1.scriptingWarnLog
+import org.jetbrains.kotlin.scripting.definitions.ScriptCompilationConfigurationFromLegacyTemplate
 import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition
-import org.jetbrains.kotlin.scripting.definitions.ScriptDefinition.FromLegacy
 import org.jetbrains.kotlin.scripting.definitions.ScriptDefinitionsSource
-import org.jetbrains.kotlin.scripting.definitions.getEnvironment
-import org.jetbrains.kotlin.scripting.resolve.KotlinScriptDefinitionFromAnnotatedTemplate
+import org.jetbrains.kotlin.scripting.definitions.ScriptEvaluationConfigurationFromHostConfiguration
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
 import java.io.File
 import java.nio.file.Files
@@ -31,8 +30,11 @@ import kotlin.io.path.pathString
 import kotlin.script.experimental.annotations.KotlinScript
 import kotlin.script.experimental.host.ScriptingHostConfiguration
 import kotlin.script.experimental.host.configurationDependencies
+import kotlin.script.experimental.host.with
 import kotlin.script.experimental.jvm.JvmDependency
+import kotlin.script.experimental.jvm.baseClassLoader
 import kotlin.script.experimental.jvm.defaultJvmScriptingHostConfiguration
+import kotlin.script.experimental.jvm.jvm
 import kotlin.script.templates.ScriptTemplateDefinition
 
 /**
@@ -44,8 +46,7 @@ fun loadDefinitionsFromTemplates(
     templateClassNames: List<String>,
     templateClasspath: List<Path>, // TODO: need to provide a way to specify this in compiler/repl .. etc
     additionalResolverClasspath: List<Path> = emptyList(),
-    baseHostConfiguration: ScriptingHostConfiguration = defaultJvmScriptingHostConfiguration,
-    defaultCompilerOptions: Iterable<String> = emptyList()
+    baseHostConfiguration: ScriptingHostConfiguration = defaultJvmScriptingHostConfiguration
 ): Sequence<ScriptDefinition> = sequence {
     val classpath = adjustClasspath(templateClasspath + additionalResolverClasspath)
     scriptingInfoLog("Loading script definitions: classes=$templateClassNames, classpath=$classpath")
@@ -61,21 +62,30 @@ fun loadDefinitionsFromTemplates(
             val template =
                 loader.loadClass(templateClassName).kotlin // do not use `Path::toFile` here as it might break the path format of non-local file system
             val templateClasspathAsFiles = templateClasspath.map { File(it.toString()) }
-            val hostConfiguration = ScriptingHostConfiguration(baseHostConfiguration) {
-                configurationDependencies(JvmDependency(templateClasspathAsFiles))
-            }
+            val hostConfiguration =
+                baseHostConfiguration.with {
+                    jvm {
+                        if (classpath.isNotEmpty()) {
+                            configurationDependencies.append(JvmDependency(templateClasspathAsFiles))
+                            baseClassLoader(loader)
+                        }
+                    }
+                }
 
             when {
                 template.annotations.firstIsInstanceOrNull<KotlinScript>() != null ->
                     ScriptDefinition.FromTemplate(
-                        hostConfiguration, template, ScriptDefinition::class, defaultCompilerOptions
+                        hostConfiguration, template, ScriptDefinition::class
                     )
 
                 template.annotations.firstIsInstanceOrNull<ScriptTemplateDefinition>() != null ->
-                    FromLegacy(
-                        hostConfiguration, KotlinScriptDefinitionFromAnnotatedTemplate(
-                            template, hostConfiguration[ScriptingHostConfiguration.getEnvironment]?.invoke(), templateClasspathAsFiles
-                        ), defaultCompilerOptions
+                    ScriptDefinition.FromConfigurations(
+                        hostConfiguration,
+                        ScriptCompilationConfigurationFromLegacyTemplate(
+                            hostConfiguration,
+                            template
+                        ),
+                        ScriptEvaluationConfigurationFromHostConfiguration(hostConfiguration)
                     )
 
                 else -> {
@@ -131,7 +141,7 @@ private fun moveJarFromWslToHost(source: Path, targetFolderPathResolver: Lazy<Pa
     try {
         Files.copy(source, relocatedJar, StandardCopyOption.REPLACE_EXISTING)
     } catch (t: Throwable) {
-        logger.warn("Unable to copy a DSL-related jar from $source to $relocatedJar: ${ExceptionUtil.getMessage(t)}")
+        kotlinScriptLogger.warn("Unable to copy a DSL-related jar from $source to $relocatedJar: ${ExceptionUtil.getMessage(t)}")
         return source
     }
     return relocatedJar

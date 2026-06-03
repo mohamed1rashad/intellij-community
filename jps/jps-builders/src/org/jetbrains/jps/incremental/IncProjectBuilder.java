@@ -1,10 +1,13 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.jps.incremental;
 
 import com.intellij.concurrency.ContextAwareRunnable;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.util.*;
-import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.LowMemoryWatcher;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.UserDataHolder;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.Formats;
 import com.intellij.openapi.util.text.StringUtil;
@@ -23,7 +26,15 @@ import org.jetbrains.jps.ModuleChunk;
 import org.jetbrains.jps.api.BuildParametersKeys;
 import org.jetbrains.jps.api.CanceledStatus;
 import org.jetbrains.jps.api.GlobalOptions;
-import org.jetbrains.jps.builders.*;
+import org.jetbrains.jps.builders.BuildRootDescriptor;
+import org.jetbrains.jps.builders.BuildTarget;
+import org.jetbrains.jps.builders.BuildTargetIndex;
+import org.jetbrains.jps.builders.BuildTargetType;
+import org.jetbrains.jps.builders.DirtyFilesHolder;
+import org.jetbrains.jps.builders.FileProcessor;
+import org.jetbrains.jps.builders.JpsBuildBundle;
+import org.jetbrains.jps.builders.ModuleBasedBuildTargetType;
+import org.jetbrains.jps.builders.ModuleBasedTarget;
 import org.jetbrains.jps.builders.impl.BuildOutputConsumerImpl;
 import org.jetbrains.jps.builders.impl.BuildTargetChunk;
 import org.jetbrains.jps.builders.impl.DirtyFilesHolderBase;
@@ -38,8 +49,24 @@ import org.jetbrains.jps.cmdline.ProjectDescriptor;
 import org.jetbrains.jps.incremental.fs.BuildFSState;
 import org.jetbrains.jps.incremental.fs.CompilationRound;
 import org.jetbrains.jps.incremental.fs.FilesDelta;
-import org.jetbrains.jps.incremental.messages.*;
-import org.jetbrains.jps.incremental.storage.*;
+import org.jetbrains.jps.incremental.messages.BuildMessage;
+import org.jetbrains.jps.incremental.messages.BuildProgress;
+import org.jetbrains.jps.incremental.messages.BuilderStatisticsMessage;
+import org.jetbrains.jps.incremental.messages.BuildingTargetProgressMessage;
+import org.jetbrains.jps.incremental.messages.CompilerMessage;
+import org.jetbrains.jps.incremental.messages.DoneSomethingNotification;
+import org.jetbrains.jps.incremental.messages.FileDeletedEvent;
+import org.jetbrains.jps.incremental.messages.FileGeneratedEvent;
+import org.jetbrains.jps.incremental.messages.ProgressMessage;
+import org.jetbrains.jps.incremental.messages.UnprocessedFSChangesNotification;
+import org.jetbrains.jps.incremental.storage.BuildDataManager;
+import org.jetbrains.jps.incremental.storage.BuildTargetConfiguration;
+import org.jetbrains.jps.incremental.storage.BuildTargetSourcesState;
+import org.jetbrains.jps.incremental.storage.BuildTargetStateManager;
+import org.jetbrains.jps.incremental.storage.OneToManyPathMapping;
+import org.jetbrains.jps.incremental.storage.OutputToTargetMapping;
+import org.jetbrains.jps.incremental.storage.SourceToOutputMappingCursor;
+import org.jetbrains.jps.incremental.storage.SourceToOutputMappingImpl;
 import org.jetbrains.jps.indices.ModuleExcludeIndex;
 import org.jetbrains.jps.javac.ExternalJavacManager;
 import org.jetbrains.jps.javac.ExternalJavacManagerKey;
@@ -63,8 +90,27 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.BitSet;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -90,7 +136,6 @@ public final class IncProjectBuilder {
 
   private static final int FLUSH_INVOCATIONS_TO_SKIP = 10;
 
-  private static final boolean SYNC_DELETE = Boolean.parseBoolean(System.getProperty("jps.sync.delete", "false"));
   private static final GlobalContextKey<Set<BuildTarget<?>>> TARGET_WITH_CLEARED_OUTPUT = GlobalContextKey.create("_targets_with_cleared_output_");
   public static final int MAX_BUILDER_THREADS;
   static {
@@ -644,30 +689,7 @@ public final class IncProjectBuilder {
     final ProjectDescriptor projectDescriptor = context.getProjectDescriptor();
     ProjectBuildException projectBuildException = null;
 
-    var targetCleanup = new Consumer<BuildTarget<?>>() {
-      final ExecutorService executor = SharedThreadPool.getInstance().createBoundedExecutor("IncProjectBuilder Output Cleanup Pool", MAX_BUILDER_THREADS);
-      final List<Future<?>> tasks = new ArrayList<>();
-      @Override
-      public void accept(BuildTarget<?> target) {
-        if (SYNC_DELETE) {
-          clearOutputFilesUninterruptibly(context, target);
-        }
-        else {
-          tasks.add(executor.submit(() -> clearOutputFilesUninterruptibly(context, target)));
-        }
-      }
-
-      void waitForTasks() {
-        for (Future<?> task : tasks) {
-          try {
-            task.get();
-          }
-          catch (Throwable e) {
-            LOG.info(e);
-          }
-        }
-      }
-    };
+    var targetCleanup = (Consumer<BuildTarget<?>>)(target -> clearOutputFilesUninterruptibly(context, target));
 
     final long cleanStart = System.nanoTime();
     try {
@@ -703,12 +725,10 @@ public final class IncProjectBuilder {
       projectBuildException = e;
     }
     finally {
-      targetCleanup.waitForTasks();
-
       LOG.info("Cleaned output directories in " + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - cleanStart) + " ms");
       if (cleanCaches) {
         try {
-          projectDescriptor.dataManager.clean(myAsyncTasks::add);
+          projectDescriptor.dataManager.clean();
         }
         catch (IOException e) {
           if (projectBuildException == null) {
@@ -1020,14 +1040,9 @@ public final class IncProjectBuilder {
 
     if (!filesToDelete.isEmpty()) {
       context.processMessage(new ProgressMessage(JpsBuildBundle.message("progress.message.cleaning.output.directories")));
-      if (SYNC_DELETE) {
-        for (var file : filesToDelete) {
-          context.checkCanceled();
-          FileUtilRt.delete(file);
-        }
-      }
-      else {
-        myAsyncTasks.add(FileUtil.asyncDelete(filesToDelete));
+      for (var file : filesToDelete) {
+        context.checkCanceled();
+        FileUtilRt.delete(file);
       }
     }
   }
@@ -1511,9 +1526,12 @@ public final class IncProjectBuilder {
                 long start = System.nanoTime();
                 int processedSourcesBefore = outputConsumer.getNumberOfProcessedSources();
                 ErrorsCapture errCapture = null;
+                OutputsCapture outsCapture = null;
                 ModuleLevelBuilder.ExitCode buildResult = ModuleLevelBuilder.ExitCode.NOTHING_DONE;
                 try {
-                  buildResult = builder.build(roundCount == 0 && !isFullRebuild? errCapture = ErrorsCapture.wrap(context) : context, chunk, dirtyFilesHolder, outputConsumer);
+                  CompileContext builderContext = roundCount == 0 && !isFullRebuild? errCapture = ErrorsCapture.wrap(context) : context;
+                  ModuleLevelBuilder.OutputConsumer buildOutputConsumer = errCapture != null? outsCapture = OutputsCapture.wrap(outputConsumer) : outputConsumer;
+                  buildResult = builder.build(builderContext, chunk, dirtyFilesHolder, buildOutputConsumer);
                 }
                 catch (StopBuildException e) {
                   if (errCapture != null) {
@@ -1539,6 +1557,10 @@ public final class IncProjectBuilder {
                       return true;
                     });
                     nextPassRequired = true;
+                    // clean partially generated outputs to ensure consistent clean state
+                    if (outsCapture != null) {
+                      outsCapture.clearGeneratedOutputs();
+                    }
                     break BUILDER_CATEGORY_LOOP;
                   }
                   else { // no additional files were marked
@@ -1662,6 +1684,64 @@ public final class IncProjectBuilder {
         MethodHandle mh = ourLookup.unreflect(method).bindTo(delegate);
         return args == null? mh.invoke() : mh.asSpreader(Object[].class, args.length).invoke(args);  // delegate further
       });
+    }
+  }
+
+  private interface OutputsCapture extends ModuleLevelBuilder.OutputConsumer {
+
+    void clearGeneratedOutputs();
+
+    static OutputsCapture wrap(ModuleLevelBuilder.OutputConsumer delegate) {
+      return new OutputsCapture() {
+        private final Set<File> generated = new HashSet<>();
+
+        @Override
+        public void clearGeneratedOutputs() {
+          try {
+            for (var file : generated) {
+              FileUtilRt.delete(file);
+            }
+          }
+          finally {
+            generated.clear();
+          }
+        }
+
+        @Override
+        public void registerOutputFile(@NotNull BuildTarget<?> target, File outputFile, Collection<String> sourcePaths) throws IOException {
+          try {
+            delegate.registerOutputFile(target, outputFile, sourcePaths);
+          }
+          finally {
+            generated.add(outputFile);
+          }
+        }
+
+        @Override
+        public void registerCompiledClass(@Nullable BuildTarget<?> target, CompiledClass compiled) throws IOException {
+          try {
+            delegate.registerCompiledClass(target, compiled);
+          }
+          finally {
+            generated.add(compiled.getOutputFile());
+          }
+        }
+
+        @Override
+        public Collection<CompiledClass> getTargetCompiledClasses(@NotNull BuildTarget<?> target) {
+          return delegate.getTargetCompiledClasses(target);
+        }
+
+        @Override
+        public @NotNull Map<String, CompiledClass> getCompiledClasses() {
+          return delegate.getCompiledClasses();
+        }
+
+        @Override
+        public @Nullable BinaryContent lookupClassBytes(String className) {
+          return delegate.lookupClassBytes(className);
+        }
+      };
     }
   }
 

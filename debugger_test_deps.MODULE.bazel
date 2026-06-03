@@ -1,0 +1,8 @@
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "debugger_test_deps_debugger_agent",
+    downloaded_file_path = "debugger-agent.jar",
+    sha256 = "e634d3c132f5d84259426db9ff3c9945992b3287ea61621d1254e0d89ee33536",
+    url = "https://cache-redirector.jetbrains.com/packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/intellij/deps/debugger-agent/1.179/debugger-agent-1.179.jar",
+)

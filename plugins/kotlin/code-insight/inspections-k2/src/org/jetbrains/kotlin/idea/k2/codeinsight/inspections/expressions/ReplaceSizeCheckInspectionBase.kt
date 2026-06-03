@@ -9,7 +9,11 @@ import com.intellij.openapi.util.NlsSafe
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.components.allSupertypes
 import org.jetbrains.kotlin.analysis.api.components.expandedSymbol
-import org.jetbrains.kotlin.analysis.api.resolution.*
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaVariableAccessCall
+import org.jetbrains.kotlin.analysis.api.resolution.singleCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.allOverriddenSymbolsWithSelf
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinApplicableInspectionBase
@@ -18,7 +22,13 @@ import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtSafeQualifiedExpression
+import org.jetbrains.kotlin.psi.binaryExpressionVisitor
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 
 internal sealed class ReplaceSizeCheckInspectionBase :
@@ -113,24 +123,22 @@ internal sealed class ReplaceSizeCheckInspectionBase :
 
         val symbolWithOverrides = partiallyAppliedSymbol.symbol.allOverriddenSymbolsWithSelf
 
-        val replaceableCall = symbolWithOverrides.firstNotNullOfOrNull { symbol ->
-            when (this) {
-                is KaVariableAccessCall -> REPLACEABLE_FIELDS_BY_CALLABLE_ID[symbol.callableId]
+        val replaceableCalls = when (this) {
+            is KaVariableAccessCall -> listOfNotNull(symbolWithOverrides.firstNotNullOfOrNull { symbol -> REPLACEABLE_FIELDS_BY_CALLABLE_ID[symbol.callableId] })
 
-                is KaFunctionCall -> REPLACEABLE_COUNT_CALL.takeIf {
-                    symbol.callableId == REPLACEABLE_COUNT_CALL.callableId && this.partiallyAppliedSymbol.signature.valueParameters.isEmpty()
-                }
+            is KaFunctionCall -> {
+                if (this.valueArgumentMapping.isNotEmpty()) return null
+                symbolWithOverrides.flatMap { symbol -> REPLACEABLE_FUNCTIONS_BY_CALLABLE_ID[symbol.callableId].orEmpty() }.toList()
             }
-        } ?: return null
+        }
+        if (replaceableCalls.isEmpty()) return null
 
         val receiverTypeAndSuperTypes = sequence {
             yield(receiverType)
             yieldAll(receiverType.allSupertypes)
         }
-        if (receiverTypeAndSuperTypes.any { it.expandedSymbol?.classId in replaceableCall.supportedReceivers }) {
-            return replaceableCall
-        } else {
-            return null
+        return replaceableCalls.firstOrNull { replaceableCall ->
+            receiverTypeAndSuperTypes.any { it.expandedSymbol?.classId in replaceableCall.supportedReceivers }
         }
     }
 }
@@ -153,6 +161,13 @@ private data class ReplaceableCall(
 
 private val COUNT_CALLABLE_ID = CallableId(StandardClassIds.BASE_COLLECTIONS_PACKAGE, Name.identifier("count"))
 private val CHAR_SEQUENCE_CALLABLE_ID = ClassId.fromString("kotlin/CharSequence")
+private val SIZE_FIELD_RECEIVERS = buildSet {
+    add(StandardClassIds.Collection)
+    add(StandardClassIds.Array)
+    add(StandardClassIds.Map)
+    addAll(StandardClassIds.primitiveArrayTypeByElementType.values)
+    addAll(StandardClassIds.unsignedArrayTypeByElementType.values)
+}
 
 private val REPLACEABLE_FIELDS: Set<ReplaceableCall> = buildSet {
     add(
@@ -162,14 +177,7 @@ private val REPLACEABLE_FIELDS: Set<ReplaceableCall> = buildSet {
             hasIsNotEmpty = true
         )
     )
-    val sizeFieldReceivers = buildSet {
-        add(StandardClassIds.Collection)
-        add(StandardClassIds.Array)
-        add(StandardClassIds.Map)
-        addAll(StandardClassIds.primitiveArrayTypeByElementType.values)
-        addAll(StandardClassIds.unsignedArrayTypeByElementType.values)
-    }
-    for (classId in sizeFieldReceivers) {
+    for (classId in SIZE_FIELD_RECEIVERS) {
         add(
             ReplaceableCall(
                 CallableId(classId, Name.identifier("size")),
@@ -183,19 +191,36 @@ private val REPLACEABLE_FIELDS: Set<ReplaceableCall> = buildSet {
 private val REPLACEABLE_FIELDS_BY_CALLABLE_ID: Map<CallableId, ReplaceableCall> =
     REPLACEABLE_FIELDS.associateBy { call -> call.callableId }
 
-private val REPLACEABLE_COUNT_CALL = ReplaceableCall(
-    COUNT_CALLABLE_ID,
-    buildSet {
-        val progressionBasePrimitiveTypes = listOf(
-            StandardClassIds.Char,
-            StandardClassIds.Int,
-            StandardClassIds.UInt,
-            StandardClassIds.Long,
-            StandardClassIds.ULong
-        )
-        for (primitiveClassId in progressionBasePrimitiveTypes) {
-            add(ClassId(StandardClassIds.BASE_RANGES_PACKAGE, Name.identifier("${primitiveClassId.shortClassName}Progression")))
-        }
-    },
-    hasIsNotEmpty = false
+private val PROGRESSION_COUNT_RECEIVERS = buildSet {
+    val progressionBasePrimitiveTypes = listOf(
+        StandardClassIds.Char,
+        StandardClassIds.Int,
+        StandardClassIds.UInt,
+        StandardClassIds.Long,
+        StandardClassIds.ULong
+    )
+    for (primitiveClassId in progressionBasePrimitiveTypes) {
+        add(ClassId(StandardClassIds.BASE_RANGES_PACKAGE, Name.identifier("${primitiveClassId.shortClassName}Progression")))
+    }
+}
+
+private val REPLACEABLE_FUNCTIONS = listOf(
+    ReplaceableCall(
+        COUNT_CALLABLE_ID,
+        SIZE_FIELD_RECEIVERS,
+        hasIsNotEmpty = true,
+    ),
+    ReplaceableCall(
+        COUNT_CALLABLE_ID,
+        PROGRESSION_COUNT_RECEIVERS,
+        hasIsNotEmpty = false,
+    ),
+    ReplaceableCall(
+        CallableId(StandardClassIds.BASE_TEXT_PACKAGE, Name.identifier("count")),
+        setOf(StandardClassIds.CharSequence),
+        hasIsNotEmpty = true
+    ),
 )
+
+private val REPLACEABLE_FUNCTIONS_BY_CALLABLE_ID: Map<CallableId, List<ReplaceableCall>> =
+    REPLACEABLE_FUNCTIONS.groupBy { call -> call.callableId }

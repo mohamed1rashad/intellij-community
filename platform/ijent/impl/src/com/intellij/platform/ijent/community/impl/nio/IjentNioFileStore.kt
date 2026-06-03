@@ -5,8 +5,10 @@ import com.intellij.platform.eel.path.EelPath
 import com.intellij.platform.eel.provider.utils.getOrThrowFileSystemException
 import com.intellij.platform.ijent.fs.IjentFileSystemApi
 import com.intellij.platform.ijent.fs.IjentFileSystemPosixApi
+import com.intellij.platform.ijent.fs.IjentFileSystemWindowsApi
 import java.nio.file.FileStore
 import java.nio.file.attribute.BasicFileAttributeView
+import java.nio.file.attribute.DosFileAttributeView
 import java.nio.file.attribute.FileAttributeView
 import java.nio.file.attribute.FileStoreAttributeView
 
@@ -30,21 +32,21 @@ internal class IjentNioFileStore(
   }
 
   override fun getTotalSpace(): Long {
-    return fsBlocking {
-      ijentFsApi.getDiskInfo(path).getOrThrowFileSystemException().totalSpace.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
-    }
+    return ijentFsApi.fsBlocking {
+      getDiskInfo(path)
+    }.getOrThrowFileSystemException().totalSpace.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
   }
 
   override fun getUsableSpace(): Long {
-    return fsBlocking {
-      ijentFsApi.getDiskInfo(path).getOrThrowFileSystemException().availableSpace.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
-    }
+    return ijentFsApi.fsBlocking {
+      getDiskInfo(path)
+    }.getOrThrowFileSystemException().availableSpace.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
   }
 
   override fun getUnallocatedSpace(): Long {
-    return fsBlocking {
-      ijentFsApi.getDiskInfo(path).getOrThrowFileSystemException().availableSpace.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
-    }
+    return ijentFsApi.fsBlocking {
+      ijentFsApi.getDiskInfo(path)
+    }.getOrThrowFileSystemException().availableSpace.coerceAtMost(Long.MAX_VALUE.toULong()).toLong()
   }
 
   override fun supportsFileAttributeView(type: Class<out FileAttributeView?>?): Boolean {
@@ -53,7 +55,7 @@ internal class IjentNioFileStore(
     }
     when (ijentFsApi) {
       is IjentFileSystemPosixApi -> return type == IjentNioPosixFileAttributeView::class.java
-      else -> return false
+      is IjentFileSystemWindowsApi -> return type == DosFileAttributeView::class.java
     }
   }
 
@@ -63,7 +65,7 @@ internal class IjentNioFileStore(
     }
     when (ijentFsApi) {
       is IjentFileSystemPosixApi -> return name == "posix"
-      else -> return false
+      is IjentFileSystemWindowsApi -> return name == "dos"
     }
   }
 

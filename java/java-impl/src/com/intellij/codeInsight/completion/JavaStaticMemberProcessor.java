@@ -8,7 +8,23 @@ import com.intellij.codeInsight.lookup.VariableLookupItem;
 import com.intellij.featureStatistics.FeatureUsageTracker;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiImportList;
+import com.intellij.psi.PsiImportStaticStatement;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameHelper;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiReferenceExpression;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -22,10 +38,12 @@ import java.util.List;
 
 public class JavaStaticMemberProcessor extends StaticMemberProcessor {
   private final PsiElement myOriginalPosition;
+  private final PsiElement myOriginalFile;
 
-  public JavaStaticMemberProcessor(@NotNull CompletionParameters parameters) {
+  public JavaStaticMemberProcessor(@NotNull BaseCompletionParameters parameters) {
     super(parameters.getPosition());
     myOriginalPosition = parameters.getOriginalPosition();
+    myOriginalFile = parameters.getOriginalFile();
     final PsiFile file = parameters.getPosition().getContainingFile();
     if (file instanceof PsiJavaFile) {
       final PsiImportList importList = ((PsiJavaFile)file).getImportList();
@@ -42,24 +60,42 @@ public class JavaStaticMemberProcessor extends StaticMemberProcessor {
     JavaProjectCodeInsightSettings codeInsightSettings = JavaProjectCodeInsightSettings.getSettings(project);
     JavaPsiFacade javaPsiFacade = JavaPsiFacade.getInstance(project);
     GlobalSearchScope resolveScope = parameters.getOriginalFile().getResolveScope();
-    for (String name : codeInsightSettings.getAllIncludedAutoStaticNames()) {
+    JavaProjectCodeInsightSettings.AutoStaticNameContainer autoContainer = codeInsightSettings.getAllIncludedAutoStaticNames();
+    for (String name : autoContainer.includedNames()) {
       PsiClass aClass = javaPsiFacade.findClass(name, resolveScope);
-      if (aClass != null && isAccessibleClass(aClass)) {
-        importMembersOf(aClass);
+      if (aClass != null &&
+          aClass.getQualifiedName() != null &&
+          isAccessibleClass(aClass)) {
+        for (PsiMethod method : aClass.getAllMethods()) {
+          if (method.hasModifierProperty(PsiModifier.STATIC) &&
+              autoContainer.containsName(aClass.getQualifiedName() + "." + method.getName())) {
+            importMember(method);
+          }
+        }
+        for (PsiField psiField : aClass.getAllFields()) {
+          if (psiField.hasModifierProperty(PsiModifier.STATIC) &&
+              autoContainer.containsName(aClass.getQualifiedName() + "." + psiField.getName())) {
+            importMember(psiField);
+          }
+        }
       }
       else {
         String shortMemberName = StringUtil.getShortName(name);
         String containingMemberName = StringUtil.getPackageName(name);
         if (containingMemberName.isEmpty() || shortMemberName.isEmpty()) continue;
         PsiClass containingClass = javaPsiFacade.findClass(containingMemberName, resolveScope);
-        if (containingClass != null && isAccessibleClass(containingClass)) {
+        if (containingClass == null || containingClass.getQualifiedName() == null) continue;
+        if (isAccessibleClass(containingClass)) {
           for (PsiMethod method : containingClass.findMethodsByName(shortMemberName, true)) {
-            if (method.hasModifierProperty(PsiModifier.STATIC)) {
+            if (method.hasModifierProperty(PsiModifier.STATIC) &&
+                autoContainer.containsName(containingClass.getQualifiedName() + "." + method.getName())) {
               importMember(method);
             }
           }
           PsiField psiField = containingClass.findFieldByName(shortMemberName, true);
-          if (psiField != null && psiField.hasModifierProperty(PsiModifier.STATIC)) {
+          if (psiField != null &&
+              psiField.hasModifierProperty(PsiModifier.STATIC) &&
+              autoContainer.containsName(containingClass.getQualifiedName() + "." + psiField.getName())) {
             importMember(psiField);
           }
         }
@@ -68,10 +104,11 @@ public class JavaStaticMemberProcessor extends StaticMemberProcessor {
   }
 
   private boolean isAccessibleClass(@NotNull PsiClass importFromClass) {
-    boolean importFromDefaultPackage = importFromClass.getContainingFile() instanceof PsiJavaFile javaFile && javaFile.getPackageName().isBlank();
+    boolean importFromDefaultPackage =
+      importFromClass.getContainingFile() instanceof PsiJavaFile javaFile && javaFile.getPackageName().isBlank();
     if (importFromDefaultPackage) {
-      boolean targetClassInDefaultPackage = myOriginalPosition.getContainingFile() instanceof PsiJavaFile targetClass && targetClass.getPackageName().isBlank();
-      if(!targetClassInDefaultPackage) {
+      boolean targetClassInDefaultPackage = myOriginalFile instanceof PsiJavaFile targetClass && targetClass.getPackageName().isBlank();
+      if (!targetClassInDefaultPackage) {
         return false;
       }
     }
@@ -147,7 +184,7 @@ public class JavaStaticMemberProcessor extends StaticMemberProcessor {
   }
 
   protected @NotNull JavaMethodCallElement getMethodCallElement(boolean shouldImport, List<? extends PsiMethod> members) {
-    return new GlobalMethodCallElement(members.get(0), shouldImport, members.size()>1);
+    return new GlobalMethodCallElement(members.getFirst(), shouldImport, members.size() > 1);
   }
 
   private static class GlobalMethodCallElement extends JavaMethodCallElement {

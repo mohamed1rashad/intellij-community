@@ -1,7 +1,12 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.notification.impl;
 
-import com.intellij.notification.*;
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationAnnouncingMode;
+import com.intellij.notification.NotificationDisplayType;
+import com.intellij.notification.NotificationGroup;
+import com.intellij.notification.Notifications;
+import com.intellij.notification.NotificationsConfiguration;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.SettingsCategory;
@@ -12,8 +17,14 @@ import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
 
+@SuppressWarnings("SplitModeApiUsage")
 @State(name = "NotificationConfiguration", storages = @Storage("notifications.xml"), category = SettingsCategory.UI)
 public final class NotificationsConfigurationImpl extends NotificationsConfiguration implements PersistentStateComponent<Element>, Disposable {
   private static final Logger LOG = Logger.getInstance(NotificationsConfigurationImpl.class);
@@ -74,6 +85,7 @@ public final class NotificationsConfigurationImpl extends NotificationsConfigura
     for (String groupId : toRemove) {
       myIdToSettingsMap.remove(groupId);
       myToolWindowCapable.remove(groupId);
+      NotificationGroup.fireGroupEvent(groupId, false);
     }
   }
 
@@ -171,9 +183,11 @@ public final class NotificationsConfigurationImpl extends NotificationsConfigura
     String groupDisplayName = settings.getGroupId();
     if (settings.equals(getDefaultSettings(groupDisplayName))) {
       myIdToSettingsMap.remove(groupDisplayName);
+      NotificationGroup.fireGroupEvent(groupDisplayName, false);
     }
     else {
       myIdToSettingsMap.put(groupDisplayName, settings);
+      NotificationGroup.fireGroupEvent(groupDisplayName, true);
     }
   }
 
@@ -210,6 +224,7 @@ public final class NotificationsConfigurationImpl extends NotificationsConfigura
 
   @Override
   public synchronized void loadState(@NotNull Element state) {
+    myIdToSettingsMap.keySet().forEach(id -> NotificationGroup.fireGroupEvent(id, false));
     myIdToSettingsMap.clear();
     for (Element child : state.getChildren("notification")) {
       NotificationSettings settings = NotificationSettings.Companion.load(child);
@@ -217,6 +232,7 @@ public final class NotificationsConfigurationImpl extends NotificationsConfigura
         String id = settings.getGroupId();
         LOG.assertTrue(!myIdToSettingsMap.containsKey(id), String.format("Settings for '%s' already loaded!", id));
         myIdToSettingsMap.put(id, settings);
+        NotificationGroup.fireGroupEvent(id, true);
       }
     }
     doRemove("Log Only");

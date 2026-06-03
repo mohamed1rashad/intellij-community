@@ -14,14 +14,20 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.UpdateScaleHelper;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleContext;
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
 import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.tree.TreeCellRenderer;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Font;
 import java.util.ArrayList;
 
 public abstract class GroupedElementsRenderer implements Accessible {
@@ -73,6 +79,11 @@ public abstract class GroupedElementsRenderer implements Accessible {
     updateScaleHelper.saveScaleAndUpdateUIIfChanged(myRendererComponent);
 
     return myRendererComponent;
+  }
+
+  @ApiStatus.Experimental
+  protected @Nullable @NlsContexts.Tooltip String getToolTipOverride() {
+    return null;
   }
 
   protected void updateSelection(boolean isSelected, JComponent component, JComponent innerComponent) {
@@ -200,6 +211,13 @@ public abstract class GroupedElementsRenderer implements Accessible {
     public MyComponent() {
       super(new BorderLayout(), GroupedElementsRenderer.this.getBackground());
       renderer = GroupedElementsRenderer.this;
+    }
+
+    @Override
+    public String getToolTipText() {
+      var toolTipOverride = getToolTipOverride();
+      if (toolTipOverride != null) return toolTipOverride;
+      return super.getToolTipText();
     }
 
     public void setPreferredWidth(final int minWidth) {

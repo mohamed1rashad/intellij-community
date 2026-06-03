@@ -1,7 +1,11 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.coverage;
 
-import com.intellij.coverage.*;
+import com.intellij.coverage.CoverageBundle;
+import com.intellij.coverage.CoverageDataManager;
+import com.intellij.coverage.CoverageEngine;
+import com.intellij.coverage.CoverageRunnerData;
+import com.intellij.coverage.CoverageSuite;
 import com.intellij.coverage.listeners.java.CoverageListener;
 import com.intellij.execution.CommonJavaRunConfigurationParameters;
 import com.intellij.execution.Location;
@@ -46,7 +50,6 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Registers "Coverage" tab in Java run configurations
@@ -156,8 +159,9 @@ final class CoverageJavaRunConfigurationExtension extends RunConfigurationExtens
      if (!isApplicableFor(runConfiguration)) {
       return;
     }
-
-    Objects.requireNonNull(JavaCoverageEnabledConfiguration.getFrom(runConfiguration)).readExternal(element);
+    JavaCoverageEnabledConfiguration configuration = JavaCoverageEnabledConfiguration.getFrom(runConfiguration);
+    if (configuration == null) return;
+    configuration.readExternal(element);
   }
 
   @Override
@@ -165,13 +169,15 @@ final class CoverageJavaRunConfigurationExtension extends RunConfigurationExtens
     if (!isApplicableFor(runConfiguration)) {
       return;
     }
-    Objects.requireNonNull(JavaCoverageEnabledConfiguration.getFrom(runConfiguration)).writeExternal(element);
+    JavaCoverageEnabledConfiguration configuration = JavaCoverageEnabledConfiguration.getFrom(runConfiguration);
+    if (configuration == null) return;
+    configuration.writeExternal(element);
   }
 
   @Override
   public void extendCreatedConfiguration(@NotNull RunConfigurationBase runJavaConfiguration, @NotNull Location location) {
     final JavaCoverageEnabledConfiguration coverageEnabledConfiguration = JavaCoverageEnabledConfiguration.getFrom(runJavaConfiguration);
-    assert coverageEnabledConfiguration != null;
+    if (coverageEnabledConfiguration == null) return;
     if (runJavaConfiguration instanceof CommonJavaRunConfigurationParameters) {
       coverageEnabledConfiguration.setUpCoverageFilters(((CommonJavaRunConfigurationParameters)runJavaConfiguration).getRunClass(),
                                                         ((CommonJavaRunConfigurationParameters)runJavaConfiguration).getPackage());

@@ -8,47 +8,56 @@ import com.intellij.openapi.components.PathMacroManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectUtil;
-import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.platform.eel.EelDescriptor;
+import com.intellij.platform.eel.EelPlatform;
 import com.intellij.platform.eel.EelPlatformKt;
 import com.intellij.terminal.ui.TerminalWidget;
 import com.intellij.util.EnvironmentRestorer;
 import com.intellij.util.SystemProperties;
-import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.system.OS;
+import kotlin.Unit;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.VisibleForTesting;
 import org.jetbrains.plugins.terminal.ShellStartupOptions;
+import org.jetbrains.plugins.terminal.ShellStartupOptionsKt;
 import org.jetbrains.plugins.terminal.TerminalProjectOptionsProvider;
 import org.jetbrains.plugins.terminal.TerminalStartupKt;
+import org.jetbrains.plugins.terminal.startup.TerminalProcessType;
 import org.jetbrains.plugins.terminal.util.TerminalEnvironment;
 
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.jetbrains.plugins.terminal.LocalTerminalDirectRunner.isDirectory;
-import static org.jetbrains.plugins.terminal.TerminalStartupKt.findEelDescriptor;
+import static org.jetbrains.plugins.terminal.TerminalStartupKt.buildStartupEelContext;
 import static org.jetbrains.plugins.terminal.util.TerminalEnvironment.TERMINAL_EMULATOR;
 import static org.jetbrains.plugins.terminal.util.TerminalEnvironment.TERM_SESSION_ID;
+import static org.jetbrains.plugins.terminal.util.TerminalUtilKt.toExistentNioDirectory;
 
 @ApiStatus.Internal
 public final class LocalOptionsConfigurer {
   private static final Logger LOG = Logger.getInstance(LocalOptionsConfigurer.class);
 
   public static @NotNull ShellStartupOptions configureStartupOptions(@NotNull ShellStartupOptions baseOptions, @NotNull Project project) {
-    String workingDir = getWorkingDirectory(baseOptions.getWorkingDirectory(), project);
-    List<String> initialCommand = getInitialCommand(baseOptions, project, workingDir);
-    var eelDescriptor = findEelDescriptor(workingDir, initialCommand);
-    Map<String, String> envs = getTerminalEnvironment(baseOptions.getEnvVariables(), project, eelDescriptor, initialCommand);
+    Path requestedWorkingDirectory = findValidWorkingDirectory(baseOptions.getWorkingDirectory());
+    boolean isRequestedWorkingDirectoryInvalid = baseOptions.getWorkingDirectory() != null && requestedWorkingDirectory == null;
+    Path workingDir = requestedWorkingDirectory != null ? requestedWorkingDirectory : getDefaultStartingDirectory(project);
+    List<String> initialCommand = getInitialCommand(baseOptions, project, workingDir, isRequestedWorkingDirectoryInvalid);
+    var eelContext = buildStartupEelContext(workingDir, initialCommand);
+    Map<String, String> envs = getTerminalEnvironment(
+      baseOptions.getEnvVariables(),
+      baseOptions.getProcessType(),
+      project,
+      eelContext.getEelDescriptor(),
+      eelContext.getPlatform(),
+      eelContext.getShellCommand().getCommand()
+    );
 
     TerminalWidget widget = baseOptions.getWidget();
     if (widget != null) {
@@ -56,38 +65,50 @@ public final class LocalOptionsConfigurer {
     }
 
     return baseOptions.builder()
-      .shellCommand(initialCommand)
-      .workingDirectory(workingDir)
+      .shellCommand(eelContext.getShellCommand().getCommand())
+      .setFinalWorkingDirectoryEelPath(eelContext.getWorkingDirectory())
       .envVariables(envs)
+      .modify(builder -> {
+        builder.setInitialShellCommand(new InitialShellCommand(initialCommand));
+        return Unit.INSTANCE;
+      })
       .build();
   }
 
-  @VisibleForTesting
-  static @NotNull String getWorkingDirectory(@Nullable String directory, Project project) {
-    String validDirectory = findValidWorkingDirectory(directory);
-    if (validDirectory != null) {
-      return validDirectory;
+  private static @NotNull Path getDefaultStartingDirectory(@NotNull Project project) {
+    Path configuredStartingDirectory = toExistentNioDirectory(
+      TerminalProjectOptionsProvider.getInstance(project).getStartingDirectory(),
+      "Starting directory"
+    );
+    if (configuredStartingDirectory != null) {
+      return configuredStartingDirectory;
     }
-    String configuredWorkingDirectory = TerminalProjectOptionsProvider.getInstance(project).getStartingDirectory();
-    if (configuredWorkingDirectory != null && isDirectory(configuredWorkingDirectory)) {
-      return configuredWorkingDirectory;
-    }
-    String defaultWorkingDirectory = TerminalProjectOptionsProvider.getInstance(project).getDefaultStartingDirectory();
-    if (defaultWorkingDirectory != null && isDirectory(defaultWorkingDirectory)) {
-      return defaultWorkingDirectory;
+    Path defaultStartingDirectory = toExistentNioDirectory(
+      TerminalProjectOptionsProvider.getInstance(project).getDefaultStartingDirectory(),
+      "Default starting directory"
+    );
+    if (defaultStartingDirectory != null) {
+      return defaultStartingDirectory;
     }
     VirtualFile projectDir = ProjectUtil.guessProjectDir(project);
     if (projectDir != null) {
-      return VfsUtilCore.virtualToIoFile(projectDir).getAbsolutePath();
+      try {
+        return projectDir.toNioPath();
+      }
+      catch (UnsupportedOperationException e) {
+        LOG.warn("Cannot convert " + projectDir, e);
+      }
     }
-    return SystemProperties.getUserHome();
+    return Path.of(SystemProperties.getUserHome());
   }
 
   /**
    * @param path can be null, incorrect path or path to the valid file or directory.
    * @return the provided path if it is a valid directory path or parent directory path if provided path points to a valid file.
+   *
+   * TODO Fix RevealFileInTerminalAction to pass directory (not file) and replace with toExistentNioDirectory.
    */
-  private static @Nullable String findValidWorkingDirectory(@Nullable String path) {
+  private static @Nullable Path findValidWorkingDirectory(@Nullable String path) {
     if (path == null) return null;
 
     Path directoryPath;
@@ -98,34 +119,43 @@ public final class LocalOptionsConfigurer {
       return null;
     }
 
+    if (!directoryPath.isAbsolute()) return null;
+
     if (Files.isDirectory(directoryPath)) {
-      return directoryPath.toString();
+      return directoryPath;
     }
 
     Path parentPath = directoryPath.getParent();
     if (parentPath != null && Files.isDirectory(parentPath)) {
-      return parentPath.toString();
+      return parentPath;
     }
 
     return null;
   }
 
   private static @NotNull Map<String, String> getTerminalEnvironment(@NotNull Map<String, String> baseEnvs,
+                                                                     @NotNull TerminalProcessType processType,
                                                                      @NotNull Project project,
                                                                      @NotNull EelDescriptor eelDescriptor,
+                                                                     @NotNull EelPlatform platform,
                                                                      @NotNull List<String> shellCommand) {
     final var isWindows = EelPlatformKt.isWindows(eelDescriptor.getOsFamily());
 
-    Map<String, String> envs = isWindows ? CollectionFactory.createCaseInsensitiveStringMap() : new HashMap<>();
+    Map<String, String> envs = ShellStartupOptionsKt.createEnvVariablesMap(eelDescriptor.getOsFamily());
     EnvironmentVariablesData envData = TerminalProjectOptionsProvider.getInstance(project).getEnvData();
     if (envData.isPassParentEnvs()) {
-      envs.putAll(TerminalStartupKt.fetchMinimalEnvironmentVariablesBlocking(eelDescriptor));
+      var parentEnvs = processType == TerminalProcessType.SHELL
+                       ? TerminalStartupKt.fetchMinimalEnvironmentVariablesBlocking(eelDescriptor)
+                       : TerminalStartupKt.fetchDefaultEnvironmentVariablesBlocking(eelDescriptor);
+      envs.putAll(parentEnvs);
       EnvironmentRestorer.restoreOverriddenVars(envs);
       if (envs.isEmpty()) {
-        LOG.warn("Empty parent environment for " + shellCommand + " on (" + eelDescriptor.getMachine().getName() + ")");
+        LOG.warn("Empty parent environment for process type %s, shell command %s on (%s)"
+                   .formatted(processType, shellCommand, eelDescriptor.getName()));
       }
       if (LOG.isDebugEnabled()) {
-        LOG.debug("Parent environment for " + shellCommand + " on (" + eelDescriptor.getMachine().getName() + ")" + ": " + envs);
+        LOG.debug("Parent environment for process type %s, shell command %s on (%s): %s"
+                    .formatted(processType, shellCommand, eelDescriptor.getName(), envs));
       }
     }
     else {
@@ -139,7 +169,7 @@ public final class LocalOptionsConfigurer {
     envs.put(TERMINAL_EMULATOR, "JetBrains-JediTerm");
     envs.put(TERM_SESSION_ID, UUID.randomUUID().toString());
 
-    TerminalEnvironment.INSTANCE.setCharacterEncoding(envs);
+    TerminalEnvironment.INSTANCE.setCharacterEncoding(platform, envs);
 
     // user-defined envs are passed for trusted projects only (IJPL-111912)
     EnvironmentVariablesData trustedEnvData = TrustedProjects.isProjectTrusted(project) ? envData : null;
@@ -156,9 +186,10 @@ public final class LocalOptionsConfigurer {
   private static @NotNull List<String> getInitialCommand(
     @NotNull ShellStartupOptions options,
     @NotNull Project project,
-    @NotNull String workingDir
+    @NotNull Path workingDir,
+    boolean isRequestedWorkingDirectoryInvalid
   ) {
-    List<String> shellCommand = fixShellCommand(options.getShellCommand());
+    List<String> shellCommand = fixShellCommand(options.getShellCommand(), isRequestedWorkingDirectoryInvalid);
     if (shellCommand != null) {
       return shellCommand;
     }
@@ -166,17 +197,26 @@ public final class LocalOptionsConfigurer {
     return LocalTerminalStartCommandBuilder.convertShellPathToCommand(shellPath, workingDir);
   }
 
-  private static @Nullable List<String> fixShellCommand(@Nullable List<String> shellCommand) {
+  private static @Nullable List<String> fixShellCommand(
+    @Nullable List<String> shellCommand,
+    boolean isRequestedWorkingDirectoryInvalid
+  ) {
     if (OS.CURRENT == OS.Windows && !TerminalStartupKt.shouldUseEelApi() &&
         isUnixPath(ContainerUtil.getFirstItem(shellCommand))) {
       return null; // use the default shell path
     }
+    if (isRequestedWorkingDirectoryInvalid && isUnixPath(ContainerUtil.getFirstItem(shellCommand))) {
+      // When switching between Host and DevContainer projects,
+      // terminal tabs are stored in the same place (unfortunately).
+      // Let's use the default shell path instead of the invalid stored shell path in such a case.
+      return null;
+    }
     return shellCommand;
   }
 
-  private static @NotNull String fixShellPath(@NotNull String shellPath, @NotNull String workingDirectory) {
+  private static @NotNull String fixShellPath(@NotNull String shellPath, @NotNull Path workingDirectory) {
     if (OS.CURRENT == OS.Windows && !TerminalStartupKt.shouldUseEelApi() && isUnixPath(shellPath)) {
-      WslPath wslPath = WslPath.parseWindowsUncPath(workingDirectory);
+      WslPath wslPath = WslPath.parseWindowsUncPath(workingDirectory.toString());
       if (wslPath != null) {
         return "wsl.exe --distribution " + wslPath.getDistributionId();
       }

@@ -21,7 +21,11 @@ import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinPsiUpdateModCommandAction
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtDestructuringDeclaration
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtParameter
 
 internal object AddDataModifierFixFactory {
     val addDataModifierFixFactory = KotlinQuickFixFactory.ModCommandBased { diagnostic: KaFirDiagnostic.ComponentFunctionMissing ->
@@ -40,7 +44,7 @@ internal object AddDataModifierFixFactory {
             ?: return@ModCommandBased emptyList()
 
         val modality = classSymbol.modality
-        if (modality != KaSymbolModality.FINAL || classSymbol.isInner) return@ModCommandBased emptyList()
+        if (modality != KaSymbolModality.FINAL || classSymbol.isInner || classSymbol.isData) return@ModCommandBased emptyList()
         val constructors = classSymbol.declaredMemberScope.constructors
         val ctorParams = constructors.firstOrNull { it.isPrimary }?.valueParameters ?: return@ModCommandBased emptyList()
         if (ctorParams.isEmpty()) return@ModCommandBased emptyList()
@@ -81,9 +85,9 @@ internal object AddDataModifierFixFactory {
     }
 }
 
-context(_: KaSession)
 @ApiStatus.Internal
 @OptIn(KaExperimentalApi::class)
+context(_: KaSession)
 fun KaDeclarationSymbol.isVisible(position: PsiElement): Boolean {
     val file = (position.containingFile as? KtFile)?.symbol ?: return false
     return createUseSiteVisibilityChecker(file, receiverExpression = null, position).isVisible(this)

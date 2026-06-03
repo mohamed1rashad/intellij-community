@@ -30,8 +30,6 @@ interface PolySymbolQueryExecutorFactory : Disposable {
 
     fun addNameConversionRules(rules: PolySymbolNameConversionRules): PolySymbolQueryExecutorBuilder
 
-    fun setFramework(framework: String): PolySymbolQueryExecutorBuilder
-
     fun addPolyContext(kind: PolyContextKind, name: PolyContextName?): PolySymbolQueryExecutorBuilder
 
     fun allowResolve(allowResolve: Boolean): PolySymbolQueryExecutorBuilder
@@ -51,7 +49,7 @@ interface PolySymbolQueryExecutorFactory : Disposable {
       PolySymbolQueryExecutorBuilderImpl()
 
     fun createCustom(setup: PolySymbolQueryExecutorBuilder.() -> Unit): PolySymbolQueryExecutor =
-      PolySymbolQueryExecutorBuilderImpl()
+      PolySymbolQueryExecutorBuilderImpl(setup)
         .let { setup(it); it.create() }
 
   }

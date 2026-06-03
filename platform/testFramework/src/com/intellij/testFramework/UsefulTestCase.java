@@ -35,12 +35,22 @@ import com.intellij.testFramework.common.ThreadUtil;
 import com.intellij.testFramework.fixtures.IdeaTestExecutionPolicy;
 import com.intellij.ui.IconManager;
 import com.intellij.ui.icons.CoreIconManager;
-import com.intellij.util.*;
-import com.intellij.util.containers.*;
+import com.intellij.util.Consumer;
+import com.intellij.util.DocumentUtil;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.ReflectionUtil;
+import com.intellij.util.SmartList;
+import com.intellij.util.ThrowableRunnable;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.ObjectIntHashMap;
+import com.intellij.util.containers.ObjectIntMap;
+import com.intellij.util.containers.PeekableIterator;
+import com.intellij.util.containers.PeekableIteratorWrapper;
 import com.intellij.util.io.PathKt;
 import com.intellij.util.ui.UIUtil;
 import junit.framework.AssertionFailedError;
 import junit.framework.TestCase;
+import junit.framework.TestResult;
 import kotlinx.coroutines.Job;
 import org.jdom.Element;
 import org.jetbrains.annotations.ApiStatus;
@@ -64,9 +74,22 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
@@ -133,6 +156,7 @@ public abstract class UsefulTestCase extends TestCase {
   private @Nullable Disposable myTestRootDisposable;
   private @Nullable List<Path> myPathsToKeep;
   private @Nullable Path myTempDir;
+  private @Nullable Description myTestDescription;
 
   private static CodeInsightSettings defaultSettings = new CodeInsightSettings();
 
@@ -225,6 +249,11 @@ public abstract class UsefulTestCase extends TestCase {
   }
 
   @Override
+  public void run(TestResult result) {
+    ApplicationManagerEx.runInStressTest(isStressTest(), () -> super.run(result));
+  }
+
+  @Override
   protected void setUp() throws Exception {
     super.setUp();
 
@@ -233,7 +262,6 @@ public abstract class UsefulTestCase extends TestCase {
     setupTempDir();
 
     boolean isStressTest = isStressTest();
-    ApplicationManagerEx.setInStressTest(isStressTest);
     if (isPerformanceTest()) {
       Timings.getStatistics();
     }
@@ -411,6 +439,14 @@ Most likely there was an uncaught exception in asynchronous execution that resul
     return disposable;
   }
 
+  private @NotNull Description getTestDescription() {
+    Description testDescription = myTestDescription;
+    if (testDescription == null) {
+      myTestDescription = testDescription = Description.createTestDescription(getClass(), getName());
+    }
+    return testDescription;
+  }
+
   /**
    * @deprecated not JUnit4-friendly; to override the way tests are executed use {@link #runTestRunnable} instead
    */
@@ -451,13 +487,14 @@ Most likely there was an uncaught exception in asynchronous execution that resul
 
   protected final void invokeSetUp() throws Exception {
     long setupStart = System.nanoTime();
-    setUp();
+    TestLoggerFactory.fixtureInitialization(false, getTestDescription().getDisplayName(), ()->setUp());
     long setupCost = (System.nanoTime() - setupStart) / 1000000;
     logPerClassCost((int)setupCost, TOTAL_SETUP_COST_MILLIS, TOTAL_SETUP_COUNT);
   }
 
   protected void invokeTearDown() throws Exception {
     long teardownStart = System.nanoTime();
+    TestLoggerFactory.onFixturesDisposeStart(false);
     tearDown();
     long teardownCost = (System.nanoTime() - teardownStart) / 1000000;
     logPerClassCost((int)teardownCost, TOTAL_TEARDOWN_COST_MILLIS, TOTAL_TEARDOWN_COUNT);
@@ -531,10 +568,9 @@ Most likely there was an uncaught exception in asynchronous execution that resul
   }
 
   protected @NotNull ThrowableRunnable<Throwable> wrapTestRunnable(@NotNull ThrowableRunnable<Throwable> testRunnable) {
-    Description testDescription = Description.createTestDescription(getClass(), getName());
     return () -> {
       boolean success = false;
-      TestLoggerFactory.onTestStarted();
+      TestLoggerFactory.onTestStarted(getClass());
       try {
         recordErrorsLoggedInTheCurrentThreadAndReportThemAsFailures(testRunnable);
         success = true;
@@ -548,7 +584,7 @@ Most likely there was an uncaught exception in asynchronous execution that resul
         throw t;
       }
       finally {
-        TestLoggerFactory.onTestFinished(success, testDescription);
+        TestLoggerFactory.onTestFinished(success, getTestDescription());
       }
     };
   }
@@ -1075,11 +1111,12 @@ Most likely there was an uncaught exception in asynchronous execution that resul
   /**
    * @return true for a test which performs a lot of computations to test resource consumption, not correctness.
    * Such tests should avoid performing expensive consistency checks, e.g., data structure consistency complex validations.
-   * If you want your test to be treated as "Performance", include the "Performance" word in its class/method name.
-   * For example: {@code public void testHighlightingPerformance()}
+   * If you want your test to be treated as "Performance", include the "Performance" word in its class or mark
+   * the method as {@link com.intellij.testFramework.PerformanceUnitTest}.
+   * For example: {@code @PerformanceUnitTest public void testHighlightingPerformance()}
    */
   public final boolean isPerformanceTest() {
-    return TestFrameworkUtil.isPerformanceTest(getName(), getClass().getSimpleName());
+    return TestFrameworkUtil.isPerformanceTest(getName(), getClass());
   }
 
   /**
@@ -1089,9 +1126,7 @@ Most likely there was an uncaught exception in asynchronous execution that resul
    * For example: {@code public void testStressPSIFromDifferentThreads()}
    */
   public final boolean isStressTest() {
-    String testName = getName();
-    String className = getClass().getSimpleName();
-    return TestFrameworkUtil.isStressTest(testName, className);
+    return TestFrameworkUtil.isStressTest(getName(), getClass());
   }
 
   public static void doPostponedFormatting(@NotNull Project project) {
@@ -1105,7 +1140,7 @@ Most likely there was an uncaught exception in asynchronous execution that resul
    * Checks that the code block throws a specified exception.
    */
   public static void assertThrows(@NotNull Class<? extends Throwable> exceptionClass, @NotNull ThrowableRunnable<?> runnable) {
-    assertThrows(exceptionClass, null, runnable);
+    assertThrows(runnable, exceptionClass, null);
   }
 
   /**
@@ -1115,6 +1150,14 @@ Most likely there was an uncaught exception in asynchronous execution that resul
   public static void assertThrows(@NotNull Class<? extends Throwable> exceptionClass,
                                   @Nullable String expectedErrorMsgPart,
                                   @NotNull ThrowableRunnable<?> runnable) {
+    assertThrows(runnable, exceptionClass, expectedErrorMsgPart != null ? msg -> assertTrue(
+      msg.getClass() + " message was expected to contain '" + expectedErrorMsgPart + "', but got: '" + msg + "'",
+      msg.contains(expectedErrorMsgPart)) : null);
+  }
+
+  public static void assertThrows(@NotNull ThrowableRunnable<?> runnable,
+                                  @NotNull Class<? extends Throwable> exceptionClass,
+                                  @Nullable Consumer<String> messageChecker) {
     boolean wasThrown = false;
     try {
       runnable.run();
@@ -1130,8 +1173,8 @@ Most likely there was an uncaught exception in asynchronous execution that resul
         throw new AssertionError("Expected instance of: " + exceptionClass + " actual: " + cause.getClass(), cause);
       }
 
-      if (expectedErrorMsgPart != null) {
-        assertTrue(cause.getClass()+" message was expected to contain '"+expectedErrorMsgPart+"', but got: '"+cause.getMessage()+"'", ObjectUtils.notNull(cause.getMessage(), "").contains(expectedErrorMsgPart));
+      if (messageChecker != null) {
+        messageChecker.accept(ObjectUtils.notNull(cause.getMessage(), ""));
       }
     }
     finally {

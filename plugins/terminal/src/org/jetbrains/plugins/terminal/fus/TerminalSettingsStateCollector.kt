@@ -9,22 +9,32 @@ import com.intellij.internal.statistic.eventLog.events.EventId1
 import com.intellij.internal.statistic.service.fus.collectors.ApplicationUsagesCollector
 import com.intellij.openapi.editor.colors.FontPreferences
 import com.intellij.terminal.TerminalUiSettingsManager
-import org.jetbrains.plugins.terminal.*
+import org.jetbrains.plugins.terminal.DEFAULT_TERMINAL_COLUMN_SPACING
+import org.jetbrains.plugins.terminal.DEFAULT_TERMINAL_FONT_SIZE
+import org.jetbrains.plugins.terminal.DEFAULT_TERMINAL_LINE_SPACING
+import org.jetbrains.plugins.terminal.RunCommandUsingIdeUtil
+import org.jetbrains.plugins.terminal.TerminalEngine
+import org.jetbrains.plugins.terminal.TerminalFontSettingsService
+import org.jetbrains.plugins.terminal.TerminalOptionsProvider
+import org.jetbrains.plugins.terminal.agent.TerminalAgentsStateService
 import org.jetbrains.plugins.terminal.block.BlockTerminalOptions
 import org.jetbrains.plugins.terminal.block.completion.TerminalCommandCompletionShowingMode
 import org.jetbrains.plugins.terminal.block.prompt.TerminalPromptStyle
 import org.jetbrains.plugins.terminal.settings.TerminalLocalOptions
 
 internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
-  private val GROUP = EventLogGroup("terminalShell.settings", 5)
+  private val GROUP = EventLogGroup("terminalShell.settings", 7)
 
   private val NON_DEFAULT_OPTIONS = GROUP.registerEvent(
     "non.default.options",
     EventFields.Enum<BooleanOptions>("option_name") { it.settingName },
     EventFields.Enabled
   )
-  private val NON_DEFAULT_SHELL = GROUP.registerEvent("non.default.shell", "User modified the default shell path")
-  private val NON_DEFAULT_TAB_NAME = GROUP.registerEvent("non.default.tab.name", "User modified the default terminal tab name")
+  private val NON_DEFAULT_SHELL = GROUP.registerEvent(
+    "non.default.shell",
+    EventFields.String("shell", TerminalShellInfoStatistics.KNOWN_SHELLS.toList()),
+  )
+  private val NON_DEFAULT_TAB_NAME = GROUP.registerEvent("non.default.tab.name")
   private val NON_DEFAULT_ENGINE = GROUP.registerEvent(
     "non.default.engine",
     EventFields.Enum<TerminalEngine>("engine")
@@ -39,13 +49,9 @@ internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
   )
   private val NON_DEFAULT_COMMAND_COMPLETION_MODE = GROUP.registerEvent(
     "non.default.command.completion.mode",
-    EventFields.Enum<TerminalCommandCompletionMode>("mode"),
-    "Users preference of showing completion popup automatically"
+    EventFields.Enum<TerminalCommandCompletionMode>("mode")
   )
-  private val NON_DEFAULT_FONT_NAME = GROUP.registerEvent(
-    "non.default.font.name",
-    "User modified the default terminal font name",
-  )
+  private val NON_DEFAULT_FONT_NAME = GROUP.registerEvent("non.default.font.name")
   private val NON_DEFAULT_FONT_SIZE = GROUP.registerEvent(
     "non.default.font.size", 
     EventFields.Float("font_size"),
@@ -58,6 +64,10 @@ internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
     "non.default.column.spacing", 
     EventFields.Float("column_spacing"),
   )
+  private val NON_DEFAULT_SELECTED_AI_AGENT = GROUP.registerEvent(
+    "non.default.selected.ai.agent",
+    EventFields.Enum<FusTerminalAiAgent>("agent"),
+  )
 
   override fun getGroup(): EventLogGroup = GROUP
 
@@ -65,8 +75,14 @@ internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
     val metrics = mutableSetOf<MetricEvent>()
     addNonDefaultBooleanOptions(metrics)
 
-    addIfNotDefault(metrics, NON_DEFAULT_SHELL, TerminalLocalOptions.getInstance().shellPath, null)
     addIfNotDefault(metrics, NON_DEFAULT_TAB_NAME, TerminalOptionsProvider.instance.tabName, TerminalOptionsProvider.State().myTabName)
+
+    addIfNotDefault(
+      metrics,
+      NON_DEFAULT_SHELL,
+      curValue = TerminalLocalOptions.getInstance().shellPath,
+      defaultValue = null,
+    ) { shellCommandLine -> TerminalShellInfoStatistics.getShellNameForStat(shellCommandLine) }
 
     addIfNotDefault(
       metrics,
@@ -124,6 +140,13 @@ internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
       DEFAULT_TERMINAL_COLUMN_SPACING,
     ) { it.floatValue }
 
+    addIfNotDefault(
+      metrics,
+      event = NON_DEFAULT_SELECTED_AI_AGENT,
+      curValue = TerminalAgentsStateService.getInstance().lastLaunchedAgentKey,
+      defaultValue = TerminalAgentsStateService.State().lastLaunchedAgentKey
+    ) { it?.toFusTerminalAiAgent() ?: FusTerminalAiAgent.NONE }
+
     return metrics
   }
 
@@ -150,6 +173,12 @@ internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
       BooleanOptions.RUN_COMMANDS_USING_IDE,
       curValue = RunCommandUsingIdeUtil.isEnabled,
       defaultValue = RunCommandUsingIdeUtil.DEFAULT_VALUE
+    )
+    addIfNotDefault(
+      metrics,
+      BooleanOptions.AI_AGENTS_BUTTON_VISIBLE,
+      curValue = TerminalAgentsStateService.getInstance().isSelectorVisible,
+      defaultValue = TerminalAgentsStateService.State().isSelectorVisible
     )
   }
 
@@ -201,6 +230,7 @@ internal class TerminalSettingsStateCollector : ApplicationUsagesCollector() {
     USE_OPTION_AS_META("use_option_as_meta"),
     RUN_COMMANDS_USING_IDE("run_commands_using_ide"),
     SHOW_SEPARATORS_BETWEEN_COMMANDS("show_separators_between_commands"),
+    AI_AGENTS_BUTTON_VISIBLE("ai_agents_button_visible"),
   }
 }
 

@@ -19,7 +19,28 @@ import org.jetbrains.annotations.NotNull;
 import java.util.HashMap;
 import java.util.Map;
 
-import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.*;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.BRACES;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.BRACKETS;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.CLASS_NAME;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.COMMA;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.DOC_COMMENT;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.DOC_COMMENT_TAG;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.DOT;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.FUNCTION_CALL;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.FUNCTION_DECLARATION;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.IDENTIFIER;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.INVALID_STRING_ESCAPE;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.KEYWORD;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.LINE_COMMENT;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.LOCAL_VARIABLE;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.METADATA;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.NUMBER;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.OPERATION_SIGN;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.PARAMETER;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.PARENTHESES;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.PREDEFINED_SYMBOL;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.STRING;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.VALID_STRING_ESCAPE;
 
 /**
  * Colors and lexer(s) needed for highlighting.
@@ -118,6 +139,8 @@ public class PyHighlighter extends SyntaxHighlighterBase {
   public static final TextAttributesKey PY_FSTRING_FRAGMENT_BRACES = TextAttributesKey.createTextAttributesKey("PY.FSTRING_FRAGMENT_BRACES", VALID_STRING_ESCAPE);
   public static final TextAttributesKey PY_FSTRING_FRAGMENT_COLON = TextAttributesKey.createTextAttributesKey("PY.FSTRING_FRAGMENT_COLON", VALID_STRING_ESCAPE);
   public static final TextAttributesKey PY_FSTRING_FRAGMENT_TYPE_CONVERSION = TextAttributesKey.createTextAttributesKey("PY.FSTRING_FRAGMENT_TYPE_CONVERSION", VALID_STRING_ESCAPE);
+  public static final TextAttributesKey PY_FSTRING_FORMAT_SPEC_SPECIAL_CHAR = TextAttributesKey.createTextAttributesKey("PY.FSTRING_FORMAT_SPEC_SPECIAL_CHAR", VALID_STRING_ESCAPE);
+  public static final TextAttributesKey PY_FSTRING_FORMAT_SPEC_NUMBER = TextAttributesKey.createTextAttributesKey("PY.FSTRING_FORMAT_SPEC_NUMBER", NUMBER);
   public static final TextAttributesKey PY_LOCAL_VARIABLE = TextAttributesKey.createTextAttributesKey("PY.LOCAL_VARIABLE", LOCAL_VARIABLE);
   public static final TextAttributesKey PY_TYPE_PARAMETER = TextAttributesKey.createTextAttributesKey("PY.TYPE_PARAMETER", PARAMETER);
 

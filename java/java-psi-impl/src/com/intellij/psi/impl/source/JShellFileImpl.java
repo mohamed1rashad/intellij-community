@@ -6,7 +6,14 @@ import com.intellij.lang.Language;
 import com.intellij.lang.java.JShellLanguage;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.util.Condition;
-import com.intellij.psi.*;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiEmptyStatement;
+import com.intellij.psi.PsiJShellFile;
+import com.intellij.psi.PsiJShellHolderMethod;
+import com.intellij.psi.PsiJShellRootClass;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.util.SmartList;
 import org.jetbrains.annotations.NotNull;
 
@@ -31,11 +38,6 @@ public class JShellFileImpl extends PsiJavaFileBaseImpl implements PsiJShellFile
   @Override
   public @NotNull FileType getFileType() {
     return JShellFileType.INSTANCE;
-  }
-
-  @Override
-  public boolean isPhysical() {
-    return getViewProvider().isPhysical();
   }
 
   @Override

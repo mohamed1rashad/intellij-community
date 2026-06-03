@@ -1,7 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.ui
 
-import com.intellij.execution.*
+import com.intellij.execution.AdditionalRunningOptions
+import com.intellij.execution.ExecutionBundle
+import com.intellij.execution.ExecutionListener
+import com.intellij.execution.ExecutionManager
+import com.intellij.execution.Executor
+import com.intellij.execution.ExecutorRegistry
+import com.intellij.execution.InlineResumeCreator
+import com.intellij.execution.RunManager
+import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.execution.actions.ExecutorAction
 import com.intellij.execution.actions.RunConfigurationsComboBoxAction
 import com.intellij.execution.actions.RunConfigurationsComboBoxAction.SelectConfigAction
@@ -9,6 +17,8 @@ import com.intellij.execution.actions.RunCurrentFileExecutorAction
 import com.intellij.execution.actions.RunSpecifiedConfigExecutorAction
 import com.intellij.execution.configurations.RunProfile
 import com.intellij.execution.executors.DefaultRunExecutor
+import com.intellij.execution.fullRunAccess
+import com.intellij.execution.getStoppableDescriptors
 import com.intellij.execution.impl.ExecutionManagerImpl
 import com.intellij.execution.impl.RunManagerImpl
 import com.intellij.execution.process.ProcessHandler
@@ -16,14 +26,38 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ProgramRunner
 import com.intellij.icons.AllIcons
 import com.intellij.ide.ActivityTracker
-import com.intellij.ide.dnd.*
-import com.intellij.openapi.actionSystem.*
+import com.intellij.ide.dnd.DnDAction
+import com.intellij.ide.dnd.DnDDragStartBean
+import com.intellij.ide.dnd.DnDEvent
+import com.intellij.ide.dnd.DnDManager
+import com.intellij.ide.dnd.DnDSource
+import com.intellij.ide.dnd.DnDTarget
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionGroupUtil
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CustomizedDataContext
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.DataKey
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.KeepPopupOnPerform
+import com.intellij.openapi.actionSystem.PlatformDataKeys
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.impl.PresentationFactory
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehavior
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
+import com.intellij.openapi.components.service
 import com.intellij.openapi.options.advanced.AdvancedSettings
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.DumbAwareToggleAction
@@ -32,10 +66,13 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.ListPopupStep
 import com.intellij.openapi.ui.popup.PopupStep
 import com.intellij.openapi.ui.popup.StackingPopupDispatcher
 import com.intellij.openapi.ui.popup.util.PopupUtil
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.util.NlsActions
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -44,8 +81,10 @@ import com.intellij.openapi.vfs.projectFilesWrite
 import com.intellij.openapi.wm.ToolWindowId
 import com.intellij.platform.ide.core.permissions.Permission
 import com.intellij.platform.ide.core.permissions.RequiresPermissions
+import com.intellij.ui.ClientProperty
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.GroupedElementsRenderer
+import com.intellij.ui.PopupBorder
 import com.intellij.ui.components.JBList
 import com.intellij.ui.popup.ActionPopupOptions
 import com.intellij.ui.popup.ActionPopupStep
@@ -55,8 +94,12 @@ import com.intellij.ui.popup.list.ListPopupImpl
 import com.intellij.ui.popup.list.ListPopupModel
 import com.intellij.ui.popup.list.PopupListElementRenderer
 import com.intellij.util.messages.Topic
+import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBDimension
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.JLabelUtil
+import com.intellij.util.ui.SwingTextTrimmer
+import com.intellij.util.ui.SwingTextTrimmerStrategy
 import com.intellij.util.xmlb.annotations.Attribute
 import com.intellij.util.xmlb.annotations.OptionTag
 import com.intellij.util.xmlb.annotations.Tag
@@ -64,11 +107,16 @@ import com.intellij.util.xmlb.annotations.XCollection
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.awt.Component
+import java.awt.Dimension
+import java.awt.FontMetrics
 import java.awt.Point
-import java.util.*
+import java.util.WeakHashMap
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import java.util.function.Predicate
+import javax.swing.GroupLayout
+import javax.swing.JComponent
 import javax.swing.JList
+import javax.swing.ListCellRenderer
 import kotlin.concurrent.read
 import kotlin.concurrent.write
 import kotlin.math.max
@@ -86,6 +134,8 @@ val RUN_CONFIGURATION_KEY: DataKey<RunnerAndConfigurationSettings> = DataKey.cre
 @JvmField
 internal val RUN_CONFIGURATION_ID: Key<String> = Key.create("sub.popup.run.configuration.unique.id")
 
+private val NEEDS_RUN_CONFIG_NAME_TRIMMING: Key<Boolean> = Key.create("sub.popup.run.configuration.need.trimming")
+
 private const val TAG_PINNED = "pinned"
 private const val TAG_RECENT = "recent"
 private const val TAG_REGULAR_HIDE = "regular-hide" // hidden behind the "All configurations" toggle
@@ -93,7 +143,7 @@ private const val TAG_REGULAR_SHOW = "regular-show" // shown regularly
 private const val TAG_REGULAR_DUPE = "regular-dupe" // shown regularly until search (pinned/recent duplicate)
 private const val TAG_HIDDEN = "hidden"             // hidden until search
 
-private class RunConfigurationsActionGroup : ActionGroup(), ActionRemoteBehaviorSpecification.BackendOnly {
+internal class RunConfigurationsActionGroup : ActionGroup(), ActionRemoteBehaviorSpecification.BackendOnly {
   override fun getChildren(e: AnActionEvent?): Array<AnAction> {
     val project = e?.project ?: return emptyArray()
     val selectedFile = e.getData(PlatformDataKeys.LAST_ACTIVE_FILE_EDITOR)?.file
@@ -234,6 +284,7 @@ internal class RunConfigurationsActionGroupPopup(actionGroup: ActionGroup,
 
   private val pinnedSize: Int
   private val serviceState: RunConfigurationStartHistory
+  internal var maxWidth: Int = JBUI.scale(MAXIMAL_POPUP_WIDTH)
 
   init {
     serviceState = RunConfigurationStartHistory.getInstance(project)
@@ -276,18 +327,22 @@ internal class RunConfigurationsActionGroupPopup(actionGroup: ActionGroup,
     })
   }
 
+  override fun createContentPanel(
+    resizable: Boolean,
+    border: PopupBorder,
+    isToDrawMacCorner: Boolean,
+  ): MyContentPanel {
+    return ContentPanelWithMaxWidth(border)
+  }
+
   override fun createPopup(parent: WizardPopup?, step: PopupStep<*>?, parentValue: Any?): WizardPopup {
-    val popup = super.createPopup(parent, step, parentValue)
+    val popup = ChildListPopup(parent, step, parentValue)
     popup.minimumSize = JBDimension(MINIMAL_POPUP_WIDTH, 0)
     return popup
   }
 
   override fun getListElementRenderer(): PopupListElementRenderer<PopupFactoryImpl.ActionItem> {
-    return object : PopupListElementRenderer<PopupFactoryImpl.ActionItem>(this) {
-      override fun isShowSecondaryText(): Boolean = mySpeedSearch.isHoldingFilter
-
-      override fun isShowSecondaryIcon(): Boolean = mySpeedSearch.isHoldingFilter
-    }
+    return MyListElementRenderer()
   }
 
   override fun shouldBeShowing(value: Any?): Boolean {
@@ -321,6 +376,115 @@ internal class RunConfigurationsActionGroupPopup(actionGroup: ActionGroup,
       c.separator.preferredSize.height
     }
     else 0
+  }
+
+  private inner class ChildListPopup(
+    parent: WizardPopup?,
+    step: PopupStep<*>?,
+    parentValue: Any?,
+  ) : ListPopupImpl(project, parent, step as ListPopupStep<*>, parentValue) {
+    override fun createContentPanel(
+      resizable: Boolean,
+      border: PopupBorder,
+      isToDrawMacCorner: Boolean,
+    ): MyContentPanel {
+      @Suppress("UNCHECKED_CAST")
+      if ((step as? ListPopupStep<PopupFactoryImpl.ActionItem>)?.values?.any { it.getClientProperty(NEEDS_RUN_CONFIG_NAME_TRIMMING) == true } == true) {
+        return ContentPanelWithMaxWidth(border)
+      }
+      else {
+        return super.createContentPanel(resizable, border, isToDrawMacCorner)
+      }
+    }
+
+    override fun getListElementRenderer(): ListCellRenderer<*> {
+      return MyListElementRenderer()
+    }
+  }
+
+  private inner class ContentPanelWithMaxWidth(border: PopupBorder) : MyContentPanel(border) {
+    // AbstractPopup only uses the preferred size, so we coerce it instead of overriding the max size.
+    override fun getPreferredSize(): Dimension? {
+      return super.getPreferredSize().also {
+        it.width = it.width.coerceAtMost(maxWidth)
+      }
+    }
+  }
+
+  private inner class MyListElementRenderer : PopupListElementRenderer<PopupFactoryImpl.ActionItem>(this) {
+    private lateinit var mainPanel: JComponent
+    private lateinit var mainPanelLayout: GroupLayout
+    
+    override fun isShowSecondaryText(): Boolean = mySpeedSearch.isHoldingFilter
+
+    override fun isShowSecondaryIcon(): Boolean = mySpeedSearch.isHoldingFilter
+
+    override fun customizeComponent(
+      list: JList<out PopupFactoryImpl.ActionItem?>?,
+      value: PopupFactoryImpl.ActionItem?,
+      isSelected: Boolean,
+    ) {
+      isReserveSpaceForExtraButtons = false // otherwise the name won't fit if the popup has the same width as the button
+      mainPanelLayout.invalidateLayout(mainPanel) // clear the cached preferred size
+      super.customizeComponent(list, value, isSelected)
+      if (value?.getClientProperty(NEEDS_RUN_CONFIG_NAME_TRIMMING) == true) {
+        if (!isShowingTooltipForExtraButton) {
+          myRendererComponent.setToolTipText(null) // we override the tool tip using getToolTipOverride()
+        }
+        ClientProperty.put(myTextLabel, SwingTextTrimmer.KEY, SwingTextTrimmer.createCustomTrimmer(object : SwingTextTrimmerStrategy {
+          override fun trim(text: @NlsActions.ActionText String, metrics: FontMetrics, availableWidth: Int): String {
+            return trimRunConfigurationName(text, availableWidth, GraphicsUtil.fontMetrics(metrics.font))
+          }
+        }))
+        JLabelUtil.setTrimOverflow(myTextLabel, true)
+      }
+    }
+
+    override fun getToolTipOverride(): @NlsContexts.Tooltip String? {
+      if (isShowingTooltipForExtraButton) return null
+      // A hack: this triggers com.intellij.ide.ui.laf.darcula.ui.DarculaLabelUI.layoutCL and updates the trimmer's status.
+      // The width and height we have to trust here because we have nothing else.
+      myTextLabel.getBaseline(myTextLabel.width, myTextLabel.height)
+      val trimmer = ClientProperty.get(myTextLabel, SwingTextTrimmer.KEY) ?: return null
+      return if (trimmer.isTrimmed) StringUtil.escapeXmlEntities(myTextLabel.text) else null
+    }
+
+    override fun layoutComponent(middleItemComponent: JComponent): JComponent {
+      return super.layoutComponent(middleItemComponent.also { relayoutMainPanel(it) })
+    }
+
+    /**
+     * A hack to fix the default layout of the renderer.
+     * 
+     * It uses `BorderLayout` by default, which doesn't support shrinking of the west and east components.
+     */
+    private fun relayoutMainPanel(panel: JComponent) {
+      mainPanel = panel
+      val components = panel.components.toList()
+      panel.removeAll()
+      val layout = GroupLayout(panel).also { mainPanelLayout = it }
+      val hg = layout.createSequentialGroup()
+      val vg = layout.createParallelGroup(GroupLayout.Alignment.BASELINE)
+      layout.setHorizontalGroup(hg)
+      layout.setVerticalGroup(vg)
+      val height = JBUI.CurrentTheme.List.rowHeight()
+
+      for ((i, c) in components.withIndex()) {
+        // The first component expand, pushing the others (the secondary text and the shortcut) to the right.
+        if (i == 0) {
+          hg.addComponent(c, GroupLayout.DEFAULT_SIZE, GroupLayout.DEFAULT_SIZE, 99999)
+        }
+        else {
+          hg.addComponent(c)
+        }
+      }
+      for (c in components) {
+        // Vertically, they all should be the same size as the rest of the renderer, otherwise alignment issues will occur.
+        vg.addComponent(c, height, height, height)
+      }
+
+      panel.layout = layout
+    }
   }
 
   private inner class MyDnDTarget : DnDTarget {
@@ -448,6 +612,9 @@ private fun createRunConfigurationWithInlines(project: Project,
 
     override fun update(e: AnActionEvent) {
       super.update(e)
+      // This popup has its own truncation logic, so we replace the shortened name set by super().
+      e.presentation.setText(configuration.name, false)
+      e.presentation.putClientProperty(NEEDS_RUN_CONFIG_NAME_TRIMMING, true)
       val filtered = filterOutRunIfDebugResumeIsPresent(
         e, ActionGroupUtil.getVisibleActions(inlineActionGroup, e).toList())
       e.presentation.putClientProperty(ActionUtil.INLINE_ACTIONS, filtered)
@@ -562,7 +729,7 @@ fun runCounterToString(e: AnActionEvent, stopCount: Int): String =
     stopCount.toString()
   }
 
-private class PinConfigurationAction(val conf: RunnerAndConfigurationSettings, isPinned: Boolean)
+internal class PinConfigurationAction(val conf: RunnerAndConfigurationSettings, isPinned: Boolean)
   : DumbAwareAction(), RequiresPermissions {
   init {
     templatePresentation.text = getText(isPinned)
@@ -590,7 +757,7 @@ private class PinConfigurationAction(val conf: RunnerAndConfigurationSettings, i
   }
 }
 
-private class StopConfigurationInlineAction(val executor: Executor, val settings: RunnerAndConfigurationSettings)
+internal class StopConfigurationInlineAction(val executor: Executor, val settings: RunnerAndConfigurationSettings)
   : DumbAwareAction(), RequiresPermissions {
 
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -758,7 +925,7 @@ class RunConfigurationStartHistory(private val project: Project) : PersistentSta
   }
 }
 
-private class ExecutionReasonableHistoryManager : ProjectActivity {
+internal class ExecutionReasonableHistoryManager : ProjectActivity {
   override suspend fun execute(project: Project) {
     project.messageBus.simpleConnect().subscribe(ExecutionManager.EXECUTION_TOPIC, MyExecutionListener { executorId, env, state ->
       getPersistedConfiguration(env.runnerAndConfigurationSettings)?.let { conf ->

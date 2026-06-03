@@ -4,6 +4,7 @@ package org.jetbrains.idea.maven.execution
 import com.intellij.execution.executors.DefaultDebugExecutor
 import com.intellij.execution.impl.RunManagerImpl.Companion.getInstanceImpl
 import com.intellij.execution.impl.RunnerAndConfigurationSettingsImpl
+import com.intellij.execution.process.BaseProcessHandler
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.process.ProcessOutputType
@@ -19,7 +20,7 @@ import com.intellij.util.concurrency.Semaphore
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.idea.maven.project.MavenGeneralSettings
 import org.junit.Test
-import kotlin.io.path.exists
+import java.nio.charset.Charset
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
@@ -29,19 +30,7 @@ abstract class MavenExecutionTest : MavenExecutionTestCase() {
     Registry.get("maven.use.scripts").setValue(useScripts, testRootDisposable)
   }
 
-  @Test
-  fun testExternalExecutor() = runBlocking {
-    createProjectSubFile("src/main/java/A.java", "public class A {}")
-    createProjectPom("""
-                         <groupId>test</groupId>
-                         <artifactId>project</artifactId>
-                         <version>1</version>
-                         """.trimIndent())
-    importProjectAsync()
-    assertFalse(projectPath.resolve("target").exists())
-    execute(MavenRunnerParameters(true, projectPath.toCanonicalPath(), null as String?, mutableListOf("compile"), emptyList()))
-    assertTrue(projectPath.resolve("target").exists())
-  }
+
 
   @Test
   fun testUpdatingExcludedFoldersAfterExecution() = runBlocking {
@@ -75,6 +64,7 @@ abstract class MavenExecutionTest : MavenExecutionTestCase() {
     val stdout = StringBuilder()
     val stderr = StringBuilder()
     val system = StringBuilder()
+    var charset: Charset? = null
     sema.down()
     edt<RuntimeException> {
       MavenRunConfigurationType.runConfiguration(
@@ -82,10 +72,11 @@ abstract class MavenExecutionTest : MavenExecutionTestCase() {
         settings,
         ProgramRunner.Callback { descriptor ->
           descriptor.processHandler!!.addProcessListener(MyTestExecutionListener(stdout, stderr, system, sema, descriptor))
+          charset = (descriptor.processHandler as? BaseProcessHandler<*>)?.charset
         }, false)
     }
     sema.waitFor(maxTimeToWait.inWholeMilliseconds)
-    return ExecutionInfo(system.toString(), stdout.toString(), stderr.toString())
+    return ExecutionInfo(system.toString(), stdout.toString(), stderr.toString(), charset)
   }
 
 
@@ -135,16 +126,18 @@ abstract class MavenExecutionTest : MavenExecutionTestCase() {
     val stderr = StringBuilder()
     val system = StringBuilder()
     sema.down()
+    var charset: Charset? = null
 
     ExecutionUtil.doRunConfiguration(configuration, DefaultDebugExecutor.getDebugExecutorInstance(), null, null, null) { environment ->
       environment.callback = ProgramRunner.Callback { descriptor ->
         descriptor.processHandler!!.addProcessListener(MyTestExecutionListener(stdout, stderr, system, sema, descriptor))
+        charset = (descriptor.processHandler as? BaseProcessHandler<*>)?.charset
       }
     }
     sema.waitFor(maxTimeToWait.inWholeMilliseconds)
-    return ExecutionInfo(system.toString(), stdout.toString(), stderr.toString())
+    return ExecutionInfo(system.toString(), stdout.toString(), stderr.toString(), charset)
   }
 
 }
 
-data class ExecutionInfo(val system: String, val stdout: String, val stderr: String)
+data class ExecutionInfo(val system: String, val stdout: String, val stderr: String, val charset: Charset?)

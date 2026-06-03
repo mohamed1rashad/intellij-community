@@ -1,7 +1,10 @@
 package com.intellij.grazie.text
 
-import com.intellij.grazie.utils.Text.looksLikeCode
-import com.intellij.openapi.util.TextRange
+import ai.grazie.rules.code.CodeDetector
+import com.intellij.grazie.spellcheck.GrazieSpellCheckingInspection
+import com.intellij.grazie.utils.treeRange
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.util.text.StringUtil
 
 /**
  * A natural language problem filter that suppresses problems in areas which resemble code.
@@ -14,19 +17,24 @@ import com.intellij.openapi.util.TextRange
  * @see InDocumentation
  */
 open class CodeProblemFilter : ProblemFilter() {
-
   override fun shouldIgnore(problem: TextProblem): Boolean {
-    return problem.shouldSuppressInCodeLikeFragments() &&
-           shouldSuppressInText(problem.text) &&
-           problem.highlightRanges.any { textAround(problem.text, it).looksLikeCode() }
+    if (!problem.shouldSuppressInCodeLikeFragments() || !shouldSuppressInText(problem.text)) return false
+    val codeFragments = CodeDetector.findCodeFragments(object: StringUtil.BombedCharSequence(problem.text) {
+      override fun checkCanceled() {
+        ProgressManager.checkCanceled()
+      }
+    })
+    return problem.highlightRanges.any { range -> codeFragments.any { it.containsInclusive(range.treeRange()) } }
+  }
+
+  override fun shouldIgnoreTypo(problem: TextProblem): Boolean {
+    return GrazieSpellCheckingInspection.hasSameNamedReferenceInFile(
+      problem.highlightRanges.first().subSequence(problem.text).toString(), problem.text.commonParent
+    )
   }
 
   protected open fun shouldSuppressInText(text: TextContent): Boolean =
     text.domain == TextContent.TextDomain.COMMENTS || text.domain == TextContent.TextDomain.LITERALS
-
-  private fun textAround(text: CharSequence, range: TextRange): CharSequence {
-    return text.subSequence((range.startOffset - 20).coerceAtLeast(0), (range.endOffset + 20).coerceAtMost(text.length))
-  }
 
   /** A variant of [CodeProblemFilter] that suppresses problems in code-like fragments in [TextContent.TextDomain.PLAIN_TEXT] */
   class InPlainText: CodeProblemFilter() {

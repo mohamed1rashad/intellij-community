@@ -8,6 +8,7 @@ import com.intellij.find.findUsages.FindUsagesManager;
 import com.intellij.find.findUsages.FindUsagesOptions;
 import com.intellij.find.impl.FindManagerImpl;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.externalSystem.importing.ImportSpec;
 import com.intellij.openapi.externalSystem.importing.ImportSpecBuilder;
 import com.intellij.openapi.externalSystem.model.DataNode;
@@ -31,7 +32,18 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.ContentEntry;
+import com.intellij.openapi.roots.ContentFolder;
+import com.intellij.openapi.roots.DependencyScope;
+import com.intellij.openapi.roots.JavadocOrderRootType;
+import com.intellij.openapi.roots.LibraryOrderEntry;
+import com.intellij.openapi.roots.ModuleOrderEntry;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.ModuleRootModel;
+import com.intellij.openapi.roots.OrderEntry;
+import com.intellij.openapi.roots.OrderRootType;
+import com.intellij.openapi.roots.RootPolicy;
+import com.intellij.openapi.roots.SourceFolder;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar;
 import com.intellij.openapi.util.Couple;
@@ -46,7 +58,6 @@ import com.intellij.platform.testFramework.assertion.moduleAssertion.ContentRoot
 import com.intellij.platform.testFramework.assertion.moduleAssertion.ModuleAssertions;
 import com.intellij.platform.testFramework.assertion.moduleAssertion.SourceRootAssertions;
 import com.intellij.psi.PsiElement;
-import com.intellij.testFramework.IndexingTestUtil;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.RunAll;
 import com.intellij.usageView.UsageInfo;
@@ -62,16 +73,27 @@ import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.AbstractSet;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
+import static com.intellij.platform.externalSystem.testFramework.ExternalSystemTestObservation.waitForProjectActivity;
 import static com.intellij.platform.externalSystem.testFramework.utils.module.ExternalSystemSourceRootAssertions.getExType;
 import static com.intellij.testFramework.EdtTestUtil.runInEdtAndGet;
-import static com.intellij.testFramework.EdtTestUtil.runInEdtAndWait;
 
 /**
  * @author Vladislav.Soroka
@@ -102,57 +124,72 @@ public abstract class ExternalSystemImportingTestCase extends NioExternalSystemT
   }
 
   public static void installExecutionOutputPrinter(@NotNull Disposable parentDisposable) {
+    var outputPrinter = new ExecutionOutputPrinter(parentDisposable);
     var notificationManager = ExternalSystemProgressNotificationManager.getInstance();
     var notificationListener = new ExternalSystemTaskNotificationListener() {
 
-      private final @NotNull TaskOutput stdOutput = new TaskOutput();
-      private final @NotNull TaskOutput errOutput = new TaskOutput();
-
       @Override
       public void onStart(@NotNull String projectPath, @NotNull ExternalSystemTaskId id) {
-        stdOutput.append(id, id + "\\n");
+        try {
+          outputPrinter.open(id);
+        }
+        catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+        outputPrinter.print(id, "Sync: %s\n".formatted(id), ProcessOutputType.SYSTEM);
+        outputPrinter.print(id, "Project: %s\n".formatted(projectPath), ProcessOutputType.SYSTEM);
+        outputPrinter.print(id, "\n", ProcessOutputType.SYSTEM);
       }
 
       @Override
       public void onTaskOutput(@NotNull ExternalSystemTaskId id, @NotNull String text, @NotNull ProcessOutputType processOutputType) {
-        if (processOutputType.isStdout()) {
-          stdOutput.append(id, text.replace("\n", "\\n").replace("\r", "\\r"));
-        }
-        else {
-          errOutput.append(id, text);
-        }
+        outputPrinter.print(id, text, processOutputType);
       }
 
       @Override
       public void onFailure(@NotNull String projectPath, @NotNull ExternalSystemTaskId id, @NotNull Exception exception) {
-        errOutput.append(id, ExceptionUtil.getThrowableText(exception));
+        outputPrinter.print(id, ExceptionUtil.getThrowableText(exception), ProcessOutputType.STDERR);
       }
 
       @Override
-      @SuppressWarnings("UseOfSystemOutOrSystemErr")
       public void onEnd(@NotNull String projectPath, @NotNull ExternalSystemTaskId id) {
-        stdOutput.append(id, "\n");
-        stdOutput.flush(id, System.out);
-        errOutput.flush(id, System.err);
+        outputPrinter.close(id);
       }
     };
     notificationManager.addNotificationListener(notificationListener, parentDisposable);
   }
 
-  private static class TaskOutput {
+  @SuppressWarnings("UseOfSystemOutOrSystemErr")
+  private static class ExecutionOutputPrinter {
 
-    private final @NotNull ConcurrentHashMap<ExternalSystemTaskId, StringBuilder> buffer = new ConcurrentHashMap<>();
+    private final @NotNull Disposable myParentDisposable;
+    private final @NotNull ConcurrentHashMap<ExternalSystemTaskId, PrintStream> myStreams = new ConcurrentHashMap<>();
 
-    private void append(@NotNull ExternalSystemTaskId id, @NotNull String output) {
-      buffer.computeIfAbsent(id, __ -> new StringBuilder())
-        .append(output);
+    private ExecutionOutputPrinter(@NotNull Disposable disposable) {
+      myParentDisposable = disposable;
     }
 
-    private void flush(@NotNull ExternalSystemTaskId id, @NotNull PrintStream stream) {
-      var output = buffer.remove(id);
-      if (output != null){
-        stream.print(output);
+    private void open(@NotNull ExternalSystemTaskId id) throws IOException {
+      var outputDir = Files.createDirectories(PathManager.getSystemDir().resolve("testlog", "syncOutput"));
+      var outputFile = Files.createTempFile(outputDir, FileUtil.sanitizeFileName(id.toString()) + "_", ".txt");
+      var outputStream = new PrintStream(Files.newOutputStream(outputFile), true, StandardCharsets.UTF_8);
+      myStreams.put(id, outputStream);
+      Disposer.register(myParentDisposable, () -> close(id));
+
+      System.out.println("Sync output: " + outputFile.toUri());
+    }
+
+    private void print(@NotNull ExternalSystemTaskId id, @NotNull String text, @NotNull ProcessOutputType processOutputType) {
+      var stream = myStreams.get(id);
+      if (stream != null) stream.print(text);
+      if (processOutputType.isStderr()) System.err.print(text);
+    }
+
+    private void close(@NotNull ExternalSystemTaskId id) {
+      var stream = myStreams.remove(id);
+      if (stream != null) {
         stream.flush();
+        stream.close();
       }
     }
   }
@@ -216,7 +253,7 @@ public abstract class ExternalSystemImportingTestCase extends NioExternalSystemT
     @NotNull JpsModuleSourceRootType<?> rootType,
     @NotNull List<String> expected
   ) {
-    assertSourceFolders(moduleName, rootType, __ -> true, expected);
+    assertSourceFolders(moduleName, rootType, _ -> true, expected);
   }
 
   private void assertGeneratedSourceFolders(
@@ -517,8 +554,9 @@ public abstract class ExternalSystemImportingTestCase extends NioExternalSystemT
     final Ref<Couple<String>> error = Ref.create();
     ImportSpec importSpec = createImportSpec();
     ExternalProjectRefreshCallback callback = importSpec.getCallback();
+    ImportSpecBuilder importSpecBuilder = new ImportSpecBuilder(importSpec);
     if (callback == null || callback instanceof ImportSpecBuilder.DefaultProjectRefreshCallback) {
-      importSpec = new ImportSpecBuilder(importSpec).callback(new ExternalProjectRefreshCallback() {
+      importSpecBuilder.callback(new ExternalProjectRefreshCallback() {
         @Override
         public void onSuccess(final @Nullable DataNode<ProjectData> externalProject) {
           if (externalProject == null) {
@@ -540,16 +578,14 @@ public abstract class ExternalSystemImportingTestCase extends NioExternalSystemT
       }).build();
     }
 
-    ExternalSystemUtil.refreshProjects(importSpec);
+    // await for all background activities to complete
+    waitForProjectActivity(getMyProject(), () ->
+      ExternalSystemUtil.refreshProjects(importSpecBuilder)
+    );
 
     if (!error.isNull()) {
       handleImportFailure(error.get().first, error.get().second);
     }
-
-    // allow all the invokeLater to pass through the queue, before waiting for indexes to be ready
-    // (specifically, all the invokeLater that schedule indexing after language level change performed by import)
-    runInEdtAndWait(() -> PlatformTestUtil.dispatchAllEventsInIdeEventQueue());
-    IndexingTestUtil.waitUntilIndexesAreReady(getMyProject());
   }
 
   protected void handleImportFailure(@NotNull String errorMessage, @Nullable String errorDetails) {

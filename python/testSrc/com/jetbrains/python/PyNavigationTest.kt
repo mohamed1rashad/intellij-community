@@ -4,6 +4,7 @@ package com.jetbrains.python
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationOrUsageHandler2
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationOrUsageHandler2.GTDUOutcome
 import com.intellij.ide.util.gotoByName.GotoSymbolModel2
+import com.intellij.idea.TestFor
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.parentOfType
 import com.intellij.testFramework.fixtures.CodeInsightTestUtil
@@ -532,6 +533,33 @@ class PyNavigationTest : PyTestCase() {
 
     checkPyNotPyi(local.containingFile)
     assertEquals("test.py", local.containingFile.name)
+  }
+
+  @TestFor(issues = ["PY-85012"])
+  fun `test gtd for local variable`() {
+    val (result) = checkMulti(
+      """
+      a = 1
+      if bool():
+          a = 2
+      <caret>a
+    """.trimIndent(),
+      1,
+    )
+    assertEquals("a = 2", result.parent.text)
+  }
+
+  @TestFor(issues=["PY-82222"])
+  fun `test gtd prefer pyi over skeleton`() {
+    myFixture.configureByText("a.py", "in<caret>t")
+    val target = gotoDeclaration()
+    assertNotNull(target)
+
+    val containingFile = target!!.containingFile
+
+    // Should navigate to .pyi file (typeshed), not .py skeleton file
+    assertTrue(containingFile is PyiFile)
+    assertEquals("builtins.pyi", containingFile.name)
   }
 
   private fun doTestGotoDeclarationNavigatesToPyNotPyi() {

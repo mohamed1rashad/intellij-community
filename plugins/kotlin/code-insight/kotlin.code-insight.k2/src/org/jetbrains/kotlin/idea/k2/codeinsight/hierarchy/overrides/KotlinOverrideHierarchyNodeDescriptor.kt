@@ -5,12 +5,17 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.hierarchy.overrides
 import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.hierarchy.HierarchyNodeDescriptor
-import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.roots.ui.util.CompositeAppearance
 import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.Iconable
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.psi.*
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiClassOwner
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiMember
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.createSmartPointer
 import com.intellij.ui.LayeredIcon
 import com.intellij.ui.RowIcon
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
@@ -19,16 +24,32 @@ import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.callableSymbol
 import org.jetbrains.kotlin.analysis.api.components.containingDeclaration
 import org.jetbrains.kotlin.analysis.api.components.createInheritanceTypeSubstitutor
+import org.jetbrains.kotlin.analysis.api.components.declaredMemberScope
+import org.jetbrains.kotlin.analysis.api.components.getExpectsForActual
 import org.jetbrains.kotlin.analysis.api.components.namedClassSymbol
 import org.jetbrains.kotlin.analysis.api.components.substitute
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolOrigin
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.name
+import org.jetbrains.kotlin.analysis.api.symbols.symbol
+import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.isJavaSourceOrLibrary
 import org.jetbrains.kotlin.idea.base.projectStructure.getKaModule
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
+import org.jetbrains.kotlin.idea.k2.codeinsight.hierarchy.appendPlatformTruncatedPresentableName
 import org.jetbrains.kotlin.idea.k2.refactoring.findCallableMemberBySignature
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.psiUtil.isActualDeclaration
 import org.jetbrains.kotlin.psi.psiUtil.parents
-import java.awt.Font
 import javax.swing.Icon
 
 class KotlinOverrideHierarchyNodeDescriptor(
@@ -60,15 +81,31 @@ class KotlinOverrideHierarchyNodeDescriptor(
     context(_: KaSession)
     private fun getCurrentClassSymbol() = psiElement?.let { resolveToSymbol(it) } as? KaClassSymbol
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun getCurrentSymbol(): KaCallableSymbol? {
         val classSymbol = getCurrentClassSymbol() ?: return null
         val baseSymbol = getBaseSymbol() ?: return null
+        val callableName = baseSymbol.name ?: return null
         val baseClassSymbol = baseSymbol.containingDeclaration as? KaClassSymbol ?: return null
-        val substitution = createInheritanceTypeSubstitutor(classSymbol, baseClassSymbol) ?: return null
-        val callableSignature = baseSymbol.substitute(substitution)
 
+        val actualSuperSymbol =
+            if (baseClassSymbol.isExpect) {
+                classSymbol.superTypes.mapNotNull { it.symbol as? KaClassSymbol }
+                    .firstOrNull { it.isActual && it.getExpectsForActual().contains(baseClassSymbol) }
+                    ?: classSymbol.takeIf { it.isActual }
+            } else {
+                null
+            }
+
+        val substitution = createInheritanceTypeSubstitutor(classSymbol, actualSuperSymbol ?: baseClassSymbol) ?: return null
+
+        val actualBaseSymbol = actualSuperSymbol
+            ?.declaredMemberScope
+            ?.callables(callableName)
+            ?.firstOrNull { it.isActual && it.getExpectsForActual().contains(baseSymbol) }
+
+        val callableSignature = (actualBaseSymbol ?: baseSymbol).substitute(substitution)
         return classSymbol.findCallableMemberBySignature(callableSignature)
     }
 
@@ -138,10 +175,7 @@ class KotlinOverrideHierarchyNodeDescriptor(
         val oldText = myHighlightedText
 
         myHighlightedText = CompositeAppearance()
-        var classNameAttributes: TextAttributes? = null
-        if (myColor != null) {
-            classNameAttributes = TextAttributes(myColor, null, null, null, Font.PLAIN)
-        }
+        val classNameAttributes = textAttributesFor(classPsi)
 
         with(myHighlightedText.ending) {
             @NlsSafe val classDescriptorAsString = (classPsi as PsiNamedElement).name
@@ -158,16 +192,20 @@ class KotlinOverrideHierarchyNodeDescriptor(
 
                     is KtFile -> {
                         @NlsSafe val parentDescriptorAsString = parent.packageDirective?.qualifiedName ?: ""
-                        addText("  ($parentDescriptorAsString)", getPackageNameAttributes())
+                        addText(" ($parentDescriptorAsString)", getPackageNameAttributes())
                         return@forEach
                     }
 
                     is PsiClassOwner -> {
                         @NlsSafe val parentDescriptorAsString = parent.packageName
-                        addText("  ($parentDescriptorAsString)", getPackageNameAttributes())
+                        addText(" ($parentDescriptorAsString)", getPackageNameAttributes())
                         return@forEach
                     }
                 }
+            }
+
+            if (classPsi is KtClassOrObject && classPsi.isActualDeclaration()) {
+                myHighlightedText.appendPlatformTruncatedPresentableName(classPsi, getPackageNameAttributes())
             }
         }
 

@@ -12,8 +12,9 @@ import com.intellij.platform.backend.workspace.virtualFile
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.testFramework.LightVirtualFile
 import com.intellij.util.applyIf
-import org.jetbrains.kotlin.idea.core.script.v1.ScriptAdditionalIdeaDependenciesProvider
+import org.jetbrains.kotlin.K1Deprecation
 import org.jetbrains.kotlin.idea.core.script.k1.ScriptConfigurationManager
+import org.jetbrains.kotlin.idea.core.script.v1.ScriptAdditionalIdeaDependenciesProvider
 import org.jetbrains.kotlin.idea.core.script.v1.ScriptDependencyAware
 import java.nio.file.Path
 import kotlin.io.path.pathString
@@ -24,6 +25,7 @@ import kotlin.io.path.relativeToOrNull
  * For technical details, see [this article](https://jetbrains.team/p/wm/documents/Development/a/Workspace-model-custom-entities-creation).
  */
 
+@K1Deprecation
 fun KotlinScriptEntity.listDependencies(project: Project, rootTypeId: KotlinScriptLibraryRootTypeId? = null): List<VirtualFile> {
     val storage = WorkspaceModel.getInstance(project).currentSnapshot
     return dependencies.asSequence()
@@ -35,6 +37,7 @@ fun KotlinScriptEntity.listDependencies(project: Project, rootTypeId: KotlinScri
         .toList()
 }
 
+@K1Deprecation
 fun VirtualFile.findDependentScripts(project: Project): List<KotlinScriptEntity>? {
     val workspaceModel = WorkspaceModel.getInstance(project)
     val storage = workspaceModel.currentSnapshot
@@ -58,6 +61,7 @@ fun VirtualFile.findDependentScripts(project: Project): List<KotlinScriptEntity>
     return null
 }
 
+@K1Deprecation
 fun BuilderSnapshot.syncScriptEntities(
     project: Project,
     scriptFilesToAddOrUpdate: List<VirtualFile>,
@@ -166,7 +170,7 @@ private fun MutableEntityStorage.removeOutdatedScripts(removedScriptPaths: List<
         }
 }
 
-private fun MutableList<ModifiableKotlinScriptLibraryEntity>.fillWithFiles(
+private fun MutableList<KotlinScriptLibraryEntityBuilder>.fillWithFiles(
     project: Project,
     classFiles: Collection<VirtualFile>,
     sourceFiles: Collection<VirtualFile>
@@ -186,7 +190,7 @@ private fun MutableEntityStorage.getActualScriptLibraries(scriptFile: VirtualFil
     val dependenciesSourceFiles = configurationManager.getScriptDependenciesSourceFiles(scriptFile)
 
     // List builders are not supported by WorkspaceModel yet
-    val libraries = mutableListOf<ModifiableKotlinScriptLibraryEntity>()
+    val libraries = mutableListOf<KotlinScriptLibraryEntityBuilder>()
 
     libraries.fillWithFiles(project, dependenciesClassFiles, dependenciesSourceFiles)
     libraries.fillWithIdeSpecificDependencies(project, scriptFile)
@@ -209,7 +213,7 @@ private fun MutableEntityStorage.getActualScriptLibraries(scriptFile: VirtualFil
         }
 }
 
-private fun MutableList<ModifiableKotlinScriptLibraryEntity>.mergeClassAndSourceRoots(): List<ModifiableKotlinScriptLibraryEntity> {
+private fun MutableList<KotlinScriptLibraryEntityBuilder>.mergeClassAndSourceRoots(): List<KotlinScriptLibraryEntityBuilder> {
     return groupBy { it.name }.values
         .map { libsWithSameName ->
             if (libsWithSameName.size == 1) libsWithSameName.single()
@@ -224,7 +228,7 @@ private fun MutableList<ModifiableKotlinScriptLibraryEntity>.mergeClassAndSource
         }
 }
 
-private fun MutableList<ModifiableKotlinScriptLibraryEntity>.fillWithIdeSpecificDependencies(project: Project, scriptFile: VirtualFile) {
+private fun MutableList<KotlinScriptLibraryEntityBuilder>.fillWithIdeSpecificDependencies(project: Project, scriptFile: VirtualFile) {
     ScriptAdditionalIdeaDependenciesProvider.getRelatedLibraries(scriptFile, project).forEach { lib ->
         val provider = lib.rootProvider
         fillWithFiles(
@@ -235,9 +239,10 @@ private fun MutableList<ModifiableKotlinScriptLibraryEntity>.fillWithIdeSpecific
     }
 }
 
-private fun KotlinScriptLibraryEntity.hasSameRootsAs(dependency: ModifiableKotlinScriptLibraryEntity): Boolean =
+private fun KotlinScriptLibraryEntity.hasSameRootsAs(dependency: KotlinScriptLibraryEntityBuilder): Boolean =
     this.roots.containsAll(dependency.roots) && dependency.roots.containsAll(this.roots)
 
+@K1Deprecation
 fun VirtualFile.relativeName(project: Project): String =
     if (ScratchUtil.isScratch(this) || this is LightVirtualFile) presentableName
     else toNioPath().relativeToOrNull(Path.of(project.basePath!!))?.pathString
@@ -247,7 +252,7 @@ private fun Project.createLibraryEntity(
     name: String,
     dependency: VirtualFile,
     rootTypeId: KotlinScriptLibraryRootTypeId,
-): ModifiableKotlinScriptLibraryEntity {
+): KotlinScriptLibraryEntityBuilder {
 
     val fileUrlManager = WorkspaceModel.getInstance(this).getVirtualFileUrlManager()
     val fileUrl = dependency.toVirtualFileUrl(fileUrlManager)

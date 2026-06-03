@@ -1,7 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution;
 
-import com.intellij.execution.configurations.*;
+import com.intellij.execution.configurations.ConfigurationFactory;
+import com.intellij.execution.configurations.JavaParameters;
+import com.intellij.execution.configurations.JavaRunConfigurationModule;
+import com.intellij.execution.configurations.ModuleBasedConfiguration;
+import com.intellij.execution.configurations.ModuleBasedConfigurationOptions;
 import com.intellij.execution.vmOptions.VMOption;
 import com.intellij.execution.wsl.WslPath;
 import com.intellij.java.codeserver.core.JavaPsiModuleUtil;
@@ -36,7 +40,12 @@ public abstract class JavaRunConfigurationBase extends ModuleBasedConfiguration<
     super(configurationModule, factory);
   }
 
+  public boolean isUseModulePath() {
+    return true;
+  }
+
   public @Nullable String findJavaModuleName(boolean inTests) {
+    if (!isUseModulePath()) return null;
     Module module = getConfigurationModule().getModule();
     if (module == null) return null;
     PsiJavaModule javaModule = JavaPsiModuleUtil.findDescriptorByModule(module, inTests);

@@ -1,9 +1,10 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.analysis.problemsView.toolWindow
 
 import com.intellij.CommonBundle
 import com.intellij.analysis.problemsView.FileProblem
 import com.intellij.analysis.problemsView.ProblemsProvider
+import com.intellij.analysis.problemsView.toolWindow.splitApi.HighlightingBaseProblem
 import com.intellij.codeHighlighting.HighlightDisplayLevel
 import com.intellij.codeInsight.daemon.HighlightDisplayKey
 import com.intellij.codeInsight.daemon.impl.AsyncDescriptionSupplier
@@ -17,15 +18,17 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.AnimatedIcon
 import com.intellij.xml.util.XmlStringUtil.escapeString
+import org.jetbrains.annotations.ApiStatus
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.Icon
 
-internal class HighlightingProblem(
+@ApiStatus.Internal
+open class HighlightingProblem(
   override val provider: ProblemsProvider,
   override val file: VirtualFile,
-  val highlighter: RangeHighlighter) : FileProblem {
+  val highlighter: RangeHighlighter) : FileProblem, HighlightingBaseProblem {
 
-  private fun getIcon(level: HighlightDisplayLevel): Icon? = when {
+  internal fun getIcon(level: HighlightDisplayLevel): Icon? = when {
     text.isEmpty() || asyncDescriptionRequested.get() -> AnimatedIcon.Default.INSTANCE
     severity >= level.severity.myVal -> level.icon
     else -> null
@@ -81,8 +84,8 @@ internal class HighlightingProblem(
 
   override val group: String?
     get() {
-      val id = info?.inspectionToolId ?: return null
-      return HighlightDisplayKey.getDisplayNameByKey(HighlightDisplayKey.findById(id))
+      val id = info?.problemGroup?.problemName ?: info?.inspectionToolId ?: return null
+      return HighlightDisplayKey.getDisplayNameByKey(HighlightDisplayKey.find(id))
     }
 
   override val contextGroup: CodeInsightContext?
@@ -99,8 +102,10 @@ internal class HighlightingProblem(
       else "<html>" + StringUtil.join(StringUtil.splitByLines(escapeString(text)), "<br/>")
     }
 
-  val severity: Int
+  override val severity: Int
     get() = info?.severity?.myVal ?: -1
+
+  override fun getQuickFixOffset(): Int = info?.actualStartOffset ?: -1
 
   override fun hashCode(): Int = highlighter.hashCode()
 

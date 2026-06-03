@@ -1,11 +1,13 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.workspace.jps.entities
 
-import com.intellij.platform.workspace.storage.*
-import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceList
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.EntityType
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntityWithSymbolicId
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
-import java.io.Serializable
 import org.jetbrains.annotations.NonNls
+import java.io.Serializable
 
 interface SdkEntity : WorkspaceEntityWithSymbolicId {
   override val symbolicId: SdkId
@@ -19,8 +21,8 @@ interface SdkEntity : WorkspaceEntityWithSymbolicId {
   val additionalData: String
 
   //region generated code
-  @Deprecated(message = "Use ModifiableSdkEntity instead")
-  interface Builder : ModifiableSdkEntity
+  @Deprecated(message = "Use SdkEntityBuilder instead")
+  interface Builder : SdkEntityBuilder
   companion object : EntityType<SdkEntity, Builder>() {
     @Deprecated(message = "Use new API instead")
     @JvmOverloads
@@ -51,4 +53,11 @@ fun MutableEntityStorage.modifySdkEntity(
 
 data class SdkRoot(val url: VirtualFileUrl, val type: SdkRootTypeId) : Serializable
 
-data class SdkRootTypeId(val name: @NonNls String) : Serializable
+data class SdkRootTypeId(val name: @NonNls String) : Serializable {
+  companion object {
+    @JvmField
+    val CLASSES: SdkRootTypeId = SdkRootTypeId("classPath")
+    @JvmField
+    val SOURCES: SdkRootTypeId = SdkRootTypeId("sourcePath")
+  }
+}

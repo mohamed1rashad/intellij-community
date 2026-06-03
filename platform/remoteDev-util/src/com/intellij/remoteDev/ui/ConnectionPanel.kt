@@ -1,3 +1,4 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.remoteDev.ui
 
 import com.intellij.openapi.ui.DialogWrapper
@@ -20,7 +21,13 @@ import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.beans.PropertyChangeListener
-import javax.swing.*
+import javax.swing.AbstractAction
+import javax.swing.Action
+import javax.swing.BorderFactory
+import javax.swing.JButton
+import javax.swing.JRootPane
+import javax.swing.SwingConstants
+import javax.swing.UIManager
 
 @Suppress("LeakingThis")
 @ApiStatus.Experimental

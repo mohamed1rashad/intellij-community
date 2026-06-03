@@ -10,12 +10,12 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.util.createDocumentBuilder
 import org.w3c.dom.Node
 import org.xml.sax.InputSource
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
-import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.io.path.extension
 import kotlin.io.path.name
 import kotlin.io.path.nameWithoutExtension
@@ -50,9 +50,10 @@ internal suspend fun Project.generateAccessorsFrom(changedComposeResourcesDirs: 
       findResourcesDir(moduleName, "$sourceSetName$RESOURCES_ACCESSORS_SUFFIX")
       ?: findResourcesDir(moduleName, "$sourceSetName$RESOURCES_COLLECTORS_SUFFIX")
     } ?: return
-    val packageName = changedComposeResourcesDir.getResourcePackageName(this)
-    val moduleDir = resourcesAccessorsDir.findFileByRelativePath(packageName.replace('.', '/')) ?: return
     val composeResourcesConfig = this.service<ComposeResourcesManager>().composeResourcesByModulePath[moduleName] ?: return
+    val packageOfResClass = composeResourcesConfig.packageOfResClass
+    val packageName = changedComposeResourcesDir.getResourcePackageName(this, packageOfResClass)
+    val moduleDir = resourcesAccessorsDir.findFileByRelativePath(packageName.replace('.', '/')) ?: return
     val isPublicResClass = composeResourcesConfig.isPublicResClass
     val nameOfResClass = composeResourcesConfig.nameOfResClass
     getAccessorsSpecs(
@@ -70,12 +71,13 @@ private fun Project.findResourcesDir(moduleName: String, name: String): VirtualF
   //TODO use .processFilesByName() to get the first matching file without collecting/resolving all them first
   FilenameIndex.getVirtualFilesByName(name, GlobalSearchScope.allScope(this)).firstOrNull { it.path.contains(moduleName) }
 
-private fun ComposeResourcesDir.getResourcePackageName(project: Project): String {
-  val groupName = project.name.lowercase().asUnderscoredIdentifier()
-  val moduleName = moduleName.lowercase().asUnderscoredIdentifier()
-  val id = if (groupName.isNotEmpty()) "$groupName.$moduleName" else moduleName
-  return "$id.generated.resources"
-}
+internal fun ComposeResourcesDir.getResourcePackageName(project: Project, packageOfResClass: String): String =
+  packageOfResClass.ifEmpty {
+    val groupName = projectGroupName.ifEmpty { project.name }.lowercase().asUnderscoredIdentifier()
+    val moduleName = moduleName.lowercase().asUnderscoredIdentifier()
+    val id = if (groupName.isNotEmpty()) "$groupName.$moduleName" else moduleName
+    "$id.generated.resources"
+  }
 
 private fun getItemRecord(node: Node): ValueResourceRecord {
   val type = ResourceType.fromString(node.nodeName)
@@ -191,7 +193,7 @@ private suspend fun Path.getValueResourceItems(project: Project, qualifiers: Lis
   val fileContent = readAction { toPsiFile(project)?.text } ?: return emptyList()
   val text = InputSource(ByteArrayInputStream(fileContent.toByteArray()))
   // it may throw exceptions if the file is not a valid XML file while the user is typing
-  val doc = runCatching { DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(text) }.getOrNull() ?: return emptyList()
+  val doc = runCatching { createDocumentBuilder().parse(text) }.getOrNull() ?: return emptyList()
   val items = doc.getElementsByTagName("resources").item(0).childNodes
 
   val records = List(items.length) { items.item(it) }

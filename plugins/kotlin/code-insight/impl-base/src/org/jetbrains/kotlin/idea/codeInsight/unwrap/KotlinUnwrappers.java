@@ -2,11 +2,20 @@
 
 package org.jetbrains.kotlin.idea.codeInsight.unwrap;
 
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.kotlin.psi.*;
+import org.jetbrains.kotlin.psi.KtBlockExpression;
+import org.jetbrains.kotlin.psi.KtCatchClause;
+import org.jetbrains.kotlin.psi.KtElement;
+import org.jetbrains.kotlin.psi.KtExpression;
+import org.jetbrains.kotlin.psi.KtFinallySection;
+import org.jetbrains.kotlin.psi.KtIfExpression;
+import org.jetbrains.kotlin.psi.KtLoopExpression;
+import org.jetbrains.kotlin.psi.KtPsiFactory;
+import org.jetbrains.kotlin.psi.KtTryExpression;
 
 public class KotlinUnwrappers {
     private KotlinUnwrappers() {
@@ -61,7 +70,7 @@ public class KotlinUnwrappers {
         @Override
         protected void doUnwrap(PsiElement element, Context context) throws IncorrectOperationException {
             KtIfExpression ifExpr = (KtIfExpression) element;
-            context.replace(ifExpr, new KtPsiFactory(ifExpr.getProject()).createIf(ifExpr.getCondition(), ifExpr.getThen(), null));
+            context.replace(ifExpr, ReadAction.computeBlocking(() -> new KtPsiFactory(ifExpr.getProject()).createIf(ifExpr.getCondition(), ifExpr.getThen(), null)));
         }
     }
 

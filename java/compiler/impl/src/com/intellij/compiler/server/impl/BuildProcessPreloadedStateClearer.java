@@ -8,11 +8,15 @@ import com.intellij.openapi.roots.ModuleRootEvent;
 import com.intellij.openapi.roots.ModuleRootListener;
 import com.intellij.openapi.util.Predicates;
 import com.intellij.platform.backend.workspace.WorkspaceModelChangeListener;
-import com.intellij.platform.workspace.jps.entities.*;
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity;
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntity;
+import com.intellij.platform.workspace.jps.entities.ModuleEntity;
+import com.intellij.platform.workspace.jps.entities.RootsKt;
+import com.intellij.platform.workspace.jps.entities.SourceRootEntity;
 import com.intellij.platform.workspace.storage.EntityChange;
 import com.intellij.platform.workspace.storage.VersionedStorageChange;
-import com.intellij.platform.workspace.storage.impl.VersionedStorageChangeInternal;
 import com.intellij.platform.workspace.storage.WorkspaceEntity;
+import com.intellij.platform.workspace.storage.impl.VersionedStorageChangeInternal;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.function.BiFunction;
@@ -134,12 +138,11 @@ public final class BuildProcessPreloadedStateClearer implements WorkspaceModelCh
 
   @Override
   public void rootsChanged(@NotNull ModuleRootEvent event) {
-    if (!event.isCausedByWorkspaceModelChangesOnly()) {
-      // only process events that are not covered by events from the workspace model
-      final Object source = event.getSource();
-      if (source instanceof Project) {
-        BuildManager.getInstance().clearState((Project)source);
-      }
+    if (event.isCausedByWorkspaceModelChangesOnly()) return;
+    // only process events that are not covered by events from the workspace model
+    final Object source = event.getSource();
+    if (source instanceof Project) {
+      BuildManager.getInstance().clearState((Project)source);
     }
   }
 }

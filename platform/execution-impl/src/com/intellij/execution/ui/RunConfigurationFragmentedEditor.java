@@ -26,8 +26,10 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
+import java.awt.Point;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.util.ArrayList;
@@ -38,7 +40,8 @@ import java.util.List;
  * A {@link FragmentedSettingsEditor} for a run configuration,
  * where the {@code Settings} type parameter is a subclass of {@link RunConfigurationBase}.
  */
-public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfigurationBase<?>> extends FragmentedSettingsEditor<Settings> {
+public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfigurationBase<?>> extends FragmentedSettingsEditor<Settings>
+  implements RunnerAndConfigurationAwareSettingsEditor {
   private static final Logger LOG = Logger.getInstance(RunConfigurationFragmentedEditor.class);
   private final @Nullable RunConfigurationExtensionsManager<RunConfigurationBase<?>, RunConfigurationExtensionBase<RunConfigurationBase<?>>> myExtensionsManager;
   private boolean myDefaultSettings;
@@ -53,6 +56,7 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
     this(runConfiguration, null);
   }
 
+  @Override
   public boolean isInplaceValidationSupported() {
     return false;
   }
@@ -156,6 +160,7 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
    */
   protected abstract List<SettingsEditorFragment<Settings, ?>> createRunFragments();
 
+  @Override
   public void resetEditorFrom(@NotNull RunnerAndConfigurationSettingsImpl s) {
     myDefaultSettings = s.isTemplate();
     for (RunConfigurationEditorFragment<?,?> fragment : getRunFragments()) {
@@ -163,6 +168,7 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
     }
   }
 
+  @Override
   public void applyEditorTo(@NotNull RunnerAndConfigurationSettingsImpl s) {
     for (RunConfigurationEditorFragment<?, ?> fragment : getRunFragments()) {
       fragment.applyEditorTo(s);
@@ -176,6 +182,7 @@ public abstract class RunConfigurationFragmentedEditor<Settings extends RunConfi
                                                 : null);
   }
 
+  @Override
   public void targetChanged(String targetName) {
     SettingsEditorFragment<Settings, ?> targetPathFragment =
       ContainerUtil.find(getFragments(), fragment -> TargetPathFragment.ID.equals(fragment.getId()));

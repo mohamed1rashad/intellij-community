@@ -4,7 +4,12 @@ package com.intellij.openapi.editor.impl
 import com.intellij.application.options.CodeStyle
 import com.intellij.codeWithMe.ClientId
 import com.intellij.lang.Language
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.ComponentManagerEx
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.getOrLogException
@@ -20,6 +25,7 @@ import com.intellij.openapi.editor.impl.stickyLines.ui.StickyLineComponent.Compa
 import com.intellij.openapi.editor.state.CustomOutValueModifier
 import com.intellij.openapi.editor.state.ObservableState
 import com.intellij.openapi.editor.state.ObservableStateListener
+import com.intellij.openapi.editor.state.StateProperty
 import com.intellij.openapi.editor.state.SyncDefaultValueCalculator
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.options.advanced.AdvancedSettings
@@ -36,7 +42,11 @@ import com.intellij.psi.codeStyle.CodeStyleSettingsManager
 import com.intellij.util.PatternUtil
 import com.intellij.util.SlowOperations
 import com.intellij.util.cancelOnDispose
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.beans.PropertyChangeEvent
 import java.beans.PropertyChangeListener
@@ -75,6 +85,11 @@ class EditorSettingsState(private val editor: EditorImpl?,
     private val LOG = logger<EditorSettingsState>()
   }
 
+  // Use for code-style-derived properties: their defaults depend on backend-side data (e.g. .clang-format, .editorconfig)
+  // that the frontend in Remote Development cannot compute independently, so they must always be transferred.
+  private inline fun <reified T> codeStyleProperty(noinline defaultValueCalculator: () -> T): StateProperty<T> =
+    property(alwaysTransfer = true, defaultValueCalculator = defaultValueCalculator)
+
   // This group of settings does not have a UI
   var myAdditionalLinesCount: Int by property(Registry.intValue("editor.virtual.lines", 5))
   var myAdditionalColumnsCount: Int by property(3)
@@ -85,8 +100,8 @@ class EditorSettingsState(private val editor: EditorImpl?,
   var myAreLineNumbersAfterIcons: Boolean by property { false }
 
   // These come from CodeStyleSettings.
-  var myUseTabCharacter: Boolean by property {
-    ReadAction.compute(ThrowableComputable {
+  var myUseTabCharacter: Boolean by codeStyleProperty {
+    ReadAction.computeBlocking(ThrowableComputable {
       val file = getVirtualFile()
 
       if (file == null || project == null) {
@@ -100,7 +115,7 @@ class EditorSettingsState(private val editor: EditorImpl?,
       }
     })
   }
-  var myWrapWhenTypingReachesRightMargin: Boolean by property {
+  var myWrapWhenTypingReachesRightMargin: Boolean by codeStyleProperty {
     val settings = if (editor == null) {
       CodeStyle.getDefaultSettings()
     }
@@ -109,7 +124,7 @@ class EditorSettingsState(private val editor: EditorImpl?,
     }
     settings.isWrapOnTyping(language)
   }
-  var softMargins: List<Int> by property {
+  var softMargins: List<Int> by codeStyleProperty {
     if (editor == null) {
       mutableListOf()
     }
@@ -117,7 +132,7 @@ class EditorSettingsState(private val editor: EditorImpl?,
       getEditorCodeStyleSettingsOrDefaults(editor).getSoftMargins(language)
     }
   }
-  var rightMargin: Int by property {
+  var rightMargin: Int by codeStyleProperty {
     val settings = if (editor == null) {
       CodeStyle.getProjectOrDefaultSettings(project)
     }
@@ -141,6 +156,7 @@ class EditorSettingsState(private val editor: EditorImpl?,
                                                CustomOutValueModifier { if (editor != null && editor.isColumnMode) true else it })
   var myIsCaretBlinking: Boolean by property { EditorSettingsExternalizable.getInstance().isBlinkCaret }
   var myCaretBlinkingPeriod: Int by property { EditorSettingsExternalizable.getInstance().blinkPeriod }
+  var myIsSmoothCaretBlinking: Boolean by property { EditorSettingsExternalizable.getInstance().isSmoothBlinkCaret }
   var myIsRightMarginShown: Boolean by property(EditorSettingsExternalizable.getInstance().isRightMarginShown) {
     if (editor != null && rightMargin == CodeStyleConstraints.MAX_RIGHT_MARGIN) false
     else EditorSettingsExternalizable.getInstance().isRightMarginShown
@@ -158,6 +174,8 @@ class EditorSettingsState(private val editor: EditorImpl?,
   var myIsSmartHome: Boolean by property { EditorSettingsExternalizable.getInstance().isSmartHome }
   var myIsBlockCursor: Boolean by property { EditorSettingsExternalizable.getInstance().isBlockCursor }
   var myIsFullLineHeightCursor: Boolean by property { EditorSettingsExternalizable.getInstance().isFullLineHeightCursor }
+  var myIsSmoothCaretMovement: Boolean by property { EditorSettingsExternalizable.getInstance().isSmoothCaretMovement }
+  var myCaretEasing: EditorSettings.CaretEasing by property { EditorSettingsExternalizable.getInstance().caretEasing }
   var myCaretRowShown: Boolean by property { EditorSettingsExternalizable.getInstance().isCaretRowShown }
   var myIsWhitespacesShown: Boolean by property { EditorSettingsExternalizable.getInstance().isWhitespacesShown }
   var myIsLeadingWhitespacesShown: Boolean by property { EditorSettingsExternalizable.getInstance().isLeadingWhitespacesShown }
@@ -242,6 +260,7 @@ class EditorSettingsState(private val editor: EditorImpl?,
             EditorSettingsExternalizable.PropNames.PROP_IS_CARET_INSIDE_TABS -> refresh(::myIsCaretInsideTabs)
             EditorSettingsExternalizable.PropNames.PROP_IS_CARET_BLINKING -> refresh(::myIsCaretBlinking)
             EditorSettingsExternalizable.PropNames.PROP_CARET_BLINKING_PERIOD -> refresh(::myCaretBlinkingPeriod)
+            EditorSettingsExternalizable.PropNames.PROP_IS_SMOOTH_CARET_BLINKING -> refresh(::myIsSmoothCaretBlinking)
             EditorSettingsExternalizable.PropNames.PROP_IS_RIGHT_MARGIN_SHOWN -> refresh(::myIsRightMarginShown)
 
             EditorSettingsExternalizable.PropNames.PROP_VERTICAL_SCROLL_OFFSET -> refresh(::myVerticalScrollOffset)
@@ -253,6 +272,9 @@ class EditorSettingsState(private val editor: EditorImpl?,
             EditorSettingsExternalizable.PropNames.PROP_IS_FOLDING_OUTLINE_SHOWN -> refresh(::myIsFoldingOutlineShown)
             EditorSettingsExternalizable.PropNames.PROP_SMART_HOME -> refresh(::myIsSmartHome)
             EditorSettingsExternalizable.PropNames.PROP_IS_BLOCK_CURSOR -> refresh(::myIsBlockCursor)
+            EditorSettingsExternalizable.PropNames.PROP_IS_FULL_LINE_HEIGHT_CURSOR -> refresh(::myIsFullLineHeightCursor)
+            EditorSettingsExternalizable.PropNames.PROP_IS_ANIMATED_CARET -> refresh(::myIsSmoothCaretMovement)
+            EditorSettingsExternalizable.PropNames.PROP_CARET_EASING -> refresh(::myCaretEasing)
             EditorSettingsExternalizable.PropNames.PROP_IS_WHITESPACES_SHOWN -> refresh(::myIsWhitespacesShown)
             EditorSettingsExternalizable.PropNames.PROP_IS_LEADING_WHITESPACES_SHOWN -> refresh(::myIsLeadingWhitespacesShown)
             EditorSettingsExternalizable.PropNames.PROP_IS_INNER_WHITESPACES_SHOWN -> refresh(::myIsInnerWhitespacesShown)

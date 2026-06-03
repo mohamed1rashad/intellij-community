@@ -1,6 +1,14 @@
 package com.intellij.database.run.ui.treetable;
 
-import com.intellij.database.datagrid.*;
+import com.intellij.database.datagrid.DataGrid;
+import com.intellij.database.datagrid.GridCellRequest;
+import com.intellij.database.datagrid.GridCellRequestKt;
+import com.intellij.database.datagrid.GridColumn;
+import com.intellij.database.datagrid.GridRow;
+import com.intellij.database.datagrid.ModelIndex;
+import com.intellij.database.datagrid.SelectionModel;
+import com.intellij.database.datagrid.SelectionModelUtil;
+import com.intellij.database.datagrid.ViewIndex;
 import com.intellij.database.run.ui.ResultViewWithCells;
 import com.intellij.database.run.ui.ResultViewWithRows;
 import com.intellij.database.run.ui.grid.GridColorsScheme;
@@ -30,15 +38,27 @@ import it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.tree.TreePath;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Rectangle;
 import java.util.Map;
 
-import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.*;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetBackground;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetGridColor;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetSelectionBackground;
+import static com.intellij.database.run.ui.grid.GridColorSchemeUtil.doGetSelectionForeground;
 import static com.intellij.database.run.ui.grid.TableCellImageCache.MAX_ROWS;
-import static com.intellij.database.run.ui.grid.renderers.DefaultTextRendererFactory.TextRenderer.*;
+import static com.intellij.database.run.ui.grid.renderers.DefaultTextRendererFactory.TextRenderer.configureEditor;
+import static com.intellij.database.run.ui.grid.renderers.DefaultTextRendererFactory.TextRenderer.createComponent;
+import static com.intellij.database.run.ui.grid.renderers.DefaultTextRendererFactory.TextRenderer.getAttributes;
 import static com.intellij.ui.render.RenderingUtil.CUSTOM_SELECTION_BACKGROUND;
 
 /**
@@ -269,7 +289,7 @@ public final class GridTreeTable extends JBTreeTable implements Disposable, Edit
                                                    boolean hasFocus,
                                                    int row,
                                                    int column) {
-      TableCellRenderer renderer = myRenderers.getRenderer(row, 1);
+      TableCellRenderer renderer = myRenderers.getRenderer(row, 1, value);
       renderer = renderer != null ? renderer : myDefaultRenderer;
       renderer = myTreeTable.myCellImageCache.wrapCellRenderer(renderer);
       Component component = renderer.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
@@ -304,12 +324,15 @@ public final class GridTreeTable extends JBTreeTable implements Disposable, Edit
       Disposer.register(grid, myJsonRenderer);
     }
 
-    public @Nullable TableCellRenderer getRenderer(int viewRow, int viewColumn) {
+    public @Nullable TableCellRenderer getRenderer(int viewRow, int viewColumn, @Nullable Object value) {
       Pair<Integer, Integer> rowAndColumn = myGrid.getRawIndexConverter().rowAndColumn2Model().fun(viewRow, viewColumn);
       int modelColumnIdx = rowAndColumn.second;
+      ModelIndex<GridRow> row = ModelIndex.forRow(myGrid, rowAndColumn.first);
+      ModelIndex<GridColumn> column = ModelIndex.forColumn(myGrid, modelColumnIdx);
+      GridCellRequest<GridRow, GridColumn> request = GridCellRequestKt.overrideValue(GridCellRequestKt.request(myGrid, row, column), value);
       GridCellRenderer gridCellRenderer = myTreeTable.getTree().isExpanded(viewRow) ? myEmptyRenderer :
                                           modelColumnIdx == -1 ? myJsonRenderer :
-                                          GridCellRenderer.getRenderer(myGrid, ModelIndex.forRow(myGrid, rowAndColumn.first), ModelIndex.forColumn(myGrid, modelColumnIdx));
+                                          GridCellRenderer.getRenderer(request);
 
       TableCellRenderer renderer = myTableCellRenderers.get(gridCellRenderer);
       if (renderer == null) {

@@ -1,8 +1,12 @@
 <idea-plugin visibility="internal" package="org.jetbrains.kotlin.idea.gradle">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <plugin id="com.intellij.gradle"/>
     <module name="intellij.kotlin.gradle.tooling"/>
+    <module name="intellij.gradle"/>
+    <module name="intellij.gradle.toolingExtension.impl"/>
+    <module name="intellij.java.execution.impl"/>
   </dependencies>
+  <!-- endregion -->
 
   <extensionPoints>
     <extensionPoint qualifiedName="org.jetbrains.kotlin.gradleModelFacade"
@@ -29,7 +33,6 @@
     <failedToDownloadJpsMavenArtifactSuggestedSolutionsContributor
             implementation="org.jetbrains.kotlin.idea.gradle.GradleFailedToDownloadSuggestedSolutionsContributor"/>
 
-    <projectStructureInsightsProvider implementation="org.jetbrains.kotlin.idea.gradle.GradleProjectStructureInsightsProvider"/>
     <buildSystemTypeDetector implementation="org.jetbrains.kotlin.idea.gradle.configuration.GradleModuleDetector"/>
   </extensions>
 
@@ -59,6 +62,9 @@
     <statistics.counterUsagesCollector implementationClass="org.jetbrains.kotlin.idea.gradle.statistics.KotlinGradleFUSCollector"/>
     <statistics.counterUsagesCollector implementationClass="org.jetbrains.kotlin.idea.gradle.statistics.v2.flow.KotlinBuildToolFusFlowCollector"/>
     <statistics.projectUsagesCollector implementation="org.jetbrains.kotlin.idea.gradle.statistics.ComposeLibraryUsagesCollector"/>
+    <statistics.projectUsagesCollector implementation="org.jetbrains.kotlin.idea.gradle.statistics.KotlinJsLibraryUsagesCollector"/>
+    <projectSettings service="org.jetbrains.kotlin.idea.gradle.ui.IdeResolveModulePerSourceSetComponent"/>
+    <projectSettings service="org.jetbrains.kotlin.idea.gradle.statistics.KotlinGradleFUSSettings"/>
   </extensions>
   <resource-bundle>messages.KotlinBundle</resource-bundle>
 </idea-plugin>

@@ -5,11 +5,17 @@ import com.intellij.ide.startup.importSettings.ImportSettingsBundle
 import com.intellij.ide.startup.importSettings.chooser.importProgress.ImportProgressPage
 import com.intellij.ide.startup.importSettings.chooser.productChooser.ProductChooserPage
 import com.intellij.ide.startup.importSettings.chooser.settingChooser.SettingChooserPage
-import com.intellij.ide.startup.importSettings.data.*
+import com.intellij.ide.startup.importSettings.data.ActionsDataProvider
+import com.intellij.ide.startup.importSettings.data.BaseService
+import com.intellij.ide.startup.importSettings.data.DataForSave
+import com.intellij.ide.startup.importSettings.data.DataToApply
+import com.intellij.ide.startup.importSettings.data.DialogImportData
+import com.intellij.ide.startup.importSettings.data.Product
+import com.intellij.ide.startup.importSettings.data.SettingsService
+import com.intellij.ide.startup.importSettings.data.StartupWizardService
 import com.intellij.ide.startup.importSettings.statistics.ImportSettingsEventsCollector
 import com.intellij.ide.startup.importSettings.transfer.TransferableSetting
 import com.intellij.ide.startup.importSettings.wizard.pluginChooser.WizardPluginsPage
-import com.intellij.ide.ui.LafManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.ui.DialogBackgroundImageProvider
 import com.intellij.openapi.util.Disposer
@@ -82,8 +88,7 @@ private class ImportSettingsControllerImpl(dialog: OnboardingDialog, override va
   }
 
   override fun goToProductChooserPage() {
-    val isDark = LafManager.getInstance().currentUIThemeLookAndFeel?.isDark ?: true
-    val page = ProductChooserPage(this, DialogBackgroundImageProvider.getInstance().getImage(isDark))
+    val page = ProductChooserPage(this, DialogBackgroundImageProvider.getInstance().getImage())
     Disposer.tryRegister(dialog.disposable, page)
     ImportSettingsEventsCollector.productPageShown()
     dialog.changePage(page)

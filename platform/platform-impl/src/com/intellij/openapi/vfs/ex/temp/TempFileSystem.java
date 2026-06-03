@@ -4,13 +4,16 @@ package com.intellij.openapi.vfs.ex.temp;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.BufferExposingByteArrayInputStream;
 import com.intellij.openapi.util.io.FileAttributes;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.VirtualFilePointerCapableFileSystem;
 import com.intellij.openapi.vfs.impl.local.LocalFileSystemBase;
 import com.intellij.openapi.vfs.newvfs.impl.FakeVirtualFile;
 import com.intellij.openapi.vfs.newvfs.impl.StubVirtualFile;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.LocalTimeCounter;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -194,7 +197,11 @@ public class TempFileSystem extends LocalFileSystemBase implements VirtualFilePo
   @Override
   public void setTimeStamp(@NotNull VirtualFile file, long timeStamp) {
     FSItem fsItem = convertAndCheck(file);
-    fsItem.myTimestamp = timeStamp > 0 ? timeStamp : LocalTimeCounter.currentTime();
+    fsItem.myTimestamp = timeStamp > 0 ? timeStamp : currentTime();
+  }
+
+  private static long currentTime() {
+    return System.currentTimeMillis();
   }
 
   @Override
@@ -230,7 +237,7 @@ public class TempFileSystem extends LocalFileSystemBase implements VirtualFilePo
         FSItem fsItem = convertAndCheck(file);
         if (!(fsItem instanceof FSFile)) throw new IOException("Not a file: " + file.getPath());
         ((FSFile)fsItem).myContent = toByteArray();
-        setTimeStamp(file, modStamp);
+        setTimeStamp(file, timeStamp);
       }
     };
   }
@@ -246,7 +253,7 @@ public class TempFileSystem extends LocalFileSystemBase implements VirtualFilePo
   }
 
   private abstract static sealed class FSItem {
-    private long myTimestamp = LocalTimeCounter.currentTime();
+    private long myTimestamp = currentTime();
     private boolean myWritable = true;
 
     protected boolean isDirectory() {

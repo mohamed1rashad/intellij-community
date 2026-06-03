@@ -2,7 +2,12 @@
 package org.jetbrains.idea.devkit.actions.updateFromSources
 
 import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.BaseState
+import com.intellij.openapi.components.RoamingType
+import com.intellij.openapi.components.SimplePersistentStateComponent
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
 import com.intellij.util.xmlb.annotations.XCollection
 import org.jetbrains.annotations.ApiStatus
 
@@ -18,6 +23,7 @@ class UpdateFromSourcesSettings : SimplePersistentStateComponent<UpdateFromSourc
 class UpdateFromSourcesSettingsState : BaseState() {
   var showSettings: Boolean by property(true)
   var workIdePath: String? by string()
+  var additionalVmOptionsForBuildScripts: String? by string()
   var buildDisabledPlugins: Boolean by property(false)
   var pluginDirectoriesForDisabledPlugins: MutableList<String> by list<String>()
   var restartAutomatically: Boolean by property(false)

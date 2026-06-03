@@ -1,11 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.changes.patch.tool
 
 import com.intellij.diff.DiffContext
 import com.intellij.diff.DiffViewerEx
 import com.intellij.diff.EditorDiffViewer
 import com.intellij.diff.FrameDiffTool
-import com.intellij.diff.actions.impl.SetEditorSettingsAction
+import com.intellij.diff.actions.impl.SetEditorSettingsActionGroup
 import com.intellij.diff.tools.holders.EditorHolder
 import com.intellij.diff.tools.holders.TextEditorHolder
 import com.intellij.diff.tools.util.DiffDataKeys
@@ -16,7 +16,12 @@ import com.intellij.diff.tools.util.base.TextDiffViewerUtil
 import com.intellij.diff.tools.util.side.OnesideContentPanel
 import com.intellij.diff.util.DiffDrawUtil
 import com.intellij.diff.util.DiffUtil
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
@@ -42,7 +47,7 @@ internal class PatchDiffViewer(
   private val editorHolder: EditorHolder
 
   private val prevNextDifferenceIterable: MyPrevNextDifferenceIterable
-  private val editorSettingsAction: SetEditorSettingsAction
+  private val editorSettingsAction: SetEditorSettingsActionGroup
 
   private var hunks: List<Hunk> = mutableListOf()
 
@@ -73,7 +78,7 @@ internal class PatchDiffViewer(
         sink[DiffDataKeys.CURRENT_CHANGE_RANGE] = prevNextDifferenceIterable.currentLineRange
       }
     }
-    editorSettingsAction = SetEditorSettingsAction(TextDiffViewerUtil.getTextSettings(diffContext), editors)
+    editorSettingsAction = SetEditorSettingsActionGroup(TextDiffViewerUtil.getTextSettings(diffContext), editors)
     editorSettingsAction.applyDefaults()
 
     listenTypingAttempts(diffContext, editor)
@@ -83,7 +88,7 @@ internal class PatchDiffViewer(
 
   override fun getPreferredFocusedComponent(): JComponent = editor.getContentComponent()
 
-  override fun getEditors(): List<Editor?> = listOf(editor)
+  override fun getEditors(): List<Editor> = listOf(editor)
 
   override fun getDifferenceIterable(): PrevNextDifferenceIterable = prevNextDifferenceIterable
 

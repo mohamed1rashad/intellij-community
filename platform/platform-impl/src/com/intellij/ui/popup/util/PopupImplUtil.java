@@ -17,8 +17,11 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JDialog;
+import javax.swing.JList;
+import javax.swing.SwingUtilities;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowEvent;
@@ -42,7 +45,7 @@ public final class PopupImplUtil {
       // a chance to quit in case the focus event is created right inside `dispatchEvents` code
       ApplicationManager.getApplication().invokeLater(() -> {
         LOG.error(throwable);
-      }, ModalityState.any(), __ -> !insideOnChosen[0]);
+      }, ModalityState.any(), _ -> !insideOnChosen[0]);
       return null;
     });
     return new AccessToken() {

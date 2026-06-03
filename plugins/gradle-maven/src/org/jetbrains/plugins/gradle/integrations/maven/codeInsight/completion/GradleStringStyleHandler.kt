@@ -8,8 +8,7 @@ import com.intellij.codeInsight.completion.InsertionContext
 import com.intellij.codeInsight.lookup.Lookup
 import com.intellij.codeInsight.lookup.LookupElement
 import org.jetbrains.idea.maven.dom.converters.MavenDependencyCompletionUtil
-import org.jetbrains.idea.maven.onlinecompletion.model.MavenRepositoryArtifactInfo
-import org.jetbrains.idea.maven.statistics.MavenDependencyInsertionCollector
+import org.jetbrains.idea.maven.model.MavenRepoArtifactInfo
 import org.jetbrains.plugins.gradle.integrations.maven.codeInsight.completion.MavenDependenciesGradleCompletionContributor.Companion.COMPLETION_DATA_KEY
 import org.jetbrains.plugins.gradle.integrations.maven.codeInsight.completion.MavenDependenciesGradleCompletionContributor.Companion.CompletionData
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
@@ -26,19 +25,6 @@ abstract class ReplaceEndInsertHandler : InsertHandler<LookupElement> {
     element.updateText("${quote}$newText${quote}")
     postProcess(completed, element.textRange.endOffset - (insertedSuffix.length + 1), context)
     context.commitDocument()
-
-    val selectedLookupIndex = context.elements.indexOf(item)
-    val artifactInfo = item.`object` as? MavenRepositoryArtifactInfo ?: return
-
-    MavenDependencyInsertionCollector.logPackageAutoCompleted(
-      groupId = artifactInfo.groupId,
-      artifactId = artifactInfo.artifactId,
-      version = artifactInfo.version ?: "",
-      buildSystem = MavenDependencyInsertionCollector.BuildSystem.GRADLE,
-      dependencyDeclarationNotation = MavenDependencyInsertionCollector.DependencyDeclarationNotation.GRADLE_STRING_STYLE,
-      completionPrefixLength = completionPrefix.length,
-      selectedLookupIndex = selectedLookupIndex
-    )
   }
 
   abstract fun getCompletedString(item: LookupElement): String?
@@ -47,13 +33,13 @@ abstract class ReplaceEndInsertHandler : InsertHandler<LookupElement> {
 
 object GradleStringStyleVersionHandler : ReplaceEndInsertHandler() {
   override fun getCompletedString(item: LookupElement): String? {
-    return (item.`object` as? MavenRepositoryArtifactInfo?)?.version
+    return (item.`object` as? MavenRepoArtifactInfo?)?.version
   }
 }
 
 object GradleStringStyleGroupAndArtifactHandler : ReplaceEndInsertHandler() {
   override fun getCompletedString(item: LookupElement): String? {
-    val info = item.`object` as? MavenRepositoryArtifactInfo ?: return null
+    val info = item.`object` as? MavenRepoArtifactInfo ?: return null
     val completed = MavenDependencyCompletionUtil.getPresentableText(info)
     val moreCompletionNeeded = completed.count { it == ':' } < 2
     return completed + if (moreCompletionNeeded) ":" else ""

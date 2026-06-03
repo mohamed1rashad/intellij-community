@@ -3,7 +3,6 @@ package com.intellij.openapi.vfs;
 
 import com.intellij.concurrency.JobLauncher;
 import com.intellij.concurrency.JobSchedulerImpl;
-import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.FrequentEventDetector;
 import com.intellij.openapi.diagnostic.Logger;
@@ -18,7 +17,10 @@ import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualDirectoryImpl;
-import com.intellij.testFramework.*;
+import com.intellij.testFramework.EdtTestUtil;
+import com.intellij.testFramework.PerformanceUnitTest;
+import com.intellij.testFramework.SkipSlowTestLocally;
+import com.intellij.testFramework.VfsTestUtil;
 import com.intellij.testFramework.fixtures.BareTestFixtureTestCase;
 import com.intellij.testFramework.fixtures.impl.LightTempDirTestFixtureImpl;
 import com.intellij.testFramework.rules.TempDirectory;
@@ -28,8 +30,6 @@ import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import it.unimi.dsi.fastutil.ints.IntSets;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 
@@ -46,22 +46,16 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import static java.util.Objects.requireNonNull;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
-@RunFirst
 @SkipSlowTestLocally
+@PerformanceUnitTest
 public class VfsUtilPerformanceTest extends BareTestFixtureTestCase {
   @Rule public TempDirectory tempDir = new TempDirectory();
-
-  @BeforeClass
-  public static void setupInStressTestsFlag() {
-    ApplicationManagerEx.setInStressTest(true);
-  }
-
-  @AfterClass
-  public static void clearInStressTestsFlag() {
-    ApplicationManagerEx.setInStressTest(false);
-  }
 
   @Test
   public void testFindChildByNamePerformance() throws IOException {
@@ -109,7 +103,7 @@ public class VfsUtilPerformanceTest extends BareTestFixtureTestCase {
     Benchmark.newBenchmark("finding root",
                            () -> JobLauncher.getInstance().invokeConcurrentlyUnderProgress(
                                             Collections.nCopies(500, null), null,
-                                            __ -> {
+                                            _ -> {
                                               for (int i = 0; i < 100_000; i++) {
                                                 NewVirtualFile rootJar = managingFS.findRoot(path, fs);
                                                 assertNotNull(rootJar);

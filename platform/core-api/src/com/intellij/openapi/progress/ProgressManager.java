@@ -18,7 +18,7 @@ import org.jetbrains.annotations.ApiStatus.Obsolete;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -407,6 +407,11 @@ public abstract class ProgressManager extends ProgressIndicatorProvider {
    */
   @ApiStatus.Internal
   public abstract <X> X silenceGlobalIndicator(@NotNull Supplier<? extends X> computable);
+
+  @ApiStatus.Internal
+  public boolean runCheckCanceledHooks(@Nullable ProgressIndicator indicator) {
+    return false;
+  }
 
   /**
    * Don't call this method directly!

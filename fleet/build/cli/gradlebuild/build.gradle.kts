@@ -11,7 +11,6 @@ plugins {
   id("fleet.toolchain-conventions")
   alias(libs.plugins.dokka)
   id("fleet.module-publishing-conventions")
-  id("fleet.sdk-repositories-publishing-conventions")
   // GRADLE_PLUGINS__MARKER_START
   id("fleet-module")
   // GRADLE_PLUGINS__MARKER_END
@@ -44,9 +43,12 @@ kotlin {
     "-opt-in=kotlin.ExperimentalStdlibApi",
     "-Xlambdas=class",
     "-Xconsistent-data-class-copy-visibility",
+    "-Xcontext-parameters",
     "-XXLanguage:+AllowEagerSupertypeAccessibilityChecks",
+    "-progressive",
   )
   jvm {}
+  sourceSets.jvmMain.configure { resources.srcDir(layout.projectDirectory.dir("../resources")) }
   sourceSets.commonMain.configure { kotlin.srcDir(layout.projectDirectory.dir("../srcCommonMain")) }
   sourceSets.commonMain.configure { resources.srcDir(layout.projectDirectory.dir("../resourcesCommonMain")) }
   sourceSets.commonTest.configure { kotlin.srcDir(layout.projectDirectory.dir("../srcCommonTest")) }
@@ -64,7 +66,24 @@ kotlin {
     implementation(jps.org.jetbrains.kotlinx.kotlinx.io.core.jvm479158162.get().let { "${it.group}:kotlinx-io-core:${it.version}" }) {
       exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
     }
-    implementation(jps.com.intellij.platform.kotlinx.coroutines.core.jvm134738847.get().let { "${it.group}:kotlinx-coroutines-core:${it.version}" }) {
+    implementation(jps.org.slf4j.slf4j.api2013636515.get().let { "${it.group}:${it.name}:${it.version}" }) {
+      isTransitive = false
+      exclude(group = "org.slf4j", module = "slf4j-jdk14")
+    }
+    implementation(jps.ch.qos.logback.logback.classic410158546.get().let { "${it.group}:${it.name}:${it.version}" }) {
+      exclude(group = "org.slf4j", module = "slf4j-api")
+      exclude(group = "com.sun.mail", module = "javax.mail")
+    }
+    implementation(jps.org.jetbrains.intellij.deps.kotlinx.kotlinx.coroutines.core.jvm930800474.get().let { "${it.group}:kotlinx-coroutines-core:${it.version}" }) {
+      isTransitive = false
+    }
+    implementation(jps.com.google.devtools.ksp.symbol.processing.api1172187089.get().let { "${it.group}:${it.name}:${it.version}" }) {
+      isTransitive = false
+    }
+    implementation(jps.com.google.devtools.ksp.symbol.processing.aa.embeddable356149943.get().let { "${it.group}:${it.name}:${it.version}" }) {
+      isTransitive = false
+    }
+    implementation(jps.com.google.devtools.ksp.symbol.processing.common.deps1883862941.get().let { "${it.group}:${it.name}:${it.version}" }) {
       isTransitive = false
     }
     api(jps.com.github.ajalt.clikt.clikt.core.jvm23167398.get().let { "${it.group}:clikt-core:${it.version}" }) {

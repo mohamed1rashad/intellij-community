@@ -1,12 +1,16 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build.impl.logging
 
 import com.intellij.openapi.diagnostic.IdeaLogRecordFormatter
-import java.util.logging.*
+import java.util.logging.ConsoleHandler
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger
 
 internal class BuildMessagesHandler(private val messages: BuildMessagesImpl) : Handler() {
   companion object {
-    fun initLogging(messages: BuildMessagesImpl) {
+    fun initLoggingIfNeeded(messages: BuildMessagesImpl) {
       val rootLogger = Logger.getLogger("")
       if (rootLogger.handlers.any { (it is ConsoleHandler && it.formatter is IdeaLogRecordFormatter) ||
                                     (it is BuildMessagesHandler && it.messages == messages) }) {

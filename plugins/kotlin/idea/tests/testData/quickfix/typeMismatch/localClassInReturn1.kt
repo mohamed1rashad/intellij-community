@@ -1,4 +1,5 @@
-// "Change return type of enclosing function 'foo' to 'U'" "true"
+// "Specify 'U' return type for enclosing function 'foo'" "true"
+// K2_ERROR: Return type mismatch: expected 'Unit', actual 'B'.
 interface T
 interface U
 

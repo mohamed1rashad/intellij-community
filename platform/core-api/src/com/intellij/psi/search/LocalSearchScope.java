@@ -22,7 +22,12 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -250,7 +255,7 @@ public class LocalSearchScope extends SearchScope {
     if (scope == EMPTY) {
       return EMPTY;
     }
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       PsiElement[] elements = scope.getScope();
       List<PsiElement> result = new ArrayList<>(elements.length);
       for (PsiElement element : elements) {
@@ -271,7 +276,7 @@ public class LocalSearchScope extends SearchScope {
     if (scope == EMPTY) {
       return EMPTY;
     }
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       List<? extends PsiElement> result = ContainerUtil.filter(
         scope.getScope(),
         element -> matcher.matchesLanguage(element.getContainingFile().getLanguage())

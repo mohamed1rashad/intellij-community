@@ -12,7 +12,11 @@ import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.NamedColorUtil;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
 
 public abstract class MoreAction extends DumbAwareAction implements CustomComponentAction {
   protected final JLabel myLabel;
@@ -27,7 +31,7 @@ public abstract class MoreAction extends DumbAwareAction implements CustomCompon
     myPanel.setLayout(layout);
     myLoadMoreBtn = new JButton(name);
     myLoadMoreBtn.setMargin(JBUI.insets(2));
-    myLoadMoreBtn.addActionListener(__ -> perform());
+    myLoadMoreBtn.addActionListener(_ -> perform());
     myPanel.add(myLoadMoreBtn);
     myLabel = new JLabel(CommonBundle.getLoadingTreeNodeText());
     myLabel.setForeground(NamedColorUtil.getInactiveTextColor());

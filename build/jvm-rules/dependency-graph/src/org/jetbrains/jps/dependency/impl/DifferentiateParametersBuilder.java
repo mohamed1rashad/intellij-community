@@ -3,6 +3,7 @@ package org.jetbrains.jps.dependency.impl;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.dependency.DifferentiateParameters;
+import org.jetbrains.jps.dependency.LogConsumer;
 import org.jetbrains.jps.dependency.NodeSource;
 
 import java.util.function.Predicate;
@@ -13,8 +14,10 @@ public final class DifferentiateParametersBuilder implements DifferentiateParame
   private boolean calculateAffected = true;
   private boolean processConstantsIncrementally = true;
   private boolean compiledWithErrors = false;
-  private Predicate<? super NodeSource> myAffectionFilter = s -> true;
-  private Predicate<? super NodeSource> myCurrentChunkFilter = s -> true;
+  private Predicate<? super NodeSource> myAffectionFilter = __-> true;
+  private Predicate<? super NodeSource> myScopeFilter = __-> true;
+  private Predicate<? super NodeSource> myCurrentChunkFilter = __-> true;
+  private LogConsumer myLogConsumer = LogConsumer.EMPTY;
 
   private DifferentiateParametersBuilder(String sessionName) {
     mySessionName = sessionName;
@@ -41,6 +44,11 @@ public final class DifferentiateParametersBuilder implements DifferentiateParame
   }
 
   @Override
+  public @NotNull Predicate<? super NodeSource> scopeFilter() {
+    return myScopeFilter;
+  }
+
+  @Override
   public @NotNull Predicate<? super NodeSource> affectionFilter() {
     return myAffectionFilter;
   }
@@ -48,6 +56,11 @@ public final class DifferentiateParametersBuilder implements DifferentiateParame
   @Override
   public @NotNull Predicate<? super NodeSource> belongsToCurrentCompilationChunk() {
     return myCurrentChunkFilter;
+  }
+
+  @Override
+  public @NotNull LogConsumer logConsumer() {
+    return myLogConsumer;
   }
 
   public DifferentiateParameters get() {
@@ -67,8 +80,10 @@ public final class DifferentiateParametersBuilder implements DifferentiateParame
       .compiledWithErrors(params.isCompiledWithErrors())
       .processConstantsIncrementally(params.isProcessConstantsIncrementally())
       .calculateAffected(params.isCalculateAffected())
+      .withScopeFilter(params.scopeFilter())
       .withAffectionFilter(params.affectionFilter())
-      .withChunkStructureFilter(params.belongsToCurrentCompilationChunk());
+      .withChunkStructureFilter(params.belongsToCurrentCompilationChunk())
+      .withLogConsumer(params.logConsumer());
   }
 
   public static DifferentiateParameters withDefaultSettings() {
@@ -94,6 +109,11 @@ public final class DifferentiateParametersBuilder implements DifferentiateParame
     return this;
   }
 
+  public DifferentiateParametersBuilder withScopeFilter(Predicate<? super NodeSource> filter) {
+    myScopeFilter = filter;
+    return this;
+  }
+
   public DifferentiateParametersBuilder withAffectionFilter(Predicate<? super NodeSource> filter) {
     myAffectionFilter = filter;
     return this;
@@ -101,6 +121,11 @@ public final class DifferentiateParametersBuilder implements DifferentiateParame
 
   public DifferentiateParametersBuilder withChunkStructureFilter(Predicate<? super NodeSource> filter) {
     myCurrentChunkFilter = filter;
+    return this;
+  }
+
+  public DifferentiateParametersBuilder withLogConsumer(LogConsumer logConsumer) {
+    myLogConsumer = logConsumer;
     return this;
   }
 }

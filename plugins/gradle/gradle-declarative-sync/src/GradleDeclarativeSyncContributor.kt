@@ -15,7 +15,24 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.isFile
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.DependencyScope
+import com.intellij.platform.workspace.jps.entities.InheritedSdkDependency
+import com.intellij.platform.workspace.jps.entities.LibraryDependency
+import com.intellij.platform.workspace.jps.entities.LibraryId
+import com.intellij.platform.workspace.jps.entities.LibraryTableId
+import com.intellij.platform.workspace.jps.entities.ModuleDependency
+import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ModuleId
+import com.intellij.platform.workspace.jps.entities.ModuleSourceDependency
+import com.intellij.platform.workspace.jps.entities.ModuleTypeId
+import com.intellij.platform.workspace.jps.entities.SdkDependency
+import com.intellij.platform.workspace.jps.entities.SdkId
+import com.intellij.platform.workspace.jps.entities.SourceRootEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootTypeId
 import com.intellij.platform.workspace.jps.serialization.impl.toPath
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.ImmutableEntityStorage
@@ -193,7 +210,7 @@ internal class GradleDeclarativeSyncContributor : GradleSyncContributor {
   private fun addSourceRoots(
     storage: MutableEntityStorage,
     entitySource: EntitySource,
-    contentRootEntity: ModifiableContentRootEntity,
+    contentRootEntity: ContentRootEntityBuilder,
     sourceRoots: List<Pair<String, String>>,
     basePath: VirtualFileUrl,
   ) {
@@ -256,7 +273,7 @@ internal class GradleDeclarativeSyncContributor : GradleSyncContributor {
     entitySource: EntitySource,
     moduleName: String,
     dependencies: List<ModuleDependencyItem>,
-  ): ModifiableModuleEntity {
+  ): ModuleEntityBuilder {
     val moduleName = moduleName
     val moduleEntity = ModuleEntity(
       name = moduleName,
@@ -272,9 +289,9 @@ internal class GradleDeclarativeSyncContributor : GradleSyncContributor {
   private fun addContentRootEntity(
     storage: MutableEntityStorage,
     entitySource: EntitySource,
-    moduleEntity: ModifiableModuleEntity,
+    moduleEntity: ModuleEntityBuilder,
     url: VirtualFileUrl,
-  ): ModifiableContentRootEntity {
+  ): ContentRootEntityBuilder {
     val contentRootEntity = ContentRootEntity(
       url = url,
       entitySource = entitySource,
@@ -291,7 +308,7 @@ internal class GradleDeclarativeSyncContributor : GradleSyncContributor {
     entitySource: EntitySource,
     type: String,
     url: VirtualFileUrl,
-    contentRootEntity: ModifiableContentRootEntity,
+    contentRootEntity: ContentRootEntityBuilder,
   ) {
     storage addEntity SourceRootEntity(
       url = url,

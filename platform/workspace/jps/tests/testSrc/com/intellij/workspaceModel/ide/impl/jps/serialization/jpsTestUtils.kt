@@ -26,12 +26,33 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.platform.eel.provider.LocalEelMachine
-import com.intellij.platform.workspace.jps.*
+import com.intellij.platform.workspace.jps.JpsFileEntitySource
+import com.intellij.platform.workspace.jps.JpsGlobalFileEntitySource
+import com.intellij.platform.workspace.jps.JpsProjectConfigLocation
+import com.intellij.platform.workspace.jps.JpsProjectFileEntitySource
+import com.intellij.platform.workspace.jps.UnloadedModulesNameHolder
 import com.intellij.platform.workspace.jps.entities.LibraryEntity
-import com.intellij.platform.workspace.jps.serialization.impl.*
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.jps.serialization.impl.DEPRECATED_MODULE_MANAGER_COMPONENT_NAME
+import com.intellij.platform.workspace.jps.serialization.impl.ErrorReporter
+import com.intellij.platform.workspace.jps.serialization.impl.ExternalModuleImlFileEntitiesSerializer
+import com.intellij.platform.workspace.jps.serialization.impl.FileInDirectorySourceNames
+import com.intellij.platform.workspace.jps.serialization.impl.JpsFileContentWriter
+import com.intellij.platform.workspace.jps.serialization.impl.JpsFileEntitiesSerializer
+import com.intellij.platform.workspace.jps.serialization.impl.JpsFileEntityTypeSerializer
+import com.intellij.platform.workspace.jps.serialization.impl.JpsProjectEntitiesLoader
+import com.intellij.platform.workspace.jps.serialization.impl.JpsProjectSerializers
+import com.intellij.platform.workspace.jps.serialization.impl.JpsProjectSerializersImpl
+import com.intellij.platform.workspace.jps.serialization.impl.ModuleImlFileEntitiesSerializer
+import com.intellij.platform.workspace.jps.serialization.impl.toConfigLocation
+import com.intellij.platform.workspace.storage.EntityChange
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.EntityStorage
+import com.intellij.platform.workspace.storage.ImmutableEntityStorage
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.toBuilder
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
 import com.intellij.testFramework.UsefulTestCase
@@ -44,6 +65,7 @@ import com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModel
 import com.intellij.workspaceModel.ide.impl.GlobalWorkspaceModelRegistry
 import junit.framework.AssertionFailedError
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.runBlocking
 import org.jdom.Element
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.jps.model.serialization.JDomSerializationUtil
@@ -132,7 +154,7 @@ internal fun loadProject(configLocation: JpsProjectConfigLocation,
 }
 
 @TestOnly
-fun JpsProjectSerializersImpl.saveAllEntities(storage: EntityStorage, configLocation: JpsProjectConfigLocation) {
+suspend fun JpsProjectSerializersImpl.saveAllEntities(storage: EntityStorage, configLocation: JpsProjectConfigLocation) {
   val writer = JpsFileContentWriterImpl(configLocation)
   saveAllEntities(storage, writer)
   val modulePathMapping = this.moduleSerializers.keys.filterIsInstance<ExternalModuleImlFileEntitiesSerializer>()
@@ -141,7 +163,7 @@ fun JpsProjectSerializersImpl.saveAllEntities(storage: EntityStorage, configLoca
 }
 
 @TestOnly
-fun JpsProjectSerializersImpl.saveAffectedEntities(storage: EntityStorage, affectedEntitySources: Set<EntitySource>, configLocation: JpsProjectConfigLocation) {
+suspend fun JpsProjectSerializersImpl.saveAffectedEntities(storage: EntityStorage, affectedEntitySources: Set<EntitySource>, configLocation: JpsProjectConfigLocation) {
   val writer = JpsFileContentWriterImpl(configLocation)
   saveAffectedEntities(storage, affectedEntitySources, writer)
   val modulePathMapping = this.moduleSerializers.keys.filterIsInstance<ExternalModuleImlFileEntitiesSerializer>()
@@ -410,7 +432,7 @@ internal fun checkSaveProjectAfterChange(originalProjectFile: File,
     changedSources.addAll(builder.entitiesBySource { true }.mapTo(HashSet()) { it.entitySource })
   }
   val writer = JpsFileContentWriterImpl(projectData.configLocation)
-  projectData.serializers.saveEntities(builder.toSnapshot(), unloadedEntitiesBuilder.toSnapshot(), changedSources, writer)
+  runBlocking { projectData.serializers.saveEntities(builder.toSnapshot(), unloadedEntitiesBuilder.toSnapshot(), changedSources, writer) }
   val modulePathMapping = projectData.serializers.moduleSerializers.keys.filterIsInstance<ExternalModuleImlFileEntitiesSerializer>()
     .associate { it.fileUrl.url to it.modulePath.path }
   writer.writeFiles(modulePathMapping)

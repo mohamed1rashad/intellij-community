@@ -3,32 +3,61 @@ package com.intellij.tests;
 
 import com.intellij.tests.bazel.BazelJUnitOutputListener;
 import com.intellij.tests.bazel.IjSmTestExecutionListener;
+import com.intellij.tests.bazel.TestExecutionOutputDecorator;
 import com.intellij.tests.bazel.bucketing.BucketsPostDiscoveryFilter;
+import com.intellij.platform.bazel.runfiles.BazelRunfilesManifest;
+import com.intellij.util.ArrayUtil;
 import org.junit.platform.engine.DiscoverySelector;
 import org.junit.platform.engine.Filter;
 import org.junit.platform.engine.FilterResult;
 import org.junit.platform.engine.TestEngine;
+import org.junit.platform.engine.TestExecutionResult;
 import org.junit.platform.engine.discovery.ClassNameFilter;
 import org.junit.platform.engine.discovery.DiscoverySelectors;
 import org.junit.platform.engine.discovery.MethodSelector;
 import org.junit.platform.engine.discovery.UniqueIdSelector;
-import org.junit.platform.launcher.*;
+import org.junit.platform.launcher.EngineFilter;
+import org.junit.platform.launcher.Launcher;
+import org.junit.platform.launcher.LauncherDiscoveryRequest;
+import org.junit.platform.launcher.PostDiscoveryFilter;
+import org.junit.platform.launcher.TestExecutionListener;
+import org.junit.platform.launcher.TestIdentifier;
+import org.junit.platform.launcher.TestPlan;
 import org.junit.platform.launcher.core.LauncherDiscoveryRequestBuilder;
 import org.junit.platform.launcher.core.LauncherFactory;
+import org.junit.vintage.engine.descriptor.VintageTestDescriptor;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectClass;
 import static org.junit.platform.engine.discovery.DiscoverySelectors.selectMethod;
+import static org.junit.platform.launcher.LauncherConstants.CAPTURE_STDERR_PROPERTY_NAME;
+import static org.junit.platform.launcher.LauncherConstants.CAPTURE_STDOUT_PROPERTY_NAME;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public final class JUnit5BazelRunner {
@@ -38,6 +67,7 @@ public final class JUnit5BazelRunner {
   private static final int EXIT_CODE_TEST_RUNNER_FAILURE = 2;
   private static final int EXIT_CODE_TEST_FAILURE_OOM = 137;
 
+  private static final String bazelEnvRunfilesManifestOnly = "RUNFILES_MANIFEST_ONLY";
   private static final String bazelEnvSelfLocation = "SELF_LOCATION";
   private static final String bazelEnvTestTmpDir = "TEST_TMPDIR";
   private static final String bazelEnvRunFilesDir = "RUNFILES_DIR";
@@ -50,7 +80,6 @@ public final class JUnit5BazelRunner {
   private static final String jbEnvPrintTestSrcDirContent = "JB_TEST_PRINT_TEST_SRCDIR_CONTENT";
   private static final String jbEnvPrintEnv = "JB_TEST_PRINT_ENV";
   private static final String jbEnvPrintSystemProperties = "JB_TEST_PRINT_SYSTEM_PROPERTIES";
-  // true by default. try as much as possible to run tests in sandbox
   private static final String jbEnvSandbox = "JB_TEST_SANDBOX";
   private static final String jbEnvXmlOutputFile = "JB_XML_OUTPUT_FILE";
   // Enable IntelliJ Service Messages stream from test process
@@ -59,19 +88,46 @@ public final class JUnit5BazelRunner {
   private static final String jbEnvTestFilter = "JB_TEST_FILTER";
   // Allow rerun-failed selection via JUnit5 UniqueId list
   private static final String jbEnvTestUniqueIds = "JB_TEST_UNIQUE_IDS";
+  // Allow specifying test filter in JUnit5 format. Example: include-package=com.intellij.tests;exclude-classname=com.intellij.tests.IgnoredTest
+  private static final String jbEnvJunit5TestFilter = "JB_TEST_JUNIT5_FILTERS";
+  // Allow caller to provide a TestExecutionResultInterceptor. Android Studio team needs this when running tests on ART because some tests
+  // are expected to fail on ART.
+  private static final String jbEnvTestExecutionResultInterceptor = "JB_TEST_EXCECUTION_RESULT_INTERCEPTOR";
+  // Allow test target to specify test jar explicitly. Android Studio runs tests from a external targets so SELF_LOCATION can't be used
+  private static final String jbEnvTestJar = "JB_TEST_JAR";
+
+  private static final String intellijBuildTestGroups = "intellij.build.test.groups";
+  private static final String intellijBuildTestGroupRoots = "test.group.roots";
+  private static final String commonTestGroupsResourceName = "tests/testGroups.properties";
 
   private static final ClassLoader ourClassLoader = Thread.currentThread().getContextClassLoader();
   private static final Launcher launcher = LauncherFactory.create();
 
   private static final BucketsPostDiscoveryFilter bucketingPostDiscoveryFilter = new BucketsPostDiscoveryFilter();
+  private static final PostDiscoveryFilter performancePostDiscoveryFilter = new JUnit5TeamCityRunner.PerformancePostDiscoveryFilter();
+  private static final PostDiscoveryFilter ignorePostDiscoveryFilter = new JUnit5TeamCityRunner.IgnorePostDiscoveryFilter();
+  private static final PostDiscoveryFilter shardFilter = ShardFilter.create();
 
   private static LauncherDiscoveryRequest getDiscoveryRequest() throws Throwable {
     List<? extends DiscoverySelector> bazelTestSelectors = getTestsSelectors(ourClassLoader);
-    return LauncherDiscoveryRequestBuilder.request()
+    return createDiscoveryRequest(bazelTestSelectors, System.getProperty("intellij.build.test.engine.vintage"));
+  }
+
+  public static LauncherDiscoveryRequest createDiscoveryRequest(List<? extends DiscoverySelector> bazelTestSelectors, String engineVintage) {
+    LauncherDiscoveryRequestBuilder builder = LauncherDiscoveryRequestBuilder.request()
       .configurationParameter("junit.jupiter.extensions.autodetection.enabled", "true")
+      .configurationParameter(CAPTURE_STDOUT_PROPERTY_NAME, "true")
+      .configurationParameter(CAPTURE_STDERR_PROPERTY_NAME, "true")
       .selectors(bazelTestSelectors)
       .filters(getTestFilters(bazelTestSelectors))
-      .build();
+      .filters(generateFiltersFromJbEnv().toArray(new Filter[0]))
+      .filters(getEngineFilters(engineVintage));
+
+    if (!"false".equals(engineVintage)) {
+      builder = builder.filters(ignorePostDiscoveryFilter);
+    }
+
+    return builder.build();
   }
 
   private static List<? extends DiscoverySelector> getTestSelectorsByClassPathRoots(ClassLoader classLoader) throws Throwable {
@@ -98,9 +154,11 @@ public final class JUnit5BazelRunner {
       // set intellij.test.jars.location as a temporary workaround for debugger-agent.jar downloading
       System.setProperty("intellij.test.jars.location", bazelTestTestSrcDir);
 
+      System.setProperty("idea.is.unit.test", "true");
+
       if (Boolean.parseBoolean(System.getenv(jbEnvPrintSortedClasspath))) {
         Arrays.stream(System.getProperty("java.class.path")
-          .split(Pattern.quote(File.pathSeparator)))
+                        .split(Pattern.quote(File.pathSeparator)))
           .sorted()
           .toList()
           .forEach(x -> System.err.println("CLASSPATH " + x));
@@ -137,8 +195,14 @@ public final class JUnit5BazelRunner {
       Path ideaHome;
       Path tempDir = getBazelTempDir();
 
+      ShardFilter.writeShardStatus();
+
       String jbEnvSandboxValue = System.getenv(jbEnvSandbox);
-      boolean sandbox = Boolean.parseBoolean(jbEnvSandboxValue != null ? jbEnvSandboxValue : "true");
+      if (jbEnvSandboxValue == null) {
+        throw new RuntimeException("Missing " + jbEnvSandbox + " env variable in bazel test environment");
+      }
+
+      boolean sandbox = Boolean.parseBoolean(jbEnvSandboxValue);
       System.err.println("Use sandbox: " + sandbox);
 
       if (sandbox) {
@@ -202,7 +266,11 @@ public final class JUnit5BazelRunner {
             new Thread(() -> bazelJUnitOutputListener.closeForInterrupt(), "BazelJUnitOutputListenerShutdownHook")
           );
         testExecutionListeners.add(bazelJUnitOutputListener);
-        launcher.registerTestExecutionListeners(testExecutionListeners.toArray(TestExecutionListener[]::new));
+        TestExecutionResultInterceptor interceptor = loadTestExecutionResultInterceptor();
+        Stream<InterceptingTestExecutionListener> listeners =
+          testExecutionListeners.stream().map(it -> new InterceptingTestExecutionListener(it, interceptor));
+
+        launcher.registerTestExecutionListeners(listeners.toArray(TestExecutionListener[]::new));
         launcher.execute(testPlan);
       }
 
@@ -252,6 +320,8 @@ public final class JUnit5BazelRunner {
       } else {
         myListeners.add(new ConsoleTestLogger());
       }
+    } else {
+      myListeners.add(new TestExecutionOutputDecorator(System.out));
     }
     return myListeners;
   }
@@ -290,9 +360,55 @@ public final class JUnit5BazelRunner {
     }
   }
 
+  /**
+   * Parses Junit5 filters from JB_TEST_JUNIT5_FILTERS environmental variable.
+   * <p>
+   * <b>Format</b>: filter_option_1=value_1;filter_option_2=value_2;...
+   * <br>
+   * <b>Example</b>: include-package=com.intellij.tests;exclude-classname=com.intellij.tests.IgnoredTest
+   *
+   * @see JUnit5FilterOption
+   */
+  private static List<Filter<?>> generateFiltersFromJbEnv() {
+    List<Filter<?>> out = new ArrayList<>();
+    String junitFilters = System.getenv(jbEnvJunit5TestFilter);
+    Map<JUnit5FilterOption, List<String>> junitFilterOptionToFilterStringsMap = new HashMap<>();
+    if (junitFilters != null && !junitFilters.isBlank()) {
+      for (String filter : junitFilters.split(";")) {
+        String[] parts = filter.split("=");
+        if (parts.length != 2) {
+          throw new IllegalArgumentException("Invalid JUnit5 filter: " + filter + ". Filter should be in format: <option>=<value>");
+        }
+        JUnit5FilterOption filterOption = JUnit5FilterOption.fromString(parts[0]);
+        String filterString = parts[1];
+
+        List<String> filterStrings = junitFilterOptionToFilterStringsMap.computeIfAbsent(filterOption, _ -> new ArrayList<>());
+        filterStrings.add(filterString);
+      }
+    }
+
+    junitFilterOptionToFilterStringsMap.forEach((filterOption, filterStrings) -> {
+      out.add(filterOption.toJunitFilter(ArrayUtil.toStringArray(filterStrings)));
+    });
+
+    return out;
+  }
+
   private static Filter<?>[] getTestFilters(List<? extends DiscoverySelector> bazelTestSelectors) {
     List<Filter<?>> filters = new ArrayList<>();
+    if (isTestGroupsFilterRequested()) {
+      try {
+        setTestGroupRootsPropertyIfNeeded();
+      } catch (IOException e) {
+        throw new IllegalStateException("Failed to set test group roots property", e);
+      }
+      filters.add(new JUnit5TeamCityRunner.CommonTestClassesFilter());
+    }
     filters.add(bucketingPostDiscoveryFilter);
+    filters.add(performancePostDiscoveryFilter);
+    if (shardFilter != null) {
+      filters.add(shardFilter);
+    }
 
     // value of --test_filter, if specified
     // https://bazel.build/reference/test-encyclopedia
@@ -315,6 +431,88 @@ public final class JUnit5BazelRunner {
 
     filters.add(classNameFilter);
     return filters.toArray(new Filter[0]);
+  }
+
+  private static boolean isTestGroupsFilterRequested() {
+    String testGroups = System.getProperty(intellijBuildTestGroups);
+    return testGroups != null && !testGroups.isBlank();
+  }
+
+  private static void setTestGroupRootsPropertyIfNeeded() throws IOException {
+    String testGroupRoots = System.getProperty(intellijBuildTestGroupRoots);
+    if (testGroupRoots != null && !testGroupRoots.isBlank()) {
+      return;
+    }
+    if (testGroupRoots != null) {
+      System.clearProperty(intellijBuildTestGroupRoots);
+    }
+
+    List<Path> roots = findTestGroupRoots(getContextClassLoader());
+    if (!roots.isEmpty()) {
+      System.setProperty(intellijBuildTestGroupRoots, roots.stream()
+        .map(path -> path.toAbsolutePath().toString())
+        .collect(Collectors.joining(File.pathSeparator)));
+    }
+  }
+
+  private static List<Path> findTestGroupRoots(ClassLoader classLoader) throws IOException {
+    LinkedHashSet<Path> roots = new LinkedHashSet<>();
+    Enumeration<URL> resources = classLoader.getResources(commonTestGroupsResourceName);
+    int extractedResourceIndex = 0;
+    Path testGroupRootsDir = getTestGroupRootsTempDir();
+    while (resources.hasMoreElements()) {
+      URL resource = resources.nextElement();
+      Path resourcePath = getFileResourcePath(resource);
+      if (resourcePath == null) {
+        resourcePath = extractTestGroupsResource(resource, testGroupRootsDir, extractedResourceIndex++);
+      }
+      roots.add(resourcePath);
+    }
+    return new ArrayList<>(roots);
+  }
+
+  private static ClassLoader getContextClassLoader() {
+    ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+    return classLoader != null ? classLoader : ClassLoader.getSystemClassLoader();
+  }
+
+  private static Path getFileResourcePath(URL resource) throws IOException {
+    if (!"file".equals(resource.getProtocol())) {
+      return null;
+    }
+    try {
+      return Path.of(resource.toURI()).toAbsolutePath();
+    }
+    catch (URISyntaxException e) {
+      throw new IOException("Invalid test group resource URL: " + resource, e);
+    }
+  }
+
+  private static Path extractTestGroupsResource(URL resource, Path testGroupRootsDir, int index) throws IOException {
+    Path testGroupsFile = testGroupRootsDir.resolve("testGroups-" + index + ".properties");
+    try (var stream = resource.openStream()) {
+      Files.copy(stream, testGroupsFile, StandardCopyOption.REPLACE_EXISTING);
+    }
+    return testGroupsFile.toAbsolutePath();
+  }
+
+  private static Path getTestGroupRootsTempDir() throws IOException {
+    String tempDir = System.getenv(bazelEnvTestTmpDir);
+    Path root = tempDir == null || tempDir.isBlank() ? Files.createTempDirectory("junit5-bazel-test-groups") : Path.of(tempDir);
+    Path testGroupRootsDir = root.resolve("test-group-roots");
+    Files.createDirectories(testGroupRootsDir);
+    return testGroupRootsDir;
+  }
+
+  private static Filter<?>[] getEngineFilters(String engineVintage) {
+    if (engineVintage == null) {
+      return new Filter[0];
+    }
+    return switch (engineVintage) {
+      case "false" -> new Filter[]{EngineFilter.excludeEngines(VintageTestDescriptor.ENGINE_ID)};
+      case "only" -> new Filter[]{EngineFilter.includeEngines(VintageTestDescriptor.ENGINE_ID)};
+      default -> throw new RuntimeException("Unsupported engine value: " + engineVintage);
+    };
   }
 
   private static List<? extends DiscoverySelector> getTestsSelectors(ClassLoader classLoader) throws Throwable {
@@ -419,8 +617,11 @@ public final class JUnit5BazelRunner {
   }
 
   private static Boolean isBazelTestRun() {
-    return Stream.of(bazelEnvSelfLocation, bazelEnvTestTmpDir, bazelEnvRunFilesDir, bazelEnvJavaRunFilesDir)
+    return Stream.of(bazelEnvTestTmpDir, bazelEnvRunFilesDir, bazelEnvJavaRunFilesDir)
       .allMatch(bazelTestEnv -> {
+        var bazelTestEnvValue = System.getenv(bazelTestEnv);
+        return bazelTestEnvValue != null && !bazelTestEnvValue.isBlank();
+      }) && Stream.of(bazelEnvSelfLocation, bazelEnvRunfilesManifestOnly).anyMatch(bazelTestEnv -> {
         var bazelTestEnvValue = System.getenv(bazelTestEnv);
         return bazelTestEnvValue != null && !bazelTestEnvValue.isBlank();
       });
@@ -453,6 +654,66 @@ public final class JUnit5BazelRunner {
 
     Path workDirPath = Path.of(testSrcDir);
     String communityMarkerFileName = "intellij.idea.community.main.iml";
+
+    // Try to get the actual workspace name from TEST_WORKSPACE env variable
+    // In Bazel's runfiles layout, the workspace subdirectory is named after the workspace
+    String testWorkspace = System.getenv("TEST_WORKSPACE");
+    String runfilesManifestOnly = System.getenv(bazelEnvRunfilesManifestOnly);
+    String runfilesManifestFile = System.getenv("RUNFILES_MANIFEST_FILE");
+
+    if (testWorkspace != null && !testWorkspace.isBlank()) {
+      // On Windows, when RUNFILES_MANIFEST_ONLY=1, we need to read the manifest file
+      // instead of looking for actual files in the runfiles directory
+      if ("1".equals(runfilesManifestOnly) && runfilesManifestFile != null) {
+        try {
+          Path manifestPath = Path.of(runfilesManifestFile);
+          if (Files.exists(manifestPath)) {
+            // In Bazel's external repository layout, the file might be at:
+            // - _main/external/community+/intellij.idea.community.main.iml (for ultimate repo accessing community as external)
+            // - community+/intellij.idea.community.main.iml (direct community+ workspace reference)
+            // - _main/intellij.idea.community.main.iml (if at workspace root)
+            String[] searchKeys = {
+              testWorkspace + "/external/community+/" + communityMarkerFileName,
+              "community+/" + communityMarkerFileName,
+              testWorkspace + "/" + communityMarkerFileName
+            };
+
+            for (String searchKey : searchKeys) {
+              try (final Stream<String> lines = Files.lines(manifestPath)) {
+                String realPath = lines
+                  .filter(line -> line.startsWith(searchKey + " "))
+                  .map(line -> line.substring(line.indexOf(' ') + 1))
+                  .findFirst()
+                  .orElse(null);
+
+                if (realPath != null) {
+                  Path realMarkerFile;
+                  try {
+                    realMarkerFile = Path.of(realPath).toRealPath();
+                  }
+                  catch (FileSystemException e) {
+                    continue;
+                  }
+                  Path communityRoot = realMarkerFile.getParent();
+                  Path parentPath = communityRoot.getParent();
+                  if (parentPath != null && Files.exists(parentPath.resolve(".ultimate.root.marker"))) {
+                    return parentPath;
+                  }
+                  else {
+                    return communityRoot;
+                  }
+                }
+              }
+            }
+          }
+        }
+        catch (IOException e) {
+          // Fall through to legacy logic
+        }
+      }
+    }
+
+    // Fallback to hardcoded workspace names for backward compatibility
     Path ultimateMarkerFile = workDirPath.resolve("community+").resolve(communityMarkerFileName);
     Path communityMarkerFile = workDirPath.resolve("_main").resolve(communityMarkerFileName);
     if (Files.exists(ultimateMarkerFile)) {
@@ -487,17 +748,101 @@ public final class JUnit5BazelRunner {
   public static Set<Path> getClassPathRoots(ClassLoader classLoader) throws Throwable {
     // to get relevant jars for the current test target, we do the following:
     // - get the list of all the paths in classpath by getBaseUrls() using reflection
-    // - get from this list only those paths, that located next to env.SELF_LOCATION
+    // - get from this list only those paths that are located next to env.SELF_LOCATION
     // where SELF_LOCATION is the path to the test executable/script and set by Bazel automatically
     Method getBaseUrls = classLoader.getClass().getMethod("getBaseUrls");
     //noinspection unchecked
     List<Path> paths = (List<Path>)getBaseUrls.invoke(classLoader);
 
-    String bazelTestSelfLocation = System.getenv(bazelEnvSelfLocation);
-    Path bazelTestSelfLocationDir = Path.of(bazelTestSelfLocation).getParent().toAbsolutePath();
+    String bazelTestJar = System.getenv(jbEnvTestJar);
+    if (bazelTestJar != null) {
+      return paths.stream()
+        .filter(p -> p.toString().endsWith(bazelTestJar))
+        .collect(Collectors.toSet());
+    }
+
+    // Linux/macOS: SELF_LOCATION points to the test binary inside its materialized
+    // runfiles tree, so all target-specific jars share its parent directory.
+    String selfLocation = System.getenv(bazelEnvSelfLocation);
+    if (selfLocation != null && !selfLocation.isBlank()) {
+      Path selfDir = Path.of(selfLocation).toAbsolutePath().getParent();
+      return paths.stream()
+        .filter(p -> selfDir.equals(p.toAbsolutePath().getParent()))
+        .collect(Collectors.toSet());
+    }
+
+    // Windows (RUNFILES_MANIFEST_ONLY=1): no materialized runfiles tree,
+    // so we have to match by the VIRTUAL parent instead of a REAL one.
+
+    String testBinary = System.getenv("TEST_BINARY");
+    String testWorkspace = System.getenv("TEST_WORKSPACE");
+    String testBinaryVirtualParent = getTestBinaryVirtualParent(testWorkspace, testBinary);
+
+    // Reverse-map each entry through the runfiles MANIFEST to its VIRTUAL runfiles path
+    // (e.g., _main/toolbox/app-starter/app-starter-tests.jar)
+    Map<Path, List<String>> realToVirtuals = buildRealToVirtualMap(testBinary, testWorkspace);
+
+    // return the ones that have the same VIRTUAL parent as the test binary
     return paths.stream()
-      .filter(p -> bazelTestSelfLocationDir.equals(p.toAbsolutePath().getParent()))
+      .filter(p -> {
+        List<String> virtuals = realToVirtuals.get(p.toAbsolutePath());
+        if (virtuals == null) {
+          return false;
+        }
+
+        for (String virtual : virtuals) {
+          int idx = virtual.lastIndexOf('/');
+          String parent = idx > 0 ? virtual.substring(0, idx) : "";
+
+          if (testBinaryVirtualParent.equals(parent)) {
+            return true;
+          }
+        }
+        return false;
+      })
       .collect(Collectors.toSet());
+  }
+
+  private static String getTestBinaryVirtualParent(String testWorkspace, String testBinary) {
+    // Normalize so that e.g., TEST_WORKSPACE=_main + TEST_BINARY=../community+/foo/bar.exe
+    // collapses to community+/foo/bar.exe (targets in external workspaces).
+    Path testBinaryVirtualPath = Path.of(
+      testWorkspace,
+      testBinary.replace('\\', '/')
+    ).normalize();
+
+    Path testBinaryVirtualParentPath = testBinaryVirtualPath.getParent();
+    if (testBinaryVirtualParentPath == null) {
+      throw new IllegalStateException("Expected TEST_BINARY to have a parent: " + testBinary);
+    }
+
+    return testBinaryVirtualParentPath.toString().replace('\\', '/');
+  }
+
+  // Each REAL path may appear under multiple VIRTUAL paths in the manifest
+  // (e.g. _main/external/community+/foo and community+/foo for a target in the
+  // community+ external workspace). Collect all VIRTUAL paths per REAL path so we
+  // can match against whichever form the test binary's VIRTUAL path normalizes to.
+  private static Map<Path, List<String>> buildRealToVirtualMap(String testBinary, String testWorkspace) {
+    BazelRunfilesManifest manifest = new BazelRunfilesManifest();
+    if (!manifest.getExists() ||
+        testBinary == null || testBinary.isBlank() ||
+        testWorkspace == null || testWorkspace.isBlank()) {
+      throw new IllegalStateException(
+        "Cannot determine test binary directory: " + bazelEnvSelfLocation + " is unset" +
+        " and RUNFILES_MANIFEST_FILE/TEST_BINARY/TEST_WORKSPACE are not all set." +
+        " Refusing to scan the full manifest-expanded classpath for test discovery.");
+    }
+
+    Map<Path, List<String>> realToVirtuals = new HashMap<>();
+
+    manifest.getEntries().forEach(
+      (virtual, real) -> realToVirtuals.computeIfAbsent(
+        Path.of(real).toAbsolutePath(),
+        k -> new ArrayList<>()).add(virtual)
+    );
+
+    return realToVirtuals;
   }
 
   public static List<? extends DiscoverySelector> getSelectors(Set<Path> classPathRoots) {
@@ -522,6 +867,22 @@ public final class JUnit5BazelRunner {
     public void executionStarted(TestIdentifier testIdentifier) {
       if (testIdentifier.isTest()) {
         System.out.println("Started: " + testIdentifier.getDisplayName());
+      }
+    }
+
+    @Override
+    public void executionFinished(TestIdentifier testIdentifier, TestExecutionResult testExecutionResult) {
+      if (testIdentifier.isTest()) {
+        System.out.println("Finished: " + testIdentifier.getDisplayName() + " (" + testExecutionResult.getStatus() + ")");
+      }
+
+      if (testExecutionResult.getStatus() != TestExecutionResult.Status.SUCCESSFUL && testExecutionResult.getThrowable().isPresent()) {
+        Throwable t = testExecutionResult.getThrowable().get();
+        t.printStackTrace(System.err);
+        String message = t.getMessage();
+        if (message != null && !message.isBlank()) {
+          System.err.println(message);
+        }
       }
     }
 
@@ -565,6 +926,23 @@ public final class JUnit5BazelRunner {
     catch (IOException t) {
       // Non-fatal: we still exit successfully, but log the problem to stderr
       System.err.println("Failed to write XML_OUTPUT_FILE for bucketing-empty plan: " + t.getMessage());
+    }
+  }
+
+  private static TestExecutionResultInterceptor loadTestExecutionResultInterceptor() {
+    String className = System.getenv(jbEnvTestExecutionResultInterceptor);
+    if (className == null) {
+      return (identifier, result) -> result;
+    }
+    try {
+      ClassLoader loader = ClassLoader.getSystemClassLoader();
+      @SuppressWarnings("unchecked")
+      Class<TestExecutionResultInterceptor> cls = (Class<TestExecutionResultInterceptor>)loader.loadClass(className);
+      Constructor<TestExecutionResultInterceptor> constructor = cls.getDeclaredConstructor();
+      return constructor.newInstance();
+    }
+    catch (ClassNotFoundException | NoSuchMethodException | InstantiationException | IllegalAccessException | InvocationTargetException e) {
+      throw new RuntimeException(e);
     }
   }
 }

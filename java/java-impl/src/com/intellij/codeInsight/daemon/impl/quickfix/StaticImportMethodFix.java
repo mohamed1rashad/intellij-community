@@ -8,7 +8,14 @@ import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.search.PsiShortNamesCache;
 import com.intellij.psi.util.PsiFormatUtil;
@@ -44,7 +51,7 @@ public class StaticImportMethodFix extends StaticImportMemberFix<PsiMethod, PsiM
 
   @Override
   public @NotNull IntentionPreviewInfo generatePreview(@NotNull Project project, @NotNull Editor editor, @NotNull PsiFile psiFile) {
-    return generatePreview(psiFile, (__, method) -> AddSingleMemberStaticImportAction.bindAllClassRefs(psiFile, method, method.getName(), method.getContainingClass()));
+    return generatePreview(psiFile, (_, method) -> AddSingleMemberStaticImportAction.bindAllClassRefs(psiFile, method, method.getName(), method.getContainingClass()));
   }
 
   @Override

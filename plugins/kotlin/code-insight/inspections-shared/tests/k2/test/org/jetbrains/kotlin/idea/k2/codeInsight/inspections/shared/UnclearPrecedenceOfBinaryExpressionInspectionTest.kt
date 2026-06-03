@@ -7,15 +7,15 @@ import junit.framework.TestCase
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeInsight.inspections.shared.UnclearPrecedenceOfBinaryExpressionInspection
-import org.jetbrains.kotlin.idea.fir.invalidateCaches
 import org.jetbrains.kotlin.idea.test.KotlinLightCodeInsightFixtureTestCase
 import org.jetbrains.kotlin.idea.test.KotlinWithJdkAndRuntimeLightProjectDescriptor
+import org.jetbrains.kotlin.test.util.invalidateCaches
 
 class UnclearPrecedenceOfBinaryExpressionInspectionTest : KotlinLightCodeInsightFixtureTestCase() {
     fun `test elvis elvis`() = doTest("fun foo(i: Int?, j: Int?, k: Int?) = i ?: j <caret>?: k")
 
     fun `test elvis as`() = doTest(
-        "fun foo(i: Int?, j: Int?) = i ?: j<caret> <warning descr=\"[USELESS_CAST] No cast needed.\">as String?</warning>",
+        "fun foo(i: Int?, j: Int?) = i ?: j<caret> <warning descr=\"[UNSAFE_CAST_RELYING_ON_NULL] This cast only succeeds when the expression is null. Consider rewriting it explicitly.\">as</warning> String?",
         "fun foo(i: Int?, j: Int?) = i ?: (j as String?)"
     )
 

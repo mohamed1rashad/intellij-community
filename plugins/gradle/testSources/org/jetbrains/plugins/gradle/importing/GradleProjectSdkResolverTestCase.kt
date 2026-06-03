@@ -9,7 +9,6 @@ import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUt
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtilTestCase.TestJdkProvider
 import com.intellij.openapi.externalSystem.service.execution.TestUnknownSdkResolver
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
-import com.intellij.openapi.externalSystem.util.awaitProjectActivity
 import com.intellij.openapi.externalSystem.util.environment.Environment
 import com.intellij.openapi.externalSystem.util.environment.TestEnvironment
 import com.intellij.openapi.projectRoots.JavaSdk
@@ -20,7 +19,9 @@ import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.roots.ui.configuration.SdkTestCase
 import com.intellij.openapi.roots.ui.configuration.SdkTestCase.Companion.assertSdk
 import com.intellij.openapi.roots.ui.configuration.SdkTestCase.TestSdkGenerator
+import com.intellij.platform.externalSystem.testFramework.ExternalSystemTestObservation.awaitProjectActivity
 import com.intellij.testFramework.VfsTestUtil
+import com.intellij.testFramework.common.runAll
 import com.intellij.testFramework.replaceService
 import com.intellij.util.lang.JavaVersion
 import org.jetbrains.plugins.gradle.service.project.open.linkAndSyncGradleProject
@@ -82,15 +83,19 @@ abstract class GradleProjectSdkResolverTestCase : GradleImportingTestCase() {
   }
 
   fun assertSdks(sdk: Sdk?, vararg moduleNames: String, isAssertSdkName: Boolean = true) {
-    assertProjectSdk(sdk, isAssertSdkName)
-    for (moduleName in moduleNames) {
-      assertModuleSdk(moduleName, sdk, isAssertSdkName)
-    }
+    runAll(
+      { assertProjectSdk(sdk, isAssertSdkName = isAssertSdkName) },
+      { assertModuleSdks(sdk, *moduleNames, isAssertSdkName = isAssertSdkName) }
+    )
   }
 
-  private fun assertProjectSdk(sdk: Sdk?, isAssertSdkName: Boolean) {
+  fun assertProjectSdk(sdk: Sdk?, isAssertSdkName: Boolean = true) {
     val projectSdk = getSdkForProject()
     assertSdk(sdk, projectSdk, isAssertSdkName)
+  }
+
+  fun assertModuleSdks(sdk: Sdk?, vararg moduleNames: String, isAssertSdkName: Boolean = true) {
+    runAll(moduleNames.asList()) { assertModuleSdk(it, sdk, isAssertSdkName) }
   }
 
   private fun assertModuleSdk(moduleName: String, sdk: Sdk?, isAssertSdkName: Boolean) {

@@ -3,11 +3,27 @@ package com.intellij.workspaceModel.codegen.impl.engine
 
 import com.intellij.workspaceModel.codegen.deft.meta.CompiledObjModule
 import com.intellij.workspaceModel.codegen.deft.meta.ObjModule
-import com.intellij.workspaceModel.codegen.engine.*
-import com.intellij.workspaceModel.codegen.impl.writer.*
+import com.intellij.workspaceModel.codegen.engine.CodeGenerator
+import com.intellij.workspaceModel.codegen.engine.GeneratedCode
+import com.intellij.workspaceModel.codegen.engine.GenerationProblem
+import com.intellij.workspaceModel.codegen.engine.GenerationResult
+import com.intellij.workspaceModel.codegen.engine.GeneratorSettings
+import com.intellij.workspaceModel.codegen.engine.ObjClassGeneratedCode
+import com.intellij.workspaceModel.codegen.engine.ObjModuleFileGeneratedCode
+import com.intellij.workspaceModel.codegen.engine.ProblemLocation
+import com.intellij.workspaceModel.codegen.impl.writer.MetadataStorage
+import com.intellij.workspaceModel.codegen.impl.writer.checkExtensionFields
+import com.intellij.workspaceModel.codegen.impl.writer.checkReferences
+import com.intellij.workspaceModel.codegen.impl.writer.checkSuperTypes
+import com.intellij.workspaceModel.codegen.impl.writer.checkSymbolicId
 import com.intellij.workspaceModel.codegen.impl.writer.classes.implWsMetadataStorageBridgeCode
 import com.intellij.workspaceModel.codegen.impl.writer.classes.implWsMetadataStorageCode
 import com.intellij.workspaceModel.codegen.impl.writer.extensions.implPackage
+import com.intellij.workspaceModel.codegen.impl.writer.fqn
+import com.intellij.workspaceModel.codegen.impl.writer.generateCompatabilityBuilder
+import com.intellij.workspaceModel.codegen.impl.writer.generateCompatibilityCompanion
+import com.intellij.workspaceModel.codegen.impl.writer.generateTopLevelCode
+import com.intellij.workspaceModel.codegen.impl.writer.implWsCode
 
 class CodeGeneratorImpl : CodeGenerator {
 
@@ -21,24 +37,34 @@ class CodeGeneratorImpl : CodeGenerator {
       return failedGenerationResult(reporter)
     }
 
-    val objClassToTopLevelCode = module.types.associateWith {
-      val topLevelCode = it.generateTopLevelCode(reporter)
-      topLevelCode
-    }
-
-    if (reporter.hasErrors()) {
-      return failedGenerationResult(reporter)
-    }
-
-
-    val generatedCode = objClassToTopLevelCode.map { (objClass, topLevelCode) ->
-      ObjClassGeneratedCode(
-        target = objClass,
-        builderInterface = objClass.generateCompatabilityBuilder(),
-        companionObject = objClass.generateCompatibilityCompanion(),
-        topLevelCode = topLevelCode,
-        implementationClass = objClass.implWsCode()
-      )
+    val generatedCode: MutableList<GeneratedCode> = arrayListOf()
+    for (type in module.types) {
+      try {
+        checkSuperTypes(type, reporter)
+        checkSymbolicId(type, reporter)
+        checkReferences(type, reporter)
+        if (reporter.hasErrors()) return failedGenerationResult(reporter)
+        val topLevelCode = type.generateTopLevelCode(reporter)
+        if (reporter.hasErrors()) return failedGenerationResult(reporter)
+        val compatibilityBuilder = type.generateCompatabilityBuilder()
+        val compatibilityCompanion = type.generateCompatibilityCompanion()
+        val implementationClass = type.implWsCode()
+        if (reporter.hasErrors()) return failedGenerationResult(reporter)
+        generatedCode.add(
+          ObjClassGeneratedCode(
+            target = type,
+            builderInterface = compatibilityBuilder,
+            companionObject = compatibilityCompanion,
+            topLevelCode = topLevelCode,
+            implementationClass = implementationClass
+          )
+        )
+      } catch (e: Exception) {
+        // todo: pass reporter everywhere (search for 'throw UnsupportedOperationException' in this module)
+        return GenerationResult(emptyList(), listOf(GenerationProblem(e.message ?: "Failed to generate entity implementation for ${type.name}",
+                                                               GenerationProblem.Level.ERROR,
+                                                               ProblemLocation.Class(type))))
+      }
     }
 
     return GenerationResult(generatedCode, reporter.problems)
@@ -62,17 +88,15 @@ class CodeGeneratorImpl : CodeGenerator {
 
     val generatedCode = arrayListOf<GeneratedCode>()
 
-    addMetadataStorageCode(
-      generatedCode, metadataStorageImplModule,
-      implWsMetadataStorageCode(metadataStorageImplModule, notEmptyModules.flatMap { it.types }, notEmptyModules.flatMap { it.abstractTypes })
-    )
+    addMetadataStorageCode(generatedCode,
+                           metadataStorageImplModule,
+                           implWsMetadataStorageCode(metadataStorageImplModule,
+                                                     notEmptyModules.flatMap { it.types },
+                                                     notEmptyModules.flatMap { it.abstractTypes }))
 
     val metadataStorageImplFqn = fqn(metadataStorageImplModule.implPackage, MetadataStorage.IMPL_NAME)
     metadataStorageBridgeModules.forEach {
-      addMetadataStorageCode(
-        generatedCode, it,
-        it.implWsMetadataStorageBridgeCode(metadataStorageImplFqn)
-      )
+      addMetadataStorageCode(generatedCode, it, it.implWsMetadataStorageBridgeCode(metadataStorageImplFqn))
     }
 
     return GenerationResult(generatedCode, emptyList())

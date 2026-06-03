@@ -8,11 +8,16 @@ import org.jetbrains.plugins.gradle.model.DefaultExternalSourceSet;
 import org.jetbrains.plugins.gradle.model.GradleSourceSetModel;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @ApiStatus.Internal
 public final class DefaultGradleSourceSetModel implements GradleSourceSetModel {
 
+  private @Nullable Integer toolchainVersion;
   private @Nullable String sourceCompatibility;
   private @Nullable String targetCompatibility;
   private @NotNull List<File> taskArtifacts;
@@ -22,12 +27,22 @@ public final class DefaultGradleSourceSetModel implements GradleSourceSetModel {
   private @NotNull List<File> additionalArtifacts;
 
   public DefaultGradleSourceSetModel() {
+    toolchainVersion = null;
     sourceCompatibility = null;
     targetCompatibility = null;
     taskArtifacts = new ArrayList<>();
     configurationArtifacts = new LinkedHashMap<>();
     sourceSets = new LinkedHashMap<>();
     additionalArtifacts = new ArrayList<>(0);
+  }
+
+  @Override
+  public @Nullable Integer getToolchainVersion() {
+    return toolchainVersion;
+  }
+
+  public void setToolchainVersion(@Nullable Integer javaToolchainVersion) {
+    this.toolchainVersion = javaToolchainVersion;
   }
 
   @Override

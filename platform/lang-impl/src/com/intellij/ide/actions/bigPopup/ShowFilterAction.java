@@ -15,11 +15,16 @@ import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.JBPopupListener;
 import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.ui.BadgeIconSupplier;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.HierarchyEvent;
@@ -77,7 +82,7 @@ public abstract class ShowFilterAction extends ToggleAction implements DumbAware
       .setModalContext(false)
       .setFocusable(false)
       .setResizable(true)
-      .setCancelOnClickOutside(false)
+      .setCancelOnClickOutside(true)
       .setMinSize(new Dimension(200, 200))
       .setDimensionServiceKey(project, getDimensionServiceKey(), false)
       .addListener(popupCloseListener)
@@ -136,4 +141,11 @@ public abstract class ShowFilterAction extends ToggleAction implements DumbAware
   }
 
   protected abstract ElementsChooser<?> createChooser();
+
+  @ApiStatus.Internal
+  public void closeFilterPopup() {
+    if (myFilterPopup != null && !myFilterPopup.isDisposed()) {
+      myFilterPopup.cancel();
+    }
+  }
 }

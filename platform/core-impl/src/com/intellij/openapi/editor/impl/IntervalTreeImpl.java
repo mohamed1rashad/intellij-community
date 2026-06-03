@@ -21,7 +21,11 @@ import org.jetbrains.annotations.Nullable;
 
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.ConcurrentModificationException;
+import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -125,7 +129,7 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
     }
 
     // removes the interval and the node, if node became empty
-    // returns true if node was removed
+    // returns true if the node itself was removed, not just one interval inside
     private boolean removeInterval(@NotNull E key) {
       myTree.checkBelongsToTheTree(key, true);
       myTree.assertUnderWriteLock();
@@ -447,9 +451,10 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
   }
 
   private @NotNull Supplier<? extends T> createGetter(@NotNull T interval) {
+    //noinspection rawtypes,unchecked
     return keepIntervalOnWeakReference(interval)
            ? new WeakReferencedGetter<>(interval, myReferenceQueue)
-           : new StaticSupplier<>(interval);
+           : (Supplier)interval;
   }
 
   private static final class WeakReferencedGetter<T> extends WeakReference<T> implements Supplier<T> {
@@ -463,26 +468,13 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
     }
   }
 
-  private static final class StaticSupplier<T> implements Supplier<T> {
-    private final T myT;
-
-    private StaticSupplier(@NotNull T referent) {
-      myT = referent;
-    }
-
-    @Override
-    public T get() {
-      return myT;
-    }
-
-    @Override
-    public @NonNls String toString() {
-      return "sRef: " + get();
-    }
-  }
-
   void assertUnderWriteLock() {
-    assert l.isWriteLocked() : l.writeLock();
+    assert l.isWriteLockedByCurrentThread() : l.writeLock();
+  }
+  protected void assertMayModify() throws IllegalStateException {
+    if (l.getReadHoldCount() != 0) {
+      throw new IllegalStateException("Must not perform modifications while holding read lock/iterating");
+    }
   }
 
   private void pushDeltaFromRoot(@Nullable IntervalNode<T> node) {
@@ -1060,9 +1052,7 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
   private void checkBelongsToTheTree(@NotNull T interval, boolean assertInvalid) {
     IntervalNode<T> root = lookupNode(interval);
     if (root == null) return;
-    //noinspection NumberEquality
-    assert root.getTree() == this : root.getTree() + " ("+root.getTree().getClass()+")"+
-                                    "; this: "+this + "("+getClass()+")";
+    assert root.getTree() == this : root.getTree() + " ("+root.getTree().getClass()+"); this: "+this + "("+getClass()+")";
     if (VERIFY) {
       if (assertInvalid) {
         List<Supplier<? extends T>> intervals = root.intervals;
@@ -1074,7 +1064,6 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
           contains |= key == interval;
           IntervalNode<T> node = lookupNode(key);
           assert node == root : node;
-          //noinspection NumberEquality
           assert node.getTree() == this : node;
         }
 
@@ -1090,10 +1079,14 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
   @Override
   public boolean removeInterval(@NotNull T interval) {
     if (!interval.isValid()) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("ITI.removeInterval=false: node is null; " + interval);
+      }
       return false;
     }
+    boolean r = false;
     try {
-      return runUnderWriteLock(() -> {
+      r = runUnderWriteLock(() -> {
         try {
           incModCount();
           boolean ret = false;
@@ -1108,6 +1101,11 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
               node.removeInterval(interval);
               ret = true;
             }
+            else {
+              if (LOG.isDebugEnabled()) {
+                LOG.debug("ITI.removeInterval=false: node lookup is null; " + interval);
+              }
+            }
           }
           return ret;
         }
@@ -1115,6 +1113,7 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
           setNode(interval, null);
         }
       });
+      return r;
     }
     finally {
       fireAfterRemoved(interval);
@@ -1636,10 +1635,12 @@ public abstract class IntervalTreeImpl<T extends RangeMarkerEx> extends RedBlack
   // return taste of subtree
   private byte verifyTaste(@Nullable IntervalNode<T> root) {
     if (root == null) return 0;
-    assert root.taste == root.computeTaste();
+    assert root.taste == root.computeTaste() : "root.taste: "+Integer.toHexString(root.taste)+"; root.computeTaste():"+Integer.toHexString(root.computeTaste())+"; intervals: "+ root.intervals;
     byte foundInChildren = (byte) (verifyTaste(root.getLeft()) | verifyTaste(root.getRight()));
-    assert (root.taste & root.tasteBeneath) == root.taste; // taste must be a subset of tasteBeneath
-    assert (root.tasteBeneath & ~root.taste)== (foundInChildren & ~root.taste); // tasteBeneath must be same as its children (except for taste bits)
+    // taste must be a subset of tasteBeneath
+    assert (root.taste & root.tasteBeneath) == root.taste : "root.taste: "+Integer.toHexString(root.taste)+"; root.tasteBeneath:"+Integer.toHexString(root.tasteBeneath)+"; intervals: "+ root.intervals;
+    // tasteBeneath must be same as its children (except for taste bits)
+    assert (root.tasteBeneath & ~root.taste)== (foundInChildren & ~root.taste) : "root.taste: "+Integer.toHexString(root.taste)+"; root.tasteBeneath:"+Integer.toHexString(root.tasteBeneath)+"; foundInChildren:"+Integer.toHexString(foundInChildren)+"; intervals: "+ root.intervals;
     return root.tasteBeneath;
   }
 

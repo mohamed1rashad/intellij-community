@@ -21,28 +21,32 @@ import com.intellij.openapi.project.rootManager
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.python.community.execService.impl.processLaunchers.uploadMeasureTime
 import com.intellij.remote.RemoteSdkProperties
 import com.intellij.util.PathMappingSettings
 import com.intellij.util.PathUtil
 import com.intellij.util.io.ZipUtil
 import com.intellij.util.io.deleteWithParentsIfEmpty
 import com.jetbrains.python.PythonHelper
-import com.jetbrains.python.run.*
+import com.jetbrains.python.run.PythonInterpreterTargetEnvironmentFactory
+import com.jetbrains.python.run.buildTargetedCommandLine
+import com.jetbrains.python.run.ensureProjectSdkAndModuleDirsAreOnTarget
+import com.jetbrains.python.run.execute
+import com.jetbrains.python.run.prepareHelperScriptExecution
 import com.jetbrains.python.run.target.HelpersAwareTargetEnvironmentRequest
 import com.jetbrains.python.target.PyTargetAwareAdditionalData
 import com.jetbrains.python.target.PyTargetAwareAdditionalData.Companion.pathsAddedByUser
 import com.jetbrains.python.target.PyTargetAwareAdditionalData.Companion.pathsRemovedByUser
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Files
-import java.nio.file.attribute.FileTime
 import java.nio.file.attribute.PosixFilePermissions
-import java.time.Instant
 import kotlin.io.path.deleteExisting
 import kotlin.io.path.div
 import kotlin.io.path.setPosixFilePermissions
 
 
 private const val STATE_FILE = ".state.json"
+private const val SUCCESS_FILE = ".success"
 
 @ApiStatus.Internal
 
@@ -77,15 +81,10 @@ class PyTargetsRemoteSourcesRefresher(val sdk: Sdk, private val project: Project
     val execution = prepareHelperScriptExecution(helperPackage = PythonHelper.REMOTE_SYNC, helpersAwareTargetRequest = pyRequest)
 
     val stateFilePath = localRemoteSourcesRoot / STATE_FILE
-    val stateFilePrevTimestamp: FileTime
     if (Files.exists(stateFilePath)) {
-      stateFilePrevTimestamp = Files.getLastModifiedTime(stateFilePath)
       Files.copy(stateFilePath, localUploadDir / STATE_FILE)
       execution.addParameter("--state-file")
       execution.addParameter(uploadVolume.getTargetUploadPath().getRelativeTargetPath(STATE_FILE))
-    }
-    else {
-      stateFilePrevTimestamp = FileTime.from(Instant.MIN)
     }
     execution.addParameter(downloadVolume.getTargetDownloadPath())
 
@@ -110,7 +109,7 @@ class PyTargetsRemoteSourcesRefresher(val sdk: Sdk, private val project: Project
     val environment = targetEnvRequest.prepareEnvironment(targetIndicator)
     try {
       // XXX Make it automatic
-      environment.uploadVolumes.values.forEach { it.upload(".", targetIndicator) }
+      environment.uploadVolumes.values.forEach { it.uploadMeasureTime(".", targetIndicator, "sourceRefresher") }
 
       val cmd = execution.buildTargetedCommandLine(environment, sdk, emptyList())
       cmd.execute(environment, indicator)
@@ -124,8 +123,12 @@ class PyTargetsRemoteSourcesRefresher(val sdk: Sdk, private val project: Project
     if (!Files.exists(stateFilePath)) {
       throw IllegalStateException("$stateFilePath is missing")
     }
-    if (Files.getLastModifiedTime(stateFilePath) <= stateFilePrevTimestamp) {
-      throw IllegalStateException("$stateFilePath has not been updated")
+    val successFilePath = localRemoteSourcesRoot / SUCCESS_FILE
+    if (!Files.exists(successFilePath)) {
+      throw IllegalStateException("$successFilePath is missing")
+    }
+    else {
+      Files.delete(successFilePath)
     }
 
     val stateFile: StateFile

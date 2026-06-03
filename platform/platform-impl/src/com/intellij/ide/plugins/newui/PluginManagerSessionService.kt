@@ -2,13 +2,17 @@
 package com.intellij.ide.plugins.newui
 
 import com.intellij.concurrency.ConcurrentCollectionFactory
-import com.intellij.ide.plugins.*
+import com.intellij.ide.plugins.IdeaPluginDescriptor
+import com.intellij.ide.plugins.IdeaPluginDescriptorImpl
+import com.intellij.ide.plugins.PendingDynamicPluginInstall
+import com.intellij.ide.plugins.PluginEnableDisableAction
+import com.intellij.ide.plugins.PluginEnabledState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.util.Pair
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -22,11 +26,15 @@ class PluginManagerSessionService {
   private val sessions: MutableMap<UUID, PluginManagerSession> = ConcurrentHashMap()
 
   fun createSession(sessionId: String): PluginManagerSession {
-    return sessions.computeIfAbsent(UUID.fromString(sessionId)) { PluginManagerSession() }
+    return sessions.computeIfAbsent(UUID.fromString(sessionId)) { PluginManagerSession(sessionId) }
   }
 
   fun getSession(sessionId: UUID): PluginManagerSession? {
     return sessions[sessionId]
+  }
+
+  fun getSessions(): List<PluginManagerSession> {
+    return sessions.values.toList()
   }
 
   fun getSession(sessionId: String): PluginManagerSession? {
@@ -48,7 +56,7 @@ class PluginManagerSessionService {
 }
 
 @ApiStatus.Internal
-class PluginManagerSession {
+class PluginManagerSession(val sessionId: String) {
   val dynamicPluginsToInstall: MutableMap<PluginId, PendingDynamicPluginInstall> = ConcurrentHashMap()
   val pluginsToRemoveOnCancel: MutableSet<IdeaPluginDescriptorImpl> = ConcurrentCollectionFactory.createConcurrentSet()
   val dynamicPluginsToUninstall: MutableSet<IdeaPluginDescriptor> = ConcurrentCollectionFactory.createConcurrentSet()
@@ -64,10 +72,7 @@ class PluginManagerSession {
   var updateService: PluginUpdatesService? = null
   var needRestart = false
 
-  // The next 2 methods was mooved from com.intellij.ide.plugins.InstalledPluginsTableModel
-  fun isPluginDisabled(pluginId: PluginId): Boolean {
-    return pluginStates[pluginId]?.isDisabled ?: true
-  }
+  fun isPluginDisabled(pluginId: PluginId): Boolean = !isPluginEnabled(pluginId)
   
   fun isPluginEnabled(pluginId: PluginId): Boolean {
     return pluginStates[pluginId]?.isEnabled ?: true

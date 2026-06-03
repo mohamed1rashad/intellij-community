@@ -1,8 +1,8 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.compiler.options
 
-import com.intellij.codeInsight.NullableNotNullDialog
 import com.intellij.codeInsight.NullableNotNullManager
+import com.intellij.codeInsight.options.JavaConfigurationDialogKind
 import com.intellij.compiler.CompilerConfiguration
 import com.intellij.compiler.CompilerConfigurationImpl
 import com.intellij.compiler.CompilerWorkspaceConfiguration
@@ -22,12 +22,21 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.RawCommandLineEditor
 import com.intellij.ui.components.fields.ExpandableTextField
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.HyperlinkEventAction
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.util.execution.ParametersListUtil
 import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.NonNls
-import java.util.*
-import javax.swing.*
+import java.util.EnumSet
+import javax.swing.JButton
+import javax.swing.JCheckBox
+import javax.swing.JComboBox
+import javax.swing.JComponent
+import javax.swing.JTextField
 
 class CompilerUIConfigurableKt(val project: Project) : DslConfigurableBase(), SearchableConfigurable {
   private val disabledSettings: MutableSet<Setting> = EnumSet.noneOf(Setting::class.java)
@@ -57,10 +66,9 @@ class CompilerUIConfigurableKt(val project: Project) : DslConfigurableBase(), Se
     row(JavaCompilerBundle.message("label.option.resource.patterns.text")) {
       resourcePatternsField = cell(RawCommandLineEditor(ParametersListUtil.COLON_LINE_PARSER, ParametersListUtil.COLON_LINE_JOINER))
         .comment(JavaCompilerBundle.message("compiler.ui.pattern.legend.text"))
-        .resizableColumn()
         .align(AlignX.FILL)
+        .contextHelp(JavaCompilerBundle.message("compiler.ui.pattern.context.help"), JavaCompilerBundle.message("compiler.ui.pattern.context.help.title"))
         .component
-      contextHelp(JavaCompilerBundle.message("compiler.ui.pattern.context.help"), JavaCompilerBundle.message("compiler.ui.pattern.context.help.title"))
     }
       .bottomGap(BottomGap.SMALL)
 
@@ -74,8 +82,8 @@ class CompilerUIConfigurableKt(val project: Project) : DslConfigurableBase(), Se
         cbAssertNotNull = checkBox(JavaCompilerBundle.message("add.notnull.assertions"))
           .component
         configureAnnotations = link(JavaCompilerBundle.message("settings.configure.annotations")) {
-          NullableNotNullDialog.showDialogWithInstrumentationOptions(project)
-          cbAssertNotNull.setSelected(!NullableNotNullManager.getInstance(project).getInstrumentedNotNulls().isEmpty())
+          JavaConfigurationDialogKind.NULLABILITY_ANNOTATIONS_INSTRUMENTATION.showConfigurationDialog(null, project)
+          cbAssertNotNull.isSelected = !NullableNotNullManager.getInstance(project).getInstrumentedNotNulls().isEmpty()
         }
           .component
       }
@@ -99,11 +107,11 @@ class CompilerUIConfigurableKt(val project: Project) : DslConfigurableBase(), Se
       row {
         label(JavaCompilerBundle.message("settings.compile.independent.modules.in.parallel"))
         comboboxJpsParallelCompilation = comboBox(ParallelCompilationOption.entries)
+          .contextHelp(
+            title = JavaCompilerBundle.message("settings.parallel.module.compile.context.help.title"),
+            description = JavaCompilerBundle.message("settings.parallel.module.compile.context.help.description")
+          )
           .component
-        contextHelp(
-          title = JavaCompilerBundle.message("settings.parallel.module.compile.context.help.title"),
-          description = JavaCompilerBundle.message("settings.parallel.module.compile.context.help.description")
-        )
       }
     }
 

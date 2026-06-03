@@ -21,7 +21,12 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.EdtTestUtil;
 import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
 import com.intellij.util.ui.UIUtil;
-import com.intellij.xdebugger.*;
+import com.intellij.xdebugger.XDebugSession;
+import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.xdebugger.XDebuggerTestUtil;
+import com.intellij.xdebugger.XDebuggerUtil;
+import com.intellij.xdebugger.XSourcePosition;
+import com.intellij.xdebugger.XTestValueNode;
 import com.intellij.xdebugger.breakpoints.SuspendPolicy;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.breakpoints.XBreakpointManager;
@@ -31,7 +36,16 @@ import com.intellij.xdebugger.frame.XValueChildrenList;
 import com.jetbrains.env.PyExecutionFixtureTestTask;
 import com.jetbrains.python.console.PythonDebugLanguageConsoleView;
 import com.jetbrains.python.console.pydev.PydevCompletionVariant;
-import com.jetbrains.python.debugger.*;
+import com.jetbrains.python.debugger.PyDebugProcess;
+import com.jetbrains.python.debugger.PyDebugValue;
+import com.jetbrains.python.debugger.PyDebuggerEvaluator;
+import com.jetbrains.python.debugger.PyDebuggerException;
+import com.jetbrains.python.debugger.PyExceptionBreakpointProperties;
+import com.jetbrains.python.debugger.PyExceptionBreakpointType;
+import com.jetbrains.python.debugger.PyFrameAccessor;
+import com.jetbrains.python.debugger.PyReferringObjectsValue;
+import com.jetbrains.python.debugger.PyStackFrame;
+import com.jetbrains.python.debugger.PyThreadInfo;
 import com.jetbrains.python.debugger.pydev.ProcessDebugger;
 import com.jetbrains.python.debugger.pydev.PyDebugCallback;
 import com.jetbrains.python.debugger.smartstepinto.PySmartStepIntoVariant;
@@ -468,11 +482,24 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
    * @return text range that will be highlighted on hover and evaluated on click
    */
   protected TextRange getQuickEvaluationTextRange(int offset) {
+    return getEvaluationTextRange(offset, true);
+  }
+
+  /**
+   * Calculates text range that will be shown on plain mouse hover (no Alt).
+   * @param offset The document offset under a mouse cursor
+   * @return text range that will be highlighted and evaluated on hover
+   */
+  protected TextRange getHoverEvaluationTextRange(int offset) {
+    return getEvaluationTextRange(offset, false);
+  }
+
+  private TextRange getEvaluationTextRange(int offset, boolean sideEffectsAllowed) {
     var file = getFileByPath(getFilePath(getScriptName()));
     var document = ReadAction.compute(() -> FileDocumentManager.getInstance().getDocument(file));
     var project = getProject();
     var evaluator = new PyDebuggerEvaluator(project, myDebugProcess);
-    return evaluator.getExpressionRangeAtOffset(project, document, offset, true);
+    return evaluator.getExpressionRangeAtOffset(project, document, offset, sideEffectsAllowed);
   }
 
   /**

@@ -31,7 +31,7 @@ import com.intellij.util.containers.NotNullList;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.ListSelectionModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
@@ -182,7 +182,7 @@ public class UnwrapHandler implements CodeInsightActionHandler {
     }
 
     private void restoreCaretPosition(final PsiFile file) {
-      ((TreeElement)file.getNode()).acceptTree(new RecursiveTreeElementWalkingVisitor() {
+      ((TreeElement)file.getNode()).acceptTree(new RecursiveTreeElementWalkingVisitor(file.getNode()) {
         @Override
         protected void visitNode(TreeElement element) {
           PsiElement el = element.getPsi();

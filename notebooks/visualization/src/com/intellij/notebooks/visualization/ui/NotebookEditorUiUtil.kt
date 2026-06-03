@@ -2,13 +2,16 @@ package com.intellij.notebooks.visualization.ui
 
 import com.intellij.notebooks.visualization.NotebookCellLines
 import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.editor.EditorCustomElementRenderer
 import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.editor.Inlay
+import com.intellij.openapi.editor.InlayProperties
 import com.intellij.openapi.editor.LogicalPosition
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.impl.EditorComponentImpl
 import com.intellij.openapi.editor.impl.EditorEmbeddedComponentManager
 import com.intellij.openapi.editor.impl.EditorEmbeddedComponentManager.Properties.RendererFactory
+import com.intellij.openapi.util.Disposer
 import java.awt.Point
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
@@ -24,10 +27,10 @@ fun EditorEx.addComponentInlay(
   showWhenFolded: Boolean = true,
   priority: Int,
   offset: Int,
-  rendererFactory: RendererFactory? = null
+  rendererFactory: RendererFactory? = null,
 ): Inlay<*> {
   // see DS-5614
-  val fullWidthArg: Boolean = this.editorKind != EditorKind.DIFF
+  val fullWidthArg: Boolean = editorKind != EditorKind.DIFF
   val inlay = EditorEmbeddedComponentManager.getInstance().addComponent(
     this,
     component,
@@ -54,6 +57,49 @@ fun EditorEx.addComponentInlay(
   component.revalidate()
   inlay.update()
   return inlay
+}
+
+fun EditorEx.addNotebookCellComponentInlay(
+  component: JComponent,
+  isRelatedToPrecedingText: Boolean,
+  showAbove: Boolean,
+  showWhenFolded: Boolean = true,
+  priority: Int,
+  offset: Int,
+): Inlay<*> {
+  val inlay = inlayModel.addBlockElement(
+    offset,
+    InlayProperties()
+      .relatesToPrecedingText(isRelatedToPrecedingText)
+      .showAbove(showAbove)
+      .showWhenFolded(showWhenFolded)
+      .priority(priority),
+    NotebookCellComponentInlayRenderer(component)
+  )
+  if (inlay == null) {
+    if (isDisposed) {
+      throw IllegalStateException("Editor is disposed")
+    }
+    throw IllegalStateException(
+      "Component is null for $component, $isRelatedToPrecedingText, $showAbove, $showWhenFolded, $priority, $offset")
+  }
+
+  componentContainer.add(component, EditorEmbeddedComponentLayoutManager.BlockInlayConstraint(this, inlay, editorKind != EditorKind.DIFF))
+  Disposer.register(inlay) {
+    componentContainer?.remove(component)
+  }
+
+  component.revalidate()
+  inlay.update()
+  return inlay
+}
+
+private class NotebookCellComponentInlayRenderer(
+  private val component: JComponent,
+) : EditorCustomElementRenderer {
+  override fun calcWidthInPixels(inlay: Inlay<*>): Int = 1
+
+  override fun calcHeightInPixels(inlay: Inlay<*>): Int = component.preferredSize.height.coerceAtLeast(0)
 }
 
 private fun updateUiOnParentResizeImpl(parent: JComponent, childRef: WeakReference<JComponent>) {
@@ -111,39 +157,42 @@ fun registerEditorSizeWatcher(
 }
 
 val EditorEx.textEditingAreaWidth: Int
-  get() = scrollingModel.visibleArea.width - scrollPane.verticalScrollBar.width
+  get() = contentComponent.visibleRect.width
 
-fun EditorEx.getFirstFullyVisibleLogicalLine(): Int? {
-  val visibleArea = this.scrollingModel.visibleArea
-  val startY = visibleArea.y
+private fun EditorEx.getFirstFullyVisibleLogicalLine(): Int? {
+  val visibleArea = contentComponent.visibleRect
+  val startY = visibleArea.y + stickyLinesPanelHeight
   val endY = visibleArea.y + visibleArea.height
 
-  val firstVisibleLine = this.xyToLogicalPosition(Point(0, startY)).line
-  val lastVisibleLine = this.xyToLogicalPosition(Point(0, endY)).line
+  val visibleLine = xyToLogicalPosition(Point(0, startY)).line
+  val lineStartY = logicalPositionToXY(LogicalPosition(visibleLine, 0)).y
 
-  for (line in firstVisibleLine..lastVisibleLine) {
-    val lineStartY = this.logicalPositionToXY(LogicalPosition(line, 0)).y
-    val lineEndY = lineStartY + this.lineHeight
-    if (lineStartY >= startY && lineEndY <= endY) {
-      return line
-    }
+  return if (lineStartY >= startY && lineStartY + lineHeight <= endY) {
+    visibleLine
   }
-  return null
+  else if (lineStartY + lineHeight >= startY && lineStartY + lineHeight * 2 <= endY) {
+    visibleLine + 1
+  }
+  else {
+    null
+  }
 }
 
 fun NotebookCellLines.Interval.computeFirstLineForHighlighter(
-  editor: EditorEx, gutterIconStickToFirstVisibleLine: Boolean = true
+  editor: EditorEx, gutterIconStickToFirstVisibleLine: Boolean = true,
 ): Int {
   return if (gutterIconStickToFirstVisibleLine) {
     val firstFullyVisibleLine = editor.getFirstFullyVisibleLogicalLine()
-    val startLine = if (firstFullyVisibleLine != null && firstFullyVisibleLine in this.lines) {
+    val startLine = if (firstFullyVisibleLine != null && firstFullyVisibleLine in lines) {
       firstFullyVisibleLine
-    } else {
-      this.lines.first
     }
-    val fullyVisibleCell = firstFullyVisibleLine == this.lines.first
-    if (fullyVisibleCell) this.lines.first else startLine
-  } else {
-    this.lines.first
+    else {
+      lines.first
+    }
+    val fullyVisibleCell = firstFullyVisibleLine == lines.first
+    if (fullyVisibleCell) lines.first else startLine
+  }
+  else {
+    lines.first
   }
 }

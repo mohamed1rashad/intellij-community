@@ -6,7 +6,14 @@ import com.intellij.ui.JBColor
 import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.JBUI
 import org.intellij.lang.annotations.MagicConstant
-import java.awt.*
+import java.awt.Color
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.Insets
+import java.awt.Paint
+import java.awt.Point
+import java.awt.Rectangle
+import java.awt.RenderingHints
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.function.Consumer
@@ -175,6 +182,7 @@ abstract class ChartWrapper : ChartComponent {
 
   open val component: JComponent by lazy {
     createCentralPanel().apply {
+      background = this@ChartWrapper.background
       with(MouseAware()) {
         addMouseMotionListener(this)
         addMouseListener(this)
@@ -217,7 +225,7 @@ abstract class ChartWrapper : ChartComponent {
   private inner class CentralPanel : JComponent() {
     override fun paintComponent(g: Graphics) {
       (g as Graphics2D).clip(Rectangle(0, 0, width, height))
-      g.color = this@ChartWrapper.background
+      g.color = background
       (g as Graphics2D).fill(g.clip)
       this@ChartWrapper.height = height
       this@ChartWrapper.width = width

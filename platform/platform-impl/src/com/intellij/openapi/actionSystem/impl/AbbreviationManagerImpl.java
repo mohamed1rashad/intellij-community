@@ -10,7 +10,14 @@ import org.jdom.Element;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -69,12 +76,12 @@ public final class AbbreviationManagerImpl extends AbbreviationManager implement
     List<Element> actions = abbreviations.get(0).getChildren("action");
     for (Element action : actions) {
       String actionId = action.getAttributeValue("id");
-      Set<String> values = actionIdToAbbreviations.computeIfAbsent(actionId, k -> new LinkedHashSet<>(1));
+      Set<String> values = actionIdToAbbreviations.computeIfAbsent(actionId, _ -> new LinkedHashSet<>(1));
       for (Element abbr : action.getChildren("abbreviation")) {
         final String abbrValue = abbr.getAttributeValue("name");
         if (abbrValue != null) {
           values.add(abbrValue);
-          abbreviationToActionId.computeIfAbsent(abbrValue, k -> new ArrayList<>()).add(actionId);
+          abbreviationToActionId.computeIfAbsent(abbrValue, _ -> new ArrayList<>()).add(actionId);
         }
       }
     }
@@ -99,7 +106,7 @@ public final class AbbreviationManagerImpl extends AbbreviationManager implement
 
 
   private static void register(@NotNull String abbreviation, @NotNull String actionId, @NotNull Map<String, Set<String>> storage) {
-    storage.computeIfAbsent(actionId, k -> new LinkedHashSet<>(1)).add(abbreviation);
+    storage.computeIfAbsent(actionId, _ -> new LinkedHashSet<>(1)).add(abbreviation);
   }
 
   public void register(@NotNull String abbreviation, @NotNull String actionId, boolean fromPluginXml) {
@@ -112,7 +119,7 @@ public final class AbbreviationManagerImpl extends AbbreviationManager implement
       register(abbreviation, actionId, pluginsActionIdToAbbreviations);
     }
 
-    List<String> ids = abbreviationToActionId.computeIfAbsent(abbreviation, k -> new ArrayList<>(0));
+    List<String> ids = abbreviationToActionId.computeIfAbsent(abbreviation, _ -> new ArrayList<>(0));
     if (!ids.contains(actionId)) {
       ids.add(actionId);
     }

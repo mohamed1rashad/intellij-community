@@ -12,7 +12,7 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 
 /**
  * Provides simple directory-oriented generators, which usually used in small IDEs, where there is only one module
@@ -29,15 +29,6 @@ public interface DirectoryProjectGenerator<T> {
 
   default @Nullable String getHelpId() {
     return null;
-  }
-
-  /**
-   * @deprecated unused
-   */
-  // to be removed in 2017.3
-  @Deprecated(forRemoval = true)
-  default boolean isPrimaryGenerator() {
-    return true;
   }
 
   @NotNull

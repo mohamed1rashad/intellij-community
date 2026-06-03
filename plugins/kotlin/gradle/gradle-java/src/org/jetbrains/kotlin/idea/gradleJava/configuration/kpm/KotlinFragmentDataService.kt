@@ -5,7 +5,6 @@ import com.intellij.openapi.externalSystem.model.DataNode
 import com.intellij.openapi.externalSystem.model.Key
 import com.intellij.openapi.externalSystem.model.ProjectKeys
 import com.intellij.openapi.externalSystem.model.project.ModuleData
-import com.intellij.openapi.externalSystem.model.project.ModuleSdkData
 import com.intellij.openapi.externalSystem.model.project.ProjectData
 import com.intellij.openapi.externalSystem.service.project.IdeModifiableModelsProvider
 import com.intellij.openapi.externalSystem.service.project.manage.AbstractProjectDataService
@@ -18,13 +17,16 @@ import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.config.createArguments
 import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmJvmPlatform
 import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmNativePlatform
-import org.jetbrains.kotlin.idea.base.externalSystem.find
 import org.jetbrains.kotlin.idea.base.externalSystem.findAll
 import org.jetbrains.kotlin.idea.base.facet.isKpmModule
 import org.jetbrains.kotlin.idea.base.facet.refinesFragmentIds
 import org.jetbrains.kotlin.idea.base.projectStructure.ExternalCompilerVersionProvider
 import org.jetbrains.kotlin.idea.compiler.configuration.IdeKotlinVersion
-import org.jetbrains.kotlin.idea.facet.*
+import org.jetbrains.kotlin.idea.facet.KotlinFacet
+import org.jetbrains.kotlin.idea.facet.applyCompilerArgumentsToFacetSettings
+import org.jetbrains.kotlin.idea.facet.getOrCreateFacet
+import org.jetbrains.kotlin.idea.facet.initializeIfNeeded
+import org.jetbrains.kotlin.idea.facet.noVersionAutoAdvance
 import org.jetbrains.kotlin.idea.gradleJava.configuration.GradleProjectImportHandler
 import org.jetbrains.kotlin.idea.gradleJava.findKotlinPluginVersion
 import org.jetbrains.kotlin.idea.projectModel.KotlinPlatform
@@ -143,8 +145,6 @@ private fun configureFacetByFragmentData(
         modelsProvider,
     )
 
-    val sdkNode = sourceSetNode.find(ModuleSdkData.KEY)
-    ideModule.hasExternalSdkConfiguration = sdkNode?.data?.sdkName != null
     ideModule.isKpmModule = true
     ideModule.refinesFragmentIds = fragmentDataNode.data.refinesFragmentIds.toList()
     applyCompilerArgumentsToFacetSettings(compilerArguments, kotlinFacet.configuration.settings, kotlinFacet.module, modelsProvider)

@@ -7,7 +7,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -18,7 +18,12 @@ import com.intellij.openapi.project.ProjectUtil;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiReference;
 import com.intellij.usageView.UsageViewBundle;
 import com.intellij.usages.similarity.bag.Bag;
 import com.intellij.usages.similarity.features.UsageSimilarityFeaturesProvider;
@@ -63,14 +68,13 @@ public class ShowUsageFeaturesInternalAction extends AnAction {
       public void run(@NotNull ProgressIndicator indicator) {
         final Bag features = new Bag();
         Ref<PsiElement> element = new Ref<>();
-        ApplicationManager.getApplication().runReadAction(() -> {
+        ReadAction.runBlocking(() -> {
           PsiReference referenceAt = file.findReferenceAt(editor.getCaretModel().getOffset());
           if (referenceAt == null) return;
           element.set(referenceAt.getElement());
           if (!element.isNull()) {
-            UsageSimilarityFeaturesProvider.EP_NAME.forEachExtensionSafe(provider -> {
-                                                                           features.addAll(provider.getFeatures(element.get()));
-                                                                         }
+            UsageSimilarityFeaturesProvider.EP_NAME.forEachExtensionSafe(
+              provider -> features.addAll(provider.getFeatures(element.get()))
             );
           }
         });

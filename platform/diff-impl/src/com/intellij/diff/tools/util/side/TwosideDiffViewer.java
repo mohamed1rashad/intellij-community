@@ -22,7 +22,7 @@ import com.intellij.util.concurrency.annotations.RequiresEdt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -145,6 +145,7 @@ public abstract class TwosideDiffViewer<T extends EditorHolder> extends Listener
   public void uiDataSnapshot(@NotNull DataSink sink) {
     super.uiDataSnapshot(sink);
     sink.set(DiffDataKeys.CURRENT_CONTENT, getCurrentSide().select(myRequest.getContents()));
+    sink.set(DiffDataKeys.DIFF_VIEWER, this);
   }
 
   //

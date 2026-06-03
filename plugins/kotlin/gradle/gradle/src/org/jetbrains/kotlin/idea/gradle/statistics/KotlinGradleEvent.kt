@@ -18,8 +18,8 @@ import org.jetbrains.kotlin.statistics.fileloggers.MetricsContainer
 import org.jetbrains.kotlin.statistics.metrics.BooleanMetrics
 import org.jetbrains.kotlin.statistics.metrics.NumericalMetrics
 import org.jetbrains.kotlin.statistics.metrics.StringMetrics
-import java.util.*
-import kotlin.collections.HashMap
+import java.util.Locale
+import java.util.TreeMap
 
 interface ICustomMetric
 
@@ -68,7 +68,7 @@ class KotlinGradleEvent(group: EventLogGroup, val eventName: GradleStatisticsEve
                 else -> throw IllegalArgumentException("$it is of unknown metric type.")
             }
         }
-        CustomNumericalMetrics.values().forEach {
+        CustomNumericalMetrics.entries.forEach {
             if (it.eventGroup == eventName || eventName == GradleStatisticsEventGroups.All) {
                 numericalEventFields[it.name] = EventFields.Long(it.name.lowercase())
                 numericalMetricConsumers[it.name] = it.consumer

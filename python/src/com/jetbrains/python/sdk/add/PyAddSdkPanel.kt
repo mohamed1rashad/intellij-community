@@ -10,8 +10,10 @@ import javax.swing.Icon
 import javax.swing.JComponent
 import javax.swing.JPanel
 
+@Suppress("DEPRECATION_ERROR")
 @Deprecated(
   "Custom Python SDKs support was removed from python plugin for IDEA because of UI/UX unification with PyCharm",
+  level = DeprecationLevel.ERROR
 )
 abstract class PyAddSdkPanel : JPanel(), PyAddSdkView {
   override val component: Component
@@ -29,19 +31,4 @@ abstract class PyAddSdkPanel : JPanel(), PyAddSdkView {
   override fun validateAll(): List<ValidationInfo> = emptyList()
 
   open fun addChangeListener(listener: Runnable) {}
-}
-
-/**
- * Obtains a list of sdk on a pool using [sdkObtainer], then fills [sdkComboBox] and calls [onAdded] on the EDT.
- */
-@Deprecated(
-  message ="this ComboBox was designed only for plain venv, not tool-specific pythons and doesn't supported anymore",
-  replaceWith = ReplaceWith("PythonInterpreterComboBox")
-)
-fun addInterpretersAsync(
-  sdkComboBox: PySdkPathChoosingComboBox,
-  sdkObtainer: () -> List<Sdk>,
-  onAdded: (List<Sdk>) -> Unit,
-) {
-  addInterpretersToComboAsync(sdkComboBox, sdkObtainer, onAdded)
 }

@@ -14,7 +14,7 @@ import com.intellij.openapi.wm.WindowManager;
 import com.intellij.util.Consumer;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.awt.event.MouseEvent;
 
 /**
@@ -74,7 +74,7 @@ final class PowerSaveStatusWidgetFactory implements StatusBarWidgetFactory {
 
     @Override
     public @NotNull Consumer<MouseEvent> getClickConsumer() {
-      return __ -> PowerSaveMode.setEnabled(!PowerSaveMode.isEnabled());
+      return _ -> PowerSaveMode.setEnabled(!PowerSaveMode.isEnabled());
     }
 
     @Override

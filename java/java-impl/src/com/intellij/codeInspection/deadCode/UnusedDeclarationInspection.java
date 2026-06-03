@@ -4,21 +4,47 @@ package com.intellij.codeInspection.deadCode;
 import com.intellij.analysis.AnalysisScope;
 import com.intellij.codeInsight.daemon.impl.quickfix.RemoveUnusedVariableFix;
 import com.intellij.codeInsight.daemon.impl.quickfix.SafeDeleteFix;
-import com.intellij.codeInspection.*;
+import com.intellij.codeInsight.options.JavaConfigurationDialogKind;
+import com.intellij.codeInspection.CommonProblemDescriptor;
+import com.intellij.codeInspection.GlobalInspectionContext;
+import com.intellij.codeInspection.InspectionManager;
+import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.ProblemDescriptionsProcessor;
+import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemHighlightType;
+import com.intellij.codeInspection.QuickFix;
+import com.intellij.codeInspection.SuppressionUtil;
 import com.intellij.codeInspection.ex.GlobalInspectionContextImpl;
 import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.codeInspection.ex.Tools;
 import com.intellij.codeInspection.options.OptPane;
 import com.intellij.codeInspection.options.OptRegularComponent;
 import com.intellij.codeInspection.options.OptionController;
-import com.intellij.codeInspection.reference.*;
+import com.intellij.codeInspection.reference.EntryPoint;
+import com.intellij.codeInspection.reference.RefClass;
+import com.intellij.codeInspection.reference.RefElement;
+import com.intellij.codeInspection.reference.RefField;
+import com.intellij.codeInspection.reference.RefGraphAnnotator;
+import com.intellij.codeInspection.reference.RefJavaVisitor;
+import com.intellij.codeInspection.reference.RefManager;
+import com.intellij.codeInspection.reference.RefManagerImpl;
+import com.intellij.codeInspection.reference.RefMethod;
 import com.intellij.codeInspection.ui.InspectionToolPresentation;
 import com.intellij.codeInspection.unusedSymbol.UnusedSymbolLocalInspection;
 import com.intellij.java.JavaBundle;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.IndexNotReadyException;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaRecursiveElementWalkingVisitor;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDeclarationStatement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiForeachStatement;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiPatternVariable;
+import com.intellij.psi.PsiResourceVariable;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.controlFlow.DefUseUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ObjectUtils;
@@ -26,16 +52,24 @@ import one.util.streamex.EntryStream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
-import org.jetbrains.uast.*;
+import org.jetbrains.uast.UClass;
+import org.jetbrains.uast.UClassInitializer;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UField;
+import org.jetbrains.uast.UMethod;
 
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import static com.intellij.codeInsight.options.JavaInspectionButtons.ButtonKind;
-import static com.intellij.codeInsight.options.JavaInspectionControls.button;
-import static com.intellij.codeInspection.options.OptPane.*;
+import static com.intellij.codeInspection.options.OptPane.checkbox;
+import static com.intellij.codeInspection.options.OptPane.dropdown;
+import static com.intellij.codeInspection.options.OptPane.group;
+import static com.intellij.codeInspection.options.OptPane.horizontalStack;
+import static com.intellij.codeInspection.options.OptPane.option;
+import static com.intellij.codeInspection.options.OptPane.pane;
+import static com.intellij.codeInspection.options.OptPane.tabs;
 
 public final class UnusedDeclarationInspection extends UnusedDeclarationInspectionBase {
   private static final Logger LOG = Logger.getInstance(UnusedDeclarationInspection.class);
@@ -139,8 +173,8 @@ public final class UnusedDeclarationInspection extends UnusedDeclarationInspecti
                          option("false", JavaBundle.message("radio.button.unused.declaration.unused.option"))));
     content.add(group(
       JavaBundle.message("label.entry.points"),
-      horizontalStack(button(ButtonKind.ENTRY_POINT_CODE_PATTERNS),
-                      button(ButtonKind.ENTRY_POINT_ANNOTATIONS))));
+      horizontalStack(JavaConfigurationDialogKind.ENTRY_POINT_CODE_PATTERNS.button(),
+                      JavaConfigurationDialogKind.ENTRY_POINT_ANNOTATIONS.button())));
     content.add(checkbox("ADD_MAINS_TO_ENTRIES", JavaBundle.message("inspection.dead.code.option.main")));
     content.add(checkbox("ADD_APPLET_TO_ENTRIES", JavaBundle.message("inspection.dead.code.option.applet")));
     content.add(checkbox("ADD_SERVLET_TO_ENTRIES", JavaBundle.message("inspection.dead.code.option.servlet")));

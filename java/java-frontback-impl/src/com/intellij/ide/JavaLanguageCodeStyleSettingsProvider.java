@@ -1,7 +1,12 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide;
 
-import com.intellij.application.options.*;
+import com.intellij.application.options.CodeStyleAbstractConfigurable;
+import com.intellij.application.options.CodeStyleAbstractPanel;
+import com.intellij.application.options.IndentOptionsEditor;
+import com.intellij.application.options.JavaCodeStyleMainPanel;
+import com.intellij.application.options.JavaDocFormattingPanel;
+import com.intellij.application.options.JavaIndentOptionsEditor;
 import com.intellij.application.options.codeStyle.properties.CodeStyleFieldAccessor;
 import com.intellij.application.options.codeStyle.properties.CodeStylePropertiesUtil;
 import com.intellij.application.options.codeStyle.properties.CodeStylePropertyAccessor;
@@ -14,7 +19,15 @@ import com.intellij.openapi.project.Project;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
-import com.intellij.psi.codeStyle.*;
+import com.intellij.psi.codeStyle.CodeStyleConfigurable;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CodeStyleSettingsCustomizable;
+import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
+import com.intellij.psi.codeStyle.DocCommentSettings;
+import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
+import com.intellij.psi.codeStyle.JavaPackageEntryTableAccessor;
+import com.intellij.psi.codeStyle.LanguageCodeStyleSettingsProvider;
+import com.intellij.psi.codeStyle.PackageEntryTable;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.LocalTimeCounter;
 import org.jetbrains.annotations.NotNull;
@@ -86,7 +99,6 @@ public final class JavaLanguageCodeStyleSettingsProvider extends LanguageCodeSty
       consumer.moveStandardOption("SPACE_AFTER_COMMA_IN_TYPE_ARGUMENTS", groupName);
       consumer.showCustomOption(JavaCodeStyleSettings.class, "SPACE_AFTER_CLOSING_ANGLE_BRACKET_IN_TYPE_ARGUMENT",
                                 JavaFrontbackBundle.message("code.style.settings.spacing.after.closing.angle.bracket"), groupName);
-
       groupName = getInstance().SPACES_IN_TYPE_PARAMETERS;
       consumer.showCustomOption(JavaCodeStyleSettings.class, "SPACE_BEFORE_OPENING_ANGLE_BRACKET_IN_TYPE_PARAMETER",
                                 ApplicationBundle.message("checkbox.spaces.before.opening.angle.bracket"), groupName);
@@ -96,6 +108,8 @@ public final class JavaLanguageCodeStyleSettingsProvider extends LanguageCodeSty
       groupName = getInstance().SPACES_OTHER;
       consumer.showCustomOption(JavaCodeStyleSettings.class, "SPACE_BEFORE_COLON_IN_FOREACH", JavaFrontbackBundle.message(
         "checkbox.spaces.before.colon.in.foreach"), groupName);
+      consumer.showCustomOption(JavaCodeStyleSettings.class, "STRIP_WHITESPACE_FROM_BLANK_LINES_IN_TEXT_BLOCKS", JavaFrontbackBundle.message(
+        "checkbox.strip.whitespace.from.blank.lines.in.text.blocks"), groupName);
       consumer.showCustomOption(JavaCodeStyleSettings.class, "SPACE_INSIDE_ONE_LINE_ENUM_BRACES", JavaFrontbackBundle.message(
         "checkbox.spaces.inside.one.line.enum"), groupName);
 
@@ -336,7 +350,8 @@ public final class JavaLanguageCodeStyleSettingsProvider extends LanguageCodeSty
         "LINE_COMMENT_ADD_SPACE_ON_REFORMAT",
         "LINE_COMMENT_AT_FIRST_COLUMN",
         "BLOCK_COMMENT_AT_FIRST_COLUMN",
-        "BLOCK_COMMENT_ADD_SPACE"
+        "BLOCK_COMMENT_ADD_SPACE",
+        "DOCUMENTATION_LINE_COMMENT_PREFERRED"
       );
     }
     else if (settingsType == SettingsType.LANGUAGE_SPECIFIC) {

@@ -2,7 +2,10 @@ package com.jetbrains.python.psi.types;
 
 import com.intellij.openapi.util.Ref;
 import com.jetbrains.python.PyNames;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.AccessDirection;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyQualifiedExpression;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.RatedResolveResult;
@@ -35,7 +38,7 @@ public final class PyDescriptorTypeUtil {
     return getTypeFromSyntheticDunderGetCall(expression, attributeType, context);
   }
 
-  public static @Nullable Ref<PyType> getExpectedValueTypeForDunderSet(@NotNull PyTargetExpression targetExpression,
+  public static @Nullable Ref<PyType> getExpectedValueTypeForDunderSet(@NotNull PyQualifiedExpression targetExpression,
                                                                        @Nullable PyType attributeType,
                                                                        @NotNull TypeEvalContext context) {
     final PyClassLikeType targetType = as(attributeType, PyClassLikeType.class);
@@ -55,7 +58,7 @@ public final class PyDescriptorTypeUtil {
     PyExpression qualifier = expression.getQualifier();
     if (qualifier != null && attributeType instanceof PyCallableType receiverType) {
       PyType qualifierType = context.getType(qualifier);
-      if (qualifierType instanceof PyClassType classType) {
+      if (qualifierType instanceof PyClassLikeType classType) {
         PyType instanceArgumentType;
         PyType instanceTypeArgument;
         final var noneType = PyBuiltinCache.getInstance(expression).getNoneType();
@@ -71,7 +74,7 @@ public final class PyDescriptorTypeUtil {
           instanceTypeArgument = noneType;
         }
         List<PyType> argumentTypes = List.of(instanceArgumentType, instanceTypeArgument);
-        PyType type  = PySyntheticCallHelper.getCallTypeByFunctionName(PyNames.DUNDER_GET, receiverType, argumentTypes, context);
+        PyType type = PySyntheticCallHelper.getCallTypeByFunctionName(PyNames.DUNDER_GET, receiverType, argumentTypes, context);
         return Ref.create(type);
       }
     }
@@ -119,5 +122,4 @@ public final class PyDescriptorTypeUtil {
     }
     return null;
   }
-
 }

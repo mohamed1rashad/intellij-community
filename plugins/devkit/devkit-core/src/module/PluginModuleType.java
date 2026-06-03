@@ -3,18 +3,25 @@ package org.jetbrains.idea.devkit.module;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.util.projectWizard.JavaModuleBuilder;
-import com.intellij.openapi.module.*;
+import com.intellij.openapi.module.JavaModuleType;
 import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
+import com.intellij.openapi.module.ModuleType;
+import com.intellij.openapi.module.ModuleTypeManager;
+import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.IntelliJProjectUtil;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ContentEntry;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.SourceFolder;
+import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.util.descriptors.ConfigFile;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,8 +29,9 @@ import org.jetbrains.idea.devkit.DevKitBundle;
 import org.jetbrains.idea.devkit.build.PluginBuildConfiguration;
 import org.jetbrains.idea.devkit.build.PluginBuildUtil;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
+import org.jetbrains.jps.model.java.JavaResourceRootType;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -77,8 +85,7 @@ public final class PluginModuleType extends ModuleType<JavaModuleBuilder> {
           final String prefixPath = packagePrefix.isEmpty() ? "" :
                                     packagePrefix.replace('.', '/') + '/';
 
-          final String relativePath = prefixPath + PluginDescriptorConstants.PLUGIN_XML_PATH;
-          final VirtualFile pluginXmlVF = file.findFileByRelativePath(relativePath);
+          final VirtualFile pluginXmlVF = findPossibleModuleXmlDescriptor(prefixPath, PluginDescriptorConstants.PLUGIN_XML_PATH, file);
           if (pluginXmlVF != null) {
             final PsiFile psiFile = PsiManager.getInstance(module.getProject()).findFile(pluginXmlVF);
             if (psiFile instanceof XmlFile) {
@@ -95,6 +102,45 @@ public final class PluginModuleType extends ModuleType<JavaModuleBuilder> {
     if (buildConfiguration == null) return null;
     final ConfigFile configFile = buildConfiguration.getPluginXmlConfigFile();
     return configFile != null ? configFile.getXmlFile() : null;
+  }
+
+  @ApiStatus.Experimental
+  public static @Nullable XmlFile getContentModuleDescriptorXml(@Nullable Module module) {
+    if (module == null) return null;
+    for (final ContentEntry entry : ModuleRootManager.getInstance(module).getContentEntries()) {
+      for (final SourceFolder folder : entry.getSourceFolders(JavaResourceRootType.RESOURCE)) {
+        final VirtualFile folderVirtualFile = folder.getFile();
+        if (folderVirtualFile == null) continue;
+
+        final String packagePrefix = folder.getPackagePrefix();
+        final String prefixPath = packagePrefix.isEmpty() ? "" :
+                                  packagePrefix.replace('.', '/') + '/';
+        final String moduleNameFromProjectModel = module.getName();
+
+        for (final String xmlDescriptorNameCandidate : computePossibleXmlDescriptorNames(moduleNameFromProjectModel)) {
+          var effectiveModuleDescriptorFile = findPossibleModuleXmlDescriptor(prefixPath, xmlDescriptorNameCandidate, folderVirtualFile);
+          if (effectiveModuleDescriptorFile != null) {
+            final PsiFile psiFile = PsiManager.getInstance(module.getProject()).findFile(effectiveModuleDescriptorFile);
+            if (psiFile instanceof XmlFile) {
+              return (XmlFile)psiFile;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private static @NotNull List<String> computePossibleXmlDescriptorNames(@NotNull String moduleName) {
+    return List.of(
+      moduleName + ".xml",
+      moduleName.replace(".main", "") + ".xml",
+      moduleName.replace("_", ".").replace(".main", "") + ".xml"
+    );
+  }
+
+  private static @Nullable VirtualFile findPossibleModuleXmlDescriptor(String prefixPath, String fileName, VirtualFile parentDirectory) {
+    return parentDirectory.findFileByRelativePath(prefixPath + fileName);
   }
 
   public static boolean isPluginModuleOrDependency(@Nullable Module module) {

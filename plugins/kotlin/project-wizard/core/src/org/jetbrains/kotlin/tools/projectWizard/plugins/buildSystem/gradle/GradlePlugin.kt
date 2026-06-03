@@ -1,21 +1,46 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.gradle
 
-import com.intellij.ide.starters.local.StandardAssetsProvider
-import com.intellij.ide.starters.local.generator.AssetsProcessor
+import com.intellij.openapi.diagnostic.Logger
 import kotlinx.collections.immutable.toPersistentList
 import org.gradle.util.GradleVersion
 import org.jetbrains.kotlin.tools.projectWizard.Versions
-import org.jetbrains.kotlin.tools.projectWizard.core.*
+import org.jetbrains.kotlin.tools.projectWizard.compatibility.GradleToPluginsCompatibilityStore
+import org.jetbrains.kotlin.tools.projectWizard.core.Context
+import org.jetbrains.kotlin.tools.projectWizard.core.PluginSettingsOwner
+import org.jetbrains.kotlin.tools.projectWizard.core.Reader
+import org.jetbrains.kotlin.tools.projectWizard.core.UNIT_SUCCESS
+import org.jetbrains.kotlin.tools.projectWizard.core.asPath
+import org.jetbrains.kotlin.tools.projectWizard.core.asSuccess
+import org.jetbrains.kotlin.tools.projectWizard.core.buildPersistenceList
+import org.jetbrains.kotlin.tools.projectWizard.core.checker
+import org.jetbrains.kotlin.tools.projectWizard.core.div
 import org.jetbrains.kotlin.tools.projectWizard.core.entity.PipelineTask
 import org.jetbrains.kotlin.tools.projectWizard.core.entity.properties.Property
 import org.jetbrains.kotlin.tools.projectWizard.core.entity.settings.PluginSetting
+import org.jetbrains.kotlin.tools.projectWizard.core.safeAs
 import org.jetbrains.kotlin.tools.projectWizard.core.service.FileSystemWizardService
-import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.*
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.AllProjectsRepositoriesIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.BuildSystemIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.BuildSystemPluginIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.FoojayPluginIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.KotlinBuildSystemPluginIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.MultiplatformSourcesetIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.PluginManagementRepositoryIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.RepositoryIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.distinctAndSorted
 import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.gradle.SettingsGradleFileIR
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.render
+import org.jetbrains.kotlin.tools.projectWizard.ir.buildsystem.withIrs
 import org.jetbrains.kotlin.tools.projectWizard.phases.GenerationPhase
 import org.jetbrains.kotlin.tools.projectWizard.plugins.StructurePlugin
-import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.*
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.BuildFileData
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.BuildSystemPlugin
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.BuildSystemType
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.allModulesPaths
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.buildSystemType
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.getPluginRepositoriesWithDefaultOnes
+import org.jetbrains.kotlin.tools.projectWizard.plugins.buildSystem.isGradle
 import org.jetbrains.kotlin.tools.projectWizard.plugins.kotlin.KotlinPlugin
 import org.jetbrains.kotlin.tools.projectWizard.plugins.printer.GradlePrinter
 import org.jetbrains.kotlin.tools.projectWizard.plugins.printer.printBuildFile
@@ -25,12 +50,16 @@ import org.jetbrains.kotlin.tools.projectWizard.settings.buildsystem.updateBuild
 import org.jetbrains.kotlin.tools.projectWizard.settings.version.Version
 import org.jetbrains.kotlin.tools.projectWizard.templates.FileTemplate
 import org.jetbrains.kotlin.tools.projectWizard.templates.FileTemplateDescriptor
+import org.jetbrains.plugins.gradle.frameworkSupport.settingsScript.isFoojayPluginSupported
 
 
 abstract class GradlePlugin(context: Context) : BuildSystemPlugin(context) {
     override val path = pluginPath
 
     companion object : PluginSettingsOwner() {
+
+        private val LOG = Logger.getInstance(GradlePlugin::class.java)
+
         override val pluginPath = "buildSystem.gradle"
 
         val gradleProperties by listProperty(
@@ -121,13 +150,6 @@ abstract class GradlePlugin(context: Context) : BuildSystemPlugin(context) {
                             "version" to gradleVersion.settingValue
                         )
                     )
-                ).andThen(
-                    // This is here temporarily until the Kotlin Multiplatform wizard has been removed
-                    compute {
-                        val assets = StandardAssetsProvider().getGradlewAssets() + KotlinAssetsProvider.getKotlinGradleIgnoreAssets()
-                        AssetsProcessor.getInstance().generateSources(projectPath, assets, emptyMap())
-                        Unit
-                    }
                 )
             }
         }
@@ -181,10 +203,8 @@ abstract class GradlePlugin(context: Context) : BuildSystemPlugin(context) {
 
                 val plugins = mutableListOf<BuildSystemPluginIR>()
 
-                val minGradleFoojayVersion =
-                    GradleVersion.version(Versions.GRADLE_PLUGINS.MIN_GRADLE_FOOJAY_VERSION.text)
                 val currentGradleVersion = GradleVersion.version(gradleVersion.settingValue.text)
-                val foojayCanBeAdded = currentGradleVersion >= minGradleFoojayVersion
+                val foojayCanBeAdded = isFoojayPluginSupported(currentGradleVersion)
 
                 if (foojayCanBeAdded) { // Check if foojay needs to be added
                     var foojayNeedsToBeAdded = false
@@ -203,7 +223,14 @@ abstract class GradlePlugin(context: Context) : BuildSystemPlugin(context) {
                     }
 
                     if (foojayNeedsToBeAdded) {
-                        plugins.add(FoojayPluginIR(Versions.GRADLE_PLUGINS.FOOJAY_VERSION))
+                        val gradleToPluginsCompatibilityStore = GradleToPluginsCompatibilityStore.getInstance()
+                        val foojayVersionString = gradleToPluginsCompatibilityStore.getFoojayVersion(currentGradleVersion)
+                        if (foojayVersionString != null) {
+                            val foojayVersion = Version.fromString(foojayVersionString)
+                            plugins.add(FoojayPluginIR(foojayVersion))
+                        } else {
+                            LOG.error("Unable to get Foojay version for Gradle $currentGradleVersion")
+                        }
                     }
                 }
 

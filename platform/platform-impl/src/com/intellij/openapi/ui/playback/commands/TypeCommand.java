@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.ui.playback.commands;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -6,11 +6,12 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeFocusManager;
-import org.intellij.lang.annotations.JdkConstants;
+import com.intellij.util.ui.EDT;
+import com.intellij.util.ui.JdkConstants;
 import org.jetbrains.annotations.ApiStatus;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.KeyStroke;
+import java.awt.Robot;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 
@@ -30,7 +31,7 @@ public abstract class TypeCommand extends AbstractCommand {
   }
 
   protected void type(Robot robot, KeyStroke keyStroke) {
-    assert !SwingUtilities.isEventDispatchThread() : "Robot playback must not be in EDT";
+    assert !EDT.isCurrentThreadEdt() : "Robot playback must not be in EDT";
 
     boolean shift = (keyStroke.getModifiers() & InputEvent.SHIFT_MASK) > 0;
     boolean alt = (keyStroke.getModifiers() & InputEvent.ALT_MASK) > 0;

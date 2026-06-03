@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.codeInsight.daemon.GutterMark;
@@ -14,6 +14,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -31,22 +32,27 @@ import com.intellij.ui.EditorNotificationPanel;
 import com.intellij.ui.LightColors;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.util.concurrency.AppExecutorUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.event.HyperlinkEvent;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Point;
 import java.awt.event.MouseEvent;
 import java.util.HashMap;
 import java.util.List;
 
+@ApiStatus.Internal
 public final class FileLevelIntentionComponent extends EditorNotificationPanel {
   public FileLevelIntentionComponent(@NlsContexts.Label String description,
                                      @NotNull HighlightSeverity severity,
                                      @Nullable GutterMark gutterMark,
                                      @Nullable List<? extends Pair<HighlightInfo.IntentionActionDescriptor, TextRange>> intentions,
                                      @NotNull PsiFile psiFile,
-                                     @NotNull Editor editor, @NlsContexts.Tooltip @Nullable String tooltip) {
+                                     @NotNull Editor editor,
+                                     @NlsContexts.Tooltip @Nullable String tooltip) {
     super(getColor(psiFile.getProject(), severity), getStatus(psiFile.getProject(), severity));
     Project project = psiFile.getProject();
     ShowIntentionsPass.IntentionsInfo info = new ShowIntentionsPass.IntentionsInfo();
@@ -89,7 +95,6 @@ public final class FileLevelIntentionComponent extends EditorNotificationPanel {
         // Compute action availability, but only show all of them once everything's computed,
         // to preserve the order of intentions (because read actions finish in an unpredictable order).
         ReadAction.nonBlocking(() -> action.isAvailable(project, editor, psiFile))
-          .expireWith(project)
           .inSmartMode(project)
           .finishOnUiThread(ModalityState.nonModal(), isAvailable -> {
             isActionAvailable.put(descriptor, isAvailable);
@@ -101,10 +106,10 @@ public final class FileLevelIntentionComponent extends EditorNotificationPanel {
       }
     }
 
-    myLabel.setText(description);
-    myLabel.setToolTipText(tooltip);
+    myTextLabel.setText(description);
+    myTextLabel.setToolTipText(tooltip);
     if (gutterMark != null) {
-      myLabel.setIcon(gutterMark.getIcon());
+      myTextLabel.setIcon(gutterMark.getIcon());
     }
 
     if (intentions != null && !intentions.isEmpty()) {
@@ -121,20 +126,22 @@ public final class FileLevelIntentionComponent extends EditorNotificationPanel {
         new ClickListener() {
           @Override
           public boolean onClick(@NotNull MouseEvent e, int clickCount) {
-            PsiFile psiFile = filePointer.getElement();
-            if (psiFile == null) return true;
-            CachedIntentions cachedIntentions = new CachedIntentions(project, psiFile, editor);
-            IntentionListStep step = new IntentionListStep(null, editor, psiFile, project, cachedIntentions, IntentionSource.FILE_LEVEL_ACTIONS);
-            HighlightInfo.IntentionActionDescriptor descriptor = intentions.get(0).getFirst();
-            IntentionActionWithTextCaching actionWithTextCaching = cachedIntentions.wrapAction(descriptor, psiFile, psiFile, editor);
-            if (step.hasSubstep(actionWithTextCaching)) {
-              step = step.getSubStep(actionWithTextCaching, null);
-            }
-            ListPopup popup = JBPopupFactory.getInstance().createListPopup(step);
-            Dimension dimension = popup.getContent().getPreferredSize();
-            Point at = new Point(-dimension.width + myGearLabel.getWidth(), FileLevelIntentionComponent.this.getHeight());
-            popup.show(new RelativePoint(e.getComponent(), at));
-            return true;
+            return WriteIntentReadAction.compute(() -> {
+              PsiFile psiFile = filePointer.getElement();
+              if (psiFile == null) return true;
+              CachedIntentions cachedIntentions = new CachedIntentions(project, psiFile, editor);
+              IntentionListStep step = WriteIntentReadAction.compute(() -> new IntentionListStep(null, editor, psiFile, project, cachedIntentions, IntentionSource.FILE_LEVEL_ACTIONS));
+              HighlightInfo.IntentionActionDescriptor descriptor = intentions.get(0).getFirst();
+              IntentionActionWithTextCaching actionWithTextCaching = cachedIntentions.wrapAction(descriptor, psiFile, psiFile, editor);
+              if (step.hasSubstep(actionWithTextCaching)) {
+                step = step.getSubStep(actionWithTextCaching, null);
+              }
+              ListPopup popup = JBPopupFactory.getInstance().createListPopup(step);
+              Dimension dimension = popup.getContent().getPreferredSize();
+              Point at = new Point(-dimension.width + myGearLabel.getWidth(), FileLevelIntentionComponent.this.getHeight());
+              popup.show(new RelativePoint(e.getComponent(), at));
+              return true;
+            });
           }
         }.installOn(myGearLabel);
       }

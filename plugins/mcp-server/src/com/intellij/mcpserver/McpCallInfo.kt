@@ -2,6 +2,7 @@ package com.intellij.mcpserver
 
 import com.intellij.concurrency.IntelliJContextElement
 import com.intellij.mcpserver.impl.McpServerService
+import com.intellij.mcpserver.impl.McpSessionHandler
 import com.intellij.mcpserver.impl.util.projectPathParameterName
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
@@ -22,7 +23,11 @@ class McpCallInfo(
   val meta: JsonObject,
   val mcpSessionOptions: McpServerService.McpSessionOptions,
   val headers: Map<String, List<String>> = emptyMap(),
+  // todo drop default, drop nullability
+  val sessionId: String? = null,
 ) {
+  internal var sessionHandler: McpSessionHandler? = null
+
   override fun toString(): String {
     return "McpCallAdditionalData(id=$callId, clientInfo=$clientInfo, toolName=${mcpToolDescriptor.name}"
   }
@@ -83,7 +88,7 @@ fun noSuitableProjectError(messagePrefix: String): McpExpectedError {
               | If you're aware of the current working directory you may pass it as `$projectPathParameterName`. 
               | In the case when it's unobvious which project to use you have to ASK the USER about a project providing him a numbered list of the projects.
               | Currently open projects: ${Json.encodeToString(projects)}""".trimMargin(),
-                         mcpErrorStructureContent = Json.encodeToJsonElement(projects).jsonObject)
+                          mcpErrorStructureContent = Json.encodeToJsonElement(projects).jsonObject)
 }
 
 @Serializable

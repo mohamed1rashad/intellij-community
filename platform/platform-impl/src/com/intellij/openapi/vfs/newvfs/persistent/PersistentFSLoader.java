@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.persistent;
 
 import com.intellij.openapi.diagnostic.Logger;
@@ -6,33 +6,29 @@ import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.PersistentFSConstants;
 import com.intellij.openapi.vfs.newvfs.persistent.mapped.content.CompressingAlgo;
-import com.intellij.openapi.vfs.newvfs.persistent.mapped.content.ContentHashEnumeratorOverDurableEnumerator;
-import com.intellij.openapi.vfs.newvfs.persistent.mapped.content.ContentStorageAdapter;
 import com.intellij.openapi.vfs.newvfs.persistent.mapped.content.VFSContentStorageOverMMappedFile;
 import com.intellij.openapi.vfs.newvfs.persistent.recovery.VFSRecoverer;
 import com.intellij.openapi.vfs.newvfs.persistent.recovery.VFSRecoveryInfo;
 import com.intellij.platform.util.io.storages.StorageFactory;
-import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageHelper;
 import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageOverMMappedFile;
 import com.intellij.platform.util.io.storages.enumerator.DurableStringEnumerator;
 import com.intellij.platform.util.io.storages.mmapped.MMappedFileStorageFactory;
 import com.intellij.util.ExceptionUtil;
-import com.intellij.util.concurrency.SequentialTaskExecutor;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.hash.ContentHashEnumerator;
-import com.intellij.util.io.*;
+import com.intellij.util.io.CleanableStorage;
+import com.intellij.util.io.DataEnumerator;
+import com.intellij.util.io.IOUtil;
+import com.intellij.util.io.ScannableDataEnumeratorEx;
+import com.intellij.util.io.SimpleStringPersistentEnumerator;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy.DataLengthPlusFixedPercentStrategy;
 import com.intellij.util.io.blobstorage.StreamlinedBlobStorage;
-import com.intellij.util.io.storage.RefCountingContentStorage;
-import com.intellij.util.io.storage.RefCountingContentStorageImpl;
 import com.intellij.util.io.storage.VFSContentStorage;
-import com.intellij.util.io.storage.lf.RefCountingContentStorageImplLF;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
-import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -45,14 +41,20 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
 import static com.intellij.openapi.vfs.newvfs.persistent.PersistentFSHeaders.Flags.FLAGS_DEFRAGMENTATION_REQUESTED;
 import static com.intellij.openapi.vfs.newvfs.persistent.PersistentFSRecordAccessor.hasDeletedFlag;
-import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.*;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.ATTRIBUTES_STORAGE_CORRUPTED;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.CONTENT_STORAGES_INCOMPLETE;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.DEFRAGMENTATION_REQUESTED;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.HAS_ERRORS_IN_PREVIOUS_SESSION;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.IMPL_VERSION_MISMATCH;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.NAME_STORAGE_INCOMPLETE;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.NOT_CLOSED_PROPERLY;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.SCHEDULED_REBUILD;
+import static com.intellij.openapi.vfs.newvfs.persistent.VFSInitException.ErrorCategory.UNRECOGNIZED;
 import static com.intellij.platform.util.io.storages.mmapped.MMappedFileStorageFactory.IfNotPageAligned.EXPAND_FILE;
-import static com.intellij.util.io.storage.CapacityAllocationPolicy.FIVE_PERCENT_FOR_GROWTH;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.stream.Collectors.joining;
 
@@ -67,11 +69,9 @@ import static java.util.stream.Collectors.joining;
  * state for {@link VFSRecoverer}s to fix.</li>
  * </ol>
  */
-@ApiStatus.Internal
+@Internal
 public final class PersistentFSLoader {
   private static final Logger LOG = Logger.getInstance(PersistentFSLoader.class);
-
-  private static final StorageLockContext PERSISTENT_FS_STORAGE_CONTEXT = new StorageLockContext(false, true);
 
   /**
    * We want the 'main exception' to be
@@ -121,7 +121,6 @@ public final class PersistentFSLoader {
   public final @NotNull Path namesFile;
   public final @NotNull Path attributesFile;
   public final @NotNull Path contentsFile;
-  public final @NotNull Path contentsHashesFile;
   public final @NotNull Path recordsFile;
   public final @NotNull Path enumeratedAttributesFile;
 
@@ -159,7 +158,6 @@ public final class PersistentFSLoader {
     namesFile = persistentFSPaths.storagePath("names");
     attributesFile = persistentFSPaths.storagePath("attributes");
     contentsFile = persistentFSPaths.storagePath("content");
-    contentsHashesFile = persistentFSPaths.storagePath("contentHashes");
     enumeratedAttributesFile = persistentFSPaths.storagePath("attributes_enums");
 
     corruptionMarkerFile = persistentFSPaths.getCorruptionMarkerFile();
@@ -181,7 +179,7 @@ public final class PersistentFSLoader {
     CompletableFuture<VFSAttributesStorage> attributesStorageFuture =
       executorService.async(() -> createAttributesStorage(attributesFile));
     CompletableFuture<VFSContentStorage> contentsStorageFuture =
-      executorService.async(() -> createContentStorage(contentsHashesFile, contentsFile));
+      executorService.async(() -> createContentStorage(contentsFile));
     CompletableFuture<PersistentFSRecordsStorage> recordsStorageFuture = executorService.async(() -> createRecordsStorage(recordsFile));
 
     //TODO RC: if !REUSE_DELETED_FILE_IDS -> check recordsStorage.maxAllocatedID() -> rebuild VFS if maxID >~ MAX_INT/2
@@ -508,7 +506,7 @@ public final class PersistentFSLoader {
     //avg record size is ~60b, hence I've chosen minCapacity=64 bytes, and defaultCapacity= 2*minCapacity
     SpaceAllocationStrategy allocationStrategy = new DataLengthPlusFixedPercentStrategy(
       /*min: */64, /*default: */ 128,
-      /*max: */StreamlinedBlobStorageHelper.MAX_CAPACITY,
+      /*max: */StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY,
       /*percentOnTop: */30
     );
 
@@ -528,79 +526,27 @@ public final class PersistentFSLoader {
 
   private @NotNull ScannableDataEnumeratorEx<String> createFileNamesEnumerator(@NotNull Path namesFile) throws IOException {
     LOG.info("VFS uses names enumerator over mmapped file");
-    //MAYBE RC: remove .mmap suffix, and use namesFile directly? Suffix was needed during transition from regular to mmapped impls,
-    //          and long unused
-    Path namesPathEx = Path.of(namesFile + ".mmap");
-    return DurableStringEnumerator.openAsync(namesPathEx, executorService::async);
+    return DurableStringEnumerator.openAsync(namesFile, executorService::async);
   }
 
-  public @NotNull VFSContentStorage createContentStorage(@NotNull Path contentsHashesFile,
-                                                         @NotNull Path contentsFile) throws IOException {
-    if (FSRecordsImpl.USE_CONTENT_STORAGE_OVER_MMAPPED_FILE) {
-      //Use larger pages: content storage is usually quite big.
-      int pageSize = 64 * IOUtil.MiB;
+  public @NotNull VFSContentStorage createContentStorage(@NotNull Path contentsFile) throws IOException {
+    //Use larger pages: content storage is usually quite big.
+    int pageSize = 64 * IOUtil.MiB;
 
-      if (pageSize <= PersistentFSConstants.MAX_FILE_LENGTH_TO_CACHE) {
-        //pageSize is an upper limit on record size for AppendOnlyLogOverMMappedFile:
-        LOG.warn("ContentStorage.pageSize(=" + pageSize + ") " +
-                 "must be > PersistentFSConstants.MAX_FILE_LENGTH_TO_CACHE(=" + PersistentFSConstants.MAX_FILE_LENGTH_TO_CACHE + "b), " +
-                 "otherwise large content can't fit");
-      }
-      CompressingAlgo compressionAlgo = switch (FSRecordsImpl.COMPRESSION_ALGO) {
-        case "zip" -> new CompressingAlgo.ZipAlgo(FSRecordsImpl.COMPRESS_CONTENT_IF_LARGER_THAN);
-        case "lz4" -> new CompressingAlgo.Lz4Algo(FSRecordsImpl.COMPRESS_CONTENT_IF_LARGER_THAN);
-        //"none"
-        default -> new CompressingAlgo.NoCompressionAlgo();
-      };
-      LOG.info("VFS uses content storage over memory-mapped file, with compression algo: " + compressionAlgo);
-      return new VFSContentStorageOverMMappedFile(contentsFile, pageSize, compressionAlgo);
+    if (pageSize <= PersistentFSConstants.MAX_FILE_LENGTH_TO_CACHE) {
+      //pageSize is an upper limit on record size for AppendOnlyLogOverMMappedFile:
+      LOG.warn("ContentStorage.pageSize(=" + pageSize + ") " +
+               "must be > PersistentFSConstants.MAX_FILE_LENGTH_TO_CACHE(=" + PersistentFSConstants.MAX_FILE_LENGTH_TO_CACHE + "b), " +
+               "otherwise large content can't fit");
     }
-
-    RefCountingContentStorage contentStorage;
-    ExecutorService storingPool = SequentialTaskExecutor.createSequentialApplicationPoolExecutor("FSRecords Content Write Pool");
-    boolean useContentHashes = true;
-    if (FSRecordsImpl.USE_CONTENT_STORAGE_OVER_NEW_FILE_PAGE_CACHE && PageCacheUtils.LOCK_FREE_PAGE_CACHE_ENABLED) {
-      LOG.info("VFS uses content storage over new FilePageCache");
-      //FiXME RC: now we create storage over new FilePageCache, but protected by the same global lock used by all storages
-      //          atop of old page-cache! Which is dummy, since content storage is independent, and could have at least
-      //          its own RWLock!
-      contentStorage = new RefCountingContentStorageImplLF(contentsFile, FIVE_PERCENT_FOR_GROWTH, storingPool, useContentHashes);
-    }
-    else {
-      LOG.info("VFS uses content storage over regular FilePageCache");
-      contentStorage = new RefCountingContentStorageImpl(contentsFile, FIVE_PERCENT_FOR_GROWTH, storingPool, useContentHashes);
-    }
-    return new ContentStorageAdapter(
-      contentStorage,
-      () -> openContentHashEnumeratorOrCreateEmpty(contentsHashesFile)
-    );
-  }
-
-
-  private static @NotNull ContentHashEnumerator openContentHashEnumeratorOrCreateEmpty(@NotNull Path contentsHashesFile)
-    throws IOException {
-    try {
-      return openContentHashEnumerator(contentsHashesFile);
-    }
-    catch (IOException e) {
-      //No need to fail here: just clean contentHashes, and open empty -- content hashes could be re-build
-      // by contentStorage data
-      LOG.warn("ContentHashEnumerator is broken -- clean it, hope it will be recovered from ContentStorage later on. " +
-               "Cause: " + e.getMessage());
-      IOUtil.deleteAllFilesStartingWith(contentsHashesFile);
-      return openContentHashEnumerator(contentsHashesFile);
-    }
-  }
-
-  private static @NotNull ContentHashEnumerator openContentHashEnumerator(@NotNull Path contentsHashesFile) throws IOException {
-    if (FSRecordsImpl.USE_CONTENT_HASH_STORAGE_OVER_MMAPPED_FILE) {
-      LOG.info("VFS uses content hash storage over mmapped file");
-      return ContentHashEnumeratorOverDurableEnumerator.open(contentsHashesFile);
-    }
-    else {
-      LOG.info("VFS uses content hash storage over regular FilePageCache");
-      return ContentHashEnumerator.open(contentsHashesFile, PERSISTENT_FS_STORAGE_CONTEXT);
-    }
+    CompressingAlgo compressionAlgo = switch (FSRecordsImpl.COMPRESSION_ALGO) {
+      case "zip" -> new CompressingAlgo.ZipAlgo(FSRecordsImpl.COMPRESS_CONTENT_IF_LARGER_THAN);
+      case "lz4" -> new CompressingAlgo.Lz4Algo(FSRecordsImpl.COMPRESS_CONTENT_IF_LARGER_THAN);
+      //"none"
+      default -> new CompressingAlgo.NoCompressionAlgo();
+    };
+    LOG.info("VFS uses content storage over memory-mapped file, with compression algo: " + compressionAlgo);
+    return new VFSContentStorageOverMMappedFile(contentsFile, pageSize, compressionAlgo);
   }
 
   public @NotNull PersistentFSRecordsStorage createRecordsStorage(@NotNull Path recordsFile) throws IOException {
@@ -694,7 +640,6 @@ public final class PersistentFSLoader {
     return reusableFileIdsLazy;
   }
 
-
   public void setNamesStorage(ScannableDataEnumeratorEx<String> namesStorage) {
     this.namesStorage = namesStorage;
   }
@@ -737,9 +682,9 @@ public final class PersistentFSLoader {
     String remainingProblemsList = problemsDuringLoad.isEmpty() ?
                                    "no problems" :
                                    problemsDuringLoad.stream()
-                                     .map(VFSInitException::category)
-                                     .map(Object::toString)
-                                     .collect(joining());
+                                   .map(VFSInitException::category)
+                                   .map(Object::toString)
+                                   .collect(joining());
 
     LOG.warn("[VFS load problem]: " +
              recoveredProblemsList + " recovered, " +

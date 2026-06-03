@@ -2752,10 +2752,12 @@
   </item>
   <item name='java.util.Comparator java.util.Comparator&lt;T&gt; naturalOrder()'>
     <annotation name='org.jetbrains.annotations.NotNull'/>
-    <annotation name='org.jetbrains.annotations.NotNull' typePath="/1"/>
     <annotation name='org.jetbrains.annotations.Contract'>
       <val name="pure" val="true"/>
     </annotation>
+  </item>
+  <item name='java.util.Comparator java.util.Comparator&lt;T&gt; naturalOrder() &lt;T&gt;'>
+    <annotation name='org.jetbrains.annotations.NotNull' typePath="/1"/>
   </item>
   <item name='java.util.Comparator java.util.Comparator&lt;T&gt; nullsFirst(java.util.Comparator&lt;? super T&gt;)'>
     <annotation name='org.jetbrains.annotations.NotNull'/>
@@ -3505,6 +3507,7 @@
     <annotation name='org.jetbrains.annotations.Contract'>
       <val name="pure" val="true"/>
     </annotation>
+    <annotation name='org.jetbrains.annotations.Unmodifiable'/>
   </item>
   <item name='java.util.List java.util.List&lt;E&gt; of(E)'>
     <annotation name="org.jetbrains.annotations.NotNull"/>
@@ -3517,12 +3520,14 @@
   </item>
   <item name='java.util.List java.util.List&lt;E&gt; of(E, E)'>
     <annotation name="org.jetbrains.annotations.NotNull"/>
-    <annotation name="org.jetbrains.annotations.NotNull" typePath="/1"/>
     <annotation name='org.jetbrains.annotations.Contract'>
       <val name="value" val="&quot;_,_-&gt;new&quot;"/>
       <val name="pure" val="true"/>
     </annotation>
     <annotation name='org.jetbrains.annotations.Unmodifiable'/>
+  </item>
+  <item name='java.util.List java.util.List&lt;E&gt; of(E, E) &lt;E&gt;'>
+    <annotation name="org.jetbrains.annotations.NotNull"/>
   </item>
   <item name='java.util.List java.util.List&lt;E&gt; of(E, E, E)'>
     <annotation name="org.jetbrains.annotations.NotNull"/>
@@ -4416,6 +4421,9 @@
       <val name="pure" val="true"/>
     </annotation>
   </item>
+  <item name='java.util.Optional &lt;T&gt;'>
+    <annotation name='org.jetbrains.annotations.NotNull'/>
+  </item>
   <item name='java.util.Optional T get()'>
     <annotation name='org.jetbrains.annotations.NotNull'/>
     <annotation name='org.jetbrains.annotations.Contract'>
@@ -4426,6 +4434,7 @@
     </annotation>
   </item>
   <item name='java.util.Optional T orElse(T)'>
+    <annotation name='org.jetbrains.annotations.Nullable'/>
     <annotation name='org.jetbrains.annotations.Contract'>
       <val name="value" val="&quot;!null -&gt; !null&quot;"/>
       <val name="pure" val="true"/>
@@ -4439,6 +4448,12 @@
     <annotation name='org.intellij.lang.annotations.Flow'>
       <val name="targetIsContainer" val="true"/>
     </annotation>
+  </item>
+  <item name='java.util.Optional T orElseGet(java.util.function.Supplier&lt;? extends T&gt;)'>
+    <annotation name='org.jetbrains.annotations.UnknownNullability'/>
+  </item>
+  <item name='java.util.Optional T orElseGet(java.util.function.Supplier&lt;? extends T&gt;) 0'>
+    <annotation name='org.jetbrains.annotations.Nullable' typePath="/1/*"/>
   </item>
   <item name='java.util.Optional T orElseThrow(java.util.function.Supplier&lt;? extends X&gt;) 0'>
       <annotation name='org.jetbrains.annotations.NotNull'/>
@@ -4750,6 +4765,101 @@
     <annotation name='org.jetbrains.annotations.NotNull'/>
   </item>
   <item name='java.util.Scanner java.util.Scanner useLocale(java.util.Locale) 0'>
+    <annotation name='org.jetbrains.annotations.NotNull'/>
+  </item>
+  <item name='java.util.SequencedCollection E getFirst()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedCollection E getLast()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedCollection E removeFirst()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedCollection E removeLast()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedCollection java.util.SequencedCollection&lt;E&gt; reversed()'>
+    <annotation name='org.jetbrains.annotations.NotNull'/>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedCollection void addFirst(E)'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedCollection void addLast(E)'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap V putFirst(K, V)'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap V putLast(K, V)'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap java.util.Map.Entry&lt;K,V&gt; firstEntry()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap java.util.Map.Entry&lt;K,V&gt; lastEntry()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap java.util.Map.Entry&lt;K,V&gt; pollFirstEntry()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap java.util.Map.Entry&lt;K,V&gt; pollLastEntry()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="mutates" val="&quot;this&quot;"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap java.util.SequencedCollection&lt;V&gt; sequencedValues()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+    <annotation name='org.jetbrains.annotations.NotNull'/>
+  </item>
+  <item name='java.util.SequencedMap java.util.SequencedMap&lt;K,V&gt; reversed()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+  </item>
+  <item name='java.util.SequencedMap java.util.SequencedSet&lt;K&gt; sequencedKeySet()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+    <annotation name='org.jetbrains.annotations.NotNull'/>
+  </item>
+  <item name='java.util.SequencedMap java.util.SequencedSet&lt;java.util.Map.Entry&lt;K,V&gt;&gt; sequencedEntrySet()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
+    <annotation name='org.jetbrains.annotations.NotNull'/>
+  </item>
+  <item name='java.util.SequencedSet java.util.SequencedSet&lt;E&gt; reversed()'>
+    <annotation name='org.jetbrains.annotations.Contract'>
+      <val name="pure" val="true"/>
+    </annotation>
     <annotation name='org.jetbrains.annotations.NotNull'/>
   </item>
   <item name='java.util.Set T[] toArray(T[])'>

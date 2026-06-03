@@ -2,7 +2,7 @@
 package org.jetbrains.kotlin.idea.base.platforms
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileTypes.FileTypeManager
@@ -20,6 +20,7 @@ import com.intellij.openapi.vfs.JarFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileVisitor
+import com.intellij.platform.backend.workspace.virtualFile
 import com.intellij.platform.workspace.jps.entities.LibraryEntity
 import com.intellij.platform.workspace.jps.entities.LibraryRootTypeId
 import com.intellij.util.gist.GistManager
@@ -37,7 +38,6 @@ import org.jetbrains.kotlin.serialization.deserialization.DOT_METADATA_FILE_EXTE
 import java.io.DataInput
 import java.io.DataOutput
 import java.util.concurrent.ConcurrentHashMap
-import com.intellij.platform.backend.workspace.virtualFile
 
 private enum class KnownLibraryKindForIndex {
     COMMON, JS, UNKNOWN
@@ -53,9 +53,10 @@ class LibraryEffectiveKindProviderImpl(private val project: Project): LibraryEff
         val virtualFile = classRoots.firstOrNull() ?: return null
         virtualFile.putUserData(CLASS_ROOTS_KEY, classRoots)
         try {
-            return runReadAction {
+            return ReadAction.nonBlocking<PersistentLibraryKind<*>> {
+                if (project.isDisposed || !virtualFile.isValid) return@nonBlocking null
                 KotlinLibraryKindGistProvider.getInstance().kotlinLibraryKindGist.getFileData(project, virtualFile)
-            }
+            }.executeSynchronously()
         } finally {
             virtualFile.removeUserData(CLASS_ROOTS_KEY)
         }
@@ -90,6 +91,15 @@ class LibraryEffectiveKindProviderImpl(private val project: Project): LibraryEff
     }
 
     override fun getEffectiveKind(library: LibraryEntity): PersistentLibraryKind<*>? {
+        // Respect explicitly set library kind from the workspace model entity.
+        // This mirrors the Library overload (which checks library.kind first)
+        // and is needed for non-Gradle build systems that explicitly set
+        // PersistentLibraryKind (e.g., KotlinNativeLibraryKind) on their libraries.
+        library.typeId?.let { typeId ->
+            val kind = LibraryKindRegistry.getInstance().findKindById(typeId.name)
+            if (kind is KotlinLibraryKind && kind is PersistentLibraryKind<*>) return kind
+        }
+
         val classRoots = library.roots.filter { it.type == LibraryRootTypeId.COMPILED }.mapNotNull { it.url.virtualFile }
         return getKind(classRoots.toTypedArray())
     }

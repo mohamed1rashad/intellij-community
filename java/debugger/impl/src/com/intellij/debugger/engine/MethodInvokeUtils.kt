@@ -21,10 +21,16 @@ import com.intellij.rt.debugger.MethodInvoker
 import com.intellij.util.BitUtil.isSet
 import com.intellij.xdebugger.impl.evaluate.XEvaluationOrigin
 import com.jetbrains.jdi.ArrayReferenceImpl
-import com.sun.jdi.*
+import com.sun.jdi.ArrayReference
+import com.sun.jdi.ArrayType
+import com.sun.jdi.IncompatibleThreadStateException
+import com.sun.jdi.Method
+import com.sun.jdi.ObjectReference
 import com.sun.jdi.ObjectReference.INVOKE_NONVIRTUAL
+import com.sun.jdi.ReferenceType
+import com.sun.jdi.Value
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.EnumSet
 
 @ApiStatus.Internal
 object MethodInvokeUtils {
@@ -70,16 +76,28 @@ object MethodInvokeUtils {
   }
 
   fun getMethodHandlesImplLookup(evaluationContext: EvaluationContextImpl): ObjectReference? {
-    val theClass = evaluationContext.debugProcess.findClass(evaluationContext,
-                                                            "java.lang.invoke.MethodHandles\$Lookup",
-                                                            null)
-    val theField = DebuggerUtils.findField(theClass,
-                                           "IMPL_LOOKUP")
-    return theClass?.getValue(theField) as? ObjectReference
+    val theClass = evaluationContext.debugProcess.findLoadedClass(
+      evaluationContext.suspendContext,
+      "java.lang.invoke.MethodHandles\$Lookup", null
+    ) ?: run {
+      logger<MethodInvokeUtils>().error("Failed to find MethodHandles\$Lookup class, java version: " + evaluationContext.virtualMachineProxy.version())
+      return null
+    }
+    val theField = DebuggerUtils.findField(theClass, "IMPL_LOOKUP") ?: run {
+      logger<MethodInvokeUtils>().error("Failed to find MethodHandles.Lookup.IMPL_LOOKUP field, java version: " + evaluationContext.virtualMachineProxy.version())
+      return null
+    }
+    return theClass.getValue(theField) as? ObjectReference ?: run {
+      logger<MethodInvokeUtils>().error("Failed to get MethodHandles.Lookup.IMPL_LOOKUP field value, java version: " + evaluationContext.virtualMachineProxy.version())
+      return null
+    }
   }
 }
 
-private val ORIGINS_FOR_USE_WITH_HELPER = EnumSet.of(XEvaluationOrigin.DIALOG, XEvaluationOrigin.INLINE, XEvaluationOrigin.EDITOR)
+private val ORIGINS_FOR_USE_WITH_HELPER = EnumSet.of(XEvaluationOrigin.DIALOG,
+                                                     XEvaluationOrigin.INLINE,
+                                                     XEvaluationOrigin.EDITOR,
+                                                     XEvaluationOrigin.BREAKPOINT_LOG)
 
 private fun EvaluationContextImpl.shouldUseHelper(): Boolean {
   return when (Registry.get("debugger.evaluate.method.helper").selectedOption) {
@@ -124,7 +142,6 @@ internal fun tryInvokeWithHelper(
 
   val implLookup = MethodInvokeUtils.getMethodHandlesImplLookup(evaluationContext)
   if (implLookup == null) {
-    logger<MethodInvokeUtils>().error("Cannot get MethodHandles.Lookup.IMPL_LOOKUP, java version " + evaluationContext.virtualMachineProxy.version())
     return INVOCATION_FAILED
   }
 

@@ -1,7 +1,6 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.util;
 
-import com.intellij.codeInsight.ExternalAnnotationsManager;
 import com.intellij.java.syntax.parser.JavaKeywords;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
@@ -10,7 +9,46 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
 import com.intellij.pom.java.JavaFeature;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.LambdaUtil;
+import com.intellij.psi.PsiArrayInitializerExpression;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiCapturedWildcardType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiDisjunctionType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiEllipsisType;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiIntersectionType;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLambdaExpressionType;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodReferenceExpression;
+import com.intellij.psi.PsiMethodReferenceType;
+import com.intellij.psi.PsiMethodReferenceUtil;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParenthesizedExpression;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReturnStatement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterListOwner;
+import com.intellij.psi.PsiTypeVisitor;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.PsiWildcardType;
+import com.intellij.psi.StubBasedPsiElement;
+import com.intellij.psi.TypeAnnotationProvider;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.tree.IElementType;
@@ -21,7 +59,13 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 public final class PsiTypesUtil {
@@ -575,8 +619,13 @@ public final class PsiTypesUtil {
   }
 
   /**
-   * Checks if {@code type} mentions type parameters from the passed {@code Set}
-   * Implicit type arguments of types based on inner classes of generic outer classes are explicitly checked
+   * Checks whether {@code type} mentions at least one type parameter from {@code typeParameters}.
+   * The check traverses nested component/argument/bound types and also accounts for implicit type arguments
+   * of inner classes declared in generic outer classes.
+   *
+   * @param type type to inspect, {@code null} is treated as not mentioning any type parameter
+   * @param typeParameters type parameters to match
+   * @return {@code true} if {@code type} mentions any of {@code typeParameters}, {@code false} otherwise
    */
   public static boolean mentionsTypeParameters(@Nullable PsiType type, @NotNull Set<? extends PsiTypeParameter> typeParameters) {
     return mentionsTypeParametersOrUnboundedWildcard(type, typeParameters::contains);
@@ -705,13 +754,10 @@ public final class PsiTypesUtil {
    * @return type with removed external annotations (if any); on any level of depth
    */
   public static @NotNull PsiType removeExternalAnnotations(@NotNull PsiType type) {
-    PsiAnnotation[] annotations = type.getAnnotations();
-    if (annotations.length > 0) {
-      List<PsiAnnotation> newAnnotations = ContainerUtil.filter(
-        annotations, annotation -> !ExternalAnnotationsManager.getInstance(annotation.getProject()).isExternalAnnotation(annotation));
-      if (newAnnotations.size() < annotations.length) {
-        type = type.annotate(TypeAnnotationProvider.Static.create(newAnnotations.toArray(PsiAnnotation.EMPTY_ARRAY)));
-      }
+    TypeAnnotationProvider provider = type.getAnnotationProvider();
+    TypeAnnotationProvider noExternal = provider.removeExternalAnnotations();
+    if (noExternal != provider) {
+      type = type.annotate(noExternal);
     }
     if (type instanceof PsiClassType) {
       PsiClassType classType = (PsiClassType)type;
@@ -726,7 +772,8 @@ public final class PsiTypesUtil {
           changed |= updatedParameter != parameter;
         }
         if (changed) {
-          return JavaPsiFacade.getElementFactory(psiClass.getProject()).createType(psiClass, parameters);
+          return JavaPsiFacade.getElementFactory(psiClass.getProject()).createType(psiClass, parameters)
+            .annotate(noExternal);
         }
       }
       return type;
@@ -735,7 +782,9 @@ public final class PsiTypesUtil {
       PsiArrayType arrayType = (PsiArrayType)type;
       PsiType origComponentType = arrayType.getComponentType();
       PsiType componentType = removeExternalAnnotations(origComponentType);
-      return componentType == origComponentType ? type : componentType.createArrayType();
+      return componentType == origComponentType ? type : 
+             arrayType instanceof PsiEllipsisType ? new PsiEllipsisType(componentType, noExternal) : 
+             componentType.createArrayType().annotate(noExternal);
     }
     else if (type instanceof PsiWildcardType) {
       PsiWildcardType wildcardType = (PsiWildcardType)type;

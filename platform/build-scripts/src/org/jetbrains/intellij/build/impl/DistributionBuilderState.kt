@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build.impl
 
+import org.jetbrains.annotations.VisibleForTesting
 import org.jetbrains.intellij.build.BuildContext
 
 suspend fun createDistributionBuilderState(pluginsToPublish: Set<PluginLayout>, context: BuildContext): DistributionBuilderState {
@@ -12,11 +13,16 @@ suspend fun createDistributionBuilderState(pluginsToPublish: Set<PluginLayout>, 
 
 suspend fun createDistributionBuilderState(context: BuildContext): DistributionBuilderState {
   val platform = createPlatformLayout(context)
-  return DistributionBuilderState(platform, pluginsToPublish = emptySet(), context)
+  return DistributionBuilderState(platformLayout = platform, pluginsToPublish = emptySet(), context = context)
+}
+
+@VisibleForTesting
+fun createTestDistributionBuilderState(context: BuildContext): DistributionBuilderState {
+  return DistributionBuilderState(platformLayout = PlatformLayout(), pluginsToPublish = emptySet(), context = context)
 }
 
 class DistributionBuilderState internal constructor(
-  @JvmField val platform: PlatformLayout,
+  @JvmField val platformLayout: PlatformLayout,
   @JvmField val pluginsToPublish: Set<PluginLayout>,
   context: BuildContext,
 ) {
@@ -26,9 +32,6 @@ class DistributionBuilderState internal constructor(
       "Unresolved release-date: $releaseDate"
     }
   }
-
-  val platformModules: Sequence<String>
-    get() = platform.includedModules.asSequence().map { it.moduleName }.distinct() + getToolModules().asSequence()
 }
 
 internal fun filterPluginsToPublish(plugins: MutableSet<PluginLayout>, context: BuildContext) {
@@ -48,8 +51,3 @@ internal fun filterPluginsToPublish(plugins: MutableSet<PluginLayout>, context: 
 
   plugins.removeIf { !toInclude.contains(it.directoryName) }
 }
-
-/**
- * @return module names which are required to run the necessary tools from build scripts
- */
-internal fun getToolModules(): List<String> = listOf("intellij.java.rt", "intellij.platform.starter", "intellij.tools.updater")

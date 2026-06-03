@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.psi.impl;
 
@@ -10,15 +10,24 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.platform.backend.navigation.NavigationRequest;
 import com.intellij.platform.backend.navigation.NavigationRequests;
 import com.intellij.pom.Navigatable;
-import com.intellij.psi.*;
+import com.intellij.psi.NavigatablePsiElement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiInvalidElementAccessException;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.ResolveState;
 import com.intellij.psi.scope.PsiScopeProcessor;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
+import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ReflectionUtil;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.concurrency.annotations.RequiresReadLock;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -189,7 +198,13 @@ public abstract class PsiElementBase extends ElementBase implements NavigatableP
 
   @Override
   public void navigate(boolean requestFocus) {
-    Navigatable descriptor = PsiNavigationSupport.getInstance().getDescriptor(this);
+    doNavigate(this, requestFocus);
+  }
+
+  @ApiStatus.Internal
+  public static void doNavigate(@NotNull PsiElement element, boolean requestFocus) {
+    PsiUtilCore.ensureValid(element);
+    Navigatable descriptor = PsiNavigationSupport.getInstance().getDescriptor(element);
     if (descriptor != null) {
       descriptor.navigate(requestFocus);
     }

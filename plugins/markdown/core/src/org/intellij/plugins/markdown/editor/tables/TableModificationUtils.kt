@@ -1,10 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.intellij.plugins.markdown.editor.tables
 
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.util.endOffset
 import com.intellij.psi.util.startOffset
+import com.intellij.util.DocumentUtil
 import com.intellij.util.containers.ContainerUtil
 import org.intellij.plugins.markdown.editor.tables.TableUtils.calculateActualTextRange
 import org.intellij.plugins.markdown.editor.tables.TableUtils.columnsCount
@@ -28,6 +29,7 @@ object TableModificationUtils {
    * [transformSeparator] on corresponding separator cell.
    */
   fun MarkdownTable.modifyColumn(
+    document: Document,
     columnIndex: Int,
     transformSeparator: (TextRange) -> Unit,
     transformCell: (MarkdownTableCell) -> Unit
@@ -35,8 +37,10 @@ object TableModificationUtils {
     val separatorRange = separatorRow?.getCellRange(columnIndex) ?: return false
     val headerCell = headerRow?.getCell(columnIndex) ?: return false
     val cells = getColumnCells(columnIndex, withHeader = false)
-    for (cell in cells.asReversed()) {
-      transformCell.invoke(cell)
+    DocumentUtil.executeInBulk(document, cells.size > 100) {
+      for (cell in cells.asReversed()) {
+        transformCell.invoke(cell)
+      }
     }
     transformSeparator.invoke(separatorRange)
     transformCell.invoke(headerCell)
@@ -44,7 +48,7 @@ object TableModificationUtils {
   }
 
   private fun getCellPotentialWidth(cellText: String): Int {
-    var width = cellText.length
+    var width = TableCharacterWidthUtils.calculateDisplayWidth(cellText)
     if (!cellText.startsWith(' ')) {
       width += 1
     }
@@ -54,9 +58,10 @@ object TableModificationUtils {
     return width
   }
 
+  private val separatorCellPattern = Regex(":?-+:?")
+
   private fun isSeparatorCellCorrectlyFormatted(cellText: String): Boolean {
-    // Don't have to validate ':' count and positions, since it won't be a separator at all
-    return cellText.all { it =='-' || it == ':' }
+    return separatorCellPattern.matches(cellText.trim())
   }
 
   fun MarkdownTableCell.hasCorrectPadding(): Boolean {
@@ -80,7 +85,7 @@ object TableModificationUtils {
     }
     return cells.all {
       val selfWidth = getCellPotentialWidth(it.text)
-      it.hasCorrectPadding() && selfWidth == it.textRange.length && selfWidth == width
+      it.hasCorrectPadding() && selfWidth == TableCharacterWidthUtils.calculateDisplayWidth(it.text) && selfWidth == width
     }
   }
 
@@ -138,12 +143,14 @@ object TableModificationUtils {
   }
 
   fun buildRealignedCellContent(cellContent: String, wholeCellWidth: Int, alignment: CellAlignment): String {
-    check(wholeCellWidth >= cellContent.length)
+    val contentDisplayWidth = TableCharacterWidthUtils.calculateDisplayWidth(cellContent)
+    check(wholeCellWidth >= contentDisplayWidth)
+    val paddingNeeded = wholeCellWidth - contentDisplayWidth
     return when (alignment) {
-      CellAlignment.RIGHT -> "${" ".repeat((wholeCellWidth - cellContent.length - 1).coerceAtLeast(0))}$cellContent "
+      CellAlignment.RIGHT -> "${" ".repeat((paddingNeeded - 1).coerceAtLeast(0))}$cellContent "
       CellAlignment.CENTER -> {
-        val leftPadding = (wholeCellWidth - cellContent.length) / 2
-        val rightPadding = wholeCellWidth - cellContent.length - leftPadding
+        val leftPadding = paddingNeeded / 2
+        val rightPadding = paddingNeeded - leftPadding
         buildString {
           repeat(leftPadding) {
             append(' ')
@@ -155,7 +162,7 @@ object TableModificationUtils {
         }
       }
       // MarkdownTableSeparatorRow.CellAlignment.LEFT
-      else -> " $cellContent${" ".repeat((wholeCellWidth - cellContent.length - 1).coerceAtLeast(0))}"
+      else -> " $cellContent${" ".repeat((paddingNeeded - 1).coerceAtLeast(0))}"
     }
   }
 
@@ -180,12 +187,13 @@ object TableModificationUtils {
     val cellRange = textRange
     val cellText = documentText.substring(cellRange.startOffset, cellRange.endOffset)
     val actualContent = cellText.trim(' ')
-    val replacement = buildRealignedCellContent(actualContent, cellText.length, alignment)
+    val replacement = buildRealignedCellContent(actualContent, TableCharacterWidthUtils.calculateDisplayWidth(cellText), alignment)
     document.replaceString(cellRange.startOffset, cellRange.endOffset, replacement)
   }
 
   fun MarkdownTable.updateColumnAlignment(document: Document, columnIndex: Int, alignment: CellAlignment) {
     modifyColumn(
+      document,
       columnIndex,
       transformSeparator = { separatorRow?.updateAlignment(document, columnIndex, alignment) },
       transformCell = { it.updateAlignment(document, alignment) }

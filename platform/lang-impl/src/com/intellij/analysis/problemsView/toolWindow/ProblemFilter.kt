@@ -30,9 +30,7 @@ internal class SeverityFiltersActionGroup : DumbAware, ActionGroup() {
     val severities = SeverityRegistrar.getSeverityRegistrar(project).allSeverities.reversed()
       .filter { it != HighlightSeverity.INFO && it > HighlightSeverity.INFORMATION && it < HighlightSeverity.ERROR }
     val (mainSeverities, otherSeverities) = severities.partition { it >= HighlightSeverity.GENERIC_SERVER_ERROR_OR_WARNING }
-    val panel = event.updateSession.compute(this, "ProblemsView.getSelectedPanel", ActionUpdateThread.EDT) {
-      ProblemsView.getSelectedPanel(project) as? HighlightingPanel
-    } ?: return EMPTY_ARRAY
+    val panel = event.getData(ProblemsViewPanel.DATA_KEY) as? HighlightingPanel? ?: return EMPTY_ARRAY
     val actions = mainSeverities.mapTo(ArrayList<AnAction>()) {
       SeverityFilterAction(renderSeverity(it), it.myVal, panel)
     }
@@ -41,8 +39,8 @@ internal class SeverityFiltersActionGroup : DumbAware, ActionGroup() {
   }
 }
 
-private abstract class SeverityFilterActionBase(name: @Nls String, val panel: HighlightingPanel): DumbAwareToggleAction(name) {
-  override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+internal abstract class SeverityFilterActionBase(name: @Nls String, val panel: HighlightingPanel): DumbAwareToggleAction(name) {
+  override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
   abstract fun updateState(selected: Boolean): Boolean
 
@@ -61,7 +59,7 @@ private abstract class SeverityFilterActionBase(name: @Nls String, val panel: Hi
   }
 }
 
-private class OtherSeveritiesFilterAction(
+internal class OtherSeveritiesFilterAction(
   private val severities: Collection<Int>,
   panel: HighlightingPanel
 ): SeverityFilterActionBase(ProblemsViewBundle.message("problems.view.highlighting.other.problems.show"), panel) {
@@ -76,7 +74,7 @@ private class OtherSeveritiesFilterAction(
   }
 }
 
-private class SeverityFilterAction(@Nls name: String, val severity: Int, panel: HighlightingPanel): SeverityFilterActionBase(name, panel) {
+internal class SeverityFilterAction(@Nls name: String, val severity: Int, panel: HighlightingPanel): SeverityFilterActionBase(name, panel) {
   override fun isSelected(event: AnActionEvent) = !panel.state.hideBySeverity.contains(severity)
 
   override fun updateState(selected: Boolean): Boolean {

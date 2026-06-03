@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.backend.navigation
 
 import com.intellij.openapi.project.Project
@@ -8,7 +8,6 @@ import com.intellij.psi.PsiDirectory
 import com.intellij.psi.PsiFile
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresReadLock
-import org.jetbrains.annotations.ApiStatus.Experimental
 import org.jetbrains.annotations.ApiStatus.NonExtendable
 
 /**
@@ -16,7 +15,6 @@ import org.jetbrains.annotations.ApiStatus.NonExtendable
  *
  * @see [NavigationRequest.sourceNavigationRequest]
  */
-@Experimental
 @NonExtendable // sealed
 interface NavigationRequest {
 
@@ -30,7 +28,7 @@ interface NavigationRequest {
     @RequiresBackgroundThread
     @JvmStatic
     fun sourceNavigationRequest(project: Project, file: VirtualFile, offset: Int): NavigationRequest? {
-      return NavigationRequests.getInstance().sourceNavigationRequest(project, file, offset, elementRange = null)
+      return NavigationRequests.getInstance().sourceNavigationRequest(project = project, file = file, offset = offset, elementRange = null)
     }
 
     /**

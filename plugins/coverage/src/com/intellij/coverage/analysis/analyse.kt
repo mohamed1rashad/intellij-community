@@ -10,8 +10,8 @@ import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.module.ModuleUtilCore
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.openapi.vfs.VfsUtilCore
-import java.io.File
+import java.nio.file.Files
+import java.nio.file.Path
 
 internal fun collectOutputRoots(bundle: CoverageSuitesBundle, project: Project): Map<ModuleRequest, List<RequestRoot>> {
   val coverageDataManager = CoverageDataManager.getInstance(project)
@@ -46,11 +46,14 @@ internal fun collectOutputRoots(bundle: CoverageSuitesBundle, project: Project):
 
   val roots = hashMapOf<ModuleRequest, MutableList<RequestRoot>>()
   for ((root, module) in outputRoots) {
+    val outputRoot = root.toNioPath()
     for ((packageName, simpleName) in requestedPackages) {
       val packagePath = AnalysisUtils.fqnToInternalName(packageName)
-      val packageRoot = PackageAnnotator.findRelativeFile(packagePath, VfsUtilCore.virtualToIoFile(root))
-      if (packageRoot.exists()) {
-        roots.getOrPut(ModuleRequest(packageName, module)) { mutableListOf() }.add(RequestRoot(packageRoot, simpleName))
+      val isValidRoot = Files.isDirectory(outputRoot) || Files.isRegularFile(outputRoot) && outputRoot.fileName.toString()
+        .endsWith(".jar", ignoreCase = true)
+      if (isValidRoot) {
+        val requestRoot = RequestRoot(outputRoot, simpleName, packagePath)
+        roots.getOrPut(ModuleRequest(packageName, module)) { mutableListOf() }.add(requestRoot)
       }
     }
   }
@@ -58,7 +61,7 @@ internal fun collectOutputRoots(bundle: CoverageSuitesBundle, project: Project):
 }
 
 internal data class ModuleRequest(val packageName: String, val module: Module)
-internal data class RequestRoot(val root: File, val simpleName: String?)
+internal data class RequestRoot(val root: Path, val simpleName: String?, val packagePathInRoot: String)
 
 private fun List<String>.removeSubPackages(): List<String> {
   val allPackages = this.sortedBy { it.length }

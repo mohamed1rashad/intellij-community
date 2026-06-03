@@ -1,6 +1,14 @@
 package com.intellij.cce.fus
 
-import com.intellij.internal.statistic.eventLog.*
+import com.intellij.internal.statistic.eventLog.EmptyEventLogFilesProvider
+import com.intellij.internal.statistic.eventLog.EventLogFile
+import com.intellij.internal.statistic.eventLog.EventLogFilesProvider
+import com.intellij.internal.statistic.eventLog.EventLogGroup
+import com.intellij.internal.statistic.eventLog.EventLogListenersManager
+import com.intellij.internal.statistic.eventLog.StatisticsEventLogger
+import com.intellij.internal.statistic.eventLog.StatisticsEventLoggerProvider
+import com.intellij.internal.statistic.eventLog.escape
+import com.intellij.internal.statistic.eventLog.newLogEvent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl
@@ -12,8 +20,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executor
 
 object MockFUSCollector {
-  fun <T> collectLogEvents(parentDisposable: Disposable,
-                           action: () -> T): Pair<List<LogEvent>, T> {
+  suspend fun <T> collectLogEvents(
+    parentDisposable: Disposable,
+    action: suspend () -> T,
+  ): Pair<List<LogEvent>, T> {
 
     val mockLoggerProvider = MockStatisticsEventLoggerProvider("ML")
     val llmcLoggerProvider = MockStatisticsEventLoggerProvider("LLMC")
@@ -81,7 +91,7 @@ private class MockStatisticsEventLoggerProvider(recorderId: String) : Statistics
   }
 }
 
-fun <T> collectingFusLogs(logEventFilter: (LogEvent) -> Boolean, action: () -> T): Pair<T, List<LogEvent>> = Disposer.newDisposable().use { lifetime ->
+suspend fun <T> collectingFusLogs(logEventFilter: (LogEvent) -> Boolean, action: suspend () -> T): Pair<T, List<LogEvent>> = Disposer.newDisposable().use { lifetime ->
   val (allFusLogs, result) = MockFUSCollector.collectLogEvents(lifetime, action)
   val mlFusLogs: List<LogEvent> = allFusLogs.filter { logEventFilter(it) }
   result to mlFusLogs

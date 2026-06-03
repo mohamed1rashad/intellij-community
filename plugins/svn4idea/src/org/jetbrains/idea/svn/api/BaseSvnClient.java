@@ -2,12 +2,18 @@
 package org.jetbrains.idea.svn.api;
 
 import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vfs.newvfs.ManagingFS;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.SvnVcs;
 import org.jetbrains.idea.svn.WorkingCopyFormat;
 import org.jetbrains.idea.svn.auth.AuthenticationService;
-import org.jetbrains.idea.svn.commandLine.*;
+import org.jetbrains.idea.svn.commandLine.Command;
+import org.jetbrains.idea.svn.commandLine.CommandExecutor;
+import org.jetbrains.idea.svn.commandLine.CommandRuntime;
+import org.jetbrains.idea.svn.commandLine.LineCommandListener;
+import org.jetbrains.idea.svn.commandLine.SvnBindException;
+import org.jetbrains.idea.svn.commandLine.SvnCommandName;
 
 import java.io.File;
 import java.util.Collection;
@@ -98,6 +104,8 @@ public abstract class BaseSvnClient implements SvnClient {
                                           @Nullable File workingDirectory,
                                           @NotNull Command command,
                                           @Nullable LineCommandListener listener) throws SvnBindException {
+    ManagingFS.getInstance().flushPendingUpdatesOrNotify();
+    
     command.setTarget(target);
     command.setWorkingDirectory(workingDirectory);
     command.setResultBuilder(listener);

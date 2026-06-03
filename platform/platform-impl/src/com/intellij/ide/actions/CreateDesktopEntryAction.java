@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions;
 
 import com.intellij.execution.ExecutionException;
@@ -20,21 +20,24 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.DialogBuilder;
 import com.intellij.openapi.updateSettings.impl.ExternalUpdateManager;
-import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.AppUIUtil;
 import com.intellij.ui.AppUIUtilKt;
+import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBLabel;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.Restarter;
 import com.intellij.util.system.OS;
+import com.intellij.util.ui.JBEmptyBorder;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,12 +66,17 @@ public final class CreateDesktopEntryAction extends DumbAwareAction implements A
     if (!isAvailable()) return;
 
     var project = event.getProject();
-    var dialog = new CreateDesktopEntryDialog(project);
+    var globalEntryCb = new JBCheckBox(IdeBundle.message("desktop.entry.for.all.cb"));
+    globalEntryCb.setBorder(new JBEmptyBorder(JBUI.scale(5)));
+    var dialog = new DialogBuilder(project)
+      .title(ApplicationBundle.message("desktop.entry.title"))
+      .setNorthPanel(new JBLabel(IdeBundle.message("desktop.entry.label", ApplicationNamesInfo.getInstance().getProductName())))
+      .centerPanel(globalEntryCb);
     if (!dialog.showAndGet()) {
       return;
     }
 
-    var globalEntry = dialog.myGlobalEntryCheckBox.isSelected();
+    var globalEntry = globalEntryCb.isSelected();
     //noinspection UsagesOfObsoleteApi
     new Task.Backgroundable(project, ApplicationBundle.message("desktop.entry.progress")) {
       @Override
@@ -117,14 +125,21 @@ public final class CreateDesktopEntryAction extends DumbAwareAction implements A
   }
 
   private static Path prepare() throws IOException {
-    var binPath = PathManager.getBinPath();
-    assert Files.isDirectory(Path.of(binPath)) : "Invalid bin path: '" + binPath + "'";
+    var binDir = PathManager.getBinDir();
+    assert Files.isDirectory(binDir) : "Invalid bin directory: '" + binDir + "'";
 
     var iconPath = AppUIUtilKt.findAppIcon();
-    if (iconPath == null) throw new RuntimeException(ApplicationBundle.message("desktop.entry.icon.missing", binPath));
+    if (iconPath == null) throw new RuntimeException(ApplicationBundle.message("desktop.entry.icon.missing", binDir));
 
     var starter = Restarter.getIdeStarter();
-    if (starter == null) throw new RuntimeException(ApplicationBundle.message("desktop.entry.script.missing", binPath));
+    if (starter == null) throw new RuntimeException(ApplicationBundle.message("desktop.entry.script.missing", binDir));
+    var starterName = NioFiles.getFileName(starter);
+    if (starterName.endsWith(".sh")) {
+      var binStarter = starter.resolveSibling(starterName.substring(0, starterName.length() - 3));
+      if (Files.exists(binStarter)) {
+        starter = binStarter;
+      }
+    }
 
     var names = ApplicationNamesInfo.getInstance();
     var name = names.getFullProductNameWithEdition();
@@ -134,7 +149,7 @@ public final class CreateDesktopEntryAction extends DumbAwareAction implements A
       "$ICON$", iconPath,
       "$COMMENT$", StringUtil.notNullize(names.getMotto(), name),
       "$WM_CLASS$", AppUIUtil.INSTANCE.getFrameClass()));
-    var entryFile = Path.of(PathManager.getTempPath(), getDesktopEntryName());
+    var entryFile = PathManager.getTempDir().resolve(getDesktopEntryName());
     Files.writeString(entryFile, content);
     return entryFile;
   }
@@ -159,7 +174,7 @@ public final class CreateDesktopEntryAction extends DumbAwareAction implements A
   }
 
   private static void exec(GeneralCommandLine command, @Nls @Nullable String prompt) throws IOException, ExecutionException {
-    command.setRedirectErrorStream(true);
+    command.withRedirectErrorStream(true);
     var result = new CapturingProcessHandler(prompt != null ? ExecUtil.sudoCommand(command, prompt) : command).runProcess();
     var exitCode = result.getExitCode();
     if (exitCode != 0) {
@@ -167,26 +182,6 @@ public final class CreateDesktopEntryAction extends DumbAwareAction implements A
       var output = result.getStdout();
       if (!output.isBlank()) message += "\nOutput: " + output.trim();
       throw new RuntimeException(message);
-    }
-  }
-
-  public static final class CreateDesktopEntryDialog extends DialogWrapper {
-    private static final @NlsSafe String APP_NAME_PLACEHOLDER = "$APP_NAME$";
-
-    private JPanel myContentPane;
-    private JLabel myLabel;
-    private JCheckBox myGlobalEntryCheckBox;
-
-    public CreateDesktopEntryDialog(Project project) {
-      super(project);
-      init();
-      setTitle(ApplicationBundle.message("desktop.entry.title"));
-      myLabel.setText(myLabel.getText().replace(APP_NAME_PLACEHOLDER, ApplicationNamesInfo.getInstance().getProductName()));
-    }
-
-    @Override
-    protected JComponent createCenterPanel() {
-      return myContentPane;
     }
   }
 }

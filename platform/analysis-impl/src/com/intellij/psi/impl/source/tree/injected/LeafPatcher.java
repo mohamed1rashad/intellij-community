@@ -12,7 +12,11 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.LiteralTextEscaper;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.impl.DebugUtil;
-import com.intellij.psi.impl.source.tree.*;
+import com.intellij.psi.impl.source.tree.ForeignLeafPsiElement;
+import com.intellij.psi.impl.source.tree.LeafElement;
+import com.intellij.psi.impl.source.tree.RecursiveTreeElementWalkingVisitor;
+import com.intellij.psi.impl.source.tree.TreeElement;
+import com.intellij.psi.impl.source.tree.TreeUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
@@ -30,7 +34,8 @@ final class LeafPatcher extends RecursiveTreeElementWalkingVisitor {
   private final StringBuilder catLeafs;
   private final StringBuilder tempLeafBuffer = new StringBuilder();
 
-  LeafPatcher(@NotNull List<? extends PlaceInfo> placeInfos, int approxTextLength) {
+  LeafPatcher(@NotNull ASTNode node, @NotNull List<? extends PlaceInfo> placeInfos, int approxTextLength) {
+    super(node);
     myPlaceInfos = placeInfos;
     catLeafs = new StringBuilder(approxTextLength);
   }

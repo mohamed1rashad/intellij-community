@@ -1,15 +1,15 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.idea;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.intellij.diagnostic.DefaultIdeaErrorLogger;
 import com.intellij.diagnostic.LoadingState;
+import com.intellij.diagnostic.logs.LoggerConfigFromSystemProperties;
 import com.intellij.featureStatistics.fusCollectors.LifecycleUsageTriggerCollector;
 import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.plugins.PluginUtil;
 import com.intellij.ide.plugins.PluginUtilImpl;
-import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
@@ -17,6 +17,9 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.JulLogger;
 import com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments;
+import com.intellij.openapi.diagnostic.UnhandledException;
+import com.intellij.openapi.diagnostic.UnhandledReportSinkService;
+import com.intellij.openapi.diagnostic.UnhandledReportSinkService.PluginExceptionReportData;
 import com.intellij.openapi.util.objectTree.ThrowableInterner;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ExceptionUtil;
@@ -25,8 +28,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
 
-import java.awt.*;
-import java.util.concurrent.CancellationException;
+import java.awt.Component;
+import java.awt.Graphics;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
@@ -37,15 +40,13 @@ public final class IdeaLogger extends JulLogger {
   // when not null, holds the first of errors that occurred
   @SuppressWarnings("StaticNonFinalField") public static Exception ourErrorsOccurred;
 
-  /**
-   * We try to report exceptions thrown from frequently called methods (e.g. {@link Component#paint(Graphics)}) judiciously,
-   * so that instead of polluting the log with hundreds of identical {@link com.intellij.openapi.diagnostic.Logger#error(Throwable) LOG.errors}
-   * we print the error message and the stacktrace once in a while.
-   * <p>
-   * {@code -Didea.logger.exception.expiration.minutes=5} means to forget about this particular exception if it didn't occur for five minutes.
-   * <p>
-   * To disable the "mute frequent exceptions" feature completely, specify {@code -Didea.logger.exception.expiration.minutes=0}
-   */
+  /// We try to report exceptions thrown from frequently called methods (e.g. [Component#paint(Graphics)]) judiciously,
+  /// so that instead of polluting the log with hundreds of identical [`LOG.errors`][com.intellij.openapi.diagnostic.Logger#error(Throwable)]
+  /// we print the error message and the stacktrace once in a while.
+  ///
+  /// `-Didea.logger.exception.expiration.minutes=5` means to forget about this particular exception if it didn't occur for five minutes.
+  ///
+  /// To disable the "mute frequent exceptions" feature completely, specify `-Didea.logger.exception.expiration.minutes=0`
   private static final int EXPIRE_FREQUENT_EXCEPTIONS_AFTER_MINUTES = Integer.getInteger("idea.logger.exception.expiration.minutes", 8*60);
 
   // must be as a separate class to avoid initialization as part of start-up (file logger configuration)
@@ -56,9 +57,11 @@ public final class IdeaLogger extends JulLogger {
       .build();
 
     private static @NotNull AtomicInteger getOrCreate(int hash, @NotNull Throwable t) {
-      return cache.get(hash + ":" + t, __ -> new AtomicInteger());
+      return cache.get(hash + ":" + t, _ -> new AtomicInteger());
     }
   }
+
+  private static final ThreadLocal<Boolean> FUS_RECURSION_GUARD = new ThreadLocal<>();
 
   public static void dropFrequentExceptionsCaches() {
     MyCache.cache.invalidateAll();
@@ -74,50 +77,52 @@ public final class IdeaLogger extends JulLogger {
     var counter = MyCache.getOrCreate(hash, t);
     var occurrences = counter.incrementAndGet();
     if (isFascinatingNumber(occurrences)) {
-      warn("Suppressed a frequent exception logged for the " + occurrences + (occurrences == 2 ? "nd" : "th") + " time: " +
-           shortenErrorMessage(t.getMessage()));
+      var msg = shortenErrorMessage(t.getMessage());
+      warn("Suppressed a frequent exception logged for the " + occurrences + (occurrences == 2 ? "nd" : "th") + " time: " + msg);
     }
     return occurrences != 1;
   }
 
-  /**
-   * 2, 5, 10, 20, 50, 100, ...
-   */
+  /// 2, 5, 10, 20, 50, 100, ...
   private static boolean isFascinatingNumber(int number) {
     if (number <= 1) return false;
     while (number % 10 == 0) number /= 10;
     return number == 1 || number == 2 || number == 5;
   }
 
-  private static @NotNull String shortenErrorMessage(@Nullable String message) {
+  private static String shortenErrorMessage(@Nullable String message) {
     if (message == null) return "null";
     int newLine = message.indexOf('\n');
     message = message.substring(0, newLine != -1 ? newLine : message.length());
     return StringUtil.shortenTextWithEllipsis(message, 300, 0);
   }
 
-  private static void reportToFus(@NotNull Throwable t) {
-    if (!LoadingState.COMPONENTS_LOADED.isOccurred()) {
+  private static void reportToFus(Throwable t) {
+    if (!LoadingState.COMPONENTS_LOADED.isOccurred() || FUS_RECURSION_GUARD.get() != null) {
       return;
     }
 
-    Application app = ApplicationManager.getApplication();
-    if (app == null || app.isUnitTestMode() || app.isDisposed()) {
-      return;
-    }
-
-    PluginUtil pluginUtil;
+    FUS_RECURSION_GUARD.set(true);
     try {
-      pluginUtil = PluginUtil.getInstance();
+      var app = ApplicationManager.getApplication();
+      if (app != null && !app.isUnitTestMode() && !app.isDisposed()) {
+        var pluginUtil = PluginUtil.getInstance();
+        if (pluginUtil != null) {
+          var pluginId = pluginUtil.findPluginId(t);
+          var kind = DefaultIdeaErrorLogger.getOOMErrorKind(t);
+          LifecycleUsageTriggerCollector.onError(pluginId, t, kind);
+          if (pluginId != null) {
+            var sinkService = UnhandledReportSinkService.getInstance();
+            if (sinkService != null) { // might be null in CLI utils
+              sinkService.report(new PluginExceptionReportData(pluginId, t));
+            }
+          }
+        }
+      }
     }
-    catch (CancellationException e) {
-      return;
-    }
-
-    if (pluginUtil != null) {
-      var pluginId = pluginUtil.findPluginId(t);
-      var kind = DefaultIdeaErrorLogger.getOOMErrorKind(t);
-      LifecycleUsageTriggerCollector.onError(pluginId, t, kind);
+    catch (Exception _) { }
+    finally {
+      FUS_RECURSION_GUARD.remove();
     }
   }
 
@@ -136,6 +141,12 @@ public final class IdeaLogger extends JulLogger {
   @ApiStatus.Internal
   public IdeaLogger(@NotNull Logger logger) {
     super(logger);
+    if (LoggerConfigFromSystemProperties.hasLogLevelSystemPropertiesConfigured) {
+      var level = LoggerConfigFromSystemProperties.getLevelFromSystemProperties(logger.getName());
+      if (level != null && (logger.getLevel() == null || level.intValue() < logger.getLevel().intValue())) {
+        logger.setLevel(level);
+      }
+    }
   }
 
   @Override
@@ -170,7 +181,9 @@ public final class IdeaLogger extends JulLogger {
 
   @Override
   public void error(String message, @Nullable Throwable t, String @NotNull ... details) {
-    if (isTooFrequentException(t)) return;
+    if (isTooFrequentException(t)) {
+      return;
+    }
 
     var detailString = String.join("\n", details);
     if (!detailString.isEmpty()) {
@@ -189,6 +202,11 @@ public final class IdeaLogger extends JulLogger {
 
     if (t != null && shouldRethrow(t)) {
       ExceptionUtil.rethrow(t);
+    }
+
+    // Unhandled exception wraps real exception which might be control flow exception
+    if (t instanceof UnhandledException uh && shouldRethrow(uh.getCause())) {
+      ExceptionUtil.rethrow(uh.getCause());
     }
 
     if (t != null) {

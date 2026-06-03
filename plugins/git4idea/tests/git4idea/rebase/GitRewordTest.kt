@@ -6,7 +6,15 @@ import com.intellij.vcs.log.util.VcsLogUtil
 import git4idea.config.GitVersionSpecialty
 import git4idea.rebase.log.GitCommitEditingOperationResult.Complete
 import git4idea.rebase.log.GitCommitEditingOperationResult.Complete.UndoPossibility.Possible
-import git4idea.test.*
+import git4idea.test.GitSingleRepoTest
+import git4idea.test.assertCommitted
+import git4idea.test.assertLastMessage
+import git4idea.test.assertLatestHistory
+import git4idea.test.assertMessage
+import git4idea.test.assertStagedChanges
+import git4idea.test.findGitLogProvider
+import git4idea.test.message
+import kotlinx.coroutines.runBlocking
 import org.junit.Assume.assumeTrue
 
 class GitRewordTest : GitSingleRepoTest() {
@@ -93,7 +101,7 @@ class GitRewordTest : GitSingleRepoTest() {
     val operation = GitRewordOperation(repo, commit, "Correct message")
     val result = operation.execute() as Complete
 
-    assertTrue(result.checkUndoPossibility() is Possible)
+    assertTrue(runBlocking { result.checkUndoPossibility() } is Possible)
     result.undo()
 
     assertLastMessage("Wrong message", "Message reworded incorrectly")
@@ -110,7 +118,7 @@ class GitRewordTest : GitSingleRepoTest() {
 
     file("b").create().addCommit("New commit")
 
-    val undoPossibility = result.checkUndoPossibility()
+    val undoPossibility = runBlocking { result.checkUndoPossibility() }
     assertTrue(undoPossibility is Complete.UndoPossibility.Impossible.HeadMoved)
 
     repo.assertLatestHistory(
@@ -134,7 +142,7 @@ class GitRewordTest : GitSingleRepoTest() {
 
     git("update-ref refs/remotes/origin/master HEAD")
 
-    val undoPossibility = result.checkUndoPossibility()
+    val undoPossibility = runBlocking { result.checkUndoPossibility() }
     assertTrue(undoPossibility is Complete.UndoPossibility.Impossible.PushedToProtectedBranch && undoPossibility.branch == "origin/master")
 
     repo.assertLatestHistory(

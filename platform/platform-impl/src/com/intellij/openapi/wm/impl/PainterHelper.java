@@ -28,19 +28,42 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.imageio.ImageIO;
 import javax.imageio.stream.MemoryCacheImageInputStream;
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.AlphaComposite;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.GraphicsConfiguration;
+import java.awt.GraphicsEnvironment;
+import java.awt.Image;
+import java.awt.ImageCapabilities;
+import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.Transparency;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import java.awt.image.*;
+import java.awt.image.AffineTransformOp;
+import java.awt.image.BufferedImage;
+import java.awt.image.BufferedImageFilter;
+import java.awt.image.BufferedImageOp;
+import java.awt.image.ColorModel;
+import java.awt.image.VolatileImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 final class PainterHelper implements Painter.Listener {
   private static final Logger LOG = Logger.getInstance(PainterHelper.class);
@@ -108,7 +131,7 @@ final class PainterHelper implements Painter.Listener {
       // restore transform at the time of computeOffset()
       g.setTransform(offsets.transform);
       g.translate(offsets.offsets[i++], offsets.offsets[i++]);
-      painter.paint(cur, g);
+      painter.paint(cur, offsets.source, g);
     }
     g.setTransform(orig);
   }
@@ -119,6 +142,7 @@ final class PainterHelper implements Painter.Listener {
     }
 
     Offsets offsets = new Offsets();
+    offsets.source = component;
     offsets.offsets = new int[painters.size() * 2];
     // store current graphics transform
     Graphics2D g = (Graphics2D)gg;
@@ -138,7 +162,7 @@ final class PainterHelper implements Painter.Listener {
         if (curParent == null) {
           continue;
         }
-        r = SwingUtilities.convertRectangle(curParent, cur.getBounds(), component);
+        r = ComponentUtil.convertRectangle(curParent, cur.getBounds(), component);
         prev = cur;
       }
       // component offsets don't include graphics scale, so compensate
@@ -149,6 +173,7 @@ final class PainterHelper implements Painter.Listener {
   }
 
   public static final class Offsets {
+    Component source;
     AffineTransform transform;
     int[] offsets;
   }
@@ -156,7 +181,7 @@ final class PainterHelper implements Painter.Listener {
   @Override
   public void onNeedsRepaint(@NotNull Painter painter, JComponent dirtyComponent) {
     if (dirtyComponent != null && dirtyComponent.isShowing()) {
-      Rectangle rec = SwingUtilities.convertRectangle(dirtyComponent, dirtyComponent.getBounds(), rootComponent);
+      Rectangle rec = ComponentUtil.convertRectangle(dirtyComponent, dirtyComponent.getBounds(), rootComponent);
       rootComponent.repaint(rec);
     }
     else {

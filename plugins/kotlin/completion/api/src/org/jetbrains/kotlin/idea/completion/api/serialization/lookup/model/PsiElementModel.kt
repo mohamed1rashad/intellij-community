@@ -1,10 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.completion.api.serialization.lookup.model
 
+import com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.findPsiFile
-import com.intellij.psi.*
+import com.intellij.psi.PsiAnchor
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiFileSystemItem
+import com.intellij.psi.StubBasedPsiElement
 import com.intellij.psi.impl.source.PsiFileWithStubSupport
 import com.intellij.psi.impl.source.StubbedSpine
 import com.intellij.psi.util.endOffset
@@ -70,7 +75,8 @@ sealed interface PsiElementModel {
     companion object {
         fun create(psi: PsiElement): PsiElementModel {
             val rangeResult = runCatching {
-                psi.textRange // some elements cannot provide their range, e.g., they cannot be properly decompiled due to obfuscation
+                //todo fix KTIJ-37984
+                BinaryFileTypeDecompilers.getInstance().allowDecompilerSlowOperation{ psi.textRange } // some elements cannot provide their range, e.g., they cannot be properly decompiled due to obfuscation
             }
             val range = rangeResult.getOrNull()
             if (range != null) {

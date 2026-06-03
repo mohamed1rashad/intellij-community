@@ -1,9 +1,10 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.diagnostic;
 
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.ExceptionUtil;
 import org.apache.log4j.Level;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -19,20 +20,20 @@ import java.util.function.Function;
  * <p>
  * Production mode:
  * <ul>
- * <li>The log messages go to {@code %system%/log/idea.log}.
- * <li>Error and warning messages go to {@link System#err}. To suppress them, set {@code -Didea.log.console=false}.
- * <li>Error, warning and info messages go to the log file.
+ * <li>Logs are written to {@code com.intellij.openapi.application.PathManager.getLogDir()}.
+ * <li>Messages go to {@link System#err} according to the {@code idea.console.log.level} property value ({@code "error"}, {@code "warning"}, etc.)
+ * <li>Error, warning, and info messages go to the log file.
  * <li>Debug and trace messages are dropped by default.
- * <li>In EAP versions or if the {@code idea.fatal.error.notification} system property is set to {@code true},
- * errors additionally result in an 'IDE Internal Error'.
+ * <li>If the {@code idea.fatal.error.notification} system property is set to {@code true},
+ * errors additionally result in the 'IDE Internal Error' dialog.
  * See {@link com.intellij.diagnostic.DialogAppender DialogAppender} for more details.
  * <li>The log level of each logger can be adjusted in
  * <a href="https://plugins.jetbrains.com/docs/intellij/ide-infrastructure.html#logging">Help | Diagnostic Tools | Debug Log Settings</a>.
  * </ul>
  * <p>
- * Test mode in tests that extend {@code UsefulTestCase}:
+ * Test mode in tests that use {@code TestLoggerFactory}:
  * <ul>
- * <li>The log messages go to {@code %system%/testlog/idea.log}.
+ * <li>Logs are written to {@code com.intellij.testFramework.TestLoggerFactory.getTestLogDir()}.
  * <li>Error and warning messages go directly to the console.
  * <li>Error messages additionally throw an {@link AssertionError}.
  * <li>Info and debug messages are buffered in memory.
@@ -43,7 +44,8 @@ import java.util.function.Function;
  * </ul>
  */
 public abstract class Logger {
-  private static boolean isUnitTestMode;
+  private static volatile boolean isUnitTestMode;
+  private static volatile boolean isInStressTest;
 
   public interface Factory {
     @NotNull Logger getLoggerInstance(@NotNull String category);
@@ -58,17 +60,17 @@ public abstract class Logger {
 
   private static Factory ourFactory = new DefaultFactory();
 
-  public static void setFactory(@NotNull Class<? extends Factory> factory) {
+  public static void setFactory(@NotNull Class<? extends Factory> factoryClass) {
     if (isInitialized()) {
-      if (factory.isInstance(ourFactory)) {
+      if (factoryClass.isInstance(ourFactory)) {
         return;
       }
 
-      logFactoryChanged(factory);
+      logFactoryChanged(factoryClass);
     }
 
     try {
-      Constructor<? extends Factory> constructor = factory.getDeclaredConstructor();
+      Constructor<? extends Factory> constructor = factoryClass.getDeclaredConstructor();
       constructor.setAccessible(true);
       ourFactory = constructor.newInstance();
     }
@@ -87,11 +89,13 @@ public abstract class Logger {
     ourFactory = factory;
   }
 
-  @SuppressWarnings("UseOfSystemOutOrSystemErr")
+  @SuppressWarnings({"UseOfSystemOutOrSystemErr", "JavaPrintToLogpoint"})
   private static void logFactoryChanged(Class<? extends Factory> factory) {
     if (Boolean.getBoolean("idea.log.logger.factory.changed")) {
-      System.out.println("Changing log factory from " + ourFactory.getClass().getCanonicalName() +
-                         " to " + factory.getCanonicalName() + '\n' + ExceptionUtil.getThrowableText(new Throwable()));
+      System.out.println(
+        "Changing log factory from " + ourFactory.getClass().getCanonicalName() +
+        " to " + factory.getCanonicalName() + '\n' + ExceptionUtil.getThrowableText(new Throwable())
+      );
     }
   }
 
@@ -264,8 +268,8 @@ public abstract class Logger {
   /**
    * Log a message at trace level, which is finer-grained than debug level.
    * <p>
-   * Use this method instead of {@link #debug(String)} for internal events of a subsystem,
-   * to avoid overwhelming the log if 'debug' level is enabled.
+   * Use this method instead of {@link #debug(String)} for internal events of a subsystem
+   * to avoid overwhelming the log if the 'debug' level is enabled.
    * <p>
    * In production mode, trace messages are disabled by default.
    * They can be enabled by appending a <code>:trace</code> suffix in
@@ -275,8 +279,7 @@ public abstract class Logger {
    * use {@code TestLoggerFactory.enableTraceLogging} to enable them.
    * At the end of a test that fails, these messages go to the console; otherwise, they are dropped.
    *
-   * @param message should be a plain string literal,
-   *                or the call should be enclosed in {@link #isTraceEnabled()}
+   * @param message should be a plain string literal, or the call should be enclosed in {@link #isTraceEnabled()}
    */
   public void trace(String message) {
     debug(message);
@@ -332,7 +335,7 @@ public abstract class Logger {
   public abstract void info(String message, @Nullable Throwable t);
 
   /**
-   * Log a message at warning level.
+   * Log a message at the warning level.
    * <p>
    * In production mode, warning messages are enabled by default.
    * <p>
@@ -427,7 +430,7 @@ public abstract class Logger {
   }
 
   /**
-   * Log a stack trace at error level.
+   * Log a stack trace at the error level.
    * <p>
    * In production mode, error messages are enabled by default.
    * In EAP versions, error messages result in an 'IDE Internal Error'.
@@ -468,7 +471,9 @@ public abstract class Logger {
   public boolean assertTrue(boolean value, @Nullable Object message) {
     if (!value) {
       String resultMessage = "Assertion failed";
-      if (message != null) resultMessage += ": " + message;
+      if (message != null) {
+        resultMessage += ": " + message;
+      }
       error(resultMessage, new Throwable(resultMessage));
     }
 
@@ -493,9 +498,20 @@ public abstract class Logger {
 
   private static final boolean ourRethrowCE = "true".equals(System.getProperty("idea.log.rethrow.ce", "true"));
 
-  public static boolean shouldRethrow(@NotNull Throwable t) {
+  @SuppressWarnings("SpellCheckingInspection")
+  static boolean isRethrowable(@NotNull Throwable t) {
     return t instanceof ControlFlowException ||
-           t instanceof CancellationException && ourRethrowCE;
+           t instanceof CancellationException;
+  }
+
+  /**
+   * Do not use in applied code.
+   *
+   * @see LoggerKt#rethrowControlFlowException(Throwable)
+   */
+  @ApiStatus.Internal
+  public static boolean shouldRethrow(@NotNull Throwable t) {
+    return isRethrowable(t) && ourRethrowCE;
   }
 
   @Contract("null -> null; !null -> !null")
@@ -510,6 +526,11 @@ public abstract class Logger {
   public static void setUnitTestMode() {
     isUnitTestMode = true;
   }
+  @TestOnly
+  @ApiStatus.Internal
+  public static void setInStressTest(boolean value) {
+    isInStressTest = value;
+  }
 
   /** {@link #warn(Throwable)} in production, {@link #error(Throwable)} in tests. */
   public void warnInProduction(@NotNull Throwable t) {
@@ -519,5 +540,11 @@ public abstract class Logger {
     else {
       warn(t);
     }
+  }
+
+  @TestOnly
+  @ApiStatus.Internal
+  protected static boolean isInStressTest() {
+    return isInStressTest;
   }
 }

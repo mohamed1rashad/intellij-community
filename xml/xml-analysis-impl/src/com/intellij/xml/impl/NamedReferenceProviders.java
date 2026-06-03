@@ -16,7 +16,11 @@ import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Internal
@@ -74,7 +78,7 @@ final class NamedReferenceProviders {
         final Map<String, List<XmlNamedReferenceProviderBean>> map = bean.caseSensitive ? caseSensitiveMap
                                                                                         : caseInsensitiveMap;
         for (String hostName : bean.getHostNames()) {
-          map.computeIfAbsent(hostName, __ -> new SmartList<>()).add(bean);
+          map.computeIfAbsent(hostName, _ -> new SmartList<>()).add(bean);
         }
       }
 

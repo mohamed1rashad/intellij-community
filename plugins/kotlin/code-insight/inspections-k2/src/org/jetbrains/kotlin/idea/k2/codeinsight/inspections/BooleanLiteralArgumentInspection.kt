@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.inspections
 
 import com.intellij.codeInspection.ProblemHighlightType
@@ -19,8 +19,6 @@ import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.components.KaDiagnosticCheckerFilter
 import org.jetbrains.kotlin.analysis.api.diagnostics.KaSeverity
-import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
-import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinApplicableInspectionBase
@@ -31,7 +29,12 @@ import org.jetbrains.kotlin.idea.codeinsight.utils.NamedArgumentUtils.getStableN
 import org.jetbrains.kotlin.idea.codeinsight.utils.dereferenceValidKeys
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtConstantExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtValueArgument
+import org.jetbrains.kotlin.psi.KtVisitor
+import org.jetbrains.kotlin.psi.KtVisitorVoid
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 
 internal class BooleanLiteralArgumentInspection(
@@ -60,11 +63,11 @@ internal class BooleanLiteralArgumentInspection(
         val call = element.getStrictParentOfType<KtCallExpression>() ?: return null
         val valueArguments = call.valueArguments
 
-        val diagnostics = argumentExpression.diagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
+        val diagnostics = argumentExpression.directDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)
         if (diagnostics.any { it.severity == KaSeverity.ERROR }) return null
         val name = getStableNameFor(element) ?: return null
 
-        val symbol = call.resolveToCall()?.singleFunctionCallOrNull()?.symbol ?: return null
+        val symbol = call.resolveSymbol() ?: return null
         if ((symbol as? KaConstructorSymbol)?.importableFqName in ignoreConstructors) return null
         if (!symbol.hasStableParameterNames) return null
 
@@ -77,14 +80,18 @@ internal class BooleanLiteralArgumentInspection(
             if (hasNeighbourUnnamedBoolean) GENERIC_ERROR_OR_WARNING else INFORMATION
         }
 
-        val (familyName, argumentNames) = if (element == valueArguments.lastOrNull { !it.isNamed() }) {
-            KotlinBundle.message("add.0.to.argument", name) to mapOf(element.createSmartPointer() to name)
-        } else if (element == valueArguments.firstOrNull()) {
-            val associateArgumentNamesStartingAt = associateArgumentNamesStartingAt(call, null) ?: return null
-            KotlinBundle.message("add.names.to.call.arguments") to associateArgumentNamesStartingAt
-        } else {
-            val associateArgumentNamesStartingAt = associateArgumentNamesStartingAt(call, element) ?: return null
-            KotlinBundle.message("add.names.to.this.argument.and.following.arguments") to associateArgumentNamesStartingAt
+        val (familyName, argumentNames) = when (element) {
+            valueArguments.lastOrNull { !it.isNamed() } -> {
+                KotlinBundle.message("add.0.to.argument", name) to mapOf(element.createSmartPointer() to name)
+            }
+            valueArguments.firstOrNull() -> {
+                val associateArgumentNamesStartingAt = associateArgumentNamesStartingAt(call, null) ?: return null
+                KotlinBundle.message("add.names.to.call.arguments") to associateArgumentNamesStartingAt
+            }
+            else -> {
+                val associateArgumentNamesStartingAt = associateArgumentNamesStartingAt(call, element) ?: return null
+                KotlinBundle.message("add.names.to.this.argument.and.following.arguments") to associateArgumentNamesStartingAt
+            }
         }
 
         return Context(highlightType, familyName, argumentNames)

@@ -11,10 +11,16 @@ import com.intellij.ide.projectWizard.generators.AssetsNewProjectWizardStep
 import com.intellij.ide.projectWizard.generators.BuildSystemJavaNewProjectWizardData.Companion.javaBuildSystemData
 import com.intellij.ide.starters.local.StandardAssetsProvider
 import com.intellij.ide.util.projectWizard.WizardContext
-import com.intellij.ide.wizard.*
+import com.intellij.ide.wizard.GeneratorNewProjectWizard
+import com.intellij.ide.wizard.GeneratorNewProjectWizardBuilderAdapter
+import com.intellij.ide.wizard.GitNewProjectWizardStep
 import com.intellij.ide.wizard.NewProjectWizardChainStep.Companion.nextStep
+import com.intellij.ide.wizard.NewProjectWizardStep
+import com.intellij.ide.wizard.RootNewProjectWizardStep
 import com.intellij.ide.wizard.comment.LinkNewProjectWizardStep
 import com.intellij.ide.wizard.language.BaseLanguageGeneratorNewProjectWizard
+import com.intellij.ide.wizard.newProjectWizardBaseStepWithoutGap
+import com.intellij.ide.wizard.projectOrDefault
 import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionComboBox
 import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionComboBoxConverter
 import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionField
@@ -29,15 +35,24 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.collectionModel
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.ui.CollectionComboBoxModel
-import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.SimpleTextAttributes.GRAYED_ATTRIBUTES
 import com.intellij.ui.SimpleTextAttributes.REGULAR_ATTRIBUTES
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.COLUMNS_MEDIUM
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.RowLayout
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.columns
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.ui.layout.ValidationInfoBuilder
 import com.intellij.util.text.nullize
 import com.intellij.util.ui.update.UiNotifyConnector
 import icons.OpenapiIcons
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.idea.maven.indices.archetype.MavenCatalog
 import org.jetbrains.idea.maven.model.MavenArchetype
 import org.jetbrains.idea.maven.wizards.MavenJavaModuleBuilder
@@ -45,9 +60,9 @@ import org.jetbrains.idea.maven.wizards.MavenNewProjectWizardStep
 import org.jetbrains.idea.maven.wizards.MavenWizardBundle
 import javax.swing.Icon
 import javax.swing.JComponent
-import javax.swing.JList
 
-internal class MavenArchetypeNewProjectWizard : GeneratorNewProjectWizard {
+@ApiStatus.Internal
+class MavenArchetypeNewProjectWizard : GeneratorNewProjectWizard {
   override val id: String = "MavenArchetype"
 
   override val name: String = MavenWizardBundle.message("maven.new.project.wizard.archetype.generator.name")
@@ -115,7 +130,7 @@ internal class MavenArchetypeNewProjectWizard : GeneratorNewProjectWizard {
           .applyToComponent { toolTipText = MavenWizardBundle.message("maven.new.project.wizard.archetype.catalog.tooltip") }
           .applyToComponent { labelFor = catalogComboBox }
         cell(catalogComboBox)
-          .applyToComponent { renderer = CatalogRenderer() }
+          .applyToComponent { renderer = textListCellRenderer { it?.name } }
           .applyToComponent { setSwingPopup(false) }
           .bindItem(catalogItemProperty)
           .columns(COLUMNS_MEDIUM)
@@ -341,19 +356,6 @@ internal class MavenArchetypeNewProjectWizard : GeneratorNewProjectWizard {
           putAll(archetypeDescriptor)
         }
       }
-    }
-  }
-
-  private class CatalogRenderer : ColoredListCellRenderer<MavenCatalog>() {
-    override fun customizeCellRenderer(
-      list: JList<out MavenCatalog>,
-      value: MavenCatalog?,
-      index: Int,
-      selected: Boolean,
-      hasFocus: Boolean
-    ) {
-      val catalog = value ?: return
-      append(catalog.name)
     }
   }
 

@@ -1,7 +1,10 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build
 
 import com.intellij.util.text.SemVer
+import kotlinx.collections.immutable.PersistentMap
+import kotlinx.collections.immutable.persistentHashMapOf
+import kotlinx.collections.immutable.plus
 import org.apache.maven.model.Developer
 import org.apache.maven.model.License
 import org.apache.maven.model.Model
@@ -21,7 +24,16 @@ import kotlin.io.path.exists
 
 private const val GROUP_ID: String = "org.jetbrains.jewel"
 
-private val CORE: Map<String, String> = mapOf(
+/**
+ * Each entry represents a prefix for Platform dependencies which are being published to Maven Central.
+ * And distinct Maven Central publication credentials are issued per namespace/groupId.
+ * Please do not edit this list since every entry requires a corresponding change on the JetBrains infrastructure.
+ */
+private val PLATFORM_DEPENDENCY_PREFIXES: Set<String> = setOf(
+  "com.jetbrains.intellij.platform:icons-",
+)
+
+private val CORE: PersistentMap<String, String> = persistentHashMapOf(
   "intellij.platform.jewel.foundation" to "jewel-foundation",
   "intellij.platform.jewel.markdown.core" to "jewel-markdown-core",
   "intellij.platform.jewel.ui" to "jewel-ui",
@@ -37,7 +49,7 @@ private val NOT_PUBLISHED: Set<String> = setOf(
   "intellij.platform.jewel.markdown.ideLafBridgeStyling",
 )
 
-private val transitiveJewelDependencies = mapOf(
+private val transitiveJewelDependencies = persistentHashMapOf(
   "jewel-foundation" to emptySet(),
   "jewel-ui" to emptySet(),
   "jewel-decorated-window" to setOf("jewel-foundation", "jewel-ui"),
@@ -53,14 +65,14 @@ private val transitiveJewelDependencies = mapOf(
 )
 
 internal object JewelMavenArtifacts {
-  internal val STANDALONE: Map<String, String> = mapOf(
+  internal val STANDALONE: PersistentMap<String, String> = persistentHashMapOf(
     "intellij.platform.jewel.markdown.intUiStandaloneStyling" to "jewel-markdown-int-ui-standalone-styling",
     "intellij.platform.jewel.intUi.decoratedWindow" to "jewel-int-ui-decorated-window",
     "intellij.platform.jewel.intUi.standalone" to "jewel-int-ui-standalone",
     "intellij.platform.jewel.decoratedWindow" to "jewel-decorated-window",
   )
 
-  private val ALL: Map<String, String> = CORE + STANDALONE
+  private val ALL: PersistentMap<String, String> = CORE + STANDALONE
 
   internal val ALL_MODULES: Set<String> = ALL.keys
 
@@ -126,6 +138,12 @@ internal object JewelMavenArtifacts {
         "org.jetbrains.compose.components" -> {
           add(dependency.withTransitiveDependencies(DependencyScope.COMPILE))
         }
+        "net.java.dev.jna" -> {
+          // Add it only to Jewel Standalone INT UI modules, as it's unnecessary for other modules
+          if (module.name == "intellij.platform.jewel.intUi.standalone") {
+            add(dependency.withTransitiveDependencies(DependencyScope.COMPILE))
+          }
+        }
 
         // else -> ignore the dependency, as it comes through transitively, usually from Compose.
 
@@ -133,7 +151,7 @@ internal object JewelMavenArtifacts {
         // * org.jetbrains:annotations
         // * org.jetbrains.skiko:*
         // * org.jetbrains.kotlin:kotlin-stdlib
-        // * com.intellij.platform:kotlinx-coroutines-core-jvm — we want to use the "normal" one, not the IJP fork
+        // * org.jetbrains.intellij.deps.kotlinx:kotlinx-coroutines-core-jvm — we want to use the "normal" one, not the IJP fork
       }
     }
   }
@@ -182,22 +200,17 @@ internal object JewelMavenArtifacts {
 
   fun validate(context: BuildContext, mavenArtifacts: Collection<GeneratedMavenArtifacts>) {
     ALL_MODULES.asSequence()
-      .map(context::findRequiredModule)
+      .map { context.outputProvider.findRequiredModule(it) }
       .flatMap { it.modulesTree() }
       .distinct().forEach { module ->
         val artifact = mavenArtifacts.singleOrNull { (it) -> it.name == module.name }
-        if (module.isLibraryModule()) {
-          check(artifact == null) {
-            "Maven artifact for the library module ${module.name} is not supposed to be created: $artifact"
-          }
-        }
-        else {
+        if (!module.isLibraryModule()) {
           checkNotNull(artifact) {
             "No maven artifact is created for the module ${module.name}:\n$mavenArtifacts"
           }
-          check(artifact.coordinates.groupId == GROUP_ID) {
-            "The module ${module.name} has groupId=${artifact.coordinates.groupId} " +
-            "but it's expected to have groupId=$GROUP_ID because Maven Central publication credentials are issues per namespace/groupId"
+          check(artifact.coordinates.groupId == GROUP_ID || PLATFORM_DEPENDENCY_PREFIXES.any { "${artifact.coordinates}".startsWith(it) }) {
+            "A ${module.name} module has unknown groupId=${artifact.coordinates.groupId}, " +
+            "it is not allowed because Maven Central publication credentials are issued per namespace/groupId"
           }
         }
       }

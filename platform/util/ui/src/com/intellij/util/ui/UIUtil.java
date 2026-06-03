@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.ui;
 
 import com.intellij.BundleBase;
@@ -7,37 +7,99 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.ui.GraphicsConfig;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Conditions;
+import com.intellij.openapi.util.Couple;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Factory;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.openapi.util.text.TextWithMnemonic;
-import com.intellij.ui.*;
+import com.intellij.ui.ClientProperty;
+import com.intellij.ui.ColorUtil;
+import com.intellij.ui.ComponentUtil;
+import com.intellij.ui.DisposableWindow;
+import com.intellij.ui.Gray;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.JreHiDpiUtil;
+import com.intellij.ui.PanelWithAnchor;
+import com.intellij.ui.SideBorder;
+import com.intellij.ui.TableUtil;
 import com.intellij.ui.icons.HiDPIImage;
 import com.intellij.ui.mac.foundation.Foundation;
 import com.intellij.ui.paint.LinePainter2D;
 import com.intellij.ui.paint.PaintUtil.RoundingMode;
 import com.intellij.ui.render.RenderingUtil;
 import com.intellij.ui.scale.JBUIScale;
-import com.intellij.util.*;
+import com.intellij.util.ArrayUtilRt;
+import com.intellij.util.BitUtil;
+import com.intellij.util.Consumer;
+import com.intellij.util.FontUtil;
+import com.intellij.util.Function;
+import com.intellij.util.PairFunction;
+import com.intellij.util.ReflectionUtil;
 import com.intellij.util.concurrency.SynchronizedClearableLazy;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import com.intellij.util.containers.JBTreeTraverser;
 import com.intellij.util.system.OS;
 import kotlin.text.StringsKt;
-import org.intellij.lang.annotations.JdkConstants;
 import org.intellij.lang.annotations.Language;
 import org.intellij.lang.annotations.MagicConstant;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 import sun.font.FontUtilities;
 import sun.swing.SwingUtilities2;
 
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.Clip;
-import javax.swing.*;
+import javax.swing.AbstractButton;
+import javax.swing.Action;
+import javax.swing.BorderFactory;
+import javax.swing.CellRendererPane;
 import javax.swing.FocusManager;
+import javax.swing.Icon;
+import javax.swing.InputMap;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JEditorPane;
+import javax.swing.JFormattedTextField;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JLayeredPane;
+import javax.swing.JList;
+import javax.swing.JMenu;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JProgressBar;
+import javax.swing.JRootPane;
+import javax.swing.JScrollPane;
+import javax.swing.JSlider;
+import javax.swing.JTable;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.JTree;
+import javax.swing.JViewport;
+import javax.swing.JWindow;
+import javax.swing.KeyStroke;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.border.LineBorder;
 import javax.swing.plaf.ButtonUI;
@@ -47,11 +109,64 @@ import javax.swing.plaf.FontUIResource;
 import javax.swing.plaf.basic.BasicComboBoxUI;
 import javax.swing.plaf.basic.BasicRadioButtonUI;
 import javax.swing.plaf.basic.ComboPopup;
-import javax.swing.text.*;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultCaret;
+import javax.swing.text.DefaultFormatterFactory;
+import javax.swing.text.Document;
+import javax.swing.text.EditorKit;
+import javax.swing.text.Element;
+import javax.swing.text.JTextComponent;
+import javax.swing.text.NumberFormatter;
+import javax.swing.text.ViewFactory;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
-import java.awt.*;
-import java.awt.event.*;
+import java.awt.AWTError;
+import java.awt.AlphaComposite;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Cursor;
+import java.awt.Dialog;
+import java.awt.Dimension;
+import java.awt.Event;
+import java.awt.FocusTraversalPolicy;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Frame;
+import java.awt.GradientPaint;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.GraphicsConfiguration;
+import java.awt.GraphicsDevice;
+import java.awt.GraphicsEnvironment;
+import java.awt.HeadlessException;
+import java.awt.Image;
+import java.awt.Insets;
+import java.awt.KeyboardFocusManager;
+import java.awt.Paint;
+import java.awt.Point;
+import java.awt.PrintGraphics;
+import java.awt.Rectangle;
+import java.awt.Shape;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.awt.event.AWTEventListener;
+import java.awt.event.ActionListener;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.HierarchyEvent;
+import java.awt.event.HierarchyListener;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionListener;
+import java.awt.event.MouseWheelListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphVector;
 import java.awt.geom.RoundRectangle2D;
@@ -68,12 +183,21 @@ import java.lang.reflect.Method;
 import java.net.URL;
 import java.text.NumberFormat;
 import java.text.ParseException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+
+import static com.intellij.openapi.util.text.StringUtil.THREE_DOTS;
+
 @SuppressWarnings("StaticMethodOnlyUsedInOneClass")
 public final class UIUtil {
   public static final @NlsSafe String BORDER_LINE = "<hr size=1 noshade>";
@@ -582,13 +706,33 @@ public final class UIUtil {
 
   /**
    * Computes the minimum size the component must have to keep the given number of characters
+   *
+   * Same as {@code computeTextComponentMinimumSize(preferredSize, text, fontMetrics, nCharactersToKeep, 0, "...")}.
+   * 
+   * @see #computeTextComponentMinimumSize(int, String, FontMetrics, int, int) 
+   */
+  public static int computeTextComponentMinimumSize(
+    int preferredSize,
+    @Nullable String text,
+    @Nullable FontMetrics fontMetrics,
+    int nCharactersToKeep
+  ) {
+    return computeTextComponentMinimumSize(preferredSize, text, fontMetrics, nCharactersToKeep, 0, THREE_DOTS);
+  }
+
+  /**
+   * Computes the minimum size the component must have to keep the given number of characters
    * <p>
    * Intended to be used for simple {@code JLabel}-like text components.
    * Often they provide the preferred size, but not the minimum size.
    * This function can be used to roughly compute the minimum size based on the preferred one.
    * The returned size will be reduced by the difference between the full text width and
-   * the width of the text contracted to just the {@code nCharactersToKeep} first characters plus {@code "..."}
+   * the width of the text contracted to just the {@code nCharactersToKeep} first characters plus {@code ellipsis}
    * that's usually added by such components when the text doesn't fit.
+   * </p>
+   * <p>
+   *   If the component provides a way to keep a suffix of a fixed length, then {@code nSuffixLength}
+   *   can be used to specify the number of characters that should be reserved after {@code ellipsis}.
    * </p>
    * <p>
    * Note that, due to various factors, the result may be off by a few pixels which is enough to gain or lose an extra character.
@@ -599,18 +743,26 @@ public final class UIUtil {
    * @param preferredSize     the size of the component needed to keep everything, usually computed by {@link Component#getPreferredSize()}
    * @param text              the currently set text
    * @param fontMetrics       the current font metrics
-   * @param nCharactersToKeep the number of characters the component must keep
+   * @param nCharactersToKeep the number of characters the component must keep, including {@code nSuffixLength}
+   * @param nSuffixLength the number of characters the component must keep at the end, if possible at all
+   * @param ellipsis the string to use as the ellipsis (usually three dots or the ellipsis character)
    * @return the minimum size the component has to have to keep the given number of characters
    */
   public static int computeTextComponentMinimumSize(
     int preferredSize,
     @Nullable String text,
     @Nullable FontMetrics fontMetrics,
-    int nCharactersToKeep
+    int nCharactersToKeep,
+    int nSuffixLength,
+    @NotNull String ellipsis
   ) {
+    if (nCharactersToKeep < nSuffixLength) {
+      throw new IllegalArgumentException("nCharactersToKeep=" + nCharactersToKeep + ", nSuffixLength=" + nSuffixLength);
+    }
     if (text == null || text.length() <= nCharactersToKeep || fontMetrics == null) return preferredSize;
+    var prefixLength = nCharactersToKeep - nSuffixLength;
     var fullTextWidth = fontMetrics.stringWidth(text);
-    var minTextWidth = fontMetrics.stringWidth(text.substring(0, nCharactersToKeep) + "...");
+    var minTextWidth = fontMetrics.stringWidth(text.substring(0, prefixLength) + ellipsis + text.substring(text.length() - nSuffixLength));
     return preferredSize - (fullTextWidth - minTextWidth);
   }
 
@@ -1381,11 +1533,6 @@ public final class UIUtil {
 
     AppleBoldDottedPainter painter = AppleBoldDottedPainter.forColor(Objects.requireNonNullElse(fgColor, oldColor));
     painter.paint(g, startX, endX, lineY);
-  }
-
-  @Deprecated(forRemoval = true)
-  public static void applyRenderingHints(@NotNull Graphics g) {
-    GraphicsUtil.applyRenderingHints((Graphics2D)g);
   }
 
   /**
@@ -2165,6 +2312,33 @@ public final class UIUtil {
     return ComponentUtil.getParentOfType(type, component);
   }
 
+  /**
+   * Searches above in the component hierarchy starting from the specified component, taking foster parents into account.
+   * <p>
+   * Note that the initial component is also checked and is immediately returned if it has the correct type.
+   *</p>
+   * <p>
+   * <em>Please consider using the plain {@link #getParent(Component)} if you're dealing with pure UI without remote development hacks.</em>
+   *</p>
+   * @param type      expected class
+   * @param component initial component
+   * @return a component of the specified type, or {@code null} if the search is failed
+   * @see #getParent(Component)
+   * @see #getParentOfType(Class, Component)
+   */
+  @Contract(pure = true)
+  public static @Nullable <T> T getGeneralizedParentOfType(@NotNull Class<? extends T> type, @Nullable Component component) {
+    var result = component;
+    while (result != null) {
+      if (type.isInstance(result)) {
+        //noinspection unchecked
+        return (T)result;
+      }
+      result = getParent(result);
+    }
+    return null;
+  }
+
   public static @NotNull JBIterable<Component> uiParents(@Nullable Component c, boolean strict) {
     return strict ? JBIterable.generate(c, c1 -> c1.getParent()).skip(1) : JBIterable.generate(c, c1 -> c1.getParent());
   }
@@ -2263,6 +2437,7 @@ public final class UIUtil {
     private float myLineSpacing;
     private Font myFont;
     private Color myColor;
+    private Color myShortcutColor;
 
     public TextPainter() {
       myDrawShadow = StartupUiUtil.isUnderDarcula();
@@ -2283,6 +2458,11 @@ public final class UIUtil {
 
     public @NotNull TextPainter withColor(Color color) {
       myColor = color;
+      return this;
+    }
+
+    public @NotNull TextPainter withShortcutColor(Color color) {
+      myShortcutColor = color;
       return this;
     }
 
@@ -2351,7 +2531,9 @@ public final class UIUtil {
           g.drawString(text, x, yOffset[0]);
           if (!Strings.isEmpty(shortcut)) {
             Color oldColor1 = g.getColor();
-            g.setColor(JBColor.namedColor("Editor.shortcutForeground", new JBColor(new Color(82, 99, 155), new Color(88, 157, 246))));
+            g.setColor(myShortcutColor == null
+                       ? JBColor.namedColor("Editor.shortcutForeground", new JBColor(new Color(82, 99, 155), new Color(88, 157, 246)))
+                       : myShortcutColor);
             g.drawString(shortcut, x + fm.stringWidth(text + (StartupUiUtil.isUnderDarcula() ? " " : "")), yOffset[0]);
             g.setColor(oldColor1);
           }
@@ -2544,7 +2726,7 @@ public final class UIUtil {
   }
 
   public static @NotNull Paint getGradientPaint(float x1, float y1, @NotNull Color c1, float x2, float y2, @NotNull Color c2) {
-    return Registry.is("ui.no.bangs.and.whistles", false) ? ColorUtil.mix(c1, c2, .5) : new GradientPaint(x1, y1, c1, x2, y2, c2);
+    return Registry.is("ui.simplified", false) ? ColorUtil.mix(c1, c2, .5) : new GradientPaint(x1, y1, c1, x2, y2, c2);
   }
 
   public static @Nullable Point getLocationOnScreen(@NotNull JComponent component) {

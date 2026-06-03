@@ -30,7 +30,12 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NlsContexts.TabTitle;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.Weighted;
-import com.intellij.psi.codeStyle.*;
+import com.intellij.psi.codeStyle.CodeStyleConfigurable;
+import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CodeStyleSettingsProvider;
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
+import com.intellij.psi.codeStyle.LanguageCodeStyleSettingsProvider;
+import com.intellij.psi.codeStyle.PredefinedCodeStyle;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.TabbedPaneWrapper;
 import com.intellij.ui.TitledSeparator;
@@ -44,10 +49,26 @@ import com.intellij.util.ui.GraphicsUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.BorderFactory;
+import javax.swing.JComponent;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
+import java.util.Set;
 
 import static java.util.Arrays.stream;
 
@@ -149,7 +170,7 @@ public abstract class TabbedLanguageCodeStylePanel extends CodeStyleAbstractPane
       myPanel = new JPanel();
       myPanel.setLayout(new BorderLayout());
       myTabbedPane = new TabbedPaneWrapper(this);
-      myTabbedPane.addChangeListener(__ -> {
+      myTabbedPane.addChangeListener(_ -> {
         if (myListener != null) {
           String title = myTabbedPane.getSelectedTitle();
           if (title != null) {
@@ -364,7 +385,7 @@ public abstract class TabbedLanguageCodeStylePanel extends CodeStyleAbstractPane
       if (!lang.equals(getDefaultLanguage())) {
         final String langName = LanguageCodeStyleSettingsProvider.getLanguageName(lang);
         JMenuItem langItem = new JBMenuItem(langName);
-        langItem.addActionListener(__ -> applyLanguageSettings(lang));
+        langItem.addActionListener(_ -> applyLanguageSettings(lang));
         parentMenu.add(langItem);
       }
     }
@@ -374,7 +395,7 @@ public abstract class TabbedLanguageCodeStylePanel extends CodeStyleAbstractPane
     for (final PredefinedCodeStyle predefinedCodeStyle : myPredefinedCodeStyles) {
       JMenuItem predefinedItem = new JBMenuItem(predefinedCodeStyle.getName());
       parentMenu.add(predefinedItem);
-      predefinedItem.addActionListener(__ -> applyPredefinedStyle(predefinedCodeStyle.getName()));
+      predefinedItem.addActionListener(_ -> applyPredefinedStyle(predefinedCodeStyle.getName()));
     }
   }
 

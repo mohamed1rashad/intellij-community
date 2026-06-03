@@ -5,15 +5,18 @@ import com.intellij.codeInsight.completion.CompletionParameters
 import com.intellij.codeInsight.completion.CompletionProcessEx
 import com.intellij.codeInsight.completion.CompletionProvider
 import com.intellij.codeInsight.completion.CompletionResultSet
+import com.intellij.codeInsight.completion.CompletionService
+import com.intellij.codeInsight.completion.CompletionSorter
+import com.intellij.codeInsight.completion.PrefixMatcher
 import com.intellij.injected.editor.DocumentWindow
 import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.getAndUpdateUserData
 import com.intellij.patterns.StandardPatterns
-import com.intellij.polySymbols.FrameworkId
-import com.intellij.polySymbols.PolySymbolQualifiedKind
+import com.intellij.polySymbols.PolySymbolKind
 import com.intellij.polySymbols.completion.PolySymbolCodeCompletionItemCustomizer.Companion.customizeItems
+import com.intellij.polySymbols.context.PolyContext
 import com.intellij.polySymbols.query.PolySymbolQueryExecutor
 import com.intellij.polySymbols.query.PolySymbolQueryExecutorFactory
 import com.intellij.polySymbols.query.PolySymbolScope
@@ -46,9 +49,13 @@ abstract class PolySymbolsCompletionProviderBase<T : PsiElement> : CompletionPro
       position = 0
       name = ""
     }
-    addCompletions(parameters, result, position, name, queryExecutor, psiContext)
+    addCompletions(parameters,
+                   result.withRelevanceSorter(createSorter(parameters, result.prefixMatcher)),
+                   position, name, queryExecutor, psiContext)
   }
 
+  protected open fun createSorter(parameters: CompletionParameters, prefixMatcher: PrefixMatcher): CompletionSorter =
+    CompletionService.getCompletionService().defaultSorter(parameters, prefixMatcher)
 
   protected abstract fun getContext(position: PsiElement): T?
 
@@ -59,25 +66,25 @@ abstract class PolySymbolsCompletionProviderBase<T : PsiElement> : CompletionPro
 
   companion object {
 
-    private val preventedCodeCompletionsKey = Key<Set<PolySymbolQualifiedKind>>("polySymbols.completion.preventedSymbolKinds")
+    private val preventedCodeCompletionsKey = Key<Set<PolySymbolKind>>("polySymbols.completion.preventedSymbolKinds")
 
     @JvmStatic
-    fun preventFurtherCodeCompletionsFor(parameters: CompletionParameters, qualifiedKind: PolySymbolQualifiedKind) {
+    fun preventFurtherCodeCompletionsFor(parameters: CompletionParameters, kind: PolySymbolKind) {
       (parameters.process as CompletionProcessEx).getAndUpdateUserData(preventedCodeCompletionsKey) {
-        it?.let { it + qualifiedKind } ?: setOf(qualifiedKind)
+        it?.let { it + kind } ?: setOf(kind)
       }
     }
 
     @JvmStatic
-    fun isFurtherCodeCompletionPreventedFor(parameters: CompletionParameters, vararg qualifiedKind: PolySymbolQualifiedKind): Boolean =
+    fun isFurtherCodeCompletionPreventedFor(parameters: CompletionParameters, vararg kind: PolySymbolKind): Boolean =
       (parameters.process as CompletionProcessEx).getUserData(preventedCodeCompletionsKey)
-        ?.let { prevented -> qualifiedKind.any { prevented.contains(it) } } == true
+        ?.let { prevented -> kind.any { prevented.contains(it) } } == true
 
     @JvmStatic
     fun processCompletionQueryResults(
       queryExecutor: PolySymbolQueryExecutor,
       result: CompletionResultSet,
-      qualifiedKind: PolySymbolQualifiedKind,
+      kind: PolySymbolKind,
       name: String,
       position: Int,
       location: PsiElement,
@@ -87,8 +94,8 @@ abstract class PolySymbolsCompletionProviderBase<T : PsiElement> : CompletionPro
       consumer: (PolySymbolCodeCompletionItem) -> Unit,
     ) {
       processPolySymbolCodeCompletionItems(
-        queryExecutor.codeCompletionQuery(qualifiedKind, name, position).additionalScope(queryContext).run(),
-        result, qualifiedKind, name, queryExecutor.framework, location, providedNames, filter, consumer
+        queryExecutor.codeCompletionQuery(kind, name, position).additionalScope(queryContext).run(),
+        result, kind, name, queryExecutor.context, location, providedNames, filter, consumer
       )
     }
 
@@ -96,9 +103,9 @@ abstract class PolySymbolsCompletionProviderBase<T : PsiElement> : CompletionPro
     fun processPolySymbolCodeCompletionItems(
       symbols: List<PolySymbolCodeCompletionItem>,
       result: CompletionResultSet,
-      qualifiedKind: PolySymbolQualifiedKind,
+      kind: PolySymbolKind,
       name: String,
-      framework: FrameworkId?,
+      context: PolyContext,
       location: PsiElement,
       providedNames: MutableSet<String>? = null,
       filter: ((PolySymbolCodeCompletionItem) -> Boolean)? = null,
@@ -109,7 +116,7 @@ abstract class PolySymbolsCompletionProviderBase<T : PsiElement> : CompletionPro
       symbols
         .asSequence()
         .distinctBy { Triple(it.offset, it.name, it.completeAfterInsert) }
-        .customizeItems(framework, qualifiedKind, location)
+        .customizeItems(context, kind, location)
         .filter { item ->
           (filter == null || filter(item))
           && item.offset <= prefixLength

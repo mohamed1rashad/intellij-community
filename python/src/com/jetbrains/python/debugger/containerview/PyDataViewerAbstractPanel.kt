@@ -24,7 +24,7 @@ import javax.swing.JPanel
 abstract class PyDataViewerAbstractPanel(
   val dataViewerModel: PyDataViewerModel,
   val isPanelFromFactory: Boolean = false,
-) : JPanel(BorderLayout()), Disposable {
+) : JPanel(BorderLayout()), Disposable.Default {
 
   /**
    * Represents a formatting string used for specifying format.
@@ -75,6 +75,8 @@ abstract class PyDataViewerAbstractPanel(
   }
 
   fun apply(debugValue: PyDebugValue, modifier: Boolean, commandSource: DataViewerCommandSource? = null) {
+    val dimensions: List<Int>? = getValueDimensions(debugValue)
+    val dimensionsSize = dimensions?.size ?: 0
     if (!modifier) {
       when (commandSource) {
         DataViewerCommandSource.SLICING -> PyDataViewerCollector.logDataSlicingApplied(isPanelFromFactory)
@@ -83,9 +85,8 @@ abstract class PyDataViewerAbstractPanel(
         else -> Unit
       }
 
-      val dimensions = getValueDimensions(debugValue)
       PyDataViewerCollector.logDataOpened(dataViewerModel.project, debugValue.type,
-                                          dimensions?.size,
+                                          dimensionsSize,
                                           dimensions?.getOrNull(0) ?: 0,
                                           dimensions?.getOrNull(1) ?: 0,
                                           isNewTable = isPanelFromFactory)
@@ -98,11 +99,13 @@ abstract class PyDataViewerAbstractPanel(
       return
     }
 
+    // For 3D, 4D, we should pass the "%" as the format parameter to correctly reduce tables' dimensions to 2.
+    val format = if (dimensionsSize > 2) "%" else formatValueFromUI
     ApplicationManager.getApplication().executeOnPooledThread {
+      @Suppress("PyExceptionTooBroad")
       try {
         doStrategyInitExecution(debugValue.frameAccessor, strategy)
-        // For this initial request, we should pass the "%" as the format parameter to correctly reduce 3D tables' dimension to 2.
-        val arrayChunk = debugValue.frameAccessor.getArrayItems(debugValue, 0, 0, 0, 0, "%")
+        val arrayChunk = debugValue.frameAccessor.getArrayItems(debugValue, 0, 0, 0, 0, format)
         ApplicationManager.getApplication().invokeLater {
           updateUI(arrayChunk, debugValue, strategy, modifier)
           dataViewerModel.isModified = modifier
@@ -150,6 +153,7 @@ abstract class PyDataViewerAbstractPanel(
     val realName = if (debugValue == null || debugValue.name == originalDebugValue.tempName) originalDebugValue.name else chunk.slicePresentation
     var shownName = realName
     if (modifier && dataViewerModel.originalVarName != shownName) {
+      @Suppress("HardCodedStringLiteral") // We do not want here any localization, this is variable name format.
       shownName = String.format(MODIFIED_VARIABLE_FORMAT, dataViewerModel.originalVarName)
     }
     else {
@@ -195,15 +199,13 @@ abstract class PyDataViewerAbstractPanel(
     }
   }
 
-  fun addListener(onNameChangedListener: OnNameChangedListener) {
-    listeners.add(onNameChangedListener)
+  fun addNameChangedListener(listener: OnNameChangedListener) {
+    listeners.add(listener)
   }
 
   protected fun composeErrorMessage(text: @NlsSafe String, modifier: Boolean): @Nls String {
     return if (modifier) PyBundle.message("debugger.dataViewer.modifier.error", text) else text
   }
-
-  override fun dispose(): Unit = Unit
 
   fun interface OnNameChangedListener {
     fun onNameChanged(name: @NlsContexts.TabTitle String)

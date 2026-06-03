@@ -11,6 +11,11 @@
     expressions and named templates for XSLT documents.
   ]]></description>
 
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.platform.structureView.impl"/>
+  </dependencies>
+  <!-- endregion -->
   <depends>com.intellij.modules.xml</depends>
   <resource-bundle>messages.XPathBundle</resource-bundle>
 
@@ -175,6 +180,11 @@
 
     <projectService serviceInterface="org.intellij.lang.xpath.xslt.associations.FileAssociationsManager"
                     serviceImplementation="org.intellij.lang.xpath.xslt.associations.impl.FileAssociationsManagerImpl"/>
+    <applicationSettings service="org.intellij.lang.xpath.xslt.impl.XsltConfigImpl"/>
+    <projectSettings service="org.intellij.plugins.xpathView.XPathProjectComponent"/>
+    <projectSettings service="org.intellij.lang.xpath.xslt.associations.impl.FileAssociationsManagerImpl"/>
+    <projectSettings service="org.intellij.lang.xpath.xslt.associations.impl.FileAssociationsConfigurable$UIState"/>
+    <applicationSettings service="org.intellij.plugins.xpathView.XPathAppComponent"/>
   </extensions>
 
   <extensions defaultExtensionNs="XPathView">

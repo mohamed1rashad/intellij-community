@@ -9,10 +9,16 @@ enum class TruncateMode {
   START, MIDDLE, END, NONE
 }
 
-const val truncatedMarker: String = "<<<...content truncated...>>>"
-const val maxTextLength: Int = 64 * 1024
+internal const val truncatedMarker: String = "<<<...content truncated...>>>"
+internal const val maxTextLength: Int = 64 * 1024
 
-fun truncateText(text: String, maxLinesCount: Int, maxTextLength: Int = com.intellij.mcpserver.util.maxTextLength, truncateMode: TruncateMode = TruncateMode.START, truncatedMarker: String = com.intellij.mcpserver.util.truncatedMarker): String {
+fun truncateText(
+  text: String,
+  maxLinesCount: Int,
+  maxTextLength: Int = com.intellij.mcpserver.util.maxTextLength,
+  truncateMode: TruncateMode = TruncateMode.START,
+  truncatedMarker: String = com.intellij.mcpserver.util.truncatedMarker,
+): String {
   require(maxLinesCount > 2) { "maxLinesCount must be greater than 2" }
   val lines = text.split("\n")
   val truncatedByLinesText = if (lines.size <= maxLinesCount) {
@@ -43,10 +49,4 @@ fun Document.getWholeLinesTextRange(linesRange: IntRange): TextRange {
   val startOffset = getLineStartOffset(linesRange.first.coerceIn(0, lineCount - 1))
   val endOffset = getLineEndOffset(linesRange.last.coerceIn(0, lineCount - 1))
   return TextRange(startOffset, endOffset)
-}
-
-fun Document.getWholeLinesTextRange(range: TextRange): TextRange {
-  val startLine = getLineNumber(range.startOffset)
-  val endLine = getLineNumber(range.endOffset)
-  return getWholeLinesTextRange(startLine..endLine)
 }

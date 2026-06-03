@@ -22,6 +22,10 @@ val REQUIRES_BLOCKING_CONTEXT_ANNOTATION: String = RequiresBlockingContext::clas
 
 @Internal
 @IntellijInternalApi
+val REPLACE_WITH_ANNOTATION: String = ReplaceWith::class.java.canonicalName
+
+@Internal
+@IntellijInternalApi
 fun isInspectionForBlockingContextAvailable(holder: ProblemsHolder): Boolean =
   DevKitInspectionUtil.isAllowedIncludingTestSources(holder.file) &&
   DevKitInspectionUtil.isClassAvailable(holder, REQUIRES_BLOCKING_CONTEXT_ANNOTATION)

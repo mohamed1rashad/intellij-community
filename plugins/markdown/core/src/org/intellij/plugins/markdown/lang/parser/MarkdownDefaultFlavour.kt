@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.intellij.plugins.markdown.lang.parser
 
 import org.intellij.markdown.IElementType
@@ -19,9 +19,17 @@ import org.intellij.markdown.parser.MarkerProcessorFactory
 import org.intellij.markdown.parser.sequentialparsers.EmphasisLikeParser
 import org.intellij.markdown.parser.sequentialparsers.SequentialParser
 import org.intellij.markdown.parser.sequentialparsers.SequentialParserManager
-import org.intellij.markdown.parser.sequentialparsers.impl.*
+import org.intellij.markdown.parser.sequentialparsers.impl.AutolinkParser
+import org.intellij.markdown.parser.sequentialparsers.impl.BacktickParser
+import org.intellij.markdown.parser.sequentialparsers.impl.EmphStrongDelimiterParser
+import org.intellij.markdown.parser.sequentialparsers.impl.ImageParser
+import org.intellij.markdown.parser.sequentialparsers.impl.InlineLinkParser
+import org.intellij.markdown.parser.sequentialparsers.impl.MathParser
+import org.intellij.markdown.parser.sequentialparsers.impl.ReferenceLinkParser
 import org.intellij.plugins.markdown.lang.parser.blocks.DefinitionListMarkerProvider
 import org.intellij.plugins.markdown.lang.parser.blocks.frontmatter.FrontMatterHeaderMarkerProvider
+import org.intellij.plugins.markdown.lang.parser.testlink.TestLinkSequentialParser
+import org.intellij.plugins.markdown.ui.preview.html.HeaderAnchorCache
 import org.intellij.plugins.markdown.ui.preview.html.HeaderGeneratingProvider
 import java.net.URI
 
@@ -54,14 +62,15 @@ open class MarkdownDefaultFlavour: MarkdownFlavourDescriptor {
   }
 
   private fun addCustomHeaderProviders(providers: MutableMap<IElementType, GeneratingProvider>) {
-    providers[MarkdownElementTypes.ATX_1] = HeaderGeneratingProvider("h1")
-    providers[MarkdownElementTypes.ATX_2] = HeaderGeneratingProvider("h2")
-    providers[MarkdownElementTypes.ATX_3] = HeaderGeneratingProvider("h3")
-    providers[MarkdownElementTypes.ATX_4] = HeaderGeneratingProvider("h4")
-    providers[MarkdownElementTypes.ATX_5] = HeaderGeneratingProvider("h5")
-    providers[MarkdownElementTypes.ATX_6] = HeaderGeneratingProvider("h6")
-    providers[MarkdownElementTypes.SETEXT_1] = HeaderGeneratingProvider("h1")
-    providers[MarkdownElementTypes.SETEXT_2] = HeaderGeneratingProvider("h2")
+    val headerAnchorCache = HeaderAnchorCache()
+    providers[MarkdownElementTypes.ATX_1] = HeaderGeneratingProvider("h1", headerAnchorCache)
+    providers[MarkdownElementTypes.ATX_2] = HeaderGeneratingProvider("h2", headerAnchorCache)
+    providers[MarkdownElementTypes.ATX_3] = HeaderGeneratingProvider("h3", headerAnchorCache)
+    providers[MarkdownElementTypes.ATX_4] = HeaderGeneratingProvider("h4", headerAnchorCache)
+    providers[MarkdownElementTypes.ATX_5] = HeaderGeneratingProvider("h5", headerAnchorCache)
+    providers[MarkdownElementTypes.ATX_6] = HeaderGeneratingProvider("h6", headerAnchorCache)
+    providers[MarkdownElementTypes.SETEXT_1] = HeaderGeneratingProvider("h1", headerAnchorCache)
+    providers[MarkdownElementTypes.SETEXT_2] = HeaderGeneratingProvider("h2", headerAnchorCache)
   }
 
   protected class DefaultSequentialParserManager: SequentialParserManager() {
@@ -72,6 +81,7 @@ open class MarkdownDefaultFlavour: MarkdownFlavourDescriptor {
         MathParser(),
         ImageParser(),
         InlineLinkParser(),
+        TestLinkSequentialParser(),
         ReferenceLinkParser(),
         EmphasisLikeParser(EmphStrongDelimiterParser(), StrikeThroughDelimiterParser())
       )

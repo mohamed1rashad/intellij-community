@@ -28,8 +28,12 @@ public abstract class AbstractJavadocTypedHandlerFunctionalTest extends LightPla
     doTest('@');
   }
 
-  public void testStartMarkdownComment() {
-    doTest('/');
+  public void testMarkdownReference() {
+    doTest('>');
+  }
+
+  public void testMarkdownLink() {
+    doTest('>');
   }
 
   private void doTest(char typedChar) {

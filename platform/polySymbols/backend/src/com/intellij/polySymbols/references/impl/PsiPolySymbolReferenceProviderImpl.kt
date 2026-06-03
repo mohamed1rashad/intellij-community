@@ -12,20 +12,23 @@ import com.intellij.model.search.SearchRequest
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.polySymbols.*
+import com.intellij.polySymbols.PolySymbol
+import com.intellij.polySymbols.PolySymbolApiStatus
 import com.intellij.polySymbols.PolySymbolApiStatus.Companion.getMessage
 import com.intellij.polySymbols.PolySymbolApiStatus.Companion.isDeprecatedOrObsolete
+import com.intellij.polySymbols.PolySymbolNameSegment
+import com.intellij.polySymbols.PolySymbolProperty
+import com.intellij.polySymbols.PolySymbolsBundle
 import com.intellij.polySymbols.highlighting.impl.getDefaultProblemMessage
 import com.intellij.polySymbols.inspections.PolySymbolProblemQuickFixProvider
 import com.intellij.polySymbols.inspections.impl.PolySymbolInspectionToolMappingEP
 import com.intellij.polySymbols.query.PolySymbolMatch
-import com.intellij.polySymbols.references.PsiPolySymbolReferenceProviderListener
 import com.intellij.polySymbols.references.PolySymbolReference
 import com.intellij.polySymbols.references.PolySymbolReferenceProblem
 import com.intellij.polySymbols.references.PolySymbolReferenceProblem.ProblemKind
 import com.intellij.polySymbols.references.PsiPolySymbolReferenceCacheInfoProvider
 import com.intellij.polySymbols.references.PsiPolySymbolReferenceProvider
-import com.intellij.polySymbols.search.PolySymbolReferenceHints
+import com.intellij.polySymbols.references.PsiPolySymbolReferenceProviderListener
 import com.intellij.polySymbols.utils.asSingleSymbol
 import com.intellij.polySymbols.utils.hasOnlyExtensions
 import com.intellij.polySymbols.utils.nameSegments
@@ -37,7 +40,7 @@ import com.intellij.util.SmartList
 import com.intellij.util.application
 import com.intellij.util.containers.MultiMap
 import org.jetbrains.annotations.Nls
-import java.util.*
+import java.util.LinkedList
 import java.util.concurrent.ConcurrentHashMap
 
 internal val IJ_IGNORE_REFS: PolySymbolProperty<Boolean> = PolySymbolProperty["ij-no-psi-refs"]
@@ -50,30 +53,41 @@ class PsiPolySymbolReferenceProviderImpl : PsiSymbolReferenceProvider {
   override fun getSearchRequests(project: Project, target: Symbol): Collection<SearchRequest> =
     emptyList()
 
-  internal fun getSymbolOffsetsAndReferences(element: PsiExternalReferenceHost, hints: PsiSymbolReferenceHints): Pair<MultiMap<Int, PolySymbol>, List<PolySymbolReference>> {
+  internal fun getSymbolOffsetsAndReferences(
+    element: PsiExternalReferenceHost,
+    hints: PsiSymbolReferenceHints,
+  ): Pair<MultiMap<Int, PolySymbol>, List<PolySymbolReference>> {
     val target = hints.target
+    if (target != null && getProviders(element).none { it.canReference(target) })
+      return Pair(MultiMap.create(), emptyList())
     val cacheKeys =
       PsiPolySymbolReferenceCacheInfoProvider.getCacheKeys(element, target)
 
-    return CachedValuesManager.getCachedValue(element) {
+    val cache = CachedValuesManager.getCachedValue(element) {
       CachedValueProvider.Result.create(ConcurrentHashMap<Any, Pair<MultiMap<Int, PolySymbol>, List<PolySymbolReference>>>(),
                                         element.containingFile, PsiModificationTracker.MODIFICATION_COUNT)
-    }.computeIfAbsent(cacheKeys) {
-      getSymbolOffsetsAndReferencesNoCache(element, target)
+    }
+
+    // Do not calculate references within computeIfAbsent, as it can lead to a blocking call in a non-IO context in coroutines,
+    // causing a coroutine to fail cancellation.
+    return cache[cacheKeys].let {
+      it ?: getSymbolOffsetsAndReferencesNoCache(element, target).also { result ->
+        cache.putIfAbsent(cacheKeys, result)
+      }
     }
   }
 
-  private fun getSymbolOffsetsAndReferencesNoCache(element: PsiExternalReferenceHost, targetSymbol: Symbol?): Pair<MultiMap<Int, PolySymbol>, List<PolySymbolReference>> {
+  private fun getSymbolOffsetsAndReferencesNoCache(
+    element: PsiExternalReferenceHost,
+    targetSymbol: Symbol?,
+  ): Pair<MultiMap<Int, PolySymbol>, List<PolySymbolReference>> {
     val publisher = application.messageBus.syncPublisher(PsiPolySymbolReferenceProviderListener.TOPIC)
     publisher.beforeProvideReferences(element, targetSymbol)
 
     try {
-      val beans = PsiPolySymbolReferenceProviders.byLanguage(element.getLanguage()).byHostClass(element.javaClass)
       val result = SmartList<PolySymbolReference>()
       val offsets = MultiMap.createSet<Int, PolySymbol>()
-      for (bean in beans) {
-        @Suppress("UNCHECKED_CAST")
-        val provider = bean.instance as PsiPolySymbolReferenceProvider<PsiExternalReferenceHost>
+      for (provider in getProviders(element)) {
         val showProblems = provider.shouldShowProblems(element)
         val offsetsFromProvider = provider.getOffsetsToReferencedSymbols(element)
         result.addAll(offsetsFromProvider.flatMap { (offset, symbol) ->
@@ -88,9 +102,19 @@ class PsiPolySymbolReferenceProviderImpl : PsiSymbolReferenceProvider {
     }
   }
 
+  private fun getProviders(element: PsiExternalReferenceHost): Sequence<PsiPolySymbolReferenceProvider<PsiExternalReferenceHost>> =
+    @Suppress("UNCHECKED_CAST")
+    PsiPolySymbolReferenceProviders.byLanguage(element.getLanguage()).byHostClass(element.javaClass)
+      .asSequence().map { it.instance as PsiPolySymbolReferenceProvider<PsiExternalReferenceHost> }
+
 }
 
-internal fun getReferences(element: PsiElement, symbolNameOffset: Int, symbol: PolySymbol, showProblems: Boolean): List<PolySymbolReference> {
+internal fun getReferences(
+  element: PsiElement,
+  symbolNameOffset: Int,
+  symbol: PolySymbol,
+  showProblems: Boolean,
+): List<PolySymbolReference> {
   val problemOnlyRanges = mutableMapOf<TextRange, Boolean>()
   val result = MultiMap<TextRange, PolySymbolNameSegment>()
 
@@ -142,7 +166,8 @@ internal fun getReferences(element: PsiElement, symbolNameOffset: Int, symbol: P
           ?.firstOrNull()
       }.takeIf { it.size == segments.size }?.firstOrNull()
       if (showProblems && (deprecation != null || problemOnly || segments.any { it.problem != null })) {
-        NameSegmentReferenceWithProblem(element, symbol, range.shiftRight(symbolNameOffset), segments, symbolNameOffset, deprecation, problemOnly)
+        NameSegmentReferenceWithProblem(element, symbol, range.shiftRight(symbolNameOffset),
+                                        segments, symbolNameOffset, deprecation, problemOnly)
       }
       else if (!range.isEmpty && !problemOnly) {
         NameSegmentReference(element, range.shiftRight(symbolNameOffset), segments)
@@ -200,7 +225,7 @@ private class NameSegmentReferenceWithProblem(
       .mapNotNull { segment ->
         val problemKind = segment.getProblemKind() ?: return@mapNotNull null
         val toolMapping = segment.symbolKinds.map {
-          PolySymbolInspectionToolMappingEP.get(it.namespace, it.kind, problemKind)
+          PolySymbolInspectionToolMappingEP.get(it.namespace, it.kindName, problemKind)
         }.firstOrNull()
         PolySymbolReferenceProblem.create(
           segment.symbolKinds,
@@ -219,9 +244,9 @@ private class NameSegmentReferenceWithProblem(
       val symbolTypes = nameSegments.flatMapTo(LinkedHashSet()) { it.symbolKinds }
       val toolMapping = symbolTypes.map {
         if (apiStatus is PolySymbolApiStatus.Obsolete)
-          PolySymbolInspectionToolMappingEP.get(it.namespace, it.kind, ProblemKind.ObsoleteSymbol)
+          PolySymbolInspectionToolMappingEP.get(it.namespace, it.kindName, ProblemKind.ObsoleteSymbol)
             ?.let { mapping -> return@map mapping }
-        PolySymbolInspectionToolMappingEP.get(it.namespace, it.kind, ProblemKind.DeprecatedSymbol)
+        PolySymbolInspectionToolMappingEP.get(it.namespace, it.kindName, ProblemKind.DeprecatedSymbol)
       }.firstOrNull()
 
       val cause = apiStatus?.getMessage()

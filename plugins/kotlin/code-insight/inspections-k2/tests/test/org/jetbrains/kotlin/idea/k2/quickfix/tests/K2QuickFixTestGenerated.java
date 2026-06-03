@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.k2.quickfix.tests;
 
@@ -296,6 +296,21 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/addFunctionParameterWithAnonymousFunction.kt");
         }
 
+        @TestMetadata("addFunctionParameterWithAnonymousObjectExtendingClass.kt")
+        public void testAddFunctionParameterWithAnonymousObjectExtendingClass() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/addFunctionParameterWithAnonymousObjectExtendingClass.kt");
+        }
+
+        @TestMetadata("addFunctionParameterWithAnonymousObjectMultipleSupertypes.kt")
+        public void testAddFunctionParameterWithAnonymousObjectMultipleSupertypes() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/addFunctionParameterWithAnonymousObjectMultipleSupertypes.kt");
+        }
+
+        @TestMetadata("addFunctionParameterWithAnonymousObjectViaThis.kt")
+        public void testAddFunctionParameterWithAnonymousObjectViaThis() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/addFunctionParameterWithAnonymousObjectViaThis.kt");
+        }
+
         @TestMetadata("addFunctionParameterWithFunctionReference.kt")
         public void testAddFunctionParameterWithFunctionReference() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/addFunctionParameterWithFunctionReference.kt");
@@ -324,6 +339,11 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
         @TestMetadata("addNothingReturnType.kt")
         public void testAddNothingReturnType() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/addNothingReturnType.kt");
+        }
+
+        @TestMetadata("addParameterGenericFunction.kt")
+        public void testAddParameterGenericFunction() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/addParameterGenericFunction.kt");
         }
 
         @TestMetadata("addParameterNotAvailableForBuiltins.kt")
@@ -376,14 +396,44 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/changeFunctionLiteralParameters4.kt");
         }
 
+        @TestMetadata("changeFunctionLiteralParameters5.kt")
+        public void testChangeFunctionLiteralParameters5() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/changeFunctionLiteralParameters5.kt");
+        }
+
+        @TestMetadata("changeFunctionLiteralParameters6.kt")
+        public void testChangeFunctionLiteralParameters6() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/changeFunctionLiteralParameters6.kt");
+        }
+
+        @TestMetadata("changeFunctionParameterWithAnonymousObject.kt")
+        public void testChangeFunctionParameterWithAnonymousObject() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/changeFunctionParameterWithAnonymousObject.kt");
+        }
+
         @TestMetadata("changeFunctionReturnTypeToNothing.kt")
         public void testChangeFunctionReturnTypeToNothing() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/changeFunctionReturnTypeToNothing.kt");
         }
 
+        @TestMetadata("changeFunctionReturnTypeToNullableUnit.kt")
+        public void testChangeFunctionReturnTypeToNullableUnit() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/changeFunctionReturnTypeToNullableUnit.kt");
+        }
+
         @TestMetadata("changeParameterType.kt")
         public void testChangeParameterType() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/changeParameterType.kt");
+        }
+
+        @TestMetadata("changeParameterTypeWithContextParameter.kt")
+        public void testChangeParameterTypeWithContextParameter() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/changeParameterTypeWithContextParameter.kt");
+        }
+
+        @TestMetadata("changeParameterTypeWithContextParameter1.kt")
+        public void testChangeParameterTypeWithContextParameter1() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/changeParameterTypeWithContextParameter1.kt");
         }
 
         @TestMetadata("changePropertyTypeToNothing.kt")
@@ -474,6 +524,11 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
         @TestMetadata("removeParameterNotAvailableForBuiltins.kt")
         public void testRemoveParameterNotAvailableForBuiltins() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/changeSignature/removeParameterNotAvailableForBuiltins.kt");
+        }
+
+        @TestMetadata("specifyNullableUnitReturnType.kt")
+        public void testSpecifyNullableUnitReturnType() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/changeSignature/specifyNullableUnitReturnType.kt");
         }
     }
 
@@ -815,6 +870,40 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
         }
 
         @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("../../../idea/tests/testData/quickfix/suppress/expressionBody")
+        public static class ExpressionBody extends AbstractK2QuickFixTest {
+            @java.lang.Override
+            @org.jetbrains.annotations.NotNull
+            public final KotlinPluginMode getPluginMode() {
+                return KotlinPluginMode.K2;
+            }
+
+            private void runTest(String testDataFilePath) throws Exception {
+                KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+            }
+
+            @TestMetadata("inExpressionBody.kt")
+            public void testInExpressionBody() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/suppress/expressionBody/inExpressionBody.kt");
+            }
+
+            @TestMetadata("inExpressionBody2.kt")
+            public void testInExpressionBody2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/suppress/expressionBody/inExpressionBody2.kt");
+            }
+
+            @TestMetadata("inExpressionBodyNewLine.kt")
+            public void testInExpressionBodyNewLine() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/suppress/expressionBody/inExpressionBodyNewLine.kt");
+            }
+
+            @TestMetadata("inExpressionBodyReturnType.kt")
+            public void testInExpressionBodyReturnType() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/suppress/expressionBody/inExpressionBodyReturnType.kt");
+            }
+        }
+
+        @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("../../../idea/tests/testData/quickfix/suppress/external")
         public static class External extends AbstractK2QuickFixTest {
             @java.lang.Override
@@ -867,11 +956,6 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
                 @TestMetadata("inDefaultArgument.kt")
                 public void testInDefaultArgument() throws Exception {
                     runTest("../../../idea/tests/testData/quickfix/suppress/forStatement/unavailable/inDefaultArgument.kt");
-                }
-
-                @TestMetadata("inExpressionBody.kt")
-                public void testInExpressionBody() throws Exception {
-                    runTest("../../../idea/tests/testData/quickfix/suppress/forStatement/unavailable/inExpressionBody.kt");
                 }
 
                 @TestMetadata("inLocalValInitializer.kt")
@@ -1712,320 +1796,706 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("../../../idea/tests/testData/quickfix/optIn")
-    public static class OptIn extends AbstractK2QuickFixTest {
-        @java.lang.Override
-        @org.jetbrains.annotations.NotNull
-        public final KotlinPluginMode getPluginMode() {
-            return KotlinPluginMode.K2;
+    public abstract static class OptIn extends AbstractK2QuickFixTest {
+        @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("../../../idea/tests/testData/quickfix/optIn/scripts")
+        public abstract static class Scripts extends AbstractK2QuickFixTest {
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../../idea/tests/testData/quickfix/optIn/scripts/general")
+            public static class General extends AbstractK2QuickFixTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("annotationInTopLevelProperty.kts")
+                public void testAnnotationInTopLevelProperty() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/annotationInTopLevelProperty.kts");
+                }
+
+                @TestMetadata("appendFileAnnotationToAnnotationList.kts")
+                public void testAppendFileAnnotationToAnnotationList() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/appendFileAnnotationToAnnotationList.kts");
+                }
+
+                @TestMetadata("appendFileAnnotationToOtherFileAnnotations.kts")
+                public void testAppendFileAnnotationToOtherFileAnnotations() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/appendFileAnnotationToOtherFileAnnotations.kts");
+                }
+
+                @TestMetadata("appendFileAnnotationWithAnnotationList.kts")
+                public void testAppendFileAnnotationWithAnnotationList() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/appendFileAnnotationWithAnnotationList.kts");
+                }
+
+                @TestMetadata("basicFunction.kts")
+                public void testBasicFunction() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/basicFunction.kts");
+                }
+
+                @TestMetadata("basicFunctionContainingClass.kts")
+                public void testBasicFunctionContainingClass() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/basicFunctionContainingClass.kts");
+                }
+
+                @TestMetadata("basicFunctionNotApplicable.kts")
+                public void testBasicFunctionNotApplicable() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/basicFunctionNotApplicable.kts");
+                }
+
+                @TestMetadata("basicModule.kts")
+                public void testBasicModule() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/basicModule.kts");
+                }
+
+                @TestMetadata("basicUseOptIn.kts")
+                public void testBasicUseOptIn() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/basicUseOptIn.kts");
+                }
+
+                @TestMetadata("classUseOptIn.kts")
+                public void testClassUseOptIn() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/classUseOptIn.kts");
+                }
+
+                @TestMetadata("existingFileAnnotationWithPackage.kts")
+                public void testExistingFileAnnotationWithPackage() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/existingFileAnnotationWithPackage.kts");
+                }
+
+                @TestMetadata("forbiddenTargetsExpression2.kts")
+                public void testForbiddenTargetsExpression2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/forbiddenTargetsExpression2.kts");
+                }
+
+                @TestMetadata("forbiddenTargetsInAnnotation.kts")
+                public void testForbiddenTargetsInAnnotation() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/forbiddenTargetsInAnnotation.kts");
+                }
+
+                @TestMetadata("functionInLocalClass.kts")
+                public void testFunctionInLocalClass() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/functionInLocalClass.kts");
+                }
+
+                @TestMetadata("getterUseSiteExplicit.kts")
+                public void testGetterUseSiteExplicit() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/getterUseSiteExplicit.kts");
+                }
+
+                @TestMetadata("getterUseSiteExplicitRemove.kts")
+                public void testGetterUseSiteExplicitRemove() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/getterUseSiteExplicitRemove.kts");
+                }
+
+                @TestMetadata("getterUseSiteImplicit.kts")
+                public void testGetterUseSiteImplicit() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/getterUseSiteImplicit.kts");
+                }
+
+                @TestMetadata("getterUseSiteImplicitRemove.kts")
+                public void testGetterUseSiteImplicitRemove() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/getterUseSiteImplicitRemove.kts");
+                }
+
+                @TestMetadata("hasOptInAnnotation.kts")
+                public void testHasOptInAnnotation() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/hasOptInAnnotation.kts");
+                }
+
+                @TestMetadata("hasOptInAnnotation2.kts")
+                public void testHasOptInAnnotation2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/hasOptInAnnotation2.kts");
+                }
+
+                @TestMetadata("hasOptInAnnotation3.kts")
+                public void testHasOptInAnnotation3() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/hasOptInAnnotation3.kts");
+                }
+
+                @TestMetadata("hasOptInAnnotationForClass.kts")
+                public void testHasOptInAnnotationForClass() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/hasOptInAnnotationForClass.kts");
+                }
+
+                @TestMetadata("hasOptInAnnotationForClass2.kts")
+                public void testHasOptInAnnotationForClass2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/hasOptInAnnotationForClass2.kts");
+                }
+
+                @TestMetadata("localFunction.kts")
+                public void testLocalFunction() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/localFunction.kts");
+                }
+
+                @TestMetadata("localVariableAnnotationNoInitRemove.kts")
+                public void testLocalVariableAnnotationNoInitRemove() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/localVariableAnnotationNoInitRemove.kts");
+                }
+
+                @TestMetadata("localVariableAnnotationRemove.kts")
+                public void testLocalVariableAnnotationRemove() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/localVariableAnnotationRemove.kts");
+                }
+
+                @TestMetadata("localVariableNoGetterAction.kts")
+                public void testLocalVariableNoGetterAction() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/localVariableNoGetterAction.kts");
+                }
+
+                @TestMetadata("nestedClasses.kts")
+                public void testNestedClasses() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/nestedClasses.kts");
+                }
+
+                @TestMetadata("newFileAnnotationWithPackage.kts")
+                public void testNewFileAnnotationWithPackage() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/newFileAnnotationWithPackage.kts");
+                }
+
+                @TestMetadata("override.kts")
+                public void testOverride() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/override.kts");
+                }
+
+                @TestMetadata("propagateOptIn.kts")
+                public void testPropagateOptIn() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn.kts");
+                }
+
+                @TestMetadata("propagateOptIn2.kts")
+                public void testPropagateOptIn2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn2.kts");
+                }
+
+                @TestMetadata("propagateOptIn3.kts")
+                public void testPropagateOptIn3() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn3.kts");
+                }
+
+                @TestMetadata("propagateOptIn4.kts")
+                public void testPropagateOptIn4() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn4.kts");
+                }
+
+                @TestMetadata("propagateOptIn5.kts")
+                public void testPropagateOptIn5() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn5.kts");
+                }
+
+                @TestMetadata("propagateOptIn6.kts")
+                public void testPropagateOptIn6() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn6.kts");
+                }
+
+                @TestMetadata("propagateOptIn7.kts")
+                public void testPropagateOptIn7() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn7.kts");
+                }
+
+                @TestMetadata("propagateOptIn8.kts")
+                public void testPropagateOptIn8() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateOptIn8.kts");
+                }
+
+                @TestMetadata("propagateSubclassOptInRequired.kts")
+                public void testPropagateSubclassOptInRequired() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateSubclassOptInRequired.kts");
+                }
+
+                @TestMetadata("propagateSubclassOptInRequired2.kts")
+                public void testPropagateSubclassOptInRequired2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateSubclassOptInRequired2.kts");
+                }
+
+                @TestMetadata("propagateSubclassOptInRequired3.kts")
+                public void testPropagateSubclassOptInRequired3() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateSubclassOptInRequired3.kts");
+                }
+
+                @TestMetadata("propagateSubclassOptInRequired4.kts")
+                public void testPropagateSubclassOptInRequired4() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateSubclassOptInRequired4.kts");
+                }
+
+                @TestMetadata("propagateSubclassOptInRequired5.kts")
+                public void testPropagateSubclassOptInRequired5() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propagateSubclassOptInRequired5.kts");
+                }
+
+                @TestMetadata("propertyInConstructor.kts")
+                public void testPropertyInConstructor() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propertyInConstructor.kts");
+                }
+
+                @TestMetadata("propertyInConstructorAddOptInToClass.kts")
+                public void testPropertyInConstructorAddOptInToClass() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propertyInConstructorAddOptInToClass.kts");
+                }
+
+                @TestMetadata("propertyInConstructorAddOptInToConstructor.kts")
+                public void testPropertyInConstructorAddOptInToConstructor() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/propertyInConstructorAddOptInToConstructor.kts");
+                }
+
+                @TestMetadata("sam.kts")
+                public void testSam() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/sam.kts");
+                }
+
+                @TestMetadata("sam2.kts")
+                public void testSam2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/sam2.kts");
+                }
+
+                @TestMetadata("samWithAnnotation.kts")
+                public void testSamWithAnnotation() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/samWithAnnotation.kts");
+                }
+
+                @TestMetadata("typeAlias.kts")
+                public void testTypeAlias() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/typeAlias.kts");
+                }
+
+                @TestMetadata("typeInTopLevelProperty.kts")
+                public void testTypeInTopLevelProperty() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/typeInTopLevelProperty.kts");
+                }
+
+                @TestMetadata("valueParameterAnnotationAddExplicitUseSite.kts")
+                public void testValueParameterAnnotationAddExplicitUseSite() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/valueParameterAnnotationAddExplicitUseSite.kts");
+                }
+
+                @TestMetadata("valueParameterAnnotationRemove.kts")
+                public void testValueParameterAnnotationRemove() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/general/valueParameterAnnotationRemove.kts");
+                }
+            }
+
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements")
+            public static class WithLocalElements extends AbstractK2QuickFixTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("containingClass.kts")
+                public void testContainingClass() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/containingClass.kts");
+                }
+
+                @TestMetadata("containingClassWithInnerClass.kts")
+                public void testContainingClassWithInnerClass() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/containingClassWithInnerClass.kts");
+                }
+
+                @TestMetadata("containingObject.kts")
+                public void testContainingObject() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/containingObject.kts");
+                }
+
+                @TestMetadata("doubleExperementalApi.kts")
+                public void testDoubleExperementalApi() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/doubleExperementalApi.kts");
+                }
+
+                @TestMetadata("doubleExperementalApi2.kts")
+                public void testDoubleExperementalApi2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/doubleExperementalApi2.kts");
+                }
+
+                @TestMetadata("funWithReturnType.kts")
+                public void testFunWithReturnType() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/funWithReturnType.kts");
+                }
+
+                @TestMetadata("funWithTypeParameter.kts")
+                public void testFunWithTypeParameter() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/funWithTypeParameter.kts");
+                }
+
+                @TestMetadata("sam.kts")
+                public void testSam() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/sam.kts");
+                }
+
+                @TestMetadata("sam2.kts")
+                public void testSam2() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/sam2.kts");
+                }
+
+                @TestMetadata("sam3.kts")
+                public void testSam3() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/sam3.kts");
+                }
+
+                @TestMetadata("samWithAnnotation.kts")
+                public void testSamWithAnnotation() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/samWithAnnotation.kts");
+                }
+
+                @TestMetadata("simple.kts")
+                public void testSimple() throws Exception {
+                    runTest("../../../idea/tests/testData/quickfix/optIn/scripts/withLocalElements/simple.kts");
+                }
+            }
         }
 
-        private void runTest(String testDataFilePath) throws Exception {
-            KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
-        }
+        @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("../../../idea/tests/testData/quickfix/optIn")
+        public static class Uncategorized extends AbstractK2QuickFixTest {
+            @java.lang.Override
+            @org.jetbrains.annotations.NotNull
+            public final KotlinPluginMode getPluginMode() {
+                return KotlinPluginMode.K2;
+            }
 
-        @TestMetadata("annotationInTopLevelProperty.kt")
-        public void testAnnotationInTopLevelProperty() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/annotationInTopLevelProperty.kt");
-        }
+            private void runTest(String testDataFilePath) throws Exception {
+                KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+            }
 
-        @TestMetadata("appendFileAnnotationToAnnotationList.kt")
-        public void testAppendFileAnnotationToAnnotationList() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/appendFileAnnotationToAnnotationList.kt");
-        }
+            @TestMetadata("annotationInTopLevelProperty.kt")
+            public void testAnnotationInTopLevelProperty() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/annotationInTopLevelProperty.kt");
+            }
 
-        @TestMetadata("appendFileAnnotationToOtherFileAnnotations.kt")
-        public void testAppendFileAnnotationToOtherFileAnnotations() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/appendFileAnnotationToOtherFileAnnotations.kt");
-        }
+            @TestMetadata("appendFileAnnotationToAnnotationList.kt")
+            public void testAppendFileAnnotationToAnnotationList() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/appendFileAnnotationToAnnotationList.kt");
+            }
 
-        @TestMetadata("appendFileAnnotationWithAnnotationList.kt")
-        public void testAppendFileAnnotationWithAnnotationList() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/appendFileAnnotationWithAnnotationList.kt");
-        }
+            @TestMetadata("appendFileAnnotationToOtherFileAnnotations.kt")
+            public void testAppendFileAnnotationToOtherFileAnnotations() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/appendFileAnnotationToOtherFileAnnotations.kt");
+            }
 
-        @TestMetadata("basicFunction.kt")
-        public void testBasicFunction() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/basicFunction.kt");
-        }
+            @TestMetadata("appendFileAnnotationWithAnnotationList.kt")
+            public void testAppendFileAnnotationWithAnnotationList() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/appendFileAnnotationWithAnnotationList.kt");
+            }
 
-        @TestMetadata("basicFunctionContainingClass.kt")
-        public void testBasicFunctionContainingClass() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/basicFunctionContainingClass.kt");
-        }
+            @TestMetadata("argumentUseSiteOptIn.kt")
+            public void testArgumentUseSiteOptIn() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/argumentUseSiteOptIn.kt");
+            }
 
-        @TestMetadata("basicFunctionNotApplicable.kt")
-        public void testBasicFunctionNotApplicable() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/basicFunctionNotApplicable.kt");
-        }
+            @TestMetadata("assignmentUseSiteOptIn.kt")
+            public void testAssignmentUseSiteOptIn() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/assignmentUseSiteOptIn.kt");
+            }
 
-        @TestMetadata("basicModule.kt")
-        public void testBasicModule() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/basicModule.kt");
-        }
+            @TestMetadata("basicFunction.kt")
+            public void testBasicFunction() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/basicFunction.kt");
+            }
 
-        @TestMetadata("basicUseOptIn.kt")
-        public void testBasicUseOptIn() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/basicUseOptIn.kt");
-        }
+            @TestMetadata("basicFunctionContainingClass.kt")
+            public void testBasicFunctionContainingClass() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/basicFunctionContainingClass.kt");
+            }
 
-        @TestMetadata("classUseOptIn.kt")
-        public void testClassUseOptIn() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/classUseOptIn.kt");
-        }
+            @TestMetadata("basicFunctionNotApplicable.kt")
+            public void testBasicFunctionNotApplicable() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/basicFunctionNotApplicable.kt");
+            }
 
-        @TestMetadata("existingFileAnnotationWithPackage.kt")
-        public void testExistingFileAnnotationWithPackage() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/existingFileAnnotationWithPackage.kt");
-        }
+            @TestMetadata("basicModule.kt")
+            public void testBasicModule() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/basicModule.kt");
+            }
 
-        @TestMetadata("forbiddenTargetsExpression.kt")
-        public void testForbiddenTargetsExpression() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsExpression.kt");
-        }
+            @TestMetadata("basicUseOptIn.kt")
+            public void testBasicUseOptIn() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/basicUseOptIn.kt");
+            }
 
-        @TestMetadata("forbiddenTargetsExpression2.kt")
-        public void testForbiddenTargetsExpression2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsExpression2.kt");
-        }
+            @TestMetadata("classUseOptIn.kt")
+            public void testClassUseOptIn() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/classUseOptIn.kt");
+            }
 
-        @TestMetadata("forbiddenTargetsExpression3.kt")
-        public void testForbiddenTargetsExpression3() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsExpression3.kt");
-        }
+            @TestMetadata("destructuringDeclarationOnFunction.kt")
+            public void testDestructuringDeclarationOnFunction() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/destructuringDeclarationOnFunction.kt");
+            }
 
-        @TestMetadata("forbiddenTargetsInAnnotation.kt")
-        public void testForbiddenTargetsInAnnotation() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsInAnnotation.kt");
-        }
+            @TestMetadata("destructuringDeclarationOnStatement.kt")
+            public void testDestructuringDeclarationOnStatement() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/destructuringDeclarationOnStatement.kt");
+            }
 
-        @TestMetadata("functionInLocalClass.kt")
-        public void testFunctionInLocalClass() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/functionInLocalClass.kt");
-        }
+            @TestMetadata("existingFileAnnotationWithPackage.kt")
+            public void testExistingFileAnnotationWithPackage() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/existingFileAnnotationWithPackage.kt");
+            }
 
-        @TestMetadata("getterUseSiteExplicit.kt")
-        public void testGetterUseSiteExplicit() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteExplicit.kt");
-        }
+            @TestMetadata("expressionUseSiteOptIn.kt")
+            public void testExpressionUseSiteOptIn() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/expressionUseSiteOptIn.kt");
+            }
 
-        @TestMetadata("getterUseSiteExplicitRemove.kt")
-        public void testGetterUseSiteExplicitRemove() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteExplicitRemove.kt");
-        }
+            @TestMetadata("forbiddenTargetsExpression.kt")
+            public void testForbiddenTargetsExpression() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsExpression.kt");
+            }
 
-        @TestMetadata("getterUseSiteImplicit.kt")
-        public void testGetterUseSiteImplicit() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteImplicit.kt");
-        }
+            @TestMetadata("forbiddenTargetsExpression2.kt")
+            public void testForbiddenTargetsExpression2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsExpression2.kt");
+            }
 
-        @TestMetadata("getterUseSiteImplicitRemove.kt")
-        public void testGetterUseSiteImplicitRemove() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteImplicitRemove.kt");
-        }
+            @TestMetadata("forbiddenTargetsExpression3.kt")
+            public void testForbiddenTargetsExpression3() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsExpression3.kt");
+            }
 
-        @TestMetadata("hasOptInAnnotation.kt")
-        public void testHasOptInAnnotation() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotation.kt");
-        }
+            @TestMetadata("forbiddenTargetsInAnnotation.kt")
+            public void testForbiddenTargetsInAnnotation() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/forbiddenTargetsInAnnotation.kt");
+            }
 
-        @TestMetadata("hasOptInAnnotation2.kt")
-        public void testHasOptInAnnotation2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotation2.kt");
-        }
+            @TestMetadata("functionInLocalClass.kt")
+            public void testFunctionInLocalClass() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/functionInLocalClass.kt");
+            }
 
-        @TestMetadata("hasOptInAnnotation3.kt")
-        public void testHasOptInAnnotation3() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotation3.kt");
-        }
+            @TestMetadata("getterUseSiteExplicit.kt")
+            public void testGetterUseSiteExplicit() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteExplicit.kt");
+            }
 
-        @TestMetadata("hasOptInAnnotationForClass.kt")
-        public void testHasOptInAnnotationForClass() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotationForClass.kt");
-        }
+            @TestMetadata("getterUseSiteExplicitRemove.kt")
+            public void testGetterUseSiteExplicitRemove() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteExplicitRemove.kt");
+            }
 
-        @TestMetadata("hasOptInAnnotationForClass2.kt")
-        public void testHasOptInAnnotationForClass2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotationForClass2.kt");
-        }
+            @TestMetadata("getterUseSiteImplicit.kt")
+            public void testGetterUseSiteImplicit() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteImplicit.kt");
+            }
 
-        @TestMetadata("invisibleAnnotation.kt")
-        public void testInvisibleAnnotation() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/invisibleAnnotation.kt");
-        }
+            @TestMetadata("getterUseSiteImplicitRemove.kt")
+            public void testGetterUseSiteImplicitRemove() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/getterUseSiteImplicitRemove.kt");
+            }
 
-        @TestMetadata("invisibleAnnotationFir.kt")
-        public void testInvisibleAnnotationFir() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/invisibleAnnotationFir.kt");
-        }
+            @TestMetadata("hasOptInAnnotation.kt")
+            public void testHasOptInAnnotation() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotation.kt");
+            }
 
-        @TestMetadata("localFunction.kt")
-        public void testLocalFunction() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/localFunction.kt");
-        }
+            @TestMetadata("hasOptInAnnotation2.kt")
+            public void testHasOptInAnnotation2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotation2.kt");
+            }
 
-        @TestMetadata("localVariableAnnotationNoInitRemove.kt")
-        public void testLocalVariableAnnotationNoInitRemove() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/localVariableAnnotationNoInitRemove.kt");
-        }
+            @TestMetadata("hasOptInAnnotation3.kt")
+            public void testHasOptInAnnotation3() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotation3.kt");
+            }
 
-        @TestMetadata("localVariableAnnotationRemove.kt")
-        public void testLocalVariableAnnotationRemove() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/localVariableAnnotationRemove.kt");
-        }
+            @TestMetadata("hasOptInAnnotationForClass.kt")
+            public void testHasOptInAnnotationForClass() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotationForClass.kt");
+            }
 
-        @TestMetadata("localVariableNoGetterAction.kt")
-        public void testLocalVariableNoGetterAction() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/localVariableNoGetterAction.kt");
-        }
+            @TestMetadata("hasOptInAnnotationForClass2.kt")
+            public void testHasOptInAnnotationForClass2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/hasOptInAnnotationForClass2.kt");
+            }
 
-        @TestMetadata("nestedClasses.kt")
-        public void testNestedClasses() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/nestedClasses.kt");
-        }
+            @TestMetadata("invisibleAnnotation.kt")
+            public void testInvisibleAnnotation() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/invisibleAnnotation.kt");
+            }
 
-        @TestMetadata("nestedClassesFir.kt")
-        public void testNestedClassesFir() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/nestedClassesFir.kt");
-        }
+            @TestMetadata("invisibleAnnotationFir.kt")
+            public void testInvisibleAnnotationFir() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/invisibleAnnotationFir.kt");
+            }
 
-        @TestMetadata("newFileAnnotationWithPackage.kt")
-        public void testNewFileAnnotationWithPackage() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/newFileAnnotationWithPackage.kt");
-        }
+            @TestMetadata("localFunction.kt")
+            public void testLocalFunction() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/localFunction.kt");
+            }
 
-        @TestMetadata("nonTopLevelAnnotation.kt")
-        public void testNonTopLevelAnnotation() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/nonTopLevelAnnotation.kt");
-        }
+            @TestMetadata("localVariableAnnotationNoInitRemove.kt")
+            public void testLocalVariableAnnotationNoInitRemove() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/localVariableAnnotationNoInitRemove.kt");
+            }
 
-        @TestMetadata("nonTopLevelAnnotation2.kt")
-        public void testNonTopLevelAnnotation2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/nonTopLevelAnnotation2.kt");
-        }
+            @TestMetadata("localVariableAnnotationRemove.kt")
+            public void testLocalVariableAnnotationRemove() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/localVariableAnnotationRemove.kt");
+            }
 
-        @TestMetadata("optInUnused.kt")
-        public void testOptInUnused() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/optInUnused.kt");
-        }
+            @TestMetadata("localVariableNoGetterAction.kt")
+            public void testLocalVariableNoGetterAction() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/localVariableNoGetterAction.kt");
+            }
 
-        @TestMetadata("override.kt")
-        public void testOverride() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/override.kt");
-        }
+            @TestMetadata("nestedClasses.kt")
+            public void testNestedClasses() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/nestedClasses.kt");
+            }
 
-        @TestMetadata("propagateOptIn.kt")
-        public void testPropagateOptIn() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn.kt");
-        }
+            @TestMetadata("nestedClassesFir.kt")
+            public void testNestedClassesFir() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/nestedClassesFir.kt");
+            }
 
-        @TestMetadata("propagateOptIn2.kt")
-        public void testPropagateOptIn2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn2.kt");
-        }
+            @TestMetadata("newFileAnnotationWithPackage.kt")
+            public void testNewFileAnnotationWithPackage() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/newFileAnnotationWithPackage.kt");
+            }
 
-        @TestMetadata("propagateOptIn3.kt")
-        public void testPropagateOptIn3() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn3.kt");
-        }
+            @TestMetadata("nonTopLevelAnnotation.kt")
+            public void testNonTopLevelAnnotation() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/nonTopLevelAnnotation.kt");
+            }
 
-        @TestMetadata("propagateOptIn4.kt")
-        public void testPropagateOptIn4() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn4.kt");
-        }
+            @TestMetadata("nonTopLevelAnnotation2.kt")
+            public void testNonTopLevelAnnotation2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/nonTopLevelAnnotation2.kt");
+            }
 
-        @TestMetadata("propagateOptIn5.kt")
-        public void testPropagateOptIn5() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn5.kt");
-        }
+            @TestMetadata("optInUnused.kt")
+            public void testOptInUnused() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/optInUnused.kt");
+            }
 
-        @TestMetadata("propagateOptIn6.kt")
-        public void testPropagateOptIn6() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn6.kt");
-        }
+            @TestMetadata("override.kt")
+            public void testOverride() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/override.kt");
+            }
 
-        @TestMetadata("propagateOptIn7.kt")
-        public void testPropagateOptIn7() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn7.kt");
-        }
+            @TestMetadata("propagateOptIn.kt")
+            public void testPropagateOptIn() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn.kt");
+            }
 
-        @TestMetadata("propagateOptIn8.kt")
-        public void testPropagateOptIn8() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn8.kt");
-        }
+            @TestMetadata("propagateOptIn2.kt")
+            public void testPropagateOptIn2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn2.kt");
+            }
 
-        @TestMetadata("propagateOptIn8Fir.kt")
-        public void testPropagateOptIn8Fir() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn8Fir.kt");
-        }
+            @TestMetadata("propagateOptIn3.kt")
+            public void testPropagateOptIn3() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn3.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInMultipleMarkers1.kt")
-        public void testPropagateSubclassOptInMultipleMarkers1() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInMultipleMarkers1.kt");
-        }
+            @TestMetadata("propagateOptIn4.kt")
+            public void testPropagateOptIn4() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn4.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInMultipleMarkers2.kt")
-        public void testPropagateSubclassOptInMultipleMarkers2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInMultipleMarkers2.kt");
-        }
+            @TestMetadata("propagateOptIn5.kt")
+            public void testPropagateOptIn5() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn5.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInRequired.kt")
-        public void testPropagateSubclassOptInRequired() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired.kt");
-        }
+            @TestMetadata("propagateOptIn6.kt")
+            public void testPropagateOptIn6() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn6.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInRequired2.kt")
-        public void testPropagateSubclassOptInRequired2() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired2.kt");
-        }
+            @TestMetadata("propagateOptIn7.kt")
+            public void testPropagateOptIn7() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn7.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInRequired3.kt")
-        public void testPropagateSubclassOptInRequired3() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired3.kt");
-        }
+            @TestMetadata("propagateOptIn8.kt")
+            public void testPropagateOptIn8() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn8.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInRequired4.kt")
-        public void testPropagateSubclassOptInRequired4() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired4.kt");
-        }
+            @TestMetadata("propagateOptIn8Fir.kt")
+            public void testPropagateOptIn8Fir() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateOptIn8Fir.kt");
+            }
 
-        @TestMetadata("propagateSubclassOptInRequired5.kt")
-        public void testPropagateSubclassOptInRequired5() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired5.kt");
-        }
+            @TestMetadata("propagateSubclassOptInMultipleMarkers1.kt")
+            public void testPropagateSubclassOptInMultipleMarkers1() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInMultipleMarkers1.kt");
+            }
 
-        @TestMetadata("propertyInConstructor.kt")
-        public void testPropertyInConstructor() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propertyInConstructor.kt");
-        }
+            @TestMetadata("propagateSubclassOptInMultipleMarkers2.kt")
+            public void testPropagateSubclassOptInMultipleMarkers2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInMultipleMarkers2.kt");
+            }
 
-        @TestMetadata("propertyInConstructorAddOptInToClass.kt")
-        public void testPropertyInConstructorAddOptInToClass() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propertyInConstructorAddOptInToClass.kt");
-        }
+            @TestMetadata("propagateSubclassOptInRequired.kt")
+            public void testPropagateSubclassOptInRequired() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired.kt");
+            }
 
-        @TestMetadata("propertyInConstructorAddOptInToConstructor.kt")
-        public void testPropertyInConstructorAddOptInToConstructor() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/propertyInConstructorAddOptInToConstructor.kt");
-        }
+            @TestMetadata("propagateSubclassOptInRequired2.kt")
+            public void testPropagateSubclassOptInRequired2() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired2.kt");
+            }
 
-        @TestMetadata("typeAlias.kt")
-        public void testTypeAlias() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/typeAlias.kt");
-        }
+            @TestMetadata("propagateSubclassOptInRequired3.kt")
+            public void testPropagateSubclassOptInRequired3() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired3.kt");
+            }
 
-        @TestMetadata("typeInTopLevelProperty.kt")
-        public void testTypeInTopLevelProperty() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/typeInTopLevelProperty.kt");
-        }
+            @TestMetadata("propagateSubclassOptInRequired4.kt")
+            public void testPropagateSubclassOptInRequired4() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired4.kt");
+            }
 
-        @TestMetadata("valueParameterAnnotationAddExplicitUseSite.kt")
-        public void testValueParameterAnnotationAddExplicitUseSite() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/valueParameterAnnotationAddExplicitUseSite.kt");
-        }
+            @TestMetadata("propagateSubclassOptInRequired5.kt")
+            public void testPropagateSubclassOptInRequired5() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propagateSubclassOptInRequired5.kt");
+            }
 
-        @TestMetadata("valueParameterAnnotationRemove.kt")
-        public void testValueParameterAnnotationRemove() throws Exception {
-            runTest("../../../idea/tests/testData/quickfix/optIn/valueParameterAnnotationRemove.kt");
+            @TestMetadata("propertyInConstructor.kt")
+            public void testPropertyInConstructor() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propertyInConstructor.kt");
+            }
+
+            @TestMetadata("propertyInConstructorAddOptInToClass.kt")
+            public void testPropertyInConstructorAddOptInToClass() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propertyInConstructorAddOptInToClass.kt");
+            }
+
+            @TestMetadata("propertyInConstructorAddOptInToConstructor.kt")
+            public void testPropertyInConstructorAddOptInToConstructor() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/propertyInConstructorAddOptInToConstructor.kt");
+            }
+
+            @TestMetadata("typeAlias.kt")
+            public void testTypeAlias() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/typeAlias.kt");
+            }
+
+            @TestMetadata("typeInTopLevelProperty.kt")
+            public void testTypeInTopLevelProperty() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/typeInTopLevelProperty.kt");
+            }
+
+            @TestMetadata("valueParameterAnnotationAddExplicitUseSite.kt")
+            public void testValueParameterAnnotationAddExplicitUseSite() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/valueParameterAnnotationAddExplicitUseSite.kt");
+            }
+
+            @TestMetadata("valueParameterAnnotationRemove.kt")
+            public void testValueParameterAnnotationRemove() throws Exception {
+                runTest("../../../idea/tests/testData/quickfix/optIn/valueParameterAnnotationRemove.kt");
+            }
         }
     }
 
@@ -2238,6 +2708,11 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
             runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/AnnotationAllUseSiteTarget_2_2.kt");
         }
 
+        @TestMetadata("AnnotationAllUseSiteTarget_2_2_Increase_Version.kt")
+        public void testAnnotationAllUseSiteTarget_2_2_Increase_Version() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/AnnotationAllUseSiteTarget_2_2_Increase_Version.kt");
+        }
+
         @TestMetadata("BreakContinueInInlineLambdas_2_0.kt")
         public void testBreakContinueInInlineLambdas_2_0() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/BreakContinueInInlineLambdas_2_0.kt");
@@ -2263,6 +2738,16 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
             runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/ContextParameters_2_2.kt");
         }
 
+        @TestMetadata("ExplicitBackingFields_2_2.kt")
+        public void testExplicitBackingFields_2_2() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/ExplicitBackingFields_2_2.kt");
+        }
+
+        @TestMetadata("ExplicitBackingFields_2_3.kt")
+        public void testExplicitBackingFields_2_3() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/ExplicitBackingFields_2_3.kt");
+        }
+
         @TestMetadata("MultiDollarInterpolation_2_0.kt")
         public void testMultiDollarInterpolation_2_0() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/MultiDollarInterpolation_2_0.kt");
@@ -2271,6 +2756,11 @@ public abstract class K2QuickFixTestGenerated extends AbstractK2QuickFixTest {
         @TestMetadata("MultiDollarInterpolation_2_1.kt")
         public void testMultiDollarInterpolation_2_1() throws Exception {
             runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/MultiDollarInterpolation_2_1.kt");
+        }
+
+        @TestMetadata("MultiDollarInterpolation_2_1_Increase_Version.kt")
+        public void testMultiDollarInterpolation_2_1_Increase_Version() throws Exception {
+            runTest("../../../idea/tests/testData/quickfix/unsupportedFeature/MultiDollarInterpolation_2_1_Increase_Version.kt");
         }
 
         @TestMetadata("MultiDollarInterpolation_2_2.kt")

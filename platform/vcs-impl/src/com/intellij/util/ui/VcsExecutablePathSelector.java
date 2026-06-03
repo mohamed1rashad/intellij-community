@@ -3,12 +3,14 @@ package com.intellij.util.ui;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
+import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextComponentAccessor;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.platform.eel.annotations.MultiRoutingFileSystemPath;
 import com.intellij.ui.DocumentAdapter;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
@@ -19,9 +21,13 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JButton;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
 import javax.swing.event.DocumentEvent;
-import java.awt.*;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.util.Objects;
 
 public class VcsExecutablePathSelector {
@@ -34,12 +40,12 @@ public class VcsExecutablePathSelector {
   private @Nullable String mySavedPath;
   private @Nullable String myAutoDetectedPath = null;
 
-  public VcsExecutablePathSelector(@NotNull @Nls String vcsName, @Nullable Disposable disposable, @NotNull ExecutableHandler handler) {
+  public VcsExecutablePathSelector(@Nullable Project project, @NotNull @Nls String vcsName, @Nullable Disposable disposable, @NotNull ExecutableHandler handler) {
     BorderLayoutPanel panel = JBUI.Panels.simplePanel(UIUtil.DEFAULT_HGAP, 0);
 
     myPathSelector = new TextFieldWithBrowseButton(null, disposable);
     var descriptor = FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor().withTitle(VcsBundle.message("executable.select.title"));
-    myPathSelector.addBrowseFolderListener(null, descriptor, new MyTextComponentAccessor(handler));
+    myPathSelector.addBrowseFolderListener(project, descriptor, new MyTextComponentAccessor(handler));
     myPathSelector.getTextField().getDocument().addDocumentListener(new DocumentAdapter() {
       @Override
       protected void textChanged(@NotNull DocumentEvent e) {
@@ -171,7 +177,7 @@ public class VcsExecutablePathSelector {
   }
 
   public interface ExecutableHandler {
-    default @Nullable String patchExecutable(@NotNull String executable) {
+    default @Nullable String patchExecutable(@NotNull @MultiRoutingFileSystemPath String executable) {
       return null;
     }
 

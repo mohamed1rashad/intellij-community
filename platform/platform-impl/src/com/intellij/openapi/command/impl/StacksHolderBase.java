@@ -13,7 +13,10 @@ import com.intellij.util.containers.WeakList;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 @ApiStatus.Internal
 public abstract class StacksHolderBase<E, ECollection extends Collection<E>>  {
@@ -37,7 +40,7 @@ public abstract class StacksHolderBase<E, ECollection extends Collection<E>>  {
     VirtualFile file = r.getFile();
 
     if (file.isInLocalFileSystem()) {
-      result = myDocumentStacks.computeIfAbsent(r, __ -> newCollection());
+      result = myDocumentStacks.computeIfAbsent(r, _ -> newCollection());
     }
     else {
       result = addWeaklyTrackedEmptyStack(file, myNonlocalVirtualFilesWithStacks);

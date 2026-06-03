@@ -3,12 +3,20 @@ package com.jetbrains.python.refactoring;
 
 import com.intellij.ide.fileTemplates.FileTemplate;
 import com.intellij.ide.fileTemplates.FileTemplateManager;
+import com.intellij.idea.TestFor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.ProjectScope;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.refactoring.listeners.RefactoringEventData;
+import com.intellij.refactoring.listeners.RefactoringEventListener;
 import com.intellij.refactoring.move.moveFilesOrDirectories.MoveFilesOrDirectoriesProcessor;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.util.Consumer;
@@ -19,7 +27,12 @@ import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.formatter.PyCodeStyleSettings;
 import com.jetbrains.python.namespacePackages.PyNamespacePackagesService;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyElement;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyTargetExpression;
 import com.jetbrains.python.psi.stubs.PyClassNameIndex;
 import com.jetbrains.python.psi.stubs.PyFunctionNameIndex;
 import com.jetbrains.python.psi.stubs.PyVariableNameIndex;
@@ -37,6 +50,25 @@ import java.util.List;
 import static com.jetbrains.python.refactoring.move.moduleMembers.PyMoveModuleMembersHelper.isMovableModuleMember;
 
 public class PyMoveTest extends PyTestCase {
+  private List<String> myEvents = new ArrayList<>();
+
+  @Override
+  protected void setUp() throws Exception {
+    super.setUp();
+    var connection = myFixture.getProject().getMessageBus().connect(getTestRootDisposable());
+    connection.subscribe(RefactoringEventListener.REFACTORING_EVENT_TOPIC, new RefactoringEventListener() {
+      @Override
+      public void refactoringStarted(String refactoringId, RefactoringEventData beforeData) {
+        myEvents.add("started: " + refactoringId);
+      }
+
+      @Override
+      public void refactoringDone(String refactoringId, RefactoringEventData afterData) {
+        myEvents.add("done: " + refactoringId);
+      }
+    });
+  }
+
   public void testFunction() {
     doMoveSymbolTest("f", "b.py");
   }
@@ -282,6 +314,35 @@ public class PyMoveTest extends PyTestCase {
     }
   }
 
+  @TestFor(issues = "PY-6591")
+  public void testImportForMovedElementWithPreferredQualifiedImportStyleModule() {
+    final boolean defaultImportStyle = PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT;
+    try {
+      PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT = false;
+      doMoveSymbolTest("usage", "lib/dst.py");
+    }
+    finally {
+      PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT = defaultImportStyle;
+    }
+  }
+
+  @TestFor(issues = "PY-6591")
+  public void testImportForMovedElementWithPreferredFromImportStyleModule() {
+    doMoveSymbolTest("usage", "lib/dst.py");
+  }
+
+  @TestFor(issues = "PY-84659")
+  public void testQualifiedUsageRespectsPreferFromImport() {
+    final boolean defaultImportStyle = PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT;
+    try {
+      PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT = true;
+      doMoveSymbolTest("C", "lib/dst.py");
+    }
+    finally {
+      PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT = defaultImportStyle;
+    }
+  }
+
   // PY-10553
   public void testMoveModuleWithSameNameAsSymbolInside() {
     doMoveFileTest("Animals/Carnivore.py", "Animals/test");
@@ -493,6 +554,21 @@ public class PyMoveTest extends PyTestCase {
   // PY-23831
   public void testWithImportedTypeComments() {
     doMoveSymbolTest("test", "dst.py");
+  }
+
+  @TestFor(issues = "PY-86616")
+  public void testMoveEvents() {
+    var fileA = myFixture.configureByText("a.py", "class C: pass");
+    var destination = myFixture.configureByText("b.py", "").getVirtualFile();
+    var pyClass = PsiTreeUtil.findChildOfType(fileA, PyClass.class);
+
+    new PyMoveModuleMembersProcessor(new PyClass[]{pyClass}, destination.getPath()).run();
+
+    assertContainsElements(
+      myEvents,
+      "started: refactoring.python.move.module.members",
+      "done: refactoring.python.move.module.members"
+    );
   }
 
   private void doComparingDirectories(@NotNull Consumer<VirtualFile> testDirConsumer) {

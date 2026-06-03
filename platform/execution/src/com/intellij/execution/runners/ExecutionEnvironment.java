@@ -1,9 +1,22 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.runners;
 
-import com.intellij.execution.*;
-import com.intellij.execution.configurations.*;
-import com.intellij.execution.target.*;
+import com.intellij.execution.DefaultExecutionTarget;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.ExecutionTarget;
+import com.intellij.execution.Executor;
+import com.intellij.execution.RunnerAndConfigurationSettings;
+import com.intellij.execution.configurations.ConfigurationPerRunnerSettings;
+import com.intellij.execution.configurations.ModuleBasedConfiguration;
+import com.intellij.execution.configurations.RunProfile;
+import com.intellij.execution.configurations.RunProfileState;
+import com.intellij.execution.configurations.RunnerSettings;
+import com.intellij.execution.target.TargetEnvironment;
+import com.intellij.execution.target.TargetEnvironmentAwareRunProfile;
+import com.intellij.execution.target.TargetEnvironmentAwareRunProfileState;
+import com.intellij.execution.target.TargetEnvironmentConfigurations;
+import com.intellij.execution.target.TargetEnvironmentRequest;
+import com.intellij.execution.target.TargetProgressIndicator;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.ide.ui.IdeUiService;
 import com.intellij.openapi.Disposable;
@@ -13,6 +26,7 @@ import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.UserDataHolderBase;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -27,6 +41,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * @see <a href="https://plugins.jetbrains.com/docs/intellij/execution.html">Execution (IntelliJ Platform Docs)</a>
  */
 public final class ExecutionEnvironment extends UserDataHolderBase implements Disposable {
+  private static final Key<Boolean> AUTO_TRIGGERED = Key.create("AUTO_TRIGGERED");
+
   private static final AtomicLong myIdHolder = new AtomicLong(1L);
 
   private final @NotNull Project myProject;
@@ -102,7 +118,6 @@ public final class ExecutionEnvironment extends UserDataHolderBase implements Di
     myRunnerAndConfigurationSettings = settings;
 
     myRunner = runner;
-
     this.callback = callback;
   }
 
@@ -297,5 +312,15 @@ public final class ExecutionEnvironment extends UserDataHolderBase implements Di
 
   public void setRunningCurrentFile(boolean runningCurrentFile) {
     myRunningCurrentFile = runningCurrentFile;
+  }
+
+  /// Indicates that the run was triggered automatically (e.g., by Auto Test).
+  public boolean isAutoTriggered() {
+    return Boolean.TRUE.equals(getCopyableUserData(AUTO_TRIGGERED));
+  }
+
+  /// Set whether the run was triggered automatically (e.g., by Auto Test).
+  public void setAutoTriggered(boolean autoTriggered) {
+    putCopyableUserData(AUTO_TRIGGERED, autoTriggered);
   }
 }

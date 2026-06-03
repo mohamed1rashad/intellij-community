@@ -1,6 +1,6 @@
 ### auto-generated section `build intellij.kotlin.navigation` start
 load("//build:compiler-options.bzl", "create_kotlinc_options")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 create_kotlinc_options(
   name = "custom_navigation",
@@ -11,18 +11,13 @@ create_kotlinc_options(
   ]
 )
 
-resourcegroup(
-  name = "navigation_resources",
-  srcs = glob(["resouces/**/*"]),
-  strip_prefix = "resouces"
-)
-
 jvm_library(
   name = "navigation",
   module_name = "intellij.kotlin.navigation",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":navigation_resources"],
+  resources = glob(["resouces/**/*"]),
+  resource_strip_prefix = "resouces",
   kotlinc_opts = ":custom_navigation",
   deps = [
     "@lib//:kotlin-stdlib",
@@ -39,4 +34,30 @@ jvm_library(
     "//plugins/kotlin/base/project-structure",
   ]
 )
+
+jvm_library(
+  name = "navigation_test_lib",
+  testonly = True,
+  module_name = "intellij.kotlin.navigation",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_navigation",
+  runtime_deps = [
+    ":navigation",
+    "//platform/core-api:core_test_lib",
+    "//plugins/kotlin/base/indices:indices_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+    "//java/java-psi-api:psi_test_lib",
+    "//platform/util:util_test_lib",
+    "//platform/indexing-api:indexing_test_lib",
+    "//platform/analysis-api:analysis_test_lib",
+    "//plugins/kotlin/base/project-structure:project-structure_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.kotlin.navigation` end
+
+### auto-generated section `iml intellij.kotlin.navigation` start
+exports_files([
+  "intellij.kotlin.navigation.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.kotlin.navigation` end

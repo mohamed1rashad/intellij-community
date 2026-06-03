@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.fir.findUsages.kmpFindUsages;
 
@@ -182,9 +182,29 @@ public abstract class JsFindUsagesFirTestGenerated extends AbstractFindUsagesFir
                 runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/memberComponentFun.0.kt");
             }
 
+            @TestMetadata("nameBasedDestructuringFull.0.kt")
+            public void testNameBasedDestructuringFull() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/nameBasedDestructuringFull.0.kt");
+            }
+
+            @TestMetadata("nameBasedDestructuringShort.0.kt")
+            public void testNameBasedDestructuringShort() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/nameBasedDestructuringShort.0.kt");
+            }
+
             @TestMetadata("operators.0.kt")
             public void testOperators() throws Exception {
                 runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/operators.0.kt");
+            }
+
+            @TestMetadata("positionBasedDestructuring.0.kt")
+            public void testPositionBasedDestructuring() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/positionBasedDestructuring.0.kt");
+            }
+
+            @TestMetadata("positionBasedDestructuringNew.0.kt")
+            public void testPositionBasedDestructuringNew() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/positionBasedDestructuringNew.0.kt");
             }
 
             @TestMetadata("propertyDelegate.0.kt")
@@ -308,6 +328,26 @@ public abstract class JsFindUsagesFirTestGenerated extends AbstractFindUsagesFir
             @TestMetadata("getInObject.0.kt")
             public void testGetInObject() throws Exception {
                 runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getInObject.0.kt");
+            }
+
+            @TestMetadata("getOperatorNonNullableImplicitType.0.kt")
+            public void testGetOperatorNonNullableImplicitType() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNonNullableImplicitType.0.kt");
+            }
+
+            @TestMetadata("getOperatorNullableExplicitType.0.kt")
+            public void testGetOperatorNullableExplicitType() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNullableExplicitType.0.kt");
+            }
+
+            @TestMetadata("getOperatorNullableFunctionCall.0.kt")
+            public void testGetOperatorNullableFunctionCall() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNullableFunctionCall.0.kt");
+            }
+
+            @TestMetadata("getOperatorNullableImplicitType.0.kt")
+            public void testGetOperatorNullableImplicitType() throws Exception {
+                runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNullableImplicitType.0.kt");
             }
 
             @TestMetadata("inc.0.kt")
@@ -1927,6 +1967,11 @@ public abstract class JsFindUsagesFirTestGenerated extends AbstractFindUsagesFir
 
         private void runTest(String testDataFilePath) throws Exception {
             KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+        }
+
+        @TestMetadata("destructuringEntry.0.kt")
+        public void testDestructuringEntry() throws Exception {
+            runTest("../../idea/tests/testData/findUsages/kotlin/variable/destructuringEntry.0.kt");
         }
 
         @TestMetadata("plusAssignFun.0.kt")

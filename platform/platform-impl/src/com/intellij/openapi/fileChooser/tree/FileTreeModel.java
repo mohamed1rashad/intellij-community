@@ -1,12 +1,8 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.fileChooser.tree;
 
-import com.intellij.execution.wsl.WSLDistribution;
-import com.intellij.execution.wsl.WSLUtil;
-import com.intellij.execution.wsl.WslDistributionManager;
-import com.intellij.execution.wsl.WslIjentAvailabilityService;
+import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.Experiments;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileElement;
@@ -14,9 +10,18 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VFileProperty;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
-import com.intellij.openapi.vfs.newvfs.events.*;
+import com.intellij.openapi.vfs.newvfs.events.VFileCopyEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileDeleteEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent;
+import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent;
 import com.intellij.openapi.vfs.newvfs.impl.VirtualFileSystemEntry;
 import com.intellij.ui.tree.MapBasedTree;
 import com.intellij.ui.tree.MapBasedTree.Entry;
@@ -33,7 +38,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import javax.swing.tree.TreePath;
 import java.lang.reflect.Method;
 import java.nio.file.FileSystems;
@@ -42,12 +47,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.StreamSupport;
 
 @ApiStatus.Internal
 public final class FileTreeModel extends AbstractTreeModel implements InvokerSupplier {
+
+  public static final DataKey<Predicate<Path>> SYSTEM_ROOTS_FILTER = DataKey.create("file.tree.model.system.roots.filter");
 
   private static final Logger LOG = Logger.getInstance(FileTreeModel.class);
 
@@ -317,40 +325,12 @@ public final class FileTreeModel extends AbstractTreeModel implements InvokerSup
     }
 
     private @NotNull List<VirtualFile> getSystemRoots() {
-      if (WslIjentAvailabilityService.getInstance().useIjentForWslNioFileSystem()) {
-        return toVirtualFiles(FileSystems.getDefault().getRootDirectories());
-      }
-      else {
-        return getSystemsRootLegacy();
-      }
-    }
-
-    private @NotNull List<VirtualFile> getSystemsRootLegacy() {
-      List<WSLDistribution> distributions = List.of();
-      if (WSLUtil.isSystemCompatible() && Experiments.getInstance().isFeatureEnabled("wsl.p9.show.roots.in.file.chooser")) {
-        WslDistributionManager distributionManager = WslDistributionManager.getInstance();
-        List<WSLDistribution> lastDistributions = ContainerUtil.notNullize(distributionManager.getLastInstalledDistributions());
-        distributions = lastDistributions;
-        LOG.debug("WSL distributions: ", distributions);
-        distributionManager.getInstalledDistributionsFuture().thenAccept(newDistributions -> {
-          // called on a background thread without read action
-          if (newDistributions.equals(lastDistributions)) {
-            LOG.debug("WSL distributions are up-to-date");
-            return;
-          }
-          LOG.debug("New WSL distributions: ", newDistributions);
-          model.invoker.invokeLater(() -> {
-            // invokeLater to ensure model.roots are calculated
-            setRoots(getLocalAndWslRoots(newDistributions));
-          });
-        });
-      }
-      return getLocalAndWslRoots(distributions);
-    }
-
-    private static @NotNull List<VirtualFile> getLocalAndWslRoots(@NotNull List<? extends WSLDistribution> distributions) {
-      return toVirtualFiles(ContainerUtil.concat(ContainerUtil.newArrayList(FileSystems.getDefault().getRootDirectories()),
-                                                 ContainerUtil.map(distributions, WSLDistribution::getUNCRootPath)));
+      final Predicate<Path> rootsFilter = descriptor.getUserData(SYSTEM_ROOTS_FILTER);
+      Iterable<Path> systemRoots = FileSystems.getDefault().getRootDirectories();
+      final var visibleRoots = rootsFilter != null
+                               ? StreamSupport.stream(systemRoots.spliterator(), false).filter(rootsFilter).toList()
+                               : systemRoots;
+      return toVirtualFiles(visibleRoots);
     }
 
     private void setRoots(@NotNull List<VirtualFile> newRootFiles) {
@@ -495,5 +475,12 @@ public final class FileTreeModel extends AbstractTreeModel implements InvokerSup
                : Pair.create(new Node(state, file), state.isLeaf(file));
       }).collect(Collectors.toList()));
     }
+  }
+
+  public void resetRoots() {
+    invoker.invoke(() -> {
+      roots = null;
+      treeStructureChanged(state.path, null, null);
+    });
   }
 }

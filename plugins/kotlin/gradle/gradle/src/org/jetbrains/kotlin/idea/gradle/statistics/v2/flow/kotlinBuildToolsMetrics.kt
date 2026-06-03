@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.gradle.statistics.v2.flow
 
 //metric name and enum should be the same: KDoc + test, + version + test
@@ -21,6 +21,7 @@ enum class KotlinBuildToolFusMetricName(val metric: KotlinBuildToolFusMetric<*>)
     ENABLED_COMPILER_PLUGIN_KOTLINX_SERIALIZATION(KotlinBuildToolBooleanFusMetric("ENABLED_COMPILER_PLUGIN_KOTLINX_SERIALIZATION")),
     ENABLED_COMPILER_PLUGIN_KOTLINX_DOKKA(KotlinBuildToolBooleanFusMetric("ENABLED_COMPILER_PLUGIN_KOTLINX_DOKKA")),
     ENABLED_COMPILER_PLUGIN_KOTLINX_BINARY_COMPATIBILITY_VALIDATOR(KotlinBuildToolBooleanFusMetric("ENABLED_COMPILER_PLUGIN_KOTLINX_BINARY_COMPATIBILITY_VALIDATOR")),
+    ENABLED_COMPILER_REFERENCE_INDEX(KotlinBuildToolBooleanFusMetric("ENABLED_COMPILER_REFERENCE_INDEX")),
     ENABLED_HMPP(KotlinBuildToolBooleanOverrideFusMetric("ENABLED_HMPP")),
 
     // Enabled features
@@ -34,14 +35,37 @@ enum class KotlinBuildToolFusMetricName(val metric: KotlinBuildToolFusMetric<*>)
     KOTLIN_OFFICIAL_CODESTYLE(KotlinBuildToolBooleanOverrideFusMetric("KOTLIN_OFFICIAL_CODESTYLE")),
     KOTLIN_PROGRESSIVE_MODE(KotlinBuildToolBooleanOverrideFusMetric("KOTLIN_PROGRESSIVE_MODE")),
     KOTLIN_KTS_USED(KotlinBuildToolBooleanFusMetric("KOTLIN_KTS_USED")),
+    KOTLIN_BTA_USED(KotlinBuildToolBooleanFusMetric("KOTLIN_BTA_USED")),
     KOTLIN_INCREMENTAL_NATIVE_ENABLED(KotlinBuildToolBooleanFusMetric("KOTLIN_INCREMENTAL_NATIVE_ENABLED")),
+    KOTLIN_CROSS_COMPILATION_DISABLED(KotlinBuildToolBooleanFusMetric("KOTLIN_CROSS_COMPILATION_DISABLED")),
+    KOTLIN_CROSS_COMPILATION_NOT_SUPPORTED(KotlinBuildToolBooleanFusMetric("KOTLIN_CROSS_COMPILATION_NOT_SUPPORTED")),
+    KOTLIN_NATIVE_CACHE_DISABLED(KotlinBuildToolBooleanFusMetric("KOTLIN_NATIVE_CACHE_DISABLED")),
     KMP_TOP_LEVEL_DEPENDENCIES_BLOCK(KotlinBuildToolBooleanFusMetric("KMP_TOP_LEVEL_DEPENDENCIES_BLOCK")),
+    KMP_SWIFT_PM_IMPORT_HAS_DIRECT_DEPENDENCIES(KotlinBuildToolBooleanFusMetric("KMP_SWIFT_PM_IMPORT_HAS_DIRECT_DEPENDENCIES")),
+    KMP_SWIFT_PM_IMPORT_HAS_TRANSITIVE_DEPENDENCIES_FROM_MODULAR_DEPENDENCIES(KotlinBuildToolBooleanFusMetric("KMP_SWIFT_PM_IMPORT_HAS_TRANSITIVE_DEPENDENCIES_FROM_MODULAR_DEPENDENCIES")),
+    KMP_SWIFT_PM_IMPORT_NUMBER_OF_DIRECT_DEPENDENCIES(KotlinBuildToolLongSumFusMetric("KMP_SWIFT_PM_IMPORT_NUMBER_OF_DIRECT_DEPENDENCIES", anonymizeByRounding = true)),
+    KMP_COCOAPODS_HAS_DIRECT_DEPENDENCIES(KotlinBuildToolBooleanFusMetric("KMP_COCOAPODS_HAS_DIRECT_DEPENDENCIES")),
+    KMP_COCOAPODS_NUMBER_OF_DIRECT_DEPENDENCIES(KotlinBuildToolLongSumFusMetric("KMP_COCOAPODS_NUMBER_OF_DIRECT_DEPENDENCIES", anonymizeByRounding = true)),
 
+    // JS SPECIFIC
     JS_GENERATE_EXTERNALS(KotlinBuildToolBooleanFusMetric("JS_GENERATE_EXTERNALS")),
 
     JS_SOURCE_MAP(KotlinBuildToolBooleanFusMetric("JS_SOURCE_MAP")),
-
     JS_IR_INCREMENTAL(KotlinBuildToolBooleanFusMetric("JS_IR_INCREMENTAL")),
+    JS_GENERATE_DTS(KotlinBuildToolBooleanFusMetric("JS_GENERATE_DTS")),
+    JS_LONG_AS_BIGINT(KotlinBuildToolBooleanFusMetric("JS_LONG_AS_BIGINT")),
+
+    JS_COMPILER_MODE(ConcatenatedAllowedListValuesStringFusMetric("JS_COMPILER_MODE", listOf("ir", "legacy", "both", "UNKNOWN"))),
+    JS_GENERATE_EXECUTABLE_DEFAULT(ConcatenatedAllowedListValuesStringFusMetric("JS_GENERATE_EXECUTABLE_DEFAULT", listOf("true", "false"))),
+    JS_TARGET_MODE(ConcatenatedAllowedListValuesStringFusMetric("JS_TARGET_MODE", listOf("both", "browser", "nodejs", "none"))),
+    JS_OUTPUT_GRANULARITY(OverrideRegexStringFusMetric("JS_OUTPUT_GRANULARITY", "(whole_program|per_module|per_file)")),
+    JS_BINARY_TYPE(ConcatenatedAllowedListValuesStringFusMetric("JS_BINARY_TYPE", listOf("both", "library", "executable", "none"))),
+    JS_ES_TARGET(ConcatenatedAllowedListValuesStringFusMetric("JS_ES_TARGET", listOf("es5", "es2015", "default"))),
+    JS_MODULE_SYSTEM(ConcatenatedAllowedListValuesStringFusMetric("JS_MODULE_SYSTEM", listOf("plain", "amd", "commonjs", "umd", "es", "default"))),
+
+    NPM_PUBLISH_PLUGIN_ENABLED(KotlinBuildToolBooleanFusMetric("NPM_PUBLISH_PLUGIN_ENABLED")),
+    ENABLED_COMPILER_PLUGIN_JS_PLAIN_OBJECTS(KotlinBuildToolBooleanFusMetric("ENABLED_COMPILER_PLUGIN_JS_PLAIN_OBJECTS")),
+
 
     WASM_IR_INCREMENTAL(KotlinBuildToolBooleanFusMetric("WASM_IR_INCREMENTAL")),
     //Garbage collector
@@ -165,40 +189,7 @@ enum class KotlinBuildToolFusMetricName(val metric: KotlinBuildToolFusMetric<*>)
     IDES_INSTALLED(ConcatenatedAllowedListValuesStringFusMetric("IDES_INSTALLED",listOf("AS", "OC", "CL", "IU", "IC", "WC"))),
 
     // Build script
-    MPP_PLATFORMS(
-        ConcatenatedAllowedListValuesStringFusMetric("MPP_PLATFORMS",
-    listOf(
-    "common",
-    "native",
-    "jvm",
-    "js",
-    "android_x64",
-    "android_x86",
-    "androidJvm",
-    "android_arm32",
-    "android_arm64",
-    "ios_arm64",
-    "ios_simulator_arm64",
-    "ios_x64",
-    "watchos_arm32",
-    "watchos_arm64",
-    "watchos_x64",
-    "watchos_simulator_arm64",
-    "watchos_device_arm64",
-    "tvos_arm64",
-    "tvos_x64",
-    "tvos_simulator_arm64",
-    "linux_arm32_hfp",
-    "linux_arm64",
-    "linux_x64",
-    "macos_x64",
-    "macos_arm64",
-    "mingw_x64",
-    "wasm"
-    )
-    )
-    ),
-    JS_COMPILER_MODE(ConcatenatedAllowedListValuesStringFusMetric("JS_COMPILER_MODE", listOf("ir", "legacy", "both", "UNKNOWN"))),
+    MPP_PLATFORMS(JoinedListValuesStringFusMetric("MPP_PLATFORMS")),
 
     // Component versions
     LIBRARY_SPRING_VERSION(IgnoreDefaultVersionStringFusMetric("LIBRARY_SPRING_VERSION")),
@@ -206,6 +197,7 @@ enum class KotlinBuildToolFusMetricName(val metric: KotlinBuildToolFusMetric<*>)
     LIBRARY_GWT_VERSION(IgnoreDefaultVersionStringFusMetric("LIBRARY_GWT_VERSION")),
     LIBRARY_HIBERNATE_VERSION(IgnoreDefaultVersionStringFusMetric("LIBRARY_HIBERNATE_VERSION")),
 
+    KOTLIN_GRADLE_PLUGIN_VERSION(VersionStringFusMetric("KOTLIN_GRADLE_PLUGIN_VERSION")),
     KOTLIN_COMPILER_VERSION(VersionStringFusMetric("KOTLIN_COMPILER_VERSION")),
     KOTLIN_STDLIB_VERSION( VersionStringFusMetric("KOTLIN_STDLIB_VERSION")),
     KOTLIN_REFLECT_VERSION(VersionStringFusMetric("KOTLIN_REFLECT_VERSION")),
@@ -217,15 +209,13 @@ enum class KotlinBuildToolFusMetricName(val metric: KotlinBuildToolFusMetric<*>)
     // Features
     KOTLIN_LANGUAGE_VERSION(VersionStringFusMetric("KOTLIN_LANGUAGE_VERSION")),
     KOTLIN_API_VERSION(VersionStringFusMetric("KOTLIN_API_VERSION")),
-    JS_GENERATE_EXECUTABLE_DEFAULT(ConcatenatedAllowedListValuesStringFusMetric("JS_GENERATE_EXECUTABLE_DEFAULT", listOf("true", "false"))),
-    JS_TARGET_MODE(ConcatenatedAllowedListValuesStringFusMetric("JS_TARGET_MODE", listOf("both", "browser", "nodejs", "none"))),
-    JS_OUTPUT_GRANULARITY(OverrideRegexStringFusMetric("JS_OUTPUT_GRANULARITY", "(whole_program|per_module|per_file)")),
 
     // Compiler parameters
     JVM_DEFAULTS(ConcatenatedAllowedListValuesStringFusMetric("JVM_DEFAULTS", listOf("enable", "no-compatibility", "disable"))),
     USE_OLD_BACKEND(ConcatenatedAllowedListValuesStringFusMetric("USE_OLD_BACKEND", listOf("true", "false"))),
     USE_FIR(ConcatenatedAllowedListValuesStringFusMetric("USE_FIR", listOf("true", "false"))),
 
+    KOTLIN_COMPILER_EXECUTION_POLICY(ConcatenatedAllowedListValuesStringFusMetric("KOTLIN_COMPILER_EXECUTION_POLICY", listOf("in-process", "daemon", "out-of-process"))),
     JS_PROPERTY_LAZY_INITIALIZATION(ConcatenatedAllowedListValuesStringFusMetric("JS_PROPERTY_LAZY_INITIALIZATION", listOf("true", "false")));
 
 }

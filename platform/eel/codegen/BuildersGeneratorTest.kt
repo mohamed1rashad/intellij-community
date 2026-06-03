@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.eel.codegen
 
 import com.intellij.analysis.AnalysisBundle
@@ -13,7 +13,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.command.writeCommandAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -27,24 +27,34 @@ import com.intellij.openapi.project.modules
 import com.intellij.openapi.project.rootManager
 import com.intellij.openapi.projectRoots.JavaSdk
 import com.intellij.openapi.projectRoots.ProjectJdkTable
-import com.intellij.openapi.roots.*
+import com.intellij.openapi.roots.DependencyScope
+import com.intellij.openapi.roots.OrderRootType
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.newvfs.RefreshQueue
 import com.intellij.openapi.vfs.readText
 import com.intellij.openapi.vfs.writeText
+import com.intellij.platform.eel.codegen.BuilderRequest.Ownership
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager
-import com.intellij.project.IntelliJProjectConfiguration
+import com.intellij.project.loadIntelliJProject
 import com.intellij.project.stateStore
-import com.intellij.psi.*
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiRecursiveElementWalkingVisitor
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.stubs.StubUpdatingIndex
-import com.intellij.psi.util.findParentOfType
 import com.intellij.testFramework.IndexingTestUtil
 import com.intellij.testFramework.TestApplicationManager
 import com.intellij.testFramework.UsefulTestCase
+import com.intellij.testFramework.common.ThreadLeakTracker
 import com.intellij.testFramework.junit5.fixture.TestFixtures
 import com.intellij.testFramework.junit5.fixture.projectFixture
 import com.intellij.util.indexing.FileBasedIndex
@@ -65,77 +75,50 @@ import org.jetbrains.jps.model.module.JpsModuleDependency
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.renderer.types.impl.KaTypeRendererForSource
+import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.asJava.classes.KtLightClass
 import org.jetbrains.kotlin.asJava.elements.KtLightField
-import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.*
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.ALL
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.CONSTRUCTOR_PARAMETER
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.FIELD
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.FILE
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.PROPERTY
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.PROPERTY_DELEGATE_FIELD
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.PROPERTY_GETTER
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.PROPERTY_SETTER
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.RECEIVER
+import org.jetbrains.kotlin.descriptors.annotations.AnnotationUseSiteTarget.SETTER_PARAMETER
 import org.jetbrains.kotlin.idea.test.UseK2PluginMode
 import org.jetbrains.kotlin.kdoc.psi.api.KDoc
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtAnnotated
+import org.jetbrains.kotlin.psi.KtAnnotationEntry
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassLiteralExpression
+import org.jetbrains.kotlin.psi.KtImportDirective
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.KtTypeReference
+import org.jetbrains.kotlin.psi.KtValueArgument
 import org.jetbrains.kotlin.psi.psiUtil.containingClass
 import org.jetbrains.kotlin.types.Variance
-import org.junit.jupiter.api.*
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.TestFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Optional
 import java.util.TreeSet
-import kotlin.Boolean
-import kotlin.Char
-import kotlin.OptIn
-import kotlin.Pair
-import kotlin.String
-import kotlin.check
-import kotlin.collections.ArrayDeque
-import kotlin.collections.addAll
-import kotlin.collections.map
-import kotlin.collections.mapNotNull
-import kotlin.error
 import kotlin.io.path.ExperimentalPathApi
-import kotlin.io.path.pathString
 import kotlin.io.path.readText
 import kotlin.io.path.walk
-import kotlin.isInitialized
 import kotlin.jvm.optionals.getOrNull
-import kotlin.let
-import kotlin.run
-import kotlin.sequences.associateWithTo
-import kotlin.sequences.filter
-import kotlin.sequences.filterIsInstance
-import kotlin.sequences.flatMap
-import kotlin.sequences.generateSequence
-import kotlin.sequences.joinToString
-import kotlin.sequences.map
-import kotlin.sequences.takeWhile
-import kotlin.sequences.toList
-import kotlin.takeIf
-import kotlin.text.Regex
-import kotlin.text.RegexOption
-import kotlin.text.buildString
-import kotlin.text.endsWith
-import kotlin.text.isBlank
-import kotlin.text.isNotBlank
-import kotlin.text.isNotEmpty
-import kotlin.text.lines
-import kotlin.text.lowercase
-import kotlin.text.matches
-import kotlin.text.orEmpty
-import kotlin.text.prependIndent
-import kotlin.text.removePrefix
-import kotlin.text.removeSuffix
-import kotlin.text.replace
-import kotlin.text.replaceFirstChar
-import kotlin.text.split
-import kotlin.text.startsWith
-import kotlin.text.substring
-import kotlin.text.substringBeforeLast
-import kotlin.text.trim
-import kotlin.text.trimEnd
-import kotlin.text.trimIndent
-import kotlin.text.trimMargin
-import kotlin.text.trimStart
-import kotlin.text.uppercase
-import kotlin.text.uppercaseChar
-import kotlin.to
 
 /**
  * This test generates builders for `com.intellij.platform.eel.EelApi`.
@@ -164,6 +147,10 @@ class BuildersGeneratorTest {
     fun beforeAll() {
       TestApplicationManager.getInstance()
       testClassDisposable = Disposer.newDisposable()
+
+      // Opening the temporary project may lazily initialize these application-scoped Android ADB helper threads
+      // after the JUnit thread snapshot.
+      ThreadLeakTracker.longRunningThreadCreated(testClassDisposable, "AndroidAdbSessionHost", "InnocuousThread")
 
       oldInitInspections = InspectionProfileImpl.INIT_INSPECTIONS
       InspectionProfileImpl.INIT_INSPECTIONS = true
@@ -207,14 +194,17 @@ class BuildersGeneratorTest {
       // The value is the pair of the old and the new content.
       val filesContent: Map<Path, Pair<Optional<String>, Optional<String>>> = fillRequests(tempProject, newEelModule, genSrcDirName)
 
-      for ((path, contentPair) in filesContent) {
-        if (contentPair.first.isPresent) {
-          val virtualFile = VfsUtil.findFile(path, true)!!
-          prettifyFile(tempProject, virtualFile)
+      // For some unclear reason, one call of prettification is not enouigh. On the second call, something can change in files.
+      repeat(2) {
+        for ((path, contentPair) in filesContent) {
+          if (contentPair.first.isPresent) {
+            val virtualFile = VfsUtil.findFile(path, true)!!
+            prettifyFile(tempProject, virtualFile)
+          }
         }
-      }
 
-      synchronizeVariousCaches(tempProject)
+        synchronizeVariousCaches(tempProject)
+      }
 
       val oldPrettifiedFiles = mutableMapOf<Path, String>()
 
@@ -241,7 +231,7 @@ class BuildersGeneratorTest {
         if (!Files.exists(path)) Files.createFile(path)
         val virtualFile = VfsUtil.findFile(path, true)!!
         val (_, newContent) = contentPair
-        writeAction {
+        edtWriteAction {
           if (newContent.isPresent) {
             virtualFile.writeText(newContent.get())
           }
@@ -250,16 +240,19 @@ class BuildersGeneratorTest {
           }
         }
       }
-
-      for ((path, contentPair) in filesContent) {
-        val virtualFile = VfsUtil.findFile(path, true)!!
-        val (_, newContent) = contentPair
-        if (newContent.isPresent) {
-          prettifyFile(tempProject, virtualFile)
+      // For some unclear reason, one call of prettification is not enouigh. On the second call, something can change in files.
+      repeat(2) {
+        for ((path, contentPair) in filesContent) {
+          if (contentPair.second.isEmpty) continue
+          val virtualFile = VfsUtil.findFile(path, true) ?: error("Failed to find the VFS file for $path")
+          val (_, newContent) = contentPair
+          if (newContent.isPresent) {
+            prettifyFile(tempProject, virtualFile)
+          }
         }
-      }
 
-      synchronizeVariousCaches(tempProject)
+        synchronizeVariousCaches(tempProject)
+      }
 
       if (unimportantChanges.isNotEmpty()) {
         logger<BuildersGeneratorTest>().warn(
@@ -284,7 +277,7 @@ class BuildersGeneratorTest {
             else
               "${path.toUri()} : " +
               "The new version of the file has been written to the disk, don't forget to commit it."
-          assertEquals(oldPrettifiedContent, newContent, errorMsg)
+          assertEquals(oldPrettifiedContent.orEmpty(), newContent.orEmpty(), errorMsg)
         }
       }
     }
@@ -296,7 +289,7 @@ class BuildersGeneratorTest {
   }
 
   private suspend fun synchronizeVariousCaches(tempProject: Project) {
-    writeAction {
+    edtWriteAction {
       FileDocumentManager.getInstance().saveAllDocuments()
     }
     IndexingTestUtil.suspendUntilIndexesAreReady(tempProject)
@@ -346,18 +339,18 @@ class BuildersGeneratorTest {
     moduleName: String,
   ): Pair<Module, Path> {
     var genSrcDirName: Path? = null
-    val ultimateProject: JpsProject = IntelliJProjectConfiguration.loadIntelliJProject(Path.of(PathManager.getHomePath()).pathString)
+    val ultimateProject: JpsProject = loadIntelliJProject(PathManager.getHomeDir())
 
     val libraries = mutableSetOf<JpsLibrary>()
 
-    val newEelModule: Module = writeAction {
+    val newEelModule: Module = edtWriteAction {
       val projectModel = ModuleManager.getInstance(tempProject).getModifiableModel()
 
       val jpsModuleQueue = mutableListOf(ultimateProject.findModuleByName(moduleName)!!)
 
-      val jdkName = "jbr-17"
+      val jdkName = "jbr-25"
       val projectJdkTable = ProjectJdkTable.getInstance(tempProject)
-      val projectJdk = JavaSdk.getInstance().createJdk("jbr-17", System.getProperty("java.home"))
+      val projectJdk = JavaSdk.getInstance().createJdk("jbr-25", System.getProperty("java.home"))
       projectJdkTable.addJdk(projectJdk)
       ProjectRootManager.getInstance(tempProject).setProjectSdkName(jdkName, JavaSdk.getInstance().name)
 
@@ -433,6 +426,7 @@ private suspend fun fillRequests(
 
   val queue = ArrayDeque<VirtualFile>()
   queue.addAll(newEelModule.rootManager.contentRoots)
+  RefreshQueue.getInstance().refresh(false, true, null, *newEelModule.rootManager.contentRoots)
   while (true) {
     val virtualFile = queue.removeFirstOrNull() ?: break
     if (virtualFile.isDirectory) {
@@ -459,12 +453,21 @@ private class BuilderRequest(
   val throwsAnnotation: String?,
   val annotations: Collection<String>,
   val argsInterfaceFqn: String,
-  val clsFqn: String,
+  val packageFqn: String,
+  val declarationFileName: String,
+  val ownership: Ownership,
   val methodName: String,
   val methodKDoc: String,
   val returnTypeFqn: String,
   val imports: Set<String>,
-)
+) {
+  sealed class Ownership {
+    // Autogenerated toString() are used for ordering.
+    data object None : Ownership()
+    data class Method(val simpleClsName: String, val clsFqn: String) : Ownership()
+    data class ExtensionFunction(val renderedReceiver: String, val outerTypeFqn: String) : Ownership()
+  }
+}
 
 private fun findBuilders(psiFile: PsiFile, methods: MutableList<BuilderRequest>) {
   val imports = mutableSetOf<String>()
@@ -503,7 +506,23 @@ private fun findBuilders(psiFile: PsiFile, methods: MutableList<BuilderRequest>)
 
           val fn = valueParameter.parent.parent as? KtNamedFunction ?: return
           val methodName = fn.name ?: return
-          val methodCls = valueParameter.containingClass()?.fqName ?: return
+          val methodPackage = fn.containingKtFile.packageFqName.asString()
+          val ownership =
+            fn.receiverTypeReference
+              ?.let { type ->
+                Ownership.ExtensionFunction(
+                  renderedReceiver = type.renderWithFqnTypes(),
+                  outerTypeFqn = analyze(type) {
+                    type.type.symbol?.classId?.asSingleFqName()?.asString() ?: return@let null
+                  },
+                )
+              }
+            ?: valueParameter.containingClass()
+              ?.fqName
+              ?.let { fqName ->
+                Ownership.Method(simpleClsName = fqName.shortName().asString(), clsFqn = fqName.asString())
+              }
+            ?: Ownership.None
 
           val annotationsToCopyRegex = Regex("""
             (
@@ -529,10 +548,12 @@ private fun findBuilders(psiFile: PsiFile, methods: MutableList<BuilderRequest>)
               .let(::preferInternalAnnotation),
             throwsAnnotation = fn.annotationEntries.filter { it.shortName?.asString() in listOf("Throws", "ThrowsChecked") }.joinToString(" ") { it.text.trim() },
             argsInterfaceFqn = typeFqn,
-            clsFqn = methodCls.asString(),
+            packageFqn = methodPackage,
+            ownership = ownership,
+            declarationFileName = fn.containingKtFile.name,
             methodName = methodName,
             methodKDoc = fn.docComment?.extractText() ?: "",
-            returnTypeFqn = fn.typeReference!!.renderWithFqnTypes(),
+            returnTypeFqn = fn.typeReference?.renderWithFqnTypes() ?: "Unit",
             imports = imports,
           )
         }
@@ -555,27 +576,37 @@ private suspend fun writeBuilderFiles(
       Optional.of(path.readText()) to Optional.empty()
     }
 
-  methods.sortBy { listOf(it.argsInterfaceFqn, it.clsFqn, it.methodName).joinToString() }
+  methods.sortBy { listOfNotNull(it.argsInterfaceFqn, it.packageFqn, it.ownership.toString(), it.methodName).joinToString() }
   val imports = TreeSet<String>()
-  methods.flatMapTo(imports) { listOf(it.argsInterfaceFqn, it.clsFqn) }
+  methods.mapTo(imports) { it.argsInterfaceFqn }
+  methods.mapNotNullTo(imports) {
+    when (val o = it.ownership) {
+      is Ownership.Method -> o.clsFqn
+      Ownership.None, is Ownership.ExtensionFunction -> null
+    }
+  }
   methods.flatMapTo(imports) { request -> request.imports.map { import -> import.removePrefix("import ") } }
 
   val filesToWrite = mutableMapOf<Path, String>()
 
-  for ((clsFqn, clsBuilderRequests) in methods.groupByTo(linkedMapOf()) { it.clsFqn }) {
-    lateinit var sourcePackage: String
+  for ((key, clsBuilderRequests) in methods.groupByTo(linkedMapOf()) { builderRequest ->
+    builderRequest.packageFqn to when (val o = builderRequest.ownership) {
+      is Ownership.ExtensionFunction -> o.outerTypeFqn
+        .removePrefix(builderRequest.packageFqn + ".")
+        .replace(Regex("[.]\\w")) { it.value.substring(1).uppercase() }
+        .plus("Helpers")
+
+      is Ownership.Method -> o.simpleClsName + "Helpers"
+
+      Ownership.None -> builderRequest.declarationFileName.removeSuffix(".kt") + "KtHelpers"
+    }
+  }) {
+    val (sourcePackage, helpersClassName) = key
 
     @Language("kotlin")
     var text = ""
 
     readAction {
-      val cls = getKtClassFromKtLightClass(
-        JavaPsiFacade.getInstance(tempProject).findClass(clsFqn, GlobalSearchScope.projectScope(tempProject)))
-      check(cls != null) { "PsiClass for ${clsFqn} not found" }
-      check(cls.findParentOfType<KtClass>() == null) { "Nested classes are not supported: ${clsFqn}" }
-
-      sourcePackage = clsFqn.substringBeforeLast('.')
-
       val argsInterfacesByFqn: Map<String, ArgInterfaceInfo> = clsBuilderRequests.associate { builderRequest ->
         val javaPsiFacade = JavaPsiFacade.getInstance(tempProject)
         val projectScope = GlobalSearchScope.projectScope(tempProject)
@@ -612,6 +643,7 @@ private suspend fun writeBuilderFiles(
               name = property.name!!,
               typeFqn = property.typeReference!!.renderWithFqnTypes(),
               kdoc = property.docComment?.extractText() ?: "",
+              imports = property.getImportableTypes(),
             )
           }
           .sortedBy { it.name }
@@ -626,6 +658,7 @@ private suspend fun writeBuilderFiles(
               typeFqn = property.typeReference!!.renderWithFqnTypes(),
               body = property.getter!!.bodyExpression!!.renderWithFqnTypes(),
               kdoc = property.docComment?.extractText() ?: "",
+              imports = property.getImportableTypes(),
             )
           }
           .sortedBy { it.name }
@@ -652,13 +685,8 @@ private suspend fun writeBuilderFiles(
           }
           .sortedBy { it.name }
 
-        for (fullTypeFqn in requiredArguments.map { it.typeFqn } + optionalArguments.map { it.typeFqn }) {
-          for (singleTypeFqn in fullTypeFqn.split(Regex("[<>,?()-]"))) {
-            if (singleTypeFqn.isNotBlank()) {
-              imports += singleTypeFqn.trim()
-            }
-          }
-        }
+        requiredArguments.flatMapTo(imports) { it.imports }
+        optionalArguments.flatMapTo(imports) { it.imports }
 
         builderRequest.argsInterfaceFqn to ArgInterfaceInfo(
           name = argsInterface.name!!,
@@ -682,7 +710,7 @@ private suspend fun writeBuilderFiles(
       for (builderRequest in clsBuilderRequests) {
         val ownedBuilderFqn = listOf(
           sourcePackage,
-          builderRequest.clsFqn.removePrefix("$sourcePackage.") + "Helpers",
+          helpersClassName,
           builderRequest.methodName.replaceFirstChar(Char::uppercaseChar),
         ).joinToString(".")
 
@@ -697,15 +725,20 @@ private suspend fun writeBuilderFiles(
           }
         }
 
+        val methodReceiver = when (val o = builderRequest.ownership) {
+          is Ownership.ExtensionFunction -> o.renderedReceiver
+          is Ownership.Method -> o.clsFqn
+          Ownership.None -> null
+        }
         text += """
         ${kdoc.renderKdoc()}@GeneratedBuilder.Result${builderRequest.annotations.joinToString("\n")}
-        fun ${builderRequest.clsFqn}.${builderRequest.methodName}(${
+        fun ${methodReceiver?.plus(".").orEmpty()}${builderRequest.methodName}(${
           requiredArguments.joinToString("") { prop ->
             "\n${prop.name}: ${prop.typeFqn},"
           }.surroundWithNewlinesIfNotBlank()
         }): $ownedBuilderFqn =
           $ownedBuilderFqn(
-            owner = this,${requiredArguments.joinToString("") { prop -> "\n${prop.name} = ${prop.name}," }}
+            ${if (methodReceiver != null) "owner = this," else ""} ${requiredArguments.joinToString("") { prop -> "\n${prop.name} = ${prop.name}," }}
           )
         """
       }
@@ -718,23 +751,39 @@ private suspend fun writeBuilderFiles(
         .sorted()
         .joinToString("\n")
 
-      text += "$annotationsForGroup object ${clsFqn.removePrefix("$sourcePackage.").split('.').first()}Helpers {"
+      text += "$annotationsForGroup object $helpersClassName {"
 
       for (builderRequest in clsBuilderRequests) {
         val argsInterfaceInfo = argsInterfacesByFqn[builderRequest.argsInterfaceFqn]!!
 
+        val ownerForKdoc = when (val o = builderRequest.ownership) {
+          is Ownership.ExtensionFunction -> o.outerTypeFqn
+          is Ownership.Method -> o.clsFqn
+          Ownership.None -> null
+        }
+        val ownerForPropertyType = when (val o = builderRequest.ownership) {
+          is Ownership.ExtensionFunction -> o.renderedReceiver
+          is Ownership.Method -> o.clsFqn
+          else -> null
+        }
+
+        val ownedBuilderClass = when (val o = builderRequest.ownership) {
+          is Ownership.ExtensionFunction -> "com.intellij.platform.eel.EelOwnedBuilder"
+          is Ownership.Method -> "com.intellij.platform.eel.EelOwnedBuilder"
+          else -> "com.intellij.platform.eel.OwnedBuilder"
+        }
         text += """
         /**
-         * Create it via [${builderRequest.clsFqn}.${builderRequest.methodName}]. 
+         * Create it via [${ownerForKdoc?.plus(".").orEmpty()}${builderRequest.methodName}]. 
          */
         @GeneratedBuilder.Result${builderRequest.annotations.joinToString("\n")}
         class ${builderRequest.methodName.replaceFirstChar(Char::uppercaseChar)}(
-          private val owner: ${builderRequest.clsFqn}, ${
+          ${if (ownerForPropertyType != null) "private val owner: $ownerForPropertyType," else ""} ${
           argsInterfaceInfo.requiredArguments.joinToString("") { prop ->
             "\nprivate var ${prop.name}: ${prop.typeFqn},"
           }
         }
-        ) : com.intellij.platform.eel.OwnedBuilder<${builderRequest.returnTypeFqn}> {
+        ) : $ownedBuilderClass<${builderRequest.returnTypeFqn}> {
         ${
           argsInterfaceInfo.optionalArguments.joinToString("\n\n") { prop ->
             "private var ${prop.name}: ${prop.typeFqn} = ${prop.body}"
@@ -753,22 +802,25 @@ private suspend fun writeBuilderFiles(
         }
 
           /**
-          * Complete the builder and call [${builderRequest.clsFqn}.${builderRequest.methodName}] 
+          * Complete the builder and call [${ownerForKdoc?.plus(".").orEmpty()}${builderRequest.methodName}] 
           * with an instance of [${builderRequest.argsInterfaceFqn}].
           */${if (builderRequest.shouldCheckReturnValue) "@org.jetbrains.annotations.CheckReturnValue" else ""}${builderRequest.throwsAnnotation ?: ""}
           override suspend fun eelIt(): ${builderRequest.returnTypeFqn} =
-            owner.${builderRequest.methodName}(${argsInterfaceInfo.name}Impl(
+            ${if (ownerForPropertyType != null) "owner." else ""}${builderRequest.methodName}(${argsInterfaceInfo.name}Impl(
             ${
           argsInterfaceInfo.properties.map { it.name }.joinToString("\n") { name -> "$name = $name," }
         })
             )
+          ${if (ownerForPropertyType != null) {
+            "override val eelDescriptor: EelDescriptor get() = owner.descriptor".trimIndent()
+          } else ""}
         }
         """
       }
 
       text += "}"
 
-      filesToWrite[Path.of(genSrcDirName.toString(), sourcePackage.replace('.', '/'), "${cls.name}Helpers.kt")] = fileHeader + text
+      filesToWrite[Path.of(genSrcDirName.toString(), sourcePackage.replace('.', '/'), "$helpersClassName.kt")] = fileHeader + text
 
       for ((argsInterfaceFqn, argsInterfaceInfo) in argsInterfacesByFqn) {
         text = """
@@ -880,8 +932,31 @@ private fun renderPropertyInBuilder(
       }
 
     for ((enumMethodName, field) in fields) {
+      val passingAnnotations = field.annotations
+        .filter { annotation ->
+          val annotationClass =
+            annotation.nameReferenceElement?.resolve()?.let { it as? KtClass }
+            ?: return@filter false
+          annotationClass.annotationEntries.none { annotationOfAnnotation ->
+            annotationOfAnnotation.name == null &&
+            annotationOfAnnotation.shortName?.asString() == "Target" &&
+            annotationOfAnnotation.valueArguments.none { target ->
+              (target as KtValueArgument).renderWithFqnTypes() == "AnnotationTarget.FUNCTION"
+            }
+          }
+        }
+        .joinToString("") { "$it\n" }
+
+      // org.jetbrains.kotlin.light.classes.symbol.SymbolLightMemberBase.getDocComment
+      // is not implemented, it returns null and has a to-do comment.
+      val fieldDocComment = field.text.run {
+        val start = indexOf("/**")
+        val end = indexOf("*/")
+        if (start != -1 && end != -1) substring(start, end + 2) else ""
+      }
+
       append("""
-        ${field.docComment?.text.orEmpty()}fun $enumMethodName(): $builderName =
+        ${fieldDocComment}${passingAnnotations}fun $enumMethodName(): $builderName =
           ${property.name}($typeFqn.${field.name})""")
     }
   }
@@ -901,6 +976,23 @@ private fun PsiElement.renderWithFqnTypes(): String {
               append(element.type.render(KaTypeRendererForSource.WITH_QUALIFIED_NAMES, Variance.INVARIANT))
             }
           }
+          element is KtQualifiedExpression -> {
+            val fqName =
+              element.children
+                .takeIf { children ->
+                  assert(children.size == 2)
+                  children.first() is KtSimpleNameExpression
+                }
+                ?.last()
+                ?.let { it as KtSimpleNameExpression }
+                ?.fqName()
+            if (fqName != null) {
+              append(fqName)
+            }
+            else {
+              super.visitElement(element)
+            }
+          }
           element.firstChild == null -> {
             append(element.text)
           }
@@ -909,8 +1001,36 @@ private fun PsiElement.renderWithFqnTypes(): String {
           }
         }
       }
+
+      private fun KtSimpleNameExpression.fqName(): String? =
+        analyze(this) {
+          val declaration = this@fqName.references.firstOrNull()?.resolve() as? KtNamedDeclaration
+          declaration?.fqName?.asString()
+        }
     })
   }
+}
+
+private fun PsiElement.getImportableTypes(): Collection<String> {
+  val result = hashSetOf<String>()
+  accept(object : PsiRecursiveElementWalkingVisitor() {
+    override fun visitElement(element: PsiElement) {
+      if (element is KtTypeReference) {
+        val clsName = analyze(element) {
+          val maybeNestedClass = element.type.takeIf { !it.isPrimitive && !it.isAnyType && !it.isNothingType }?.expandedSymbol?.classId
+          val rootClass = generateSequence(maybeNestedClass) { it.outerClassId }.lastOrNull()
+          rootClass?.asFqNameString()
+        }
+        if (clsName != null) {
+          result += clsName
+        }
+      }
+      else {
+        super.visitElement(element)
+      }
+    }
+  })
+  return result
 }
 
 private fun KDoc.extractText(): String =
@@ -942,8 +1062,8 @@ private fun getKtClassFromKtLightClass(lightClass: PsiClass?): KtClass? {
   }
 }
 
-private class RequiredArgument(val name: String, val typeFqn: String, val kdoc: String)
-private class OptionalArgument(val name: String, val typeFqn: String, val kdoc: String, val body: String)
+private class RequiredArgument(val name: String, val typeFqn: String, val kdoc: String, val imports: Collection<String>)
+private class OptionalArgument(val name: String, val typeFqn: String, val kdoc: String, val body: String, val imports: Collection<String>)
 
 private class Property(val name: String, val annotations: Collection<String>) {
   override fun toString(): String {

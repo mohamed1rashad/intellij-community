@@ -3,7 +3,14 @@ package com.intellij.util.indexing.diagnostic;
 
 import com.intellij.internal.statistic.beans.MetricEvent;
 import com.intellij.internal.statistic.eventLog.EventLogGroup;
-import com.intellij.internal.statistic.eventLog.events.*;
+import com.intellij.internal.statistic.eventLog.events.BooleanEventField;
+import com.intellij.internal.statistic.eventLog.events.DoubleEventField;
+import com.intellij.internal.statistic.eventLog.events.EnumEventField;
+import com.intellij.internal.statistic.eventLog.events.EventFields;
+import com.intellij.internal.statistic.eventLog.events.IntEventField;
+import com.intellij.internal.statistic.eventLog.events.LongEventField;
+import com.intellij.internal.statistic.eventLog.events.StringEventField;
+import com.intellij.internal.statistic.eventLog.events.VarargEventId;
 import com.intellij.internal.statistic.service.fus.collectors.ApplicationUsagesCollector;
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector;
 import com.intellij.openapi.diagnostic.Logger;
@@ -889,7 +896,7 @@ public final class IndexLookupTimingsReporting {
       if (!failed) {
         final Recorder recorder = allKeysLookupDurationsMsByIndexId.computeIfAbsent(
           indexId,
-          __ -> new Recorder(
+          _ -> new Recorder(
             MAX_TRACKABLE_DURATION_MS,
             /* significant digits = */ 2     /* ~1% accuracy */
           )
@@ -910,7 +917,7 @@ public final class IndexLookupTimingsReporting {
       if (!failed) {
         final Recorder recorder = entriesLookupDurationsMsByIndexId.computeIfAbsent(
           indexId,
-          __ -> new Recorder(
+          _ -> new Recorder(
             MAX_TRACKABLE_DURATION_MS,
             /* significant digits = */ 2     /* ~1% accuracy */
           )
@@ -931,7 +938,7 @@ public final class IndexLookupTimingsReporting {
       if (!failed) {
         final Recorder recorder = stubEntriesLookupDurationsMsByIndexId.computeIfAbsent(
           indexId,
-          __ -> new Recorder(
+          _ -> new Recorder(
             MAX_TRACKABLE_DURATION_MS,
             /* significant digits = */ 2     /* ~1% accuracy */
           )

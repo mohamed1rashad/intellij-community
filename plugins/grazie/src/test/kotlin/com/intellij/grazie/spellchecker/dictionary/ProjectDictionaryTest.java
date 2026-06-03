@@ -8,7 +8,12 @@ import com.intellij.spellchecker.dictionary.UserDictionary;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static com.intellij.spellchecker.dictionary.Dictionary.LookupStatus.Alien;
 import static com.intellij.spellchecker.dictionary.Dictionary.LookupStatus.Present;
@@ -67,6 +72,13 @@ public class ProjectDictionaryTest extends SpellcheckerInspectionTestCase {
     assertEquals(Alien, projectDictionary.lookup(eeee));
     projectDictionary.removeFromDictionary(eeee);
     assertEquals(Alien, projectDictionary.lookup(eeee));
+  }
+
+  public void testNoTyposInUpperCaseWords() {
+    var dictionary = createProjectDictionary(Set.of("pghost"));
+    assertEquals(Present, dictionary.lookup("PGHOST"));
+    assertEquals(Present, dictionary.lookup("Pghost"));
+    assertEquals(Alien, dictionary.lookup("pgHoSt"));
   }
 
   public void testClear() {

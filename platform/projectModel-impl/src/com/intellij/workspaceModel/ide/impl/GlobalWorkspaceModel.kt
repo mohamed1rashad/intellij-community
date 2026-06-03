@@ -9,19 +9,35 @@ import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.backend.workspace.GlobalWorkspaceModelCache
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.diagnostic.telemetry.helpers.MillisecondsMeasurer
 import com.intellij.platform.eel.EelMachine
-import com.intellij.platform.eel.provider.EelProvider
+import com.intellij.platform.eel.provider.EelMachineResolver
 import com.intellij.platform.eel.provider.LocalEelMachine
-import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.eel.provider.getEelMachine
 import com.intellij.platform.workspace.jps.GlobalStorageEntitySource
 import com.intellij.platform.workspace.jps.JpsGlobalFileEntitySource
-import com.intellij.platform.workspace.jps.entities.*
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntity
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryEntity
+import com.intellij.platform.workspace.jps.entities.LibraryPropertiesEntity
+import com.intellij.platform.workspace.jps.entities.LibraryPropertiesEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryRoot
+import com.intellij.platform.workspace.jps.entities.SdkEntity
+import com.intellij.platform.workspace.jps.entities.SdkRoot
+import com.intellij.platform.workspace.jps.entities.libraryProperties
+import com.intellij.platform.workspace.storage.EntityChange
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.EntityStorage
+import com.intellij.platform.workspace.storage.ImmutableEntityStorage
+import com.intellij.platform.workspace.storage.InternalEnvironmentName
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.VersionedStorageChange
 import com.intellij.platform.workspace.storage.impl.VersionedEntityStorageImpl
 import com.intellij.platform.workspace.storage.impl.assertConsistency
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
@@ -29,7 +45,6 @@ import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStor
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
 import com.intellij.util.concurrency.ThreadingAssertions
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.intellij.util.concurrency.annotations.RequiresWriteLock
 import com.intellij.workspaceModel.ide.JpsGlobalModelSynchronizer
 import com.intellij.workspaceModel.ide.impl.legacyBridge.library.ProjectLibraryTableBridgeImpl.Companion.libraryMap
@@ -38,6 +53,7 @@ import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Compa
 import com.intellij.workspaceModel.ide.impl.legacyBridge.sdk.SdkBridgeImpl.Companion.sdkMap
 import com.intellij.workspaceModel.ide.legacyBridge.GlobalEntityBridgeAndEventHandler
 import io.opentelemetry.api.metrics.Meter
+import kotlinx.coroutines.Job
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.TestOnly
@@ -71,6 +87,13 @@ class GlobalWorkspaceModels internal constructor() {
   }
 }
 
+/**
+ * Please use project-level [WorkspaceModel] directly instead.
+ * [SdkEntity] and global [LibraryEntity] are seamlessly synchronized between [GlobalWorkspaceModel] and [WorkspaceModel].
+ * For custom entities [GlobalWorkspaceModel] won't give you an advantage because you would still need to make sure that all the
+ * custom entities are present in the global WSM after application start because global WSM cache may be invalidated. On top of that, you
+ * would have to remember which WSM to use: the global WSM or project-level WSM.
+ */
 @OptIn(EntityStorageInstrumentationApi::class)
 @ApiStatus.Internal
 class GlobalWorkspaceModel internal constructor(
@@ -97,6 +120,7 @@ class GlobalWorkspaceModel internal constructor(
   private val globalEntitiesFilter = { entitySource: EntitySource -> entitySource is GlobalStorageEntitySource }
 
   val entityStorage: VersionedEntityStorageImpl
+  val jpsSyncJob: Job
   val currentSnapshot: ImmutableEntityStorage
     get() = entityStorage.current
 
@@ -105,6 +129,15 @@ class GlobalWorkspaceModel internal constructor(
 
   private val updateModelMethodName = GlobalWorkspaceModel::updateModel.name
   private val onChangedMethodName = GlobalWorkspaceModel::onChanged.name
+
+  /**
+   * ModuleBridgeLoaderService applies changed from the global model to a newly created project.
+   * But if the global model is modified again before the project is added to the list of open projects in [ProjectManager]
+   * those changes won't be applied to the project.
+   *
+   * Therefore, we need to keep the list of projects that are being initialized.
+   */
+  private val initializingAndOpenProjects = ConcurrentHashMap.newKeySet<Project>()
 
   init {
     LOG.debug { "Loading global workspace model" }
@@ -136,10 +169,10 @@ class GlobalWorkspaceModel internal constructor(
 
     val callback = JpsGlobalModelSynchronizer.getInstance()
       .apply { setVirtualFileUrlManager(globalWorkspaceModels.virtualFileManager) }
-      .loadInitialState(internalEnvironmentName, mutableEntityStorage, entityStorage, loadedFromCache)
+      .loadInitialState(eelMachine, internalEnvironmentName, mutableEntityStorage, entityStorage, loadedFromCache)
     val changes = (mutableEntityStorage as MutableEntityStorageInstrumentation).collectChanges()
     entityStorage.replace(mutableEntityStorage.toSnapshot(), changes, mutableEntityStorage.collectSymbolicEntityIdsChanges(), {}, {})
-    callback.invoke()
+    jpsSyncJob = callback.invoke()
   }
 
   @OptIn(EntityStorageInstrumentationApi::class)
@@ -222,6 +255,27 @@ class GlobalWorkspaceModel internal constructor(
     GlobalEntityBridgeAndEventHandler.getAllGlobalEntityHandlers(eelMachine).forEach { it.handleBeforeChangeEvents(change) }
   }
 
+  fun registerInitializingProjectForUpdatesFromGlobalModel(project: Project) {
+    LOG.info("Project ${project.name} is added to the list of initializing and open projects")
+    initializingAndOpenProjects.add(project)
+    ApplicationManager.getApplication().getMessageBus().simpleConnect().subscribe(ProjectCloseListener.TOPIC,
+      object : ProjectCloseListener {
+        override fun projectClosed(project: Project) {
+          if (initializingAndOpenProjects.remove(project)) {
+            LOG.info("Project ${project.name} is removed from the list of initializing and open projects. Project was closed.")
+          }
+        }
+      },
+    )
+    // in tests a Project instance may be created (which leads to "projectPreInit" activities including ModuleBridgeLoaderService to be run),
+    // but the Project is not open therefore, it doesn't get closed, only disposed.
+    Disposer.register(project) {
+      if (initializingAndOpenProjects.remove(project)) {
+        LOG.info("Project ${project.name} is removed from the list of initializing and open projects. Project is being disposed.")
+      }
+    }
+  }
+
   @RequiresWriteLock
   private fun onChanged(change: VersionedStorageChange) {
     ThreadingAssertions.assertWriteAccess()
@@ -230,11 +284,12 @@ class GlobalWorkspaceModel internal constructor(
 
     globalWorkspaceModels.globalWorkspaceModelCache?.scheduleCacheSave()
     isFromGlobalWorkspaceModel = true
-    for (project in ProjectManager.getInstance().openProjects) {
-      if (project.isDisposed || project.getEelDescriptor().machine != eelMachine) {
+    for (project in initializingAndOpenProjects) {
+      if (project.isDisposed || project.getEelMachine() != eelMachine) {
         continue
       }
       applyStateToProject(project)
+      LOG.info("During global workspace model update the changes were also applied to project: ${project.name}")
     }
     isFromGlobalWorkspaceModel = false
   }
@@ -276,6 +331,15 @@ class GlobalWorkspaceModel internal constructor(
       builder.replaceBySource(globalEntitiesFilter, entitiesCopyAtBuilder)
     }
     filteredProject = null
+  }
+
+  /**
+   * Consider using [com.intellij.platform.backend.workspace.impl.WorkspaceModelInternal.awaitSynchronizationWithJpsModel] if you want to
+   * use project-level WSM.
+   */
+  @ApiStatus.Internal
+  suspend fun awaitSynchronizationWithJpsModel() {
+    jpsSyncJob.join()
   }
 
   /**
@@ -352,7 +416,6 @@ class GlobalWorkspaceModel internal constructor(
   companion object {
     private val LOG = logger<GlobalWorkspaceModel>()
 
-    @RequiresBlockingContext
     @JvmStatic
     fun getInstance(eelMachine: EelMachine): GlobalWorkspaceModel {
       return ApplicationManager.getApplication().service<GlobalWorkspaceModelRegistry>().getGlobalModel(eelMachine)
@@ -362,7 +425,7 @@ class GlobalWorkspaceModel internal constructor(
       return ApplicationManager.getApplication().serviceAsync<GlobalWorkspaceModelRegistry>().getGlobalModel(eelMachine)
     }
 
-    suspend fun getInstanceByEnvironmentName(environmentName: InternalEnvironmentName): GlobalWorkspaceModel {
+    suspend fun getInstanceByEnvironmentNameAsync(environmentName: InternalEnvironmentName): GlobalWorkspaceModel {
       return ApplicationManager.getApplication().serviceAsync<GlobalWorkspaceModelRegistry>().getGlobalModelByEnvironmentName(environmentName)
     }
 
@@ -404,11 +467,11 @@ class GlobalWorkspaceModel internal constructor(
 
 private fun VirtualFileUrl.createCopyAtManager(manager: VirtualFileUrlManager): VirtualFileUrl = manager.getOrCreateFromUrl(url)
 
-private fun ExcludeUrlEntity.copy(entitySource: EntitySource, manager: VirtualFileUrlManager): ModifiableExcludeUrlEntity {
+private fun ExcludeUrlEntity.copy(entitySource: EntitySource, manager: VirtualFileUrlManager): ExcludeUrlEntityBuilder {
   return ExcludeUrlEntity(url.createCopyAtManager(manager), entitySource)
 }
 
-private fun LibraryPropertiesEntity.copy(entitySource: EntitySource): ModifiableLibraryPropertiesEntity {
+private fun LibraryPropertiesEntity.copy(entitySource: EntitySource): LibraryPropertiesEntityBuilder {
   val originalPropertiesXmlTag = propertiesXmlTag
   return LibraryPropertiesEntity(entitySource) {
     this.propertiesXmlTag = originalPropertiesXmlTag
@@ -427,26 +490,31 @@ class GlobalWorkspaceModelRegistry {
   private val environmentToModel = ConcurrentHashMap<EelMachine, GlobalWorkspaceModel>()
 
   fun getGlobalModel(eelMachine: EelMachine): GlobalWorkspaceModel {
-    val protectedMachine = if (Registry.`is`("ide.workspace.model.per.environment.model.separation")) eelMachine else LocalEelMachine
+    val protectedMachine = if (Registry.`is`("ide.workspace.model.per.environment.model.separation", false)) eelMachine else LocalEelMachine
     val internalEnvironmentName = protectedMachine.getInternalEnvironmentNameImpl()
     return environmentToModel.computeIfAbsent(protectedMachine) { GlobalWorkspaceModel(globalWorkspaceModels, protectedMachine, internalEnvironmentName) }
   }
 
-  fun getGlobalModelByEnvironmentName(name: InternalEnvironmentName): GlobalWorkspaceModel {
-    val protectedName = if (Registry.`is`("ide.workspace.model.per.environment.model.separation")) name else InternalEnvironmentName.Local
+  suspend fun getGlobalModelByEnvironmentName(name: InternalEnvironmentName): GlobalWorkspaceModel {
+    val protectedName = if (Registry.`is`("ide.workspace.model.per.environment.model.separation", false)) name else InternalEnvironmentName.Local
     val machine = if (protectedName == InternalEnvironmentName.Local) {
       LocalEelMachine
     }
     else {
-      EelProvider.EP_NAME.extensionList.firstNotNullOf { eelProvider -> eelProvider.getEelMachineByInternalName(protectedName.name) }
+      EelMachineResolver.getEelMachineByInternalName(protectedName.name)
     }
     val model = getGlobalModel(machine)
     return model
   }
 
   fun getGlobalModels(): List<GlobalWorkspaceModel> {
-    return if (Registry.`is`("ide.workspace.model.per.environment.model.separation")) {
-      environmentToModel.values.toList()
+    return if (Registry.`is`("ide.workspace.model.per.environment.model.separation", false)) {
+      if (environmentToModel.containsKey(LocalEelMachine)) {
+        environmentToModel.values.toList()
+      }
+      else {
+        environmentToModel.values.toList() + getGlobalModel(LocalEelMachine)
+      }
     }
     else {
       listOf(getGlobalModel(LocalEelMachine))
@@ -456,13 +524,14 @@ class GlobalWorkspaceModelRegistry {
   @TestOnly
   fun dropCaches() {
     environmentToModel.clear()
+    JpsGlobalModelSynchronizer.getInstance().dropCaches()
   }
 
 }
 
 @ApiStatus.Internal
 fun EelMachine.getInternalEnvironmentName(): InternalEnvironmentName {
-  val protectedMachine = if (Registry.`is`("ide.workspace.model.per.environment.model.separation")) this else LocalEelMachine
+  val protectedMachine = if (Registry.`is`("ide.workspace.model.per.environment.model.separation", false)) this else LocalEelMachine
   return protectedMachine.getInternalEnvironmentNameImpl()
 }
 
@@ -471,8 +540,5 @@ private fun EelMachine.getInternalEnvironmentNameImpl(): InternalEnvironmentName
     InternalEnvironmentName.Local
   }
   else {
-    val name = EelProvider.EP_NAME.extensionList.firstNotNullOfOrNull { eelProvider ->
-      eelProvider.getInternalName(eelMachine = this)
-    } ?: throw IllegalArgumentException("Descriptor $this must be registered before using in Workspace Model")
-    InternalEnvironmentName.of(name)
+    InternalEnvironmentName.of(internalName)
   }

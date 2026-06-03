@@ -7,7 +7,12 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.vcs.FilePath
-import com.intellij.openapi.vcs.changes.*
+import com.intellij.openapi.vcs.changes.Change
+import com.intellij.openapi.vcs.changes.ChangeListChange
+import com.intellij.openapi.vcs.changes.ChangeListManagerEx
+import com.intellij.openapi.vcs.changes.ContentRevision
+import com.intellij.openapi.vcs.changes.CurrentContentRevision
+import com.intellij.openapi.vcs.changes.LocalChangeList
 import com.intellij.openapi.vcs.changes.conflicts.ChangelistConflictTracker
 import com.intellij.openapi.vcs.ex.ExclusionState
 import com.intellij.openapi.vcs.ex.PartialLocalLineStatusTracker
@@ -218,6 +223,11 @@ object PartialChangesUtil {
       ExclusionState.ALL_EXCLUDED -> ThreeStateCheckBox.State.NOT_SELECTED
       else -> ThreeStateCheckBox.State.DONT_CARE
     }
+  }
+
+  @JvmStatic
+  fun isPartialChange(change: Change): Boolean {
+    return change.afterRevision is PartialContentRevision
   }
 
   @JvmStatic

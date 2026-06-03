@@ -1,17 +1,26 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.extensionResources;
 
-import com.intellij.ide.plugins.*;
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
+import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
+import com.intellij.ide.plugins.PluginManager;
+import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.scratch.RootType;
 import com.intellij.ide.scratch.ScratchFileService;
 import com.intellij.lang.LangBundle;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtil;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileUtil;
+import com.intellij.openapi.vfs.VirtualFileVisitor;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.DigestUtil;
@@ -21,8 +30,8 @@ import kotlinx.coroutines.JobKt;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
 import java.io.IOException;
@@ -31,7 +40,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 
@@ -102,8 +118,26 @@ public final class ExtensionsRootType extends RootType {
   private void extractBundledExternalResources(@NotNull PluginId pluginId, @NotNull String path) throws IOException {
     for (ExternalResourcesUnpackExtensionBean pluginBean : ExternalResourcesUnpackExtensionBean.getPluginBeans(pluginId)) {
       PluginId dependentPluginId = PluginId.getId(pluginBean.unpackTo);
-      extractBundledResourcesImpl(dependentPluginId, path, getBundledExternalResources(pluginId, dependentPluginId, path));
+      List<URL> bundledResources = getExtensionsBundledModuleResources(pluginBean, dependentPluginId, path);
+      extractBundledResourcesImpl(dependentPluginId, path, bundledResources);
     }
+  }
+
+  private static @Unmodifiable @NotNull List<URL> getExtensionsBundledModuleResources(@NotNull ExternalResourcesUnpackExtensionBean bean,
+                                                                                      @NotNull PluginId dependentPluginId,
+                                                                                      @NotNull String path) throws IOException {
+    PluginDescriptor descriptor = bean.getPluginDescriptor();
+    ClassLoader loader = descriptor == null ? null : descriptor.getPluginClassLoader();
+    if (loader == null) return Collections.emptyList();
+
+    Enumeration<URL> resources = loader.getResources(EXTERNAL_EXTENSIONS_PATH + '/' + dependentPluginId.getIdString() + '/' + path);
+    if (resources == null) return Collections.emptyList();
+
+    Set<URL> urls = new LinkedHashSet<>();
+    while (resources.hasMoreElements()) {
+      urls.add(resources.nextElement());
+    }
+    return new ArrayList<>(urls);
   }
 
   private void extractBundledResourcesImpl(@NotNull PluginId pluginId, @NotNull String path, @NotNull List<URL> bundledResources) throws IOException {
@@ -227,10 +261,6 @@ public final class ExtensionsRootType extends RootType {
       }
     }
     return new ArrayList<>(urls);
-  }
-
-  private static @Unmodifiable @NotNull List<URL> getBundledExternalResources(@NotNull PluginId plugin, @NotNull PluginId destinationPlugin, @NotNull String path) throws IOException {
-    return getBundledResourceUrls(plugin, path, EXTERNAL_EXTENSIONS_PATH + '/' + destinationPlugin.getIdString());
   }
 
   private static @Unmodifiable @NotNull List<URL> getBundledExtensionsResources(@NotNull PluginId pluginId, @NotNull String path) throws IOException {

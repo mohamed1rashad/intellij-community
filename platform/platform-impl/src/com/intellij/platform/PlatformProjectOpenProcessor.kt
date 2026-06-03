@@ -2,7 +2,13 @@
 package com.intellij.platform
 
 import com.intellij.configurationStore.ProjectStorePathManager
-import com.intellij.ide.impl.*
+import com.intellij.ide.impl.OpenProjectTask
+import com.intellij.ide.impl.OpenProjectTaskBuilder
+import com.intellij.ide.impl.ProjectUtil
+import com.intellij.ide.impl.ProjectUtilCore
+import com.intellij.ide.impl.TrustedPaths
+import com.intellij.ide.impl.runUnderModalProgressIfIsEdt
+import com.intellij.ide.impl.toOpenProjectTask
 import com.intellij.ide.lightEdit.LightEditService
 import com.intellij.ide.util.PsiNavigationSupport
 import com.intellij.openapi.application.ApplicationManager
@@ -36,11 +42,9 @@ import com.intellij.util.SlowOperations
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.*
 import java.util.concurrent.CancellationException
 
 private val LOG = logger<PlatformProjectOpenProcessor>()
@@ -103,26 +107,6 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
       return EXTENSION_POINT_NAME.findExtension(PlatformProjectOpenProcessor::class.java)
     }
 
-    @JvmStatic
-    @ApiStatus.ScheduledForRemoval
-    @Deprecated("Use {@link #doOpenProject(Path, OpenProjectTask)}", level = DeprecationLevel.ERROR)
-    fun doOpenProject(
-      virtualFile: VirtualFile,
-      projectToClose: Project?,
-      line: Int,
-      callback: ProjectOpenedCallback?,
-      options: EnumSet<Option>,
-    ): Project? {
-      val openProjectOptions = OpenProjectTask {
-        forceOpenInNewFrame = Option.FORCE_NEW_FRAME in options
-        this.projectToClose = projectToClose
-        this.callback = callback
-        runConfigurators = callback != null
-        this.line = line
-      }
-      return doOpenProject(virtualFile.toNioPath(), openProjectOptions)
-    }
-
     private fun createTempProjectOpenTask(
       options: OpenProjectTask,
       dummyProjectName: String,
@@ -133,7 +117,8 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
         projectRootDir = file,
         createModule = false,
         projectName = dummyProjectName,
-        runConfigurators = true,
+        runConfigurators = false,
+        runConversionBeforeOpen = false,
         beforeOpen = { project ->
           project.service<OpenProjectSettingsService>().state.isLocatedInTempDirectory = true
           options.beforeOpen?.invoke(project) ?: true
@@ -163,9 +148,17 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
 
     @Internal
     fun doOpenProject(file: Path, originalOptions: OpenProjectTask): Project? {
-      if (Files.isDirectory(file)) {
+      LOG.info("Opening (sync) $file")
+
+      if (originalOptions.createModule && Files.isDirectory(file)) {
         val options = runUnderModalProgressIfIsEdt {
-          createOptionsToOpenDotIdeaOrCreateNewIfNotExists(file, projectToClose = null)
+          createOptionsToOpenDotIdeaOrCreateNewIfNotExists(file, projectToClose = null).copy(
+            projectName = originalOptions.projectName,
+            beforeOpen = {
+              it.putUserData(PROJECT_OPENED_BY_PLATFORM_PROCESSOR, true)
+              true
+            }
+          )
         }
         return ProjectManagerEx.getInstanceEx().openProject(file, options)
       }
@@ -180,7 +173,7 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
       }
 
       val storePathManager = ProjectStorePathManager.getInstance()
-      var baseDirCandidate = file.parent
+      var baseDirCandidate = if (Files.isRegularFile(file)) file.parent else null
       while (baseDirCandidate != null && !storePathManager.testStoreDirectoryExistsForProjectRoot(baseDirCandidate)) {
         baseDirCandidate = baseDirCandidate.parent
       }
@@ -221,12 +214,20 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
     }
 
     suspend fun openProjectAsync(file: Path, originalOptions: OpenProjectTask = OpenProjectTask()): Project? {
-      LOG.info("Opening $file")
+      LOG.info("Opening (async) $file")
 
-      if (Files.isDirectory(file)) {
+      val isDirectory = Files.isDirectory(file)
+      if (originalOptions.createModule && isDirectory) {
+        // todo: originalOptions should not be dropped
         return ProjectManagerEx.getInstanceEx().openProjectAsync(
           projectIdentityFile = file,
-          options = createOptionsToOpenDotIdeaOrCreateNewIfNotExists(file, projectToClose = null),
+          options = createOptionsToOpenDotIdeaOrCreateNewIfNotExists(file, projectToClose = null).copy(
+            projectName = originalOptions.projectName,
+            beforeOpen = {
+              it.putUserData(PROJECT_OPENED_BY_PLATFORM_PROCESSOR, true)
+              true
+            }
+          ),
         )
       }
 
@@ -239,7 +240,7 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
         }
       }
 
-      var baseDirCandidate = file.parent
+      var baseDirCandidate = if (Files.isRegularFile(file)) file.parent else null
       val storePathManager = serviceAsync<ProjectStorePathManager>()
       while (baseDirCandidate != null && !storePathManager.testStoreDirectoryExistsForProjectRoot(baseDirCandidate)) {
         baseDirCandidate = baseDirCandidate.parent
@@ -337,7 +338,7 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
     /**
      * If a project file in IDEA format (`.idea` directory or `.ipr` file) exists, opens it and runs configurators if no modules.
      * Otherwise, creates a new project using the default project template and runs configurators (something that creates a module)
-     * (at the moment of creation project file in IDEA format will be removed if any).
+     * (at the moment of creation a project file in IDEA format will be removed if any).
      * <p>
      * This method must be not used in tests.
      *
@@ -351,6 +352,7 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
         isNewProject = !ProjectUtil.isValidProjectPath(projectDir)
         this.projectToClose = projectToClose
         useDefaultProjectAsTemplate = true
+        projectRootDir = projectDir
       }
     }
 
@@ -363,13 +365,25 @@ class PlatformProjectOpenProcessor : ProjectOpenProcessor(), CommandLineProjectO
     }
   }
 
-  override fun canOpenProject(file: VirtualFile): Boolean = file.isDirectory
+  override fun canOpenProject(file: VirtualFile): Boolean {
+    return file.isDirectory
+  }
 
-  override fun isProjectFile(file: VirtualFile): Boolean = false
+  override fun isProjectFile(file: VirtualFile): Boolean {
+    return false
+  }
 
   override fun lookForProjectsInDirectory(): Boolean = false
 
-  @Internal
+  override suspend fun openProjectAsync(
+    virtualFile: VirtualFile,
+    projectOpenOptions: ProjectOpenOptions,
+  ): Project? {
+    return openProjectAsync(virtualFile.toNioPath(), projectOpenOptions.toOpenProjectTask())
+  }
+
+  @Deprecated("Use openProjectAsync(VirtualFile, ProjectOpenOptions) instead",
+              replaceWith = ReplaceWith("openProjectAsync(virtualFile, projectOpenOptions)"))
   override suspend fun openProjectAsync(virtualFile: VirtualFile, projectToClose: Project?, forceOpenInNewFrame: Boolean): Project? {
     val baseDir = virtualFile.toNioPath()
     val options = createOptionsToOpenDotIdeaOrCreateNewIfNotExists(baseDir, projectToClose).copy(forceOpenInNewFrame = forceOpenInNewFrame)

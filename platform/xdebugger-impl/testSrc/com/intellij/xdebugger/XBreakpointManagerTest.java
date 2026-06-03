@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xdebugger;
 
 import com.intellij.openapi.util.JDOMUtil;
@@ -7,11 +7,16 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xdebugger.breakpoints.SuspendPolicy;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.breakpoints.XBreakpointListener;
+import com.intellij.xdebugger.breakpoints.XBreakpointType;
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint;
+import com.intellij.xdebugger.breakpoints.XLineBreakpointVerticalPlacement;
+import com.intellij.xdebugger.impl.BreakpointManagerState;
+import com.intellij.xdebugger.impl.breakpoints.BreakpointState;
+import com.intellij.xdebugger.impl.breakpoints.XBreakpointBase;
+import com.intellij.xdebugger.impl.breakpoints.XLineBreakpointImpl;
 import org.jdom.Element;
 import org.jdom.JDOMException;
 import org.jetbrains.annotations.NotNull;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
 import org.junit.rules.TestRule;
@@ -20,6 +25,7 @@ import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -28,8 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @RunWith(JUnit4.class)
 public class XBreakpointManagerTest extends XBreakpointsTestCase {
 
-  @Rule
-  public TestRule timeout = new DisableOnDebug(Timeout.seconds(30));
+  public TestRule timeout = asOuterRule(new DisableOnDebug(Timeout.seconds(10)));
 
   @Test
   public void testAddRemove() {
@@ -90,6 +95,117 @@ public class XBreakpointManagerTest extends XBreakpointsTestCase {
   }
 
   @Test
+  public void testSameLineBreakpointsCanCoexistByPlacement() {
+    VirtualFile file = getTempDir().createVirtualFile("coexisting-breakpoints.txt");
+    XLineBreakpoint<MyBreakpointProperties> onLine =
+      myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, file.getUrl(), 0, new MyBreakpointProperties("on-line"), false,
+                                            XLineBreakpointVerticalPlacement.ON_LINE);
+    XLineBreakpoint<MyBreakpointProperties> interLine =
+      myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, file.getUrl(), 0, new MyBreakpointProperties("inter-line"), false,
+                                            XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    assertSameElements(myBreakpointManager.getBreakpoints(MY_LINE_BREAKPOINT_TYPE), onLine, interLine);
+    assertSame(onLine, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0)));
+    assertSame(onLine, myBreakpointManager.findBreakpointAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0));
+    assertSame(onLine, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                                                  XLineBreakpointVerticalPlacement.ON_LINE)));
+    assertSame(interLine, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                                                     XLineBreakpointVerticalPlacement.INTER_LINE)));
+  }
+
+  @Test
+  public void testSerializePlacement() {
+    myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, "myurl", 239, new MyBreakpointProperties("on-line"), false,
+                                          XLineBreakpointVerticalPlacement.ON_LINE);
+    myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, "myurl", 239, new MyBreakpointProperties("inter-line"), false,
+                                          XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    reload();
+
+    List<XLineBreakpoint<MyBreakpointProperties>> lineBreakpoints = ContainerUtil.map(myBreakpointManager.getBreakpoints(MY_LINE_BREAKPOINT_TYPE),
+                                                                                      breakpoint -> (XLineBreakpoint<MyBreakpointProperties>)breakpoint);
+    assertEquals(2, lineBreakpoints.size());
+    assertTrue(ContainerUtil.exists(lineBreakpoints, breakpoint -> breakpoint.getPlacement() == XLineBreakpointVerticalPlacement.ON_LINE));
+    assertTrue(ContainerUtil.exists(lineBreakpoints, breakpoint -> breakpoint.getPlacement() == XLineBreakpointVerticalPlacement.INTER_LINE));
+  }
+
+  @Test
+  public void testRestoreRemovedBreakpointDoesNotRemoveOtherPlacement() {
+    VirtualFile file = getTempDir().createVirtualFile("breakpoint.txt");
+    XLineBreakpoint<MyBreakpointProperties> onLine =
+      myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, file.getUrl(), 0, new MyBreakpointProperties("on-line"), false,
+                                            XLineBreakpointVerticalPlacement.ON_LINE);
+    XLineBreakpoint<MyBreakpointProperties> interLine =
+      myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, file.getUrl(), 0, new MyBreakpointProperties("inter-line"), false,
+                                            XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    myBreakpointManager.rememberRemovedBreakpoint((XBreakpointBase<?, ?, ?>)interLine);
+    removeBreakPoint(myBreakpointManager, interLine);
+
+    XLineBreakpoint<?> restored = assertInstanceOf(myBreakpointManager.restoreLastRemovedBreakpoint(), XLineBreakpoint.class);
+    assertEquals(XLineBreakpointVerticalPlacement.INTER_LINE, restored.getPlacement());
+    assertSame(onLine, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0)));
+    assertSame(restored, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                                                    XLineBreakpointVerticalPlacement.INTER_LINE)));
+  }
+
+  @Test
+  public void testChangingPlacementFromLogpointToBreakpointAndBackUpdatesBreakpointLookup() {
+    VirtualFile file = getTempDir().createVirtualFile("breakpoint.txt");
+    XLineBreakpoint<MyBreakpointProperties> breakpoint =
+      myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, file.getUrl(), 0, new MyBreakpointProperties("inter-line"), false,
+                                            XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    StringBuilder out = new StringBuilder();
+    myBreakpointManager.addBreakpointListener(MY_LINE_BREAKPOINT_TYPE, new XBreakpointListener<>() {
+      @Override
+      public void breakpointChanged(@NotNull XLineBreakpoint<MyBreakpointProperties> changedBreakpoint) {
+        out.append("changed[").append(changedBreakpoint.getProperties().myOption).append("];");
+      }
+    }, getTestRootDisposable());
+
+    assertLookupForPlacement(file, breakpoint, XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    XLineBreakpointImpl<?> breakpointImpl = assertInstanceOf(breakpoint, XLineBreakpointImpl.class);
+    breakpointImpl.setPlacement(XLineBreakpointVerticalPlacement.ON_LINE);
+
+    assertLookupForPlacement(file, breakpoint, XLineBreakpointVerticalPlacement.ON_LINE);
+
+    breakpointImpl.setPlacement(XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    assertLookupForPlacement(file, breakpoint, XLineBreakpointVerticalPlacement.INTER_LINE);
+    assertEquals("changed[inter-line];changed[inter-line];", out.toString());
+  }
+
+  @Test
+  public void testChangingPlacementFromBreakpointToLogpointAndBackUpdatesBreakpointLookup() {
+    VirtualFile file = getTempDir().createVirtualFile("breakpoint.txt");
+    XLineBreakpoint<MyBreakpointProperties> breakpoint =
+      myBreakpointManager.addLineBreakpoint(MY_LINE_BREAKPOINT_TYPE, file.getUrl(), 0, new MyBreakpointProperties("on-line"), false,
+                                            XLineBreakpointVerticalPlacement.ON_LINE);
+
+    StringBuilder out = new StringBuilder();
+    myBreakpointManager.addBreakpointListener(MY_LINE_BREAKPOINT_TYPE, new XBreakpointListener<>() {
+      @Override
+      public void breakpointChanged(@NotNull XLineBreakpoint<MyBreakpointProperties> changedBreakpoint) {
+        out.append("changed[").append(changedBreakpoint.getProperties().myOption).append("];");
+      }
+    }, getTestRootDisposable());
+
+    assertLookupForPlacement(file, breakpoint, XLineBreakpointVerticalPlacement.ON_LINE);
+
+    XLineBreakpointImpl<?> breakpointImpl = assertInstanceOf(breakpoint, XLineBreakpointImpl.class);
+    breakpointImpl.setPlacement(XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    assertLookupForPlacement(file, breakpoint, XLineBreakpointVerticalPlacement.INTER_LINE);
+
+    breakpointImpl.setPlacement(XLineBreakpointVerticalPlacement.ON_LINE);
+
+    assertLookupForPlacement(file, breakpoint, XLineBreakpointVerticalPlacement.ON_LINE);
+    assertEquals("changed[on-line];changed[on-line];", out.toString());
+  }
+
+  @Test
   public void testDoNotSaveUnmodifiedDefaultBreakpoint() {
     reload();
 
@@ -117,6 +233,115 @@ public class XBreakpointManagerTest extends XBreakpointsTestCase {
     assertFalse(save().getContent().isEmpty());
     reload();
     assertEquals("changed", getSingleBreakpoint().getProperties().myOption);
+  }
+
+  @Test
+  public void testReloadDoesNotDuplicateDefaultBreakpointsInEventDrivenConsumer() {
+    List<XBreakpoint<MyBreakpointProperties>> visibleBreakpoints =
+      new ArrayList<>(myBreakpointManager.getDefaultBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE));
+    List<String> listenerCalls = new ArrayList<>();
+    myBreakpointManager.addBreakpointListener(MY_SIMPLE_BREAKPOINT_TYPE, new XBreakpointListener<>() {
+      @Override
+      public void breakpointAdded(@NotNull XBreakpoint<MyBreakpointProperties> breakpoint) {
+        listenerCalls.add("breakpoint added " + breakpoint.getProperties().myOption);
+        visibleBreakpoints.add(breakpoint);
+      }
+
+      @Override
+      public void breakpointRemoved(@NotNull XBreakpoint<MyBreakpointProperties> breakpoint) {
+        listenerCalls.add("breakpoint removed " + breakpoint.getProperties().myOption);
+        visibleBreakpoints.remove(breakpoint);
+      }
+
+      @Override
+      public void breakpointChanged(@NotNull XBreakpoint<MyBreakpointProperties> breakpoint) {
+        listenerCalls.add("breakpoint changed " + breakpoint.getProperties().myOption);
+      }
+    }, getTestRootDisposable());
+
+    reload();
+
+    XBreakpoint<MyBreakpointProperties> restoredBreakpoint = assertOneElement(myBreakpointManager.getDefaultBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE));
+    assertThat(listenerCalls).containsExactly("breakpoint removed default", "breakpoint added default");
+    assertThat(visibleBreakpoints).doesNotHaveDuplicates();
+    assertThat(visibleBreakpoints).containsExactly(restoredBreakpoint);
+  }
+
+  @Test
+  public void testLoadStateDeduplicatesDefaultBreakpointsWithSameState() {
+    BreakpointManagerState state = new BreakpointManagerState();
+    BreakpointState first = createDefaultState(MY_SIMPLE_BREAKPOINT_TYPE.getId(), true, SuspendPolicy.NONE, 1);
+    BreakpointState second = createDefaultState(MY_SIMPLE_BREAKPOINT_TYPE.getId(), true, SuspendPolicy.NONE, 2);
+    state.getDefaultBreakpoints().add(first);
+    state.getDefaultBreakpoints().add(second);
+
+    myBreakpointManager.loadState(state);
+
+    XBreakpoint<MyBreakpointProperties> breakpoint = assertOneElement(myBreakpointManager.getDefaultBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE));
+    assertEquals(1, myBreakpointManager.getBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE).size());
+    assertTrue(breakpoint.isEnabled());
+    assertEquals(SuspendPolicy.NONE, breakpoint.getSuspendPolicy());
+  }
+
+  @Test
+  public void testLoadStateKeepsDefaultBreakpointsWithDifferentStates() {
+    BreakpointManagerState state = new BreakpointManagerState();
+    BreakpointState first = createDefaultState(MY_SIMPLE_BREAKPOINT_TYPE.getId(), true, SuspendPolicy.NONE);
+    BreakpointState second = createDefaultState(MY_SIMPLE_BREAKPOINT_TYPE.getId(), false, SuspendPolicy.ALL);
+    state.getDefaultBreakpoints().add(first);
+    state.getDefaultBreakpoints().add(second);
+
+    myBreakpointManager.loadState(state);
+
+    Set<XBreakpoint<MyBreakpointProperties>> breakpoints = myBreakpointManager.getDefaultBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE);
+    assertEquals(2, breakpoints.size());
+    assertEquals(2, myBreakpointManager.getBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE).size());
+    assertTrue(
+      ContainerUtil.exists(breakpoints, breakpoint -> breakpoint.isEnabled() && breakpoint.getSuspendPolicy() == SuspendPolicy.NONE));
+    assertTrue(
+      ContainerUtil.exists(breakpoints, breakpoint -> !breakpoint.isEnabled() && breakpoint.getSuspendPolicy() == SuspendPolicy.ALL));
+  }
+
+  @Test
+  public void testExtensionAddedAddsDefaultBreakpointWhenStatesDiffer() {
+    XBreakpointType<XBreakpoint<MyBreakpointProperties>, MyBreakpointProperties> type =
+      createExtensionType("from-extension", SuspendPolicy.NONE);
+
+    myBreakpointManager.addDefaultBreakpoint(type, new MyBreakpointProperties("existing"));
+    assertEquals(1, myBreakpointManager.getDefaultBreakpoints(type).size());
+
+    XBreakpointType.EXTENSION_POINT_NAME.getPoint().registerExtension(type, getTestRootDisposable());
+
+    Set<XBreakpoint<MyBreakpointProperties>> breakpoints = myBreakpointManager.getDefaultBreakpoints(type);
+    assertEquals(2, breakpoints.size());
+    assertTrue(ContainerUtil.exists(breakpoints, breakpoint -> {
+      MyBreakpointProperties properties = assertInstanceOf(breakpoint.getProperties(), MyBreakpointProperties.class);
+      return "existing".equals(properties.myOption);
+    }));
+    assertTrue(ContainerUtil.exists(breakpoints, breakpoint -> {
+      MyBreakpointProperties properties = assertInstanceOf(breakpoint.getProperties(), MyBreakpointProperties.class);
+      return "from-extension".equals(properties.myOption) && breakpoint.getSuspendPolicy() == SuspendPolicy.NONE;
+    }));
+  }
+
+  @Test
+  public void testExtensionAddedDeduplicatesDefaultBreakpointWithSameState() {
+    XBreakpointType<XBreakpoint<MyBreakpointProperties>, MyBreakpointProperties> type =
+      createExtensionType("from-extension", SuspendPolicy.NONE);
+
+    XBreakpoint<MyBreakpointProperties> existing = myBreakpointManager.addDefaultBreakpoint(type, new MyBreakpointProperties("from-extension"));
+    existing.setEnabled(true);
+    existing.setSuspendPolicy(SuspendPolicy.NONE);
+    assertEquals(1, myBreakpointManager.getDefaultBreakpoints(type).size());
+
+    XBreakpointType.EXTENSION_POINT_NAME.getPoint().registerExtension(type, getTestRootDisposable());
+
+    Set<XBreakpoint<MyBreakpointProperties>> breakpoints = myBreakpointManager.getDefaultBreakpoints(type);
+    assertOneElement(breakpoints);
+    XBreakpoint<MyBreakpointProperties> breakpoint = assertOneElement(breakpoints);
+    assertEquals("from-extension", assertInstanceOf(breakpoint.getProperties(), MyBreakpointProperties.class).myOption);
+    assertTrue(breakpoint.isEnabled());
+    assertEquals(SuspendPolicy.NONE, breakpoint.getSuspendPolicy());
   }
 
   @Test
@@ -185,8 +410,75 @@ public class XBreakpointManagerTest extends XBreakpointsTestCase {
     return assertOneElement(myBreakpointManager.getBreakpoints(MY_SIMPLE_BREAKPOINT_TYPE));
   }
 
+  private static @NotNull BreakpointState createDefaultState(@NotNull String typeId,
+                                                             boolean enabled,
+                                                             @NotNull SuspendPolicy suspendPolicy) {
+    BreakpointState state = new BreakpointState();
+    state.setTypeId(typeId);
+    state.setEnabled(enabled);
+    state.setSuspendPolicy(suspendPolicy);
+    return state;
+  }
+
+  private static @NotNull BreakpointState createDefaultState(@NotNull String typeId,
+                                                             boolean enabled,
+                                                             @NotNull SuspendPolicy suspendPolicy,
+                                                             long timeStamp) {
+    BreakpointState state = createDefaultState(typeId, enabled, suspendPolicy);
+    state.setTimeStamp(timeStamp);
+    return state;
+  }
+
+  private static @NotNull XBreakpointType<XBreakpoint<MyBreakpointProperties>, MyBreakpointProperties> createExtensionType(
+    @NotNull String defaultOption,
+    @NotNull SuspendPolicy suspendPolicy
+  ) {
+    String typeId = "testExtensionType" + System.nanoTime();
+    return new XBreakpointType<>(typeId, "239") {
+      @Override
+      public String getDisplayText(XBreakpoint<MyBreakpointProperties> breakpoint) {
+        return "";
+      }
+
+      @Override
+      public MyBreakpointProperties createProperties() {
+        return new MyBreakpointProperties();
+      }
+
+      @Override
+      public XBreakpoint<MyBreakpointProperties> createDefaultBreakpoint(@NotNull XBreakpointCreator<MyBreakpointProperties> creator) {
+        XBreakpoint<MyBreakpointProperties> breakpoint = creator.createBreakpoint(new MyBreakpointProperties(defaultOption));
+        breakpoint.setEnabled(true);
+        breakpoint.setSuspendPolicy(suspendPolicy);
+        return breakpoint;
+      }
+    };
+  }
+
   private void reload() {
     Element element = save();
     load(element);
+  }
+
+  private void assertLookupForPlacement(@NotNull VirtualFile file,
+                                        @NotNull XLineBreakpoint<MyBreakpointProperties> breakpoint,
+                                        @NotNull XLineBreakpointVerticalPlacement expectedPlacement) {
+    assertEquals(expectedPlacement, breakpoint.getPlacement());
+    switch (expectedPlacement) {
+      case ON_LINE -> {
+        assertSame(breakpoint, myBreakpointManager.findBreakpointAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0));
+        assertSame(breakpoint, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                                                          XLineBreakpointVerticalPlacement.ON_LINE)));
+        assertEmpty(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                              XLineBreakpointVerticalPlacement.INTER_LINE));
+      }
+      case INTER_LINE -> {
+        assertNull(myBreakpointManager.findBreakpointAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0));
+        assertEmpty(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                              XLineBreakpointVerticalPlacement.ON_LINE));
+        assertSame(breakpoint, assertOneElement(myBreakpointManager.findBreakpointsAtLine(MY_LINE_BREAKPOINT_TYPE, file, 0,
+                                                                                          XLineBreakpointVerticalPlacement.INTER_LINE)));
+      }
+    }
   }
 }

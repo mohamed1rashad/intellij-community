@@ -4,6 +4,7 @@ package org.jetbrains.plugins.groovy.lang.folding;
 
 import com.intellij.codeInsight.folding.JavaCodeFoldingSettings;
 import com.intellij.codeInsight.folding.impl.JavaFoldingBuilderBase;
+import com.intellij.codeInsight.folding.impl.JavaFoldingUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.folding.CustomFoldingBuilder;
 import com.intellij.lang.folding.FoldingDescriptor;
@@ -12,7 +13,11 @@ import com.intellij.openapi.editor.FoldingGroup;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.impl.source.tree.LeafPsiElement;
 import com.intellij.psi.tree.IElementType;
 import org.jetbrains.annotations.NotNull;
@@ -239,7 +244,7 @@ public final class GroovyFoldingBuilder extends CustomFoldingBuilder implements 
         int start = first.getTextRange().getStartOffset();
         int end = marker.getTextRange().getEndOffset();
         int tail = "import ".length();
-        if (start + tail < end && !JavaFoldingBuilderBase.hasErrorElementsNearby(first.getContainingFile(), start, end)) {
+        if (start + tail < end && !JavaFoldingUtil.hasErrorElementsNearby(first.getContainingFile(), start, end)) {
           FoldingDescriptor descriptor = new FoldingDescriptor(first.getNode(), new TextRange(start + tail, end), null, "...",
                                                                JavaCodeFoldingSettings.getInstance().isCollapseImports(),
                                                                Collections.emptySet());

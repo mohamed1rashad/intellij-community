@@ -1,12 +1,14 @@
 package org.jetbrains.jewel.markdown
 
-import org.jetbrains.jewel.foundation.code.MimeType
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.contract
 import org.jetbrains.jewel.markdown.MarkdownBlock.BlockQuote
 import org.jetbrains.jewel.markdown.MarkdownBlock.CodeBlock
 import org.jetbrains.jewel.markdown.MarkdownBlock.CodeBlock.FencedCodeBlock
 import org.jetbrains.jewel.markdown.MarkdownBlock.CodeBlock.IndentedCodeBlock
 import org.jetbrains.jewel.markdown.MarkdownBlock.Heading
 import org.jetbrains.jewel.markdown.MarkdownBlock.HtmlBlock
+import org.jetbrains.jewel.markdown.MarkdownBlock.HtmlBlockWithAttributes
 import org.jetbrains.jewel.markdown.MarkdownBlock.ListBlock
 import org.jetbrains.jewel.markdown.MarkdownBlock.ListBlock.OrderedList
 import org.jetbrains.jewel.markdown.MarkdownBlock.ListBlock.UnorderedList
@@ -14,6 +16,12 @@ import org.jetbrains.jewel.markdown.MarkdownBlock.ListItem
 import org.jetbrains.jewel.markdown.MarkdownBlock.Paragraph
 import org.jetbrains.jewel.markdown.MarkdownBlock.ThematicBreak
 import org.junit.Assert.assertTrue
+
+@OptIn(ExperimentalContracts::class)
+public fun <T> T?.assertNotNull() {
+    contract { returns() implies (this@assertNotNull != null) }
+    assertTrue("Expected non-null value, but got null", this != null)
+}
 
 public fun List<MarkdownBlock>.assertEquals(vararg expected: MarkdownBlock) {
     val differences = findDifferences(expected.toList(), indentSize = 0)
@@ -66,6 +74,7 @@ private fun MarkdownBlock.findDifferenceWith(expected: MarkdownBlock, indentSize
         is ListBlock -> diffList(this, expected, indentSize, indent)
         is ListItem -> children.findDifferences((expected as ListItem).children, indentSize)
         is ThematicBreak -> emptyList() // They can only differ in their node
+        is HtmlBlockWithAttributes -> diffHtmlBlockWithAttributes(this, expected, indent)
         else -> error("Unsupported MarkdownBlock: ${this.javaClass.name}")
     }
 }
@@ -90,12 +99,24 @@ private fun diffHtmlBlock(actual: HtmlBlock, expected: MarkdownBlock, indent: St
     }
 }
 
+private fun diffHtmlBlockWithAttributes(actual: HtmlBlockWithAttributes, expected: MarkdownBlock, indent: String) =
+    buildList {
+        if (actual.attributes != (expected as HtmlBlockWithAttributes).attributes) {
+            add(
+                "$indent * HTML block attributes mismatch.\n\n" +
+                    "$indent     Actual:   ${actual.attributes}\n" +
+                    "$indent     Expected: ${expected.attributes}\n"
+            )
+        }
+        addAll(actual.mdBlock.findDifferenceWith(expected.mdBlock, indentSize = indent.length))
+    }
+
 private fun diffFencedCodeBlock(actual: FencedCodeBlock, expected: MarkdownBlock, indent: String) = buildList {
-    if (actual.mimeType != (expected as FencedCodeBlock).mimeType) {
+    if (actual.language != (expected as FencedCodeBlock).language) {
         add(
             "$indent * Fenced code block mime type mismatch.\n\n" +
-                "$indent     Actual:   ${actual.mimeType}\n" +
-                "$indent     Expected: ${expected.mimeType}"
+                "$indent     Actual:   ${actual.language}\n" +
+                "$indent     Expected: ${expected.language}"
         )
     }
 
@@ -177,8 +198,7 @@ public fun heading(level: Int, vararg inlineContent: InlineMarkdown): Heading =
 
 public fun indentedCodeBlock(content: String): IndentedCodeBlock = IndentedCodeBlock(content)
 
-public fun fencedCodeBlock(content: String, mimeType: MimeType? = null): FencedCodeBlock =
-    FencedCodeBlock(content, mimeType)
+public fun fencedCodeBlock(content: String, language: String = ""): FencedCodeBlock = FencedCodeBlock(content, language)
 
 public fun blockQuote(vararg contents: MarkdownBlock): BlockQuote = BlockQuote(contents.toList())
 

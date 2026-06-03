@@ -11,10 +11,15 @@ public interface DataPaths {
   String CONFIG_STATE_FILE_NAME = "config-state.dat";
   String DEP_GRAPH_FILE_NAME = "dep-graph.mv";
   String OLD_DEPS_DIR_NAME = "past-deps";
+  String DIAGNOSTIC_FILE_NAME_SUFFIX = "-diagnostic.zip";
+  String PARAMS_FILE_NAME_SUFFIX = ".params";
   String ABI_JAR_SUFFIX = ".abi.jar";
   String DATA_DIR_NAME_SUFFIX = "-ic";
-  String KOTLIN_CRI_STORAGE_SUFFIX = "-kotlinCriStorage";
+
+  //Suffix for a per-target directory where contents of input srcjars are unpacked.
+  String SOURCE_JARS_DIR_NAME_SUFFIX = "-srcjars";
   String KOTLIN_MODULE_EXTENSION = ".kotlin_module";
+  String BUILD_LOG_FILE_NAME = "build.log";
 
 
   static @NotNull Path getTrashDir(BuildContext context) {
@@ -38,12 +43,36 @@ public interface DataPaths {
     return context.getDataDir().resolve(CONFIG_STATE_FILE_NAME);
   }
 
+  static @NotNull Path getDiagnosticDataPath(BuildContext context) {
+    String artifactName = truncateExtension(context.getOutputZip().getFileName().toString());
+    return context.getDataDir().resolve(artifactName + DIAGNOSTIC_FILE_NAME_SUFFIX);
+  }
+
+  static @NotNull Path getBuildProcessLoggerDataPath(BuildContext context) {
+    return context.getOutputZip().resolveSibling(BUILD_LOG_FILE_NAME);
+  }
+
   static @NotNull Path getDepGraphStoreFile(BuildContext context) {
     return context.getDataDir().resolve(DEP_GRAPH_FILE_NAME);
   }
 
   static @NotNull Path getDependenciesBackupStoreDir(BuildContext context) {
     return context.getDataDir().resolve(OLD_DEPS_DIR_NAME);
+  }
+
+  /**
+   * Per-target directory into which all input srcjars of a compile action are unpacked.
+   */
+  static @NotNull Path getSrcJarsExtractDir(BuildContext context) {
+    return getSrcJarsExtractDir(context.getOutputZip());
+  }
+
+  /**
+   * Per-target directory into which all input srcjars of a compile action are unpacked.
+   */
+  static @NotNull Path getSrcJarsExtractDir(Path outputZip) {
+    String artifactName = truncateExtension(outputZip.getFileName().toString());
+    return outputZip.resolveSibling(artifactName + SOURCE_JARS_DIR_NAME_SUFFIX);
   }
 
   static @NotNull Path getJarBackupStoreFile(BuildContext context, Path jarPath) {
@@ -69,5 +98,10 @@ public interface DataPaths {
    */
   static boolean isLibraryTracked(String path) {
     return path.endsWith(ABI_JAR_SUFFIX);
+  }
+
+  static String truncateExtension(String filename) {
+    int idx = filename.lastIndexOf('.');
+    return idx >= 0? filename.substring(0, idx) : filename;
   }
 }

@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.platform.navbar.monolith` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "monolith_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "monolith",
   module_name = "intellij.platform.navbar.monolith",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":monolith_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "@lib//:kotlin-stdlib",
     "//platform/core-api:core",
@@ -20,6 +15,30 @@ jvm_library(
     "//platform/lang-impl",
     "//platform/navbar/backend",
     "//platform/navbar/frontend",
+    "//platform/platform-api:ide",
+  ]
+)
+
+jvm_library(
+  name = "monolith_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.navbar.monolith",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":monolith",
+    "//platform/core-api:core_test_lib",
+    "//platform/core-ui:core-ui_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//platform/navbar/backend:backend_test_lib",
+    "//platform/navbar/frontend:frontend_test_lib",
+    "//platform/platform-api:ide_test_lib",
   ]
 )
 ### auto-generated section `build intellij.platform.navbar.monolith` end
+
+### auto-generated section `iml intellij.platform.navbar.monolith` start
+exports_files([
+  "intellij.platform.navbar.monolith.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.navbar.monolith` end

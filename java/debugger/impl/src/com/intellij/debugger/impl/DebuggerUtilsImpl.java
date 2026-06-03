@@ -1,14 +1,31 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.debugger.impl;
 
 import com.intellij.configurationStore.XmlSerializer;
 import com.intellij.debugger.DebuggerGlobalSearchScope;
+import com.intellij.debugger.DebuggerInvocationUtil;
 import com.intellij.debugger.JavaDebuggerBundle;
 import com.intellij.debugger.actions.DebuggerAction;
-import com.intellij.debugger.engine.*;
-import com.intellij.debugger.engine.evaluation.*;
+import com.intellij.debugger.engine.DebugProcess;
+import com.intellij.debugger.engine.DebugProcessImpl;
+import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
+import com.intellij.debugger.engine.MethodInvokeUtils;
+import com.intellij.debugger.engine.RemoteConnectionStub;
+import com.intellij.debugger.engine.StackFrameContext;
+import com.intellij.debugger.engine.SuspendContext;
+import com.intellij.debugger.engine.SuspendContextImpl;
+import com.intellij.debugger.engine.evaluation.CodeFragmentKind;
+import com.intellij.debugger.engine.evaluation.EvaluateException;
+import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
+import com.intellij.debugger.engine.evaluation.EvaluationContext;
+import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
+import com.intellij.debugger.engine.evaluation.TextWithImports;
+import com.intellij.debugger.engine.evaluation.TextWithImportsImpl;
+import com.intellij.debugger.engine.jdi.VirtualMachineProxy;
 import com.intellij.debugger.impl.attach.PidRemoteConnection;
 import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
+import com.intellij.debugger.requests.Requestor;
+import com.intellij.debugger.ui.breakpoints.Breakpoint;
 import com.intellij.debugger.ui.impl.watch.DebuggerTreeNodeExpression;
 import com.intellij.debugger.ui.tree.render.BatchEvaluator;
 import com.intellij.debugger.ui.tree.render.NodeRenderer;
@@ -19,17 +36,32 @@ import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.util.TreeClassChooser;
 import com.intellij.ide.util.TreeClassChooserFactory;
 import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.ex.JavaSdkUtil;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.JDOMExternalizerUtil;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiCompiledElement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileFactory;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.impl.PsiJavaParserFacadeImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiUtil;
@@ -40,6 +72,7 @@ import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.URLUtil;
 import com.intellij.util.net.NetUtils;
+import com.intellij.xdebugger.DapMode;
 import com.intellij.xdebugger.XDebugSession;
 import com.intellij.xdebugger.XExpression;
 import com.intellij.xdebugger.impl.XDebugSessionImpl;
@@ -47,18 +80,44 @@ import com.intellij.xdebugger.impl.breakpoints.XExpressionState;
 import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.jetbrains.jdi.MethodImpl;
 import com.jetbrains.jdi.ReferenceTypeImpl;
-import com.sun.jdi.*;
+import com.sun.jdi.ArrayReference;
+import com.sun.jdi.ArrayType;
+import com.sun.jdi.BooleanValue;
+import com.sun.jdi.ByteValue;
+import com.sun.jdi.CharValue;
+import com.sun.jdi.ClassNotLoadedException;
+import com.sun.jdi.ClassType;
+import com.sun.jdi.DoubleValue;
+import com.sun.jdi.FloatValue;
+import com.sun.jdi.InterfaceType;
+import com.sun.jdi.Location;
+import com.sun.jdi.Method;
+import com.sun.jdi.ObjectCollectedException;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.PrimitiveType;
+import com.sun.jdi.PrimitiveValue;
+import com.sun.jdi.ReferenceType;
+import com.sun.jdi.StringReference;
+import com.sun.jdi.Type;
+import com.sun.jdi.VMDisconnectedException;
+import com.sun.jdi.Value;
 import com.sun.jdi.connect.Connector;
 import com.sun.jdi.connect.IllegalConnectorArgumentsException;
 import com.sun.jdi.connect.ListeningConnector;
 import one.util.streamex.StreamEx;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.URL;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -224,6 +283,13 @@ public final class DebuggerUtilsImpl extends DebuggerUtilsEx {
     return Boolean.TRUE.equals(debugProcess.getUserData(BatchEvaluator.REMOTE_SESSION_KEY));
   }
 
+  @ApiStatus.Internal
+  @Override
+  public @NotNull VirtualMachineProxy getVmProxy() {
+    DebuggerManagerThreadImpl managerThread = DebuggerManagerThreadImpl.getCurrentThread();
+    return Objects.requireNonNull(managerThread.getVmProxy(), "VM is not set in DMT");
+  }
+
   @Override
   protected void logErrorImpl(@NotNull Throwable e) {
     logError(e);
@@ -309,7 +375,9 @@ public final class DebuggerUtilsImpl extends DebuggerUtilsEx {
       }
       else {
         String superName = superType.name();
-        return CommonClassNames.JAVA_LANG_CLONEABLE.equals(superName) || CommonClassNames.JAVA_IO_SERIALIZABLE.equals(superName);
+        return CommonClassNames.JAVA_LANG_CLONEABLE.equals(superName) ||
+               CommonClassNames.JAVA_IO_SERIALIZABLE.equals(superName) ||
+               CommonClassNames.JAVA_LANG_OBJECT.equals(superName);
       }
     }
     if (superType instanceof ClassType) { // may check superclass only
@@ -362,44 +430,7 @@ public final class DebuggerUtilsImpl extends DebuggerUtilsEx {
     @NotNull ThrowableComputable<? extends T, ? extends EvaluateException> valueComputable,
     @NotNull Function<? super T, ? extends R> processor,
     @NotNull EvaluationContext evaluationContext) throws EvaluateException {
-    int retries = 3;
-    while (true) {
-      try {
-        T result = valueComputable.compute();
-        return processor.apply(result);
-      }
-      catch (ObjectCollectedException oce) {
-        if (--retries < 0) {
-          return suspendAllAndEvaluate(valueComputable, processor, evaluationContext);
-        }
-      }
-      catch (EvaluateException e) {
-        if (e.getCause() instanceof ObjectCollectedException) {
-          if (--retries < 0) {
-            return suspendAllAndEvaluate(valueComputable, processor, evaluationContext);
-          }
-        }
-        else {
-          throw e;
-        }
-      }
-    }
-  }
-
-  private static <R, T> R suspendAllAndEvaluate(@NotNull ThrowableComputable<? extends T, ? extends EvaluateException> valueComputable,
-                                                @NotNull Function<? super T, ? extends R> processor,
-                                                @NotNull EvaluationContext evaluationContext) throws EvaluateException {
-    if (Registry.is("debugger.collectible.value.retries.error", true)) {
-      LOG.error("Retries exhausted, applying suspend-all evaluation");
-    }
-    VirtualMachineProxyImpl virtualMachineProxy = ((EvaluationContextImpl)evaluationContext).getSuspendContext().getVirtualMachineProxy();
-    virtualMachineProxy.suspend();
-    try {
-      return processor.apply(valueComputable.compute());
-    }
-    finally {
-      virtualMachineProxy.resume();
-    }
+    return processCollectibleValue(valueComputable, processor, ((EvaluationContextImpl)evaluationContext).getSuspendContext());
   }
 
   private static final Key<Method> TO_STRING_METHOD_KEY = new Key<>("CachedToStringMethod");
@@ -517,6 +548,13 @@ public final class DebuggerUtilsImpl extends DebuggerUtilsEx {
         Enumeration<URL> urls = aClass.getClassLoader().getResources(resourcePath);
         while (urls.hasMoreElements()) {
           URL url = urls.nextElement();
+          // try to exclude idea_rt.jar
+          if (url.getProtocol().equals(URLUtil.JAR_PROTOCOL) && !url.getFile().contains("idea_rt.jar")) {
+            Pair<String, String> jarUrl = URLUtil.splitJarUrl(url.toString());
+            if (jarUrl != null) {
+              return jarUrl.first;
+            }
+          }
           // prefer dir
           if (url.getProtocol().equals(URLUtil.FILE_PROTOCOL)) {
             String path = URLUtil.urlToFile(url).getPath();
@@ -570,7 +608,7 @@ public final class DebuggerUtilsImpl extends DebuggerUtilsEx {
   public static @NotNull CompletableFuture<List<NodeRenderer>> getApplicableRenderers(List<? extends NodeRenderer> renderers, Type type) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     CompletableFuture<Boolean>[] futures = renderers.stream().map(r -> r.isApplicableAsync(type)).toArray(CompletableFuture[]::new);
-    return CompletableFuture.allOf(futures).thenApply(__ -> {
+    return CompletableFuture.allOf(futures).thenApply(_ -> {
       List<NodeRenderer> res = new SmartList<>();
       for (int i = 0; i < futures.length; i++) {
         try {
@@ -691,5 +729,24 @@ public final class DebuggerUtilsImpl extends DebuggerUtilsEx {
       return keepResult ? evaluationContext.computeAndKeep(invoker) : invoker.compute();
     }
     return null;
+  }
+
+  @ApiStatus.Internal
+  public static String getRequestorStringForUser(Requestor requestor) {
+    return requestor instanceof Breakpoint<?> breakpoint ? breakpoint.getDisplayName() : requestor.getClass().getSimpleName();
+  }
+
+  @ApiStatus.Internal
+  public static boolean askAboutPauseOnException(Project project, String displayName, String exceptionMessage, @NotNull @NlsContexts.DialogTitle String title) {
+    if (DapMode.isDap()) {
+      return false; // Don't stop — continue execution, error is printed to console by the caller
+    }
+    final boolean[] considerRequestHit = new boolean[]{true};
+    DebuggerInvocationUtil.invokeAndWait(project, () -> {
+      final String message = JavaDebuggerBundle.message("error.evaluating.breakpoint.condition.or.action", displayName, exceptionMessage);
+      considerRequestHit[0] = Messages.showYesNoDialog(project, message, title, Messages.getQuestionIcon()) == Messages.YES;
+    }, ModalityState.nonModal());
+    boolean r = considerRequestHit[0];
+    return r;
   }
 }

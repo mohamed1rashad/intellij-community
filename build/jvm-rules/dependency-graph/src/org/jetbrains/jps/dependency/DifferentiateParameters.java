@@ -22,10 +22,17 @@ public interface DifferentiateParameters {
   boolean isCompiledWithErrors();
 
   @NotNull
+  Predicate<? super NodeSource> scopeFilter();
+
+  @NotNull
   Predicate<? super NodeSource> affectionFilter();
 
   @NotNull
   Predicate<? super NodeSource> belongsToCurrentCompilationChunk();
+
+  default @NotNull LogConsumer logConsumer() {
+    return LogConsumer.EMPTY;
+  }
 
   @NotNull
   static Predicate<? super NodeSource> affectableInCurrentChunk(DifferentiateParameters params) {

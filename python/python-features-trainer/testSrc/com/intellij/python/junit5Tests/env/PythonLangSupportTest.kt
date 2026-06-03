@@ -1,7 +1,7 @@
 package com.intellij.python.junit5Tests.env
 
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.projectRoots.ProjectJdkTable
@@ -13,16 +13,15 @@ import com.intellij.python.featuresTrainer.ift.PythonLangSupport
 import com.intellij.python.junit5Tests.framework.env.PyEnvTestCase
 import com.intellij.python.junit5Tests.framework.env.PythonBinaryPath
 import com.intellij.python.junit5Tests.framework.winLockedFile.deleteCheckLocking
+import com.intellij.python.test.env.common.PredefinedPyEnvironments
 import com.intellij.testFramework.common.timeoutRunBlocking
 import com.jetbrains.python.PythonBinary
 import com.jetbrains.python.errorProcessing.ErrorSink
-import com.jetbrains.python.errorProcessing.PyError
 import com.jetbrains.python.getOrThrow
 import com.jetbrains.python.sdk.pythonSdk
 import com.jetbrains.python.venvReader.VirtualEnvReader.Companion.DEFAULT_VIRTUALENV_DIRNAME
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.withContext
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions
@@ -35,7 +34,7 @@ import training.project.ProjectUtils
 import java.nio.file.Path
 import kotlin.time.Duration.Companion.minutes
 
-@PyEnvTestCase
+@PyEnvTestCase(PredefinedPyEnvironments.VANILLA_3_14)
 class PythonLangSupportTest {
   companion object {
     @JvmStatic
@@ -89,7 +88,7 @@ class PythonLangSupportTest {
       Assertions.assertTrue(VanillaPythonWithPythonInfoImpl.createByPythonBinary(pythonBinary).orThrow().pythonInfo.languageLevel.isPy3K, "Sdk is broken")
     }
     finally {
-      writeAction {
+      edtWriteAction {
         ProjectJdkTable.getInstance().removeJdk(sdk)
       }
       withContext(Dispatchers.EDT) {

@@ -6,20 +6,44 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.ui.components.fields.ExtendableTextField;
+import com.intellij.ui.dsl.listCellRenderer.KotlinUIDslRendererComponent;
 import com.intellij.ui.speedSearch.SpeedSearchSupply;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.AbstractAction;
+import javax.swing.CellEditor;
+import javax.swing.ComboBoxEditor;
+import javax.swing.ComboBoxModel;
+import javax.swing.InputMap;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JRootPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicComboBoxEditor;
 import javax.swing.plaf.basic.ComboPopup;
 import javax.swing.table.TableCellEditor;
 import javax.swing.text.DefaultEditorKit;
 import javax.swing.text.JTextComponent;
-import java.awt.*;
-import java.awt.event.*;
+import java.awt.AWTEvent;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Toolkit;
+import java.awt.event.AWTEventListener;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.KeyEvent;
+import java.awt.event.WindowEvent;
 import java.awt.im.InputMethodRequests;
 
 /**
@@ -117,9 +141,13 @@ public class ComboBox<E> extends ComboBoxWithWidePopup<E> implements AWTEventLis
           text = (String)selectedItem;
         }
         else {
-          Component component = comboBox.getRenderer().getListCellRendererComponent(new JList<>(), selectedItem, 0, false, false);
+          Component component = comboBox.getRenderer().getListCellRendererComponent(
+            new JList<>(), selectedItem, comboBox.getSelectedIndex(), false, false);
           if (component instanceof JLabel) {
             text = ((JLabel)component).getText();
+          }
+          else if (component instanceof KotlinUIDslRendererComponent uiDslRendererComponent) {
+            text = uiDslRendererComponent.getCopyText();
           }
           else if (component != null) {
             String str = component.toString();

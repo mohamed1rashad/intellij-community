@@ -1,7 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.workspaceModel.ide.impl
 
-import com.intellij.openapi.application.edtWriteAction
+import com.intellij.openapi.application.backgroundWriteAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceAsync
@@ -16,8 +16,21 @@ import com.intellij.platform.backend.workspace.useReactiveWorkspaceModelApi
 import com.intellij.platform.backend.workspace.workspaceModel
 import com.intellij.platform.diagnostic.telemetry.helpers.MillisecondsMeasurer
 import com.intellij.platform.workspace.jps.OrphanageWorkerEntitySource
-import com.intellij.platform.workspace.jps.entities.*
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntity
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.contentRoot
+import com.intellij.platform.workspace.jps.entities.modifyContentRootEntity
+import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
+import com.intellij.platform.workspace.storage.EntityChange
+import com.intellij.platform.workspace.storage.ImmutableEntityStorage
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.VersionedStorageChange
+import com.intellij.platform.workspace.storage.createEntityTreeCopy
 import com.intellij.platform.workspace.storage.impl.VersionedEntityStorageImpl
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
@@ -31,7 +44,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.system.measureTimeMillis
 
-private class OrphanageActivity : ProjectActivity {
+internal class OrphanageActivity : ProjectActivity {
   override suspend fun execute(project: Project) {
     if (useReactiveWorkspaceModelApi()) {
       setupOpenTelemetryReporting(jpsMetrics.meter)
@@ -127,7 +140,7 @@ internal class OrphanService(
           val needToUpdateOrphanage = adders.any { it.hasUpdatesForOrphanage() }
           val needToUpdateWorkspaceModel = adders.any { it.hasUpdates() }
           if (needToUpdateWorkspaceModel || needToUpdateOrphanage) {
-            edtWriteAction {
+            backgroundWriteAction {
               if (needToUpdateOrphanage) {
                 entitiesOrphanage.update {
                   adders.forEach { adder -> adder.cleanOrphanage(it) }
@@ -222,7 +235,7 @@ private interface EntityAdder {
 }
 
 private class ContentRootAdder : EntityAdder {
-  private lateinit var updates: List<Pair<ModuleEntity, List<ModifiableContentRootEntity>>>
+  private lateinit var updates: List<Pair<ModuleEntity, List<ContentRootEntityBuilder>>>
   private val entitiesToRemoveFromOrphanage = ArrayList<ContentRootEntity>()
 
   override fun collectOrphanRoots(orphanToSnapshotModules: List<Pair<ModuleEntity, ModuleEntity>>) {
@@ -232,7 +245,7 @@ private class ContentRootAdder : EntityAdder {
         .filter { it.entitySource !is OrphanageWorkerEntitySource }
         .onEach { entitiesToRemoveFromOrphanage += it }
         .filter { it.url !in existingUrls }
-        .map { it.createEntityTreeCopy() as ModifiableContentRootEntity }
+        .map { it.createEntityTreeCopy() as ContentRootEntityBuilder }
 
       if (rootsToAdd.isNotEmpty()) {
         snapshotModule to rootsToAdd
@@ -278,7 +291,7 @@ private class ContentRootAdder : EntityAdder {
 }
 
 private class SourceRootAdder : EntityAdder {
-  lateinit var updates: List<Pair<ModuleEntity, List<Pair<VirtualFileUrl, List<ModifiableSourceRootEntity>>>>>
+  lateinit var updates: List<Pair<ModuleEntity, List<Pair<VirtualFileUrl, List<SourceRootEntityBuilder>>>>>
   private val entitiesToRemoveFromOrphanage = ArrayList<SourceRootEntity>()
 
   override fun collectOrphanRoots(orphanToSnapshotModules: List<Pair<ModuleEntity, ModuleEntity>>) {
@@ -291,7 +304,7 @@ private class SourceRootAdder : EntityAdder {
         .mapNotNull { contentRoot ->
           val sourcesToAdd = contentRoot.sourceRoots
             .filter { it.url !in (existingContentUrls[contentRoot.url] ?: emptyList()) }
-            .map { it.createEntityTreeCopy() as ModifiableSourceRootEntity }
+            .map { it.createEntityTreeCopy() as SourceRootEntityBuilder }
 
           if (sourcesToAdd.isNotEmpty()) {
             contentRoot.url to sourcesToAdd
@@ -352,7 +365,7 @@ private class SourceRootAdder : EntityAdder {
 }
 
 private class ExcludeRootAdder : EntityAdder {
-  lateinit var updates: List<Pair<ModuleEntity, List<Pair<VirtualFileUrl, List<ModifiableExcludeUrlEntity>>>>>
+  lateinit var updates: List<Pair<ModuleEntity, List<Pair<VirtualFileUrl, List<ExcludeUrlEntityBuilder>>>>>
   private val entitiesToRemoveFromOrphanage = ArrayList<ExcludeUrlEntity>()
 
   override fun collectOrphanRoots(orphanToSnapshotModules: List<Pair<ModuleEntity, ModuleEntity>>) {
@@ -365,7 +378,7 @@ private class ExcludeRootAdder : EntityAdder {
         .mapNotNull { contentRoot ->
           val excludeToAdd = contentRoot.excludedUrls
             .filter { it.url !in (existingExcludes[contentRoot.url] ?: emptyList()) }
-            .map { it.createEntityTreeCopy() as ModifiableExcludeUrlEntity }
+            .map { it.createEntityTreeCopy() as ExcludeUrlEntityBuilder }
 
           if (excludeToAdd.isNotEmpty()) {
             contentRoot.url to excludeToAdd

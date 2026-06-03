@@ -2,21 +2,22 @@
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.concurrency.JobLauncher;
-import com.intellij.ide.highlighter.HtmlFileType;
 import com.intellij.java.JavaBundle;
 import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.options.advanced.AdvancedSettings;
-import com.intellij.openapi.progress.EmptyProgressIndicator;
-import com.intellij.openapi.progress.ProgressIndicator;
-import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.registry.Registry;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.search.searches.OverridingMethodsSearch;
-import com.intellij.util.ObjectUtils;
 import com.siyeh.ig.psiutils.DeclarationSearchUtils;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -50,7 +51,6 @@ final class JavaTelescope {
 
   public static int usagesCount(@NotNull PsiFile psiFile, List<PsiMember> members, SearchScope scope) {
     Project project = psiFile.getProject();
-    ProgressIndicator progress = ObjectUtils.notNull(ProgressIndicatorProvider.getGlobalProgressIndicator(), /*todo remove*/new EmptyProgressIndicator());
     AtomicInteger totalUsageCount = new AtomicInteger();
 
     if (Registry.is("java.telescope.usages.single.threaded", true)) {
@@ -58,7 +58,7 @@ final class JavaTelescope {
         if (!countUsagesForMember(psiFile, scope, member, project, totalUsageCount)) break;
       }
     } else {
-      JobLauncher.getInstance().invokeConcurrentlyUnderProgress(members, progress, member -> {
+      JobLauncher.getInstance().invokeConcurrentlyUnderContextProgress(members, member -> {
         return countUsagesForMember(psiFile, scope, member, project, totalUsageCount);
       });
     }
@@ -103,7 +103,7 @@ final class JavaTelescope {
     return count.get();
   }
 
-  private static final FileType[] ourFileTypesToIgnore =  new FileType[] { HtmlFileType.INSTANCE };
+  private static final FileType[] ourFileTypesToIgnore = new FileType[] { FileTypeManager.getInstance().getFileTypeByExtension("html") };
 
   private static @NotNull SearchScope getSearchScope(@NotNull Project project, @NotNull PsiMember member, @NotNull SearchScope scope) {
     SearchScope useScope = UnusedSymbolUtil.getUseScope(member);
@@ -127,14 +127,14 @@ final class JavaTelescope {
     AtomicInteger count = new AtomicInteger();
     ClassInheritorsSearch.INSTANCE.createQuery(new ClassInheritorsSearch.SearchParameters(aClass, aClass.getUseScope(), true, true, true))
       .asIterable()
-      .forEach((Consumer<? super PsiClass>)__ -> count.incrementAndGet());
+      .forEach((Consumer<? super PsiClass>)_ -> count.incrementAndGet());
 
     return count.get();
   }
 
   static int collectOverridingMethods(@NotNull PsiMethod method) {
     AtomicInteger count = new AtomicInteger();
-    OverridingMethodsSearch.search(method).asIterable().forEach((Consumer<? super PsiMethod>)__ -> count.incrementAndGet());
+    OverridingMethodsSearch.search(method).asIterable().forEach((Consumer<? super PsiMethod>)_ -> count.incrementAndGet());
 
     return count.get();
   }

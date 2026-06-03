@@ -4,11 +4,23 @@ package com.intellij.util;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtilRt;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -221,6 +233,20 @@ public final class ExceptionUtil {
   public static <E extends Exception>
   void runAllAndRethrowAllExceptions(@NotNull Function<? super List<? extends Throwable>, E> exceptionsCombiner,
                                      ThrowableRunnable<? extends Exception> @NotNull ... potentiallyFailingTasks) throws E {
+    List<? extends Throwable> exceptions = runAllAndCollectExceptions(potentiallyFailingTasks);
+
+    if (!exceptions.isEmpty()) {
+      throw exceptionsCombiner.apply(exceptions);
+    }
+  }
+
+  /**
+   * Runs _all_ the tasks passed in and returns the list of errors thrown, if any, or empty list, of none of the tasks have failed.
+   * @return list of exceptions thrown by the potentiallyFailingTasks, in that order, or empty list, of none of the tasks have failed
+   */
+  @SafeVarargs
+  @ApiStatus.Internal
+  public static @NotNull List<? extends Throwable> runAllAndCollectExceptions(ThrowableRunnable<? extends Exception> @NotNull ... potentiallyFailingTasks) {
     List<Throwable> exceptions = null;
     for (ThrowableRunnable<? extends Exception> potentiallyFailingTask : potentiallyFailingTasks) {
       try {
@@ -235,9 +261,13 @@ public final class ExceptionUtil {
     }
 
     if (exceptions != null) {
-      throw exceptionsCombiner.apply(exceptions);
+      return exceptions;
+    }
+    else {
+      return Collections.emptyList();
     }
   }
+
 
   /**
    * @see ExceptionUtilRt#unwrapException(Throwable, Class)

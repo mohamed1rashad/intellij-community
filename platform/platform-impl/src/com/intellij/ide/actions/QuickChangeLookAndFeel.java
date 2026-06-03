@@ -5,13 +5,17 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.ui.LafManager;
 import com.intellij.ide.ui.LafManagerListener;
-import com.intellij.ide.ui.TargetUIType;
 import com.intellij.ide.ui.ThemeListProvider;
 import com.intellij.ide.ui.laf.UIThemeLookAndFeelInfo;
 import com.intellij.ide.ui.laf.UiThemeProviderListManager;
 import com.intellij.ide.ui.laf.darcula.DarculaInstaller;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.AnActionHolder;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.impl.PresentationFactory;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification;
 import com.intellij.openapi.application.ApplicationManager;
@@ -42,9 +46,14 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.util.Collections;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.ListCellRenderer;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import java.awt.BorderLayout;
 import java.util.List;
 
 public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implements ActionRemoteBehaviorSpecification.Frontend {
@@ -74,13 +83,9 @@ public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implem
 
   @Override
   protected @NotNull ListPopup createPopup(AnActionEvent e, DefaultActionGroup group, JBPopupFactory.ActionSelectionAid aid) {
-    UiThemeProviderListManager themeManager = UiThemeProviderListManager.Companion.getInstance();
-    List<UIThemeLookAndFeelInfo> islandThemes = themeManager.getBundledThemeListForTargetUI(TargetUIType.ISLANDS);
-
     if (WelcomeFrame.getInstance() == null &&
         ContainerUtil.exists(group.getChildren(e), action -> action instanceof LafChangeAction lafAction &&
-                                                             (lafAction.myLookAndFeelInfo.isRestartRequired() ||
-                                                              islandThemes.contains(lafAction.myLookAndFeelInfo)))) {
+                                                             (lafAction.myLookAndFeelInfo.isRestartRequired()))) {
       return new PopupFactoryImpl.ActionGroupPopup(null, getPopupTitle(e), group, e.getDataContext(),
                                                    myActionPlace == null ? ActionPlaces.POPUP : myActionPlace, new PresentationFactory(),
                                                    ActionPopupOptions.forAid(aid, true, -1, preselectAction()), null) {
@@ -119,7 +124,7 @@ public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implem
               if (value instanceof PopupFactoryImpl.ActionItem item) {
                 AnAction action = item.getAction();
                 if (action instanceof LafChangeAction lafAction) {
-                  checkRestartRequired(lafAction, infos, islandThemes, isSelected, icon1, icon2);
+                  checkRestartRequired(lafAction, infos, isSelected, icon1, icon2);
                 }
               }
             }
@@ -132,7 +137,6 @@ public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implem
 
   private static boolean checkRestartRequired(@NotNull LafChangeAction lafAction,
                                               @NotNull List<Groups.GroupInfo<UIThemeLookAndFeelInfo>> infos,
-                                              @NotNull List<UIThemeLookAndFeelInfo> islandThemes,
                                               boolean isSelected,
                                               @Nullable JLabel icon1,
                                               @Nullable JLabel icon2) {
@@ -160,9 +164,6 @@ public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implem
         icon2.setIcon(IconUtilKt.getDisabledIcon(AllIcons.Actions.Restart, null));
       }
       return true;
-    }
-    if (icon1 != null && islandThemes.contains(lafAction.myLookAndFeelInfo)) {
-      icon1.setIcon(AllIcons.General.Beta);
     }
     return false;
   }
@@ -243,11 +244,11 @@ public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implem
           if (item instanceof AnActionHolder) {
             AnAction anAction = ((AnActionHolder)item).getAction();
             if (anAction instanceof LafChangeAction action &&
-                !checkRestartRequired(action, infos, Collections.emptyList(), false, null, null)) {
+                !checkRestartRequired(action, infos, false, null, null)) {
               switchAlarm.cancelAllRequests();
               switchAlarm.addRequest(() -> {
                 switchLafAndUpdateUI(LafManager.getInstance(), action.myLookAndFeelInfo);
-              }, Registry.get("ide.instant.theme.switch.delay").asInteger());
+              }, 500);
             }
           }
         });
@@ -275,7 +276,7 @@ public final class QuickChangeLookAndFeel extends QuickSwitchSchemeAction implem
                                             boolean lockEditorScheme) {
       UIThemeLookAndFeelInfo cur = lafManager.getCurrentUIThemeLookAndFeel();
       if (!force && cur == lf) return;
-      ChangeLAFAnimator animator = Registry.is("ide.intellij.laf.enable.animation") ? ChangeLAFAnimator.showSnapshot() : null;
+      ChangeLAFAnimator animator = Registry.is("ide.intellij.laf.enable.animation", false) ? ChangeLAFAnimator.showSnapshot() : null;
 
       final boolean wasDarcula = StartupUiUtil.isUnderDarcula();
       lafManager.setCurrentLookAndFeel(lf, lockEditorScheme);

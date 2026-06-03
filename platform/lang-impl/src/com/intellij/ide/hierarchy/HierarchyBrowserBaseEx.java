@@ -6,7 +6,11 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.OccurenceNavigator;
 import com.intellij.ide.OccurenceNavigatorSupport;
 import com.intellij.ide.PsiCopyPasteManager;
-import com.intellij.ide.dnd.*;
+import com.intellij.ide.dnd.DnDAction;
+import com.intellij.ide.dnd.DnDDragStartBean;
+import com.intellij.ide.dnd.DnDManager;
+import com.intellij.ide.dnd.DnDSource;
+import com.intellij.ide.dnd.TransferableWrapper;
 import com.intellij.ide.dnd.aware.DnDAwareTree;
 import com.intellij.ide.hierarchy.actions.BrowseHierarchyActionBase;
 import com.intellij.ide.projectView.impl.ProjectViewTree;
@@ -17,9 +21,19 @@ import com.intellij.idea.ActionsBundle;
 import com.intellij.lang.LangBundle;
 import com.intellij.lang.LanguageExtension;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.actionSystem.ex.ComboBoxAction;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.PlatformEditorBundle;
 import com.intellij.openapi.fileEditor.PsiElementNavigatable;
@@ -30,7 +44,13 @@ import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.pom.Navigatable;
-import com.intellij.psi.*;
+import com.intellij.psi.ElementDescriptionUtil;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.psi.search.scope.ProjectProductionScope;
 import com.intellij.psi.search.scope.TestsScope;
 import com.intellij.psi.search.scope.packageSet.CustomScopesProviderEx;
@@ -57,14 +77,27 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JTree;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreeNode;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.CardLayout;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Point;
 import java.io.File;
 import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -73,11 +106,11 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
 
   public static final DataKey<HierarchyBrowserBaseEx> HIERARCHY_BROWSER = DataKey.create("HIERARCHY_BROWSER");
 
-  public static final String SCOPE_PROJECT = "Production";
-  public static final String SCOPE_ALL = "All";
-  public static final String SCOPE_CLASS = "This Class";
-  public static final String SCOPE_MODULE = "This Module";
-  public static final String SCOPE_TEST = "Test";
+  public static final String SCOPE_PROJECT = HierarchyBrowserScopes.SCOPE_PROJECT;
+  public static final String SCOPE_ALL = HierarchyBrowserScopes.SCOPE_ALL;
+  public static final String SCOPE_CLASS = HierarchyBrowserScopes.SCOPE_CLASS;
+  public static final String SCOPE_MODULE = HierarchyBrowserScopes.SCOPE_MODULE;
+  public static final String SCOPE_TEST = HierarchyBrowserScopes.SCOPE_TEST;
 
   public static final String HELP_ID = "reference.toolWindows.hierarchy";
 
@@ -281,7 +314,7 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
 
               @Override
               public List<File> asFileList() {
-                return PsiCopyPasteManager.asFileList(getPsiElements());
+                return ReadAction.computeBlocking(() -> PsiCopyPasteManager.asFileList(getPsiElements()));
               }
             });
           }
@@ -342,6 +375,11 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
   }
 
   public void changeView(@Nls @NotNull String typeName, boolean requestFocus) {
+    changeViewWithStructure(typeName, requestFocus, null);
+  }
+
+  void changeViewWithStructure(@Nls @NotNull String typeName, boolean requestFocus,
+                               @Nullable HierarchyTreeStructure existingStructure) {
     ThreadingAssertions.assertEventDispatchThread();
     Sheet sheet = myType2Sheet.get(typeName);
     myCurrentSheet.set(sheet);
@@ -352,7 +390,7 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
     }
 
     if (myContent != null) {
-      Supplier<@Nls String> supplier = myI18nMap.computeIfAbsent(typeName, __ -> () -> typeName);
+      Supplier<@Nls String> supplier = myI18nMap.computeIfAbsent(typeName, _ -> () -> typeName);
       String displayName = getContentDisplayName(supplier.get(), element);
       if (displayName != null) {
         myContent.setDisplayName(displayName);
@@ -366,7 +404,9 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
         setWaitCursor();
         JTree tree = sheet.myTree;
 
-        HierarchyTreeStructure structure = createHierarchyTreeStructure(typeName, element);
+        HierarchyTreeStructure structure = existingStructure != null
+                                           ? existingStructure
+                                           : createHierarchyTreeStructure(typeName, element);
         if (structure == null) {
           return;
         }
@@ -387,6 +427,12 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
     if (requestFocus) {
       IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> IdeFocusManager.getGlobalInstance().requestFocus(getCurrentTree(), true));
     }
+  }
+
+  @Nullable HierarchyTreeStructure getCurrentTreeStructure() {
+    StructureTreeModel<?> builder = getCurrentBuilder();
+    if (builder == null) return null;
+    return (HierarchyTreeStructure)builder.getTreeStructure();
   }
 
   private static boolean isAncestor(@NotNull Project project,
@@ -536,7 +582,7 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
     super.dispose();
   }
 
-  private void disposeAllSheets() {
+  protected void disposeAllSheets() {
     for (Sheet sheet : myType2Sheet.values()) {
       disposeSheet(sheet);
     }
@@ -545,6 +591,26 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
   private void disposeSheet(@NotNull Sheet sheet) {
     Disposer.dispose(sheet);
     myType2Sheet.put(sheet.myType, new Sheet(sheet.myType, sheet.myTree, sheet.myScope, sheet.myOccurenceNavigator));
+  }
+
+  void saveCurrentTreeState(@NotNull List<Object> pathsToExpand, @NotNull List<Object> selectionPaths) {
+    @Nls String currentViewType = getCurrentViewType();
+    if (currentViewType == null) return;
+    Sheet sheet = myType2Sheet.get(currentViewType);
+    if (sheet.myAsyncTreeModel == null) return;
+    DefaultMutableTreeNode root = (DefaultMutableTreeNode)sheet.myAsyncTreeModel.getRoot();
+    if (root != null) {
+      TreeBuilderUtil.storePaths(sheet.myTree, root, pathsToExpand, selectionPaths, true, false);
+    }
+  }
+
+  void restoreTreeState(@NotNull List<Object> pathsToExpand, @NotNull List<Object> selectionPaths) {
+    JTree tree = getCurrentTree();
+    if (tree == null) return;
+    for (Object p : pathsToExpand) {
+      expandLater(tree, (HierarchyNodeDescriptor)p);
+    }
+    selectLater(tree, (List)selectionPaths);
   }
 
   protected void doRefresh(boolean currentBuilderOnly) {
@@ -559,11 +625,7 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
     @Nls String currentViewType = getCurrentViewType();
     List<Object> pathsToExpand = new ArrayList<>();
     List<Object> selectionPaths = new ArrayList<>();
-    if (currentViewType != null) {
-      Sheet sheet = myType2Sheet.get(currentViewType);
-      DefaultMutableTreeNode root = (DefaultMutableTreeNode)sheet.myAsyncTreeModel.getRoot();
-      TreeBuilderUtil.storePaths(sheet.myTree, root, pathsToExpand, selectionPaths, true);
-    }
+    saveCurrentTreeState(pathsToExpand, selectionPaths);
 
     PsiElement element = mySmartPsiElementPointer.getElement();
     if (element == null || !isApplicableElement(element)) {
@@ -580,12 +642,8 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
     validate();
     ApplicationManager.getApplication().invokeLater(() -> {
       changeView(currentViewType);
-      for (Object p : pathsToExpand) {
-        expandLater(getCurrentTree(), (HierarchyNodeDescriptor)p);
-      }
-
-      selectLater(getCurrentTree(), (List)selectionPaths);
-    }, __-> isDisposed());
+      restoreTreeState(pathsToExpand, selectionPaths);
+    }, _-> isDisposed());
   }
 
   protected String getCurrentScopeType() {
@@ -649,7 +707,7 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
       if (provider != null) {
         HierarchyBrowserBaseEx newBrowser = (HierarchyBrowserBaseEx)BrowseHierarchyActionBase.createAndAddToPanel(
           selectedElement.getProject(), provider, selectedElement);
-        ApplicationManager.getApplication().invokeLater(() -> newBrowser.changeView(correctViewType(browser, currentViewType)), __ -> newBrowser.isDisposed());
+        ApplicationManager.getApplication().invokeLater(() -> newBrowser.changeView(correctViewType(browser, currentViewType)), _ -> newBrowser.isDisposed());
       }
     }
 
@@ -765,7 +823,7 @@ public abstract class HierarchyBrowserBaseEx extends HierarchyBrowserBase implem
 
       // invokeLater is called to update state of button before long tree building operation
       // scope is kept per type so other builders don't need to be refreshed
-      ApplicationManager.getApplication().invokeLater(() -> doRefresh(true), __ -> isDisposed());
+      ApplicationManager.getApplication().invokeLater(() -> doRefresh(true), _ -> isDisposed());
     }
 
     @Override

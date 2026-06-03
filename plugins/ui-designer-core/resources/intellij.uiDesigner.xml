@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<idea-plugin visibility="public">
+  <dependencies>
+    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+    <module name="intellij.platform.backend"/>
+    <!-- endregion -->
+  </dependencies>
+</idea-plugin>

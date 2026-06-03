@@ -1,7 +1,11 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.syntax.psi.impl
 
-import com.intellij.lang.*
+import com.intellij.lang.ASTFactory
+import com.intellij.lang.ASTNode
+import com.intellij.lang.LighterASTNode
+import com.intellij.lang.LighterLazyParseableNode
+import com.intellij.lang.ParserDefinition
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.EmptyProgressIndicator
@@ -14,10 +18,16 @@ import com.intellij.openapi.util.text.StringUtil
 import com.intellij.platform.syntax.LanguageSyntaxDefinition
 import com.intellij.platform.syntax.SyntaxElementType
 import com.intellij.platform.syntax.lexer.TokenList
-import com.intellij.platform.syntax.parser.*
+import com.intellij.platform.syntax.parser.OpaqueElementPolicy
+import com.intellij.platform.syntax.parser.ProductionResult
 import com.intellij.platform.syntax.parser.SyntaxTreeBuilder
 import com.intellij.platform.syntax.parser.SyntaxTreeBuilderFactory.builder
-import com.intellij.platform.syntax.psi.*
+import com.intellij.platform.syntax.parser.WhitespaceOrCommentBindingPolicy
+import com.intellij.platform.syntax.parser.prepareProduction
+import com.intellij.platform.syntax.psi.ElementTypeConverter
+import com.intellij.platform.syntax.psi.PsiSyntaxBuilder
+import com.intellij.platform.syntax.psi.asSyntaxLogger
+import com.intellij.platform.syntax.psi.convertNotNull
 import com.intellij.psi.PsiFile
 import com.intellij.psi.impl.BlockSupportImpl
 import com.intellij.psi.impl.DiffLog
@@ -36,7 +46,7 @@ import com.intellij.util.TripleFunction
 import com.intellij.util.diff.FlyweightCapableTreeStructure
 import com.intellij.util.text.CharArrayUtil
 import org.jetbrains.annotations.NonNls
-import java.util.*
+import java.util.ArrayDeque
 import kotlin.math.max
 
 internal class PsiSyntaxBuilderImpl(
@@ -206,6 +216,7 @@ internal class PsiSyntaxBuilderImpl(
 
     val compositeOptionalData = CompositeOptionalData()
 
+    @Suppress("UNCHECKED_CAST")
     val nodeData = NodeData(
       lexStarts = starts,
       offset = startOffset,
@@ -286,8 +297,8 @@ internal class PsiSyntaxBuilderImpl(
     lexTypes: Array<IElementType?>,
     originalLexTypes: Array<SyntaxElementType>,
   ) {
-    for (i in 0..<lexTypes.size) {
-      if (lexTypes[i] == null) {
+    for ((i, element) in lexTypes.withIndex()) {
+      if (element == null) {
         throw IllegalStateException("IElementType for token ${originalLexTypes[i]} is missing. TokenConverter = $tokenConverter")
       }
     }
@@ -357,9 +368,9 @@ internal fun extractCachedLexemes(parentCachingNode: ASTNode): TokenList? {
     return null
   }
 
-  val parentElement = parentCachingNode
-  parentElement.putUserData(LAZY_PARSEABLE_TOKENS, null)
-  return parentElement.getUserData(LAZY_PARSEABLE_TOKENS)
+  val cachedTokens = parentCachingNode.getUserData(LAZY_PARSEABLE_TOKENS)
+  parentCachingNode.putUserData(LAZY_PARSEABLE_TOKENS, null)
+  return cachedTokens
 }
 
 internal fun shouldReuseCollapsedTokens(collapsed: IElementType?): Boolean {

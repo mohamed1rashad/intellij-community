@@ -17,12 +17,23 @@ import com.intellij.util.ui.table.JBTableRowEditor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.AbstractButton;
+import javax.swing.JComponent;
+import javax.swing.JTable;
+import javax.swing.SwingConstants;
+import javax.swing.UIManager;
 import javax.swing.plaf.UIResource;
 import javax.swing.plaf.basic.BasicHTML;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.Position;
-import java.awt.*;
+import java.awt.AWTEvent;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Graphics2D;
+import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -275,12 +286,6 @@ public final class DarculaUIUtil {
   public static boolean isBorderless(Component c) {
     return ((JComponent)c).getClientProperty(ComboBox.IS_BORDERLESS_PROPERTY) == Boolean.TRUE;
   }
-
-  /**
-   * @deprecated Use correspondent {@link JBUI.CurrentTheme.ComboBox#minimumSize()}, {@link JBUI.CurrentTheme.TextField#minimumSize()} etc
-   */
-  @Deprecated(forRemoval = true)
-  public static final JBValue MINIMUM_WIDTH = new JBValue.Float(49); // 72px total
 
   /**
    * @deprecated Use correspondent {@link JBUI.CurrentTheme.ComboBox#minimumSize()}, {@link JBUI.CurrentTheme.TextField#minimumSize()} etc

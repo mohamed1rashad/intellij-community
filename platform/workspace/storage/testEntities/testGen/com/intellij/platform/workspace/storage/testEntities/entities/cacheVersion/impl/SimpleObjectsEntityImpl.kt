@@ -1,37 +1,35 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Open
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableSimpleObjectsEntity
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.SimpleObjectsEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.SimpleObjectsEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.SimpleObjectsSealedClass
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class SimpleObjectsEntityImpl(private val dataSource: SimpleObjectsEntityData) : SimpleObjectsEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class SimpleObjectsEntityImpl(private val dataSource: SimpleObjectsEntityData) : SimpleObjectsEntity,
+                                                                                          WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -52,8 +50,8 @@ internal class SimpleObjectsEntityImpl(private val dataSource: SimpleObjectsEnti
   }
 
 
-  internal class Builder(result: SimpleObjectsEntityData?) : ModifiableWorkspaceEntityBase<SimpleObjectsEntity, SimpleObjectsEntityData>(
-    result), ModifiableSimpleObjectsEntity {
+  internal class Builder(result: SimpleObjectsEntityData?) :
+    ModifiableWorkspaceEntityBase<SimpleObjectsEntity, SimpleObjectsEntityData>(result), SimpleObjectsEntityBuilder {
     internal constructor() : this(SimpleObjectsEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -66,15 +64,13 @@ internal class SimpleObjectsEntityImpl(private val dataSource: SimpleObjectsEnti
           error("Entity SimpleObjectsEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -110,7 +106,6 @@ internal class SimpleObjectsEntityImpl(private val dataSource: SimpleObjectsEnti
         changedProperty.add("entitySource")
 
       }
-
     override var someData: SimpleObjectsSealedClass
       get() = getEntityData().someData
       set(value) {
@@ -122,6 +117,7 @@ internal class SimpleObjectsEntityImpl(private val dataSource: SimpleObjectsEnti
 
     override fun getEntityClass(): Class<SimpleObjectsEntity> = SimpleObjectsEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -130,14 +126,13 @@ internal class SimpleObjectsEntityData : WorkspaceEntityData<SimpleObjectsEntity
 
   internal fun isSomeDataInitialized(): Boolean = ::someData.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<SimpleObjectsEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<SimpleObjectsEntity> {
     val modifiable = SimpleObjectsEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): SimpleObjectsEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -149,17 +144,15 @@ internal class SimpleObjectsEntityData : WorkspaceEntityData<SimpleObjectsEntity
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.SimpleObjectsEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.SimpleObjectsEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return SimpleObjectsEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return SimpleObjectsEntity(someData, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return SimpleObjectsEntity(someData, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -170,9 +163,7 @@ internal class SimpleObjectsEntityData : WorkspaceEntityData<SimpleObjectsEntity
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as SimpleObjectsEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.someData != other.someData) return false
     return true
@@ -181,9 +172,7 @@ internal class SimpleObjectsEntityData : WorkspaceEntityData<SimpleObjectsEntity
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as SimpleObjectsEntityData
-
     if (this.someData != other.someData) return false
     return true
   }

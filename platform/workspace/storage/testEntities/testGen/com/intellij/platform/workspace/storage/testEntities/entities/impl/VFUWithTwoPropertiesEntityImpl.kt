@@ -1,38 +1,35 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceList
-import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceSet
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableVFUWithTwoPropertiesEntity
 import com.intellij.platform.workspace.storage.testEntities.entities.VFUWithTwoPropertiesEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.VFUWithTwoPropertiesEntityBuilder
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwoPropertiesEntityData) : VFUWithTwoPropertiesEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwoPropertiesEntityData) : VFUWithTwoPropertiesEntity,
+                                                                                                        WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -41,13 +38,11 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
       readField("data")
       return dataSource.data
     }
-
   override val fileProperty: VirtualFileUrl
     get() {
       readField("fileProperty")
       return dataSource.fileProperty
     }
-
   override val secondFileProperty: VirtualFileUrl
     get() {
       readField("secondFileProperty")
@@ -65,8 +60,8 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
   }
 
 
-  internal class Builder(result: VFUWithTwoPropertiesEntityData?) : ModifiableWorkspaceEntityBase<VFUWithTwoPropertiesEntity, VFUWithTwoPropertiesEntityData>(
-    result), ModifiableVFUWithTwoPropertiesEntity {
+  internal class Builder(result: VFUWithTwoPropertiesEntityData?) :
+    ModifiableWorkspaceEntityBase<VFUWithTwoPropertiesEntity, VFUWithTwoPropertiesEntityData>(result), VFUWithTwoPropertiesEntityBuilder {
     internal constructor() : this(VFUWithTwoPropertiesEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -79,17 +74,15 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
           error("Entity VFUWithTwoPropertiesEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
       index(this, "fileProperty", this.fileProperty)
       index(this, "secondFileProperty", this.secondFileProperty)
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -133,7 +126,6 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
         changedProperty.add("entitySource")
 
       }
-
     override var data: String
       get() = getEntityData().data
       set(value) {
@@ -141,7 +133,6 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
         getEntityData(true).data = value
         changedProperty.add("data")
       }
-
     override var fileProperty: VirtualFileUrl
       get() = getEntityData().fileProperty
       set(value) {
@@ -151,7 +142,6 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
         val _diff = diff
         if (_diff != null) index(this, "fileProperty", value)
       }
-
     override var secondFileProperty: VirtualFileUrl
       get() = getEntityData().secondFileProperty
       set(value) {
@@ -164,6 +154,7 @@ internal class VFUWithTwoPropertiesEntityImpl(private val dataSource: VFUWithTwo
 
     override fun getEntityClass(): Class<VFUWithTwoPropertiesEntity> = VFUWithTwoPropertiesEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -176,14 +167,13 @@ internal class VFUWithTwoPropertiesEntityData : WorkspaceEntityData<VFUWithTwoPr
   internal fun isFilePropertyInitialized(): Boolean = ::fileProperty.isInitialized
   internal fun isSecondFilePropertyInitialized(): Boolean = ::secondFileProperty.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<VFUWithTwoPropertiesEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<VFUWithTwoPropertiesEntity> {
     val modifiable = VFUWithTwoPropertiesEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): VFUWithTwoPropertiesEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -195,17 +185,15 @@ internal class VFUWithTwoPropertiesEntityData : WorkspaceEntityData<VFUWithTwoPr
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.VFUWithTwoPropertiesEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.VFUWithTwoPropertiesEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return VFUWithTwoPropertiesEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return VFUWithTwoPropertiesEntity(data, fileProperty, secondFileProperty, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return VFUWithTwoPropertiesEntity(data, fileProperty, secondFileProperty, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -216,9 +204,7 @@ internal class VFUWithTwoPropertiesEntityData : WorkspaceEntityData<VFUWithTwoPr
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as VFUWithTwoPropertiesEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.data != other.data) return false
     if (this.fileProperty != other.fileProperty) return false
@@ -229,9 +215,7 @@ internal class VFUWithTwoPropertiesEntityData : WorkspaceEntityData<VFUWithTwoPr
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as VFUWithTwoPropertiesEntityData
-
     if (this.data != other.data) return false
     if (this.fileProperty != other.fileProperty) return false
     if (this.secondFileProperty != other.secondFileProperty) return false

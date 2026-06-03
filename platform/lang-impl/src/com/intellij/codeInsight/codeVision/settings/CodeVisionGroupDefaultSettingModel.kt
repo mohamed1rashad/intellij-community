@@ -1,7 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.codeVision.settings
 
-import com.intellij.codeInsight.codeVision.*
+import com.intellij.codeInsight.codeVision.CodeVisionAnchorKind
+import com.intellij.codeInsight.codeVision.CodeVisionHost
+import com.intellij.codeInsight.codeVision.CodeVisionInitializer
+import com.intellij.codeInsight.codeVision.CodeVisionMessageBundle
+import com.intellij.codeInsight.codeVision.CodeVisionProvider
 import com.intellij.codeInsight.hints.codeVision.CodeVisionPass
 import com.intellij.codeInsight.hints.codeVision.CodeVisionProviderAdapter
 import com.intellij.lang.Language
@@ -95,7 +99,11 @@ open class CodeVisionGroupDefaultSettingModel(override val name: String,
   private fun getCasePreview(): String? {
     val associatedFileType = previewLanguage?.associatedFileType ?: return null
     val path = "codeVisionProviders/" + id + "/preview." + associatedFileType.defaultExtension
-    val stream = associatedFileType.javaClass.classLoader.getResourceAsStream(path)
+    val stream =
+      associatedFileType.javaClass.classLoader.getResourceAsStream(path) ?: providers.firstNotNullOfOrNull { provider ->
+        val clazz = if (provider is CodeVisionProviderAdapter) provider.delegate.javaClass else provider.javaClass
+        clazz.classLoader.getResourceAsStream(path)
+      }
     return if (stream != null) ResourceUtil.loadText(stream) else null
   }
 

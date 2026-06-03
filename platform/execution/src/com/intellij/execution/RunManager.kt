@@ -1,12 +1,18 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution
 
-import com.intellij.execution.configurations.*
+import com.intellij.execution.configurations.ConfigurationFactory
+import com.intellij.execution.configurations.ConfigurationType
+import com.intellij.execution.configurations.ConfigurationTypeUtil
+import com.intellij.execution.configurations.RunConfiguration
+import com.intellij.execution.configurations.RunProfile
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.NlsSafe
+import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.intellij.util.text.nullize
 import org.jetbrains.annotations.ApiStatus
 import java.util.regex.Pattern
@@ -19,6 +25,7 @@ import java.util.regex.Pattern
 abstract class RunManager {
   companion object {
     @JvmStatic
+    @RequiresBlockingContext(ReplaceWith("RunManager.getInstanceAsync(project)"))
     fun getInstance(project: Project): RunManager {
       if (IS_RUN_MANAGER_INITIALIZED.get(project) != true && !project.isDefault) {
         // https://gist.github.com/develar/5bcf39b3f0ec08f507ec112d73375f2b
@@ -26,6 +33,8 @@ abstract class RunManager {
       }
       return project.getService(RunManager::class.java)
     }
+
+    suspend fun getInstanceAsync(project: Project): RunManager = project.serviceAsync()
 
     @JvmStatic
     fun getInstanceIfCreated(project: Project): RunManager? = project.serviceIfCreated()

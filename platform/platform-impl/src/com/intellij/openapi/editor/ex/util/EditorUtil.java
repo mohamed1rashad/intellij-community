@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.ex.util;
 
 import com.intellij.diagnostic.Dumpable;
@@ -7,11 +7,14 @@ import com.intellij.ide.actions.DistractionFreeModeController;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsUtils;
 import com.intellij.injected.editor.EditorWindow;
-import com.intellij.modcommand.ModPsiNavigator;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.CustomizedDataContext;
+import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.command.CommandEvent;
@@ -19,7 +22,30 @@ import com.intellij.openapi.command.CommandListener;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.AttachmentFactory;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Caret;
+import com.intellij.openapi.editor.CaretAction;
+import com.intellij.openapi.editor.CaretActionListener;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.CustomFoldRegion;
+import com.intellij.openapi.editor.CustomWrap;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorBundle;
+import com.intellij.openapi.editor.EditorCoreUtil;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.EditorModificationUtilEx;
+import com.intellij.openapi.editor.EditorThreading;
+import com.intellij.openapi.editor.FoldRegion;
+import com.intellij.openapi.editor.FoldingModel;
+import com.intellij.openapi.editor.Inlay;
+import com.intellij.openapi.editor.InlayModel;
+import com.intellij.openapi.editor.InlayProperties;
+import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.ScrollingModel;
+import com.intellij.openapi.editor.SelectionModel;
+import com.intellij.openapi.editor.SoftWrap;
+import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.colors.EditorFontType;
@@ -28,7 +54,16 @@ import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.event.SelectionEvent;
 import com.intellij.openapi.editor.event.SelectionListener;
 import com.intellij.openapi.editor.ex.EditorEx;
-import com.intellij.openapi.editor.impl.*;
+import com.intellij.openapi.editor.impl.ComplementaryFontsRegistry;
+import com.intellij.openapi.editor.impl.EditorImpl;
+import com.intellij.openapi.editor.impl.FontInfo;
+import com.intellij.openapi.editor.impl.InterLineBreakpointConfiguration;
+import com.intellij.openapi.editor.impl.InterLineBreakpointConfigurationProvider;
+import com.intellij.openapi.editor.impl.InterLineBreakpointHitArea;
+import com.intellij.openapi.editor.impl.Interval;
+import com.intellij.openapi.editor.impl.BreakpointArea;
+import com.intellij.openapi.editor.impl.ScrollingModelImpl;
+import com.intellij.openapi.editor.impl.TextRangeInterval;
 import com.intellij.openapi.editor.impl.view.VisualLinesIterator;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.editor.textarea.TextComponentEditor;
@@ -37,10 +72,15 @@ import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorImpl;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.ScalableIcon;
+import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.PsiElement;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageEditorUtil;
 import com.intellij.util.CoroutineScopeKt;
 import com.intellij.util.DocumentUtil;
@@ -49,20 +89,26 @@ import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.UIUtil;
 import kotlinx.coroutines.CoroutineScope;
-import org.intellij.lang.annotations.JdkConstants;
+import com.intellij.util.ui.JdkConstants;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JPasswordField;
+import javax.swing.JScrollBar;
+import javax.swing.JViewport;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.*;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT;
@@ -87,7 +133,7 @@ public final class EditorUtil {
   }
 
   public static @Nullable EditorEx getEditorEx(@Nullable FileEditor fileEditor) {
-    Editor editor = fileEditor instanceof TextEditor ? ((TextEditor)fileEditor).getEditor() : null;
+    Editor editor = fileEditor instanceof TextEditor te ? te.getEditor() : null;
     return editor instanceof EditorEx ? (EditorEx)editor : null;
   }
 
@@ -646,7 +692,7 @@ public final class EditorUtil {
   }
 
   public static int getNotFoldedLineStartOffset(@NotNull Editor editor, int startOffset, boolean stopAtInvisibleFoldRegions) {
-    return EditorThreading.compute(() -> getNotFoldedLineStartOffset(editor.getDocument(), editor.getFoldingModel(), startOffset, stopAtInvisibleFoldRegions));
+    return EditorThreading.compute(() -> getNotFoldedLineStartOffset(editor.getElfDocument(), editor.getFoldingModel(), startOffset, stopAtInvisibleFoldRegions));
   }
 
   @ApiStatus.Internal
@@ -673,7 +719,7 @@ public final class EditorUtil {
   }
 
   public static int getNotFoldedLineEndOffset(@NotNull Editor editor, int startOffset, boolean stopAtInvisibleFoldRegions) {
-    return EditorThreading.compute(() -> getNotFoldedLineEndOffset(editor.getDocument(), editor.getFoldingModel(), startOffset, stopAtInvisibleFoldRegions));
+    return EditorThreading.compute(() -> getNotFoldedLineEndOffset(editor.getElfDocument(), editor.getFoldingModel(), startOffset, stopAtInvisibleFoldRegions));
   }
 
   @ApiStatus.Internal
@@ -865,16 +911,85 @@ public final class EditorUtil {
       int visualLine = editor.yToVisualLine(y);
       int visualLineStartY = editor.visualLineToY(visualLine);
       if (y < visualLineStartY || y >= visualLineStartY + editor.getLineHeight()) return -1;
-      int line = editor.visualToLogicalPosition(new VisualPosition(visualLine, 0)).line;
-      Document document = editor.getDocument();
-      if (line < document.getLineCount()) {
-        int lineStartOffset = document.getLineStartOffset(line);
-        FoldRegion foldRegion = editor.getFoldingModel().getCollapsedRegionAtOffset(lineStartOffset);
-        if (foldRegion instanceof CustomFoldRegion) {
-          return -1;
-        }
+      return visualToLogicalLine(editor, visualLine);
+    });
+  }
+
+  private static int visualToLogicalLine(@NotNull Editor editor, int visualLine) {
+    int line = editor.visualToLogicalPosition(new VisualPosition(visualLine, 0)).line;
+    Document document = editor.getDocument();
+    if (line < document.getLineCount()) {
+      int lineStartOffset = document.getLineStartOffset(line);
+      FoldRegion foldRegion = editor.getFoldingModel().getCollapsedRegionAtOffset(lineStartOffset);
+      if (foldRegion instanceof CustomFoldRegion) {
+        return -1;
       }
-      return line;
+    }
+    return line;
+  }
+
+  @ApiStatus.Internal
+  public static @NotNull BreakpointArea yToLogicalLineWithInterLineDetection(@NotNull Editor editor, int y) {
+    if (!(editor instanceof EditorImpl editorImpl)) {
+      int logicalLine = yToLogicalLineNoCustomRenderers(editor, y);
+      if (logicalLine < 0) {
+        return BreakpointArea.INVALID;
+      }
+      return new BreakpointArea.OnLine(logicalLine);
+    }
+
+    return EditorThreading.compute(() -> {
+      int visualLine = editor.yToVisualLine(y);
+      int visualLineStartY = editor.visualLineToY(visualLine);
+      int logicalLine = visualToLogicalLine(editor, visualLine);
+      int lineHeight = editor.getLineHeight();
+
+      if (logicalLine < 0) {
+        return BreakpointArea.INVALID;
+      }
+
+      int lineNumberMiddle = visualLineStartY + lineHeight / 2;
+      boolean hitAboveLineNumber = y < lineNumberMiddle;
+      int documentLineCount = editor.getDocument().getLineCount();
+      int nextLogicalLine = logicalLine + (hitAboveLineNumber ? 0 : 1);
+      int configurationLine = !hitAboveLineNumber && nextLogicalLine >= documentLineCount ? logicalLine : nextLogicalLine;
+
+      InterLineBreakpointConfiguration configuration = InterLineBreakpointConfigurationProvider.findConfigurationForLine(editor, configurationLine);
+      if (configuration == null) {
+        // no interline configuration -- proceed with the standard logic
+        if (y < visualLineStartY || y >= visualLineStartY + lineHeight) {
+          return BreakpointArea.INVALID;
+        }
+        return new BreakpointArea.OnLine(logicalLine);
+      }
+
+      int nextVisualLine = editor.yToVisualLine(y + lineHeight);
+      int shift = calculateInterLineShift(editorImpl, visualLine, nextVisualLine);
+      // as animator expands the vertical space between the lines,
+      // we can increase the hit area as well
+      int padding = configuration.getHitArea() == InterLineBreakpointHitArea.MEDIUM
+                    ? shift
+                    : 2 * shift;
+      // make sure that top+bottom padding doesn't exceed half of the line height
+      // (i.e., inter-line hits don't take more space than on-line hits)
+      int totalPadding = Math.min(padding, lineHeight / 4);
+
+      if (y >= visualLineStartY + totalPadding && y <= visualLineStartY + lineHeight - totalPadding) {
+        return new BreakpointArea.OnLine(logicalLine);
+      }
+
+      if (hitAboveLineNumber && logicalLine > 0) {
+        return new BreakpointArea.InterLine(logicalLine, configuration);
+      }
+
+      if (!hitAboveLineNumber) {
+        if (nextLogicalLine >= documentLineCount) {
+          return BreakpointArea.INVALID;
+        }
+        return new BreakpointArea.InterLine(nextLogicalLine, configuration);
+      }
+
+      return BreakpointArea.INVALID;
     });
   }
 
@@ -943,7 +1058,7 @@ public final class EditorUtil {
     });
   }
 
-  public static Font getEditorFont(int size) {
+  public static @NotNull Font getEditorFont(int size) {
     return EditorThreading.compute(() -> {
       EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
       Font font = scheme.getFont(EditorFontType.PLAIN).deriveFont((float)size);
@@ -1214,10 +1329,28 @@ public final class EditorUtil {
       if (!logicalPosition.equals(editor.offsetToLogicalPosition(offset))) return false; // virtual space
       List<Inlay<?>> inlays = editor.getInlayModel().getInlineElementsInRange(offset, offset);
       if (!inlays.isEmpty()) {
-        VisualPosition inlaysStart = editor.offsetToVisualPosition(offset);
-        if (inlaysStart.line == visualPosition.line) {
-          int relX = point.x - editor.visualPositionToXY(inlaysStart).x;
-          if (relX >= 0 && relX < inlays.stream().mapToInt(i -> i.getWidthInPixels()).sum()) return false; // inline inlay
+        List<CustomWrap> customWraps = editor.getCustomWrapModel().getWrapsAtOffset(offset);
+        VisualPosition inlaysStart = editor.offsetToVisualPosition(offset, false, false);
+        if (customWraps.isEmpty()) {
+          if (inlaysStart.line == visualPosition.line) {
+            int relX = point.x - editor.visualPositionToXY(inlaysStart).x;
+            if (relX >= 0 && relX < inlays.stream().mapToInt(i -> i.getWidthInPixels()).sum()) return false; // inline inlay
+          }
+        }
+        else {
+          if (inlaysStart.line == visualPosition.line) {
+            int relX = point.x - editor.visualPositionToXY(inlaysStart).x;
+            if (relX >= 0 && relX < inlays.stream().filter(i -> !i.isRelatedToPrecedingText()).mapToInt(i -> i.getWidthInPixels()).sum()) {
+              return false; // inline inlay after custom wrap
+            }
+          }
+          else if (inlaysStart.line - 1 == visualPosition.line) {
+            inlaysStart = editor.offsetToVisualPosition(offset, false, true);
+            int relX = point.x - editor.visualPositionToXY(inlaysStart).x;
+            if (relX >= 0 && relX < inlays.stream().filter(i -> i.isRelatedToPrecedingText()).mapToInt(i -> i.getWidthInPixels()).sum()) {
+              return false; // inline inlay before custom wrap
+            }
+          }
         }
       }
       return true;
@@ -1281,44 +1414,6 @@ public final class EditorUtil {
     });
   }
 
-  /**
-   * Adapts editor to a {@link ModPsiNavigator} interface, so
-   * the code that wants to update editor position can work uniformly
-   * both within {@link com.intellij.modcommand.ModCommand#psiUpdate(PsiElement, Consumer)}
-   * and with a physical editor instance.
-   * 
-   * @param editor editor to adapt
-   * @return new {@code ModPsiNavigator} adapter.
-   */
-  public static @NotNull ModPsiNavigator asPsiNavigator(@NotNull Editor editor) {
-    return new ModPsiNavigator() {
-      @Override
-      public void select(@NotNull PsiElement element) {
-        select(element.getTextRange());
-      }
-
-      @Override
-      public void select(@NotNull TextRange range) {
-        editor.getSelectionModel().setSelection(range.getStartOffset(), range.getEndOffset());
-      }
-
-      @Override
-      public void moveCaretTo(int offset) {
-        editor.getCaretModel().moveToOffset(offset);
-      }
-
-      @Override
-      public void moveCaretTo(@NotNull PsiElement element) {
-        moveCaretTo(element.getTextRange().getStartOffset());
-      }
-
-      @Override
-      public int getCaretOffset() {
-        return editor.getCaretModel().getOffset();
-      }
-    };
-  }
-
   private static final class EditorNotification {
     private static final Key<Long> LAST_MAX_CARETS_NOTIFY_TIMESTAMP = Key.create("last.max.carets.notify.timestamp");
     private static final long MAX_CARETS_NOTIFY_INTERVAL_MS = 10_000;
@@ -1356,6 +1451,36 @@ public final class EditorUtil {
     @NotNull Runnable scrollLambda
   ) {
     runWhenViewportReady(editor, scrollLambda, () -> CoroutineScopeKt.asDisposable(awaitingScope));
+  }
+
+  /**
+   * Calculates the target shift amount for inter-line expansion.
+   * Returns 0 if no shift is needed (e.g., there's already enough space from block inlays).
+   *
+   * @return the shift amount in pixels, or 0 if no shift is needed
+   */
+  @ApiStatus.Internal
+  public static int calculateInterLineShift(EditorImpl editor, int visualLineAbove, int visualLineBelow) {
+    int lineHeight = editor.getLineHeight();
+    if (visualLineAbove < 0 && visualLineBelow < 0) {
+      return 0;
+    }
+
+    int extraSpace = 0;
+    if (visualLineBelow >= 0) {
+      VisualLinesIterator iterator = new VisualLinesIterator(editor, visualLineBelow);
+      if (!iterator.atEnd()) {
+        for (Inlay<?> inlay : iterator.getBlockInlaysAbove()) {
+          extraSpace += inlay.getHeightInPixels();
+        }
+      }
+    }
+
+    if (extraSpace >= lineHeight * 1.5) {
+      return 0;
+    }
+
+    return (lineHeight - editor.getAscent()) / 2;
   }
 
   private static void runWhenViewportReady(

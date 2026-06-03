@@ -12,7 +12,13 @@ import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.Suppl
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
 public final class ToolingStreamApiUtils {
@@ -44,6 +50,32 @@ public final class ToolingStreamApiUtils {
     reader.next();
     assertFieldName(reader, fieldName);
     return reader.intValue();
+  }
+
+  public static void writeInteger(
+    @NotNull IonWriter writer,
+    @NotNull String fieldName,
+    @Nullable Integer value
+  ) throws IOException {
+    writer.setFieldName(fieldName);
+    if (value == null) {
+      writer.writeNull(IonType.INT);
+    } else {
+      writer.writeInt(value);
+    }
+  }
+
+  public static @Nullable Integer readInteger(
+    @NotNull IonReader reader,
+    @Nullable String fieldName
+  ) {
+    reader.next();
+    assertFieldName(reader, fieldName);
+    if (reader.isNullValue()) {
+      return null;
+    } else {
+      return reader.intValue();
+    }
   }
 
   public static void writeLong(
@@ -80,6 +112,32 @@ public final class ToolingStreamApiUtils {
     reader.next();
     assertFieldName(reader, fieldName);
     return reader.booleanValue();
+  }
+
+  public static void writeBooleanNullable(
+    @NotNull IonWriter writer,
+    @NotNull String fieldName,
+    @Nullable Boolean value
+  ) throws IOException {
+    writer.setFieldName(fieldName);
+    if (value == null) {
+      writer.writeNull(IonType.BOOL);
+    } else {
+      writer.writeBool(value);
+    }
+  }
+
+  public static @Nullable Boolean readBooleanNullable(
+    @NotNull IonReader reader,
+    @Nullable String fieldName
+  ) {
+    reader.next();
+    assertFieldName(reader, fieldName);
+    if (reader.isNullValue()) {
+      return null;
+    } else {
+      return reader.booleanValue();
+    }
   }
 
   public static void writeString(

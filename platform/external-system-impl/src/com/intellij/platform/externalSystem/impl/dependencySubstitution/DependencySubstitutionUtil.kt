@@ -4,7 +4,13 @@ package com.intellij.platform.externalSystem.impl.dependencySubstitution
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.diagnostic.telemetry.TelemetryManager
 import com.intellij.platform.diagnostic.telemetry.helpers.use
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.workspace.jps.entities.LibraryDependency
+import com.intellij.platform.workspace.jps.entities.LibraryId
+import com.intellij.platform.workspace.jps.entities.ModuleDependency
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ModuleId
+import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
 import com.intellij.platform.workspace.storage.EntityStorage
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.entities
@@ -38,7 +44,7 @@ object DependencySubstitutionUtil {
     }
   }
 
-  private fun ModifiableModuleEntity.updateDependencySubstitution(libraryToModuleMap: Map<LibraryId, ModuleId>) {
+  private fun ModuleEntityBuilder.updateDependencySubstitution(libraryToModuleMap: Map<LibraryId, ModuleId>) {
     val substitutions = substitutions.associateByTo(LinkedHashMap()) { it.module to it.scope }
 
     // Tries to replace outdated module substitution by original library

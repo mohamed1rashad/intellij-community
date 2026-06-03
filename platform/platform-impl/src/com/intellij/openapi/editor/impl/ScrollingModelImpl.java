@@ -7,13 +7,21 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorCoreUtil;
+import com.intellij.openapi.editor.EditorThreading;
+import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.ScrollPositionCalculator;
+import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.ScrollingModel;
+import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.event.VisibleAreaEvent;
 import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.ScrollingModelEx;
+import com.intellij.openapi.editor.ex.util.EditorScrollingPositionKeeper;
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
@@ -29,15 +37,20 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.*;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
 
 //@ApiStatus.Internal
 public final class ScrollingModelImpl implements ScrollingModelEx {
+  /**
+   * See also {@link EditorScrollingPositionKeeper} logger
+   */
   private static final Logger LOG = Logger.getInstance(ScrollingModelImpl.class);
 
   private final @NotNull ScrollingModel.Supplier supplier;
@@ -55,7 +68,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
   private final DocumentListener documentListener = new DocumentListener() {
     @Override
     public void beforeDocumentChange(@NotNull DocumentEvent e) {
-      if (!supplier.getEditor().getDocument().isInBulkUpdate()) {
+      if (!supplier.getEditor().getElfDocument().isInBulkUpdate()) {
         cancelAnimatedScrolling(true);
       }
     }
@@ -75,7 +88,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
 
   void initListeners() {
     supplier.getScrollPane().getViewport().addChangeListener(viewportChangeListener);
-    supplier.getEditor().getDocument().addDocumentListener(documentListener);
+    supplier.getEditor().getElfDocument().addDocumentListener(documentListener);
   }
 
   /**
@@ -89,7 +102,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     // and the requested position is located somewhere around.
     // We don't want to position the viewport in a way that most of its area is used to represent that virtual empty space.
     // So, we tweak vertical offset if necessary.
-    int maxY = Math.max(editor.getLineHeight(), editor.getDocument().getLineCount() * editor.getLineHeight());
+    int maxY = Math.max(editor.getLineHeight(), editor.getElfDocument().getLineCount() * editor.getLineHeight());
     int minPreferredY = maxY - getVisibleArea().height * 2 / 3;
     final int currentOffset = getVerticalScrollOffset();
     int offsetToUse = Math.min(minPreferredY, currentOffset);
@@ -123,7 +136,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
   @RequiresEdt
   public void scrollToCaret(@NotNull ScrollType scrollType) {
     if (LOG.isTraceEnabled()) {
-      LOG.trace(new Throwable());
+      LOG.trace(new Throwable("scrollToCaret request: " + scrollType));
     }
 
     Editor editor = supplier.getEditor();
@@ -150,19 +163,22 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
   }
 
   private @NotNull Point stickyPanelAdjust(@NotNull Point targetLocation, @NotNull Rectangle viewRect) {
-    if (supplier.getEditor() instanceof EditorImpl editor) {
-      int height = editor.getStickyLinesPanelHeight();
-      if (height > 0) {
-        viewRect.height -= height;
-        return new Point(targetLocation.x, targetLocation.y - height);
-      }
+    int height = supplier.getEditor().getStickyLinesPanelHeight();
+    if (height > 0) {
+      viewRect.height -= height;
+      return new Point(targetLocation.x, targetLocation.y - height);
     }
+
     return targetLocation;
   }
 
   @Override
   @RequiresEdt
   public void scrollTo(@NotNull LogicalPosition logicalPosition, @NotNull ScrollType scrollType) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace(new Throwable("scrollTo request: " + scrollType + " - " + logicalPosition));
+    }
+
     Editor editor = supplier.getEditor();
     AsyncEditorLoader.Companion.performWhenLoaded(editor, (ContextAwareRunnable)() -> {
       for (ScrollRequestListener listener : scrollRequestListeners) {
@@ -255,6 +271,10 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
 
   @Override
   public void scroll(int hOffset, int vOffset) {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace(new Throwable("scroll to point: x:" + hOffset + ", y:" + vOffset));
+    }
+
     if (accumulateViewportChanges) {
       accumulatedXOffset = hOffset;
       accumulatedYOffset = vOffset;
@@ -332,7 +352,7 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
 
   @ApiStatus.Internal
   public void dispose() {
-    supplier.getEditor().getDocument().removeDocumentListener(documentListener);
+    supplier.getEditor().getElfDocument().removeDocumentListener(documentListener);
     supplier.getScrollPane().getViewport().removeChangeListener(viewportChangeListener);
   }
 
@@ -495,12 +515,24 @@ public final class ScrollingModelImpl implements ScrollingModelEx {
     private final ScrollingHelper myScrollingHelper = new ScrollingHelper() {
       @Override
       public @NotNull Point calculateScrollingLocation(@NotNull Editor editor, @NotNull VisualPosition pos) {
-        return editor.visualPositionToXY(pos);
+        var prefixAdjustment = 0;
+        if (pos.column == 0 && editor instanceof EditorEx editorEx) {
+          prefixAdjustment = editorEx.getPrefixTextWidthInPixels();
+        }
+        var res = editor.visualPositionToXY(pos);
+        res.translate(-prefixAdjustment, 0);
+        return res;
       }
 
       @Override
       public @NotNull Point calculateScrollingLocation(@NotNull Editor editor, @NotNull LogicalPosition pos) {
-        return editor.logicalPositionToXY(pos);
+        var prefixAdjustment = 0;
+        if (pos.column == 0 && editor instanceof EditorEx editorEx) {
+          prefixAdjustment = editorEx.getPrefixTextWidthInPixels();
+        }
+        var res = editor.logicalPositionToXY(pos);
+        res.translate(-prefixAdjustment, 0);
+        return res;
       }
     };
 

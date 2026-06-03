@@ -12,6 +12,7 @@ import com.intellij.java.workspace.entities.JavaModuleSettingsEntity
 import com.intellij.java.workspace.entities.javaSettings
 import com.intellij.openapi.module.impl.ModuleManagerEx
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.projectRoots.JavaSdk
 import com.intellij.openapi.roots.DependencyScope
 import com.intellij.openapi.roots.ExternalProjectSystemRegistry
 import com.intellij.openapi.util.JDOMUtil
@@ -20,7 +21,26 @@ import com.intellij.openapi.vfs.JarFileSystem
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.platform.backend.workspace.toVirtualFileUrl
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.workspace.jps.entities.ExternalSystemModuleOptionsEntity
+import com.intellij.platform.workspace.jps.entities.ExternalSystemModuleOptionsEntityBuilder
+import com.intellij.platform.workspace.jps.entities.InheritedSdkDependency
+import com.intellij.platform.workspace.jps.entities.LibraryEntity
+import com.intellij.platform.workspace.jps.entities.LibraryId
+import com.intellij.platform.workspace.jps.entities.LibraryPropertiesEntity
+import com.intellij.platform.workspace.jps.entities.LibraryRoot
+import com.intellij.platform.workspace.jps.entities.LibraryRootTypeId
+import com.intellij.platform.workspace.jps.entities.LibraryTableId
+import com.intellij.platform.workspace.jps.entities.LibraryTypeId
+import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleId
+import com.intellij.platform.workspace.jps.entities.ModuleSourceDependency
+import com.intellij.platform.workspace.jps.entities.SdkDependency
+import com.intellij.platform.workspace.jps.entities.SdkId
+import com.intellij.platform.workspace.jps.entities.exModuleOptions
+import com.intellij.platform.workspace.jps.entities.libraryProperties
+import com.intellij.platform.workspace.jps.entities.modifyLibraryEntity
+import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
 import com.intellij.platform.workspace.jps.serialization.impl.FileInDirectorySourceNames
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.EntityStorage
@@ -37,9 +57,12 @@ import org.jetbrains.idea.maven.importing.SHADED_MAVEN_LIBRARY_NAME_PREFIX
 import org.jetbrains.idea.maven.importing.StandardMavenModuleType
 import org.jetbrains.idea.maven.importing.tree.MavenModuleImportData
 import org.jetbrains.idea.maven.importing.tree.MavenTreeModuleImportData
-import org.jetbrains.idea.maven.importing.tree.dependency.*
+import org.jetbrains.idea.maven.importing.tree.dependency.AttachedJarDependency
+import org.jetbrains.idea.maven.importing.tree.dependency.BaseDependency
 import org.jetbrains.idea.maven.importing.tree.dependency.LibraryDependency
+import org.jetbrains.idea.maven.importing.tree.dependency.MavenImportDependency
 import org.jetbrains.idea.maven.importing.tree.dependency.ModuleDependency
+import org.jetbrains.idea.maven.importing.tree.dependency.SystemDependency
 import org.jetbrains.idea.maven.model.MavenArtifact
 import org.jetbrains.idea.maven.model.MavenConstants
 import org.jetbrains.idea.maven.model.MavenId
@@ -136,8 +159,8 @@ internal class WorkspaceModuleImporter(
     // With the new workspace model we can make this process working out of the box. For that we need to extract module
     //   dependencies as separate entities and add the SDK dependency with the user defined EntitySource. However, this will require
     //   the refactoring of the ModuleEntity
-    val moduleSdk = originalModule?.dependencies?.find { it is SdkDependency }
-                    ?: InheritedSdkDependency
+    val originalSdk = originalModule?.dependencies?.filterIsInstance<SdkDependency>()?.firstOrNull()
+    val moduleSdk = getModuleSdk(originalSdk)
     result.add(moduleSdk)
     result.add(ModuleSourceDependency)
 
@@ -169,6 +192,12 @@ internal class WorkspaceModuleImporter(
       result.addIfNotNull(created)
     }
     return result
+  }
+
+  private fun getModuleSdk(originalSdk: SdkDependency?): ModuleDependencyItem {
+    val jdkName = importData.moduleData.jdkName
+    if(jdkName != null) return SdkDependency(SdkId(jdkName, JavaSdk.getInstance().name))
+    return InheritedSdkDependency
   }
 
   private fun pathToUrl(it: String) = VirtualFileManager.constructUrl(JarFileSystem.PROTOCOL, it) + JarFileSystem.JAR_SEPARATOR
@@ -370,7 +399,7 @@ internal class WorkspaceModuleImporter(
   }
 
   class ExternalSystemData(val moduleEntity: ModuleEntity, val mavenProjectFilePath: String, val mavenModuleType: StandardMavenModuleType) {
-    fun write(entity: ModifiableExternalSystemModuleOptionsEntity) {
+    fun write(entity: ExternalSystemModuleOptionsEntityBuilder) {
       entity.externalSystemModuleVersion = VERSION
       entity.externalSystem = EXTERNAL_SOURCE_ID
       // Can't use 'entity.linkedProjectPath' since it implies directory (and used to set working dir for Run Configurations).

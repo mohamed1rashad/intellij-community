@@ -3,6 +3,7 @@ package com.intellij.ide.plugins.newui
 
 import com.intellij.ide.plugins.marketplace.PluginSearchResult
 import com.intellij.ide.plugins.marketplace.SetEnabledStateResult
+import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
@@ -18,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
+import java.util.function.Consumer
 import java.util.function.Function
 import javax.swing.JComponent
 
@@ -43,37 +45,25 @@ internal object PluginModelAsyncOperationsExecutor {
     }
   }
 
-  fun performMarketplaceSearch(
-    cs: CoroutineScope,
+  suspend fun performMarketplaceSearch(
     query: String,
-    loadUpdates: Boolean,
-    callback: (PluginSearchResult, List<PluginUiModel>) -> Unit,
-  ) {
-    cs.launch(Dispatchers.IO) {
+  ): PluginSearchResult {
+    return withContext(Dispatchers.IO) {
       val pluginManager = UiPluginManager.getInstance()
-      val result = pluginManager.executeMarketplaceQuery(query, 10000, true)
-      val updates = mutableListOf<PluginUiModel>()
-      if (loadUpdates) {
-        updates.addAll(pluginManager.getUpdateModels())
-      }
-      callback(result, updates)
+      pluginManager.executeMarketplaceQuery(query, 10000, true)
     }
   }
 
-  fun getCustomRepositoriesPluginMap(cs: CoroutineScope, callback: (Map<String, List<PluginUiModel>>) -> Unit) {
-    cs.launch(Dispatchers.IO) {
+  suspend fun getCustomRepositoriesPluginMap(): Map<String, List<PluginUiModel>> {
+    return withContext(Dispatchers.IO) {
       val pluginManager = UiPluginManager.getInstance()
-      val result = pluginManager.getCustomRepositoryPluginMap()
-      callback(result)
+      pluginManager.getCustomRepositoryPluginMap()
     }
   }
 
-  fun loadUpdates(cs: CoroutineScope, callback: (List<PluginUiModel>) -> Unit) {
-    cs.launch(Dispatchers.IO) {
-      val updates = UiPluginManager.getInstance().getUpdateModels()
-      withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
-        callback(updates)
-      }
+  suspend fun loadUpdates(): List<PluginUiModel> {
+    return withContext(Dispatchers.IO) {
+      UiPluginManager.getInstance().getUpdateModels()
     }
   }
 
@@ -128,10 +118,33 @@ internal object PluginModelAsyncOperationsExecutor {
     }
   }
 
+  fun loadPopupMenuActions(
+    component: ListPluginComponent,
+    selection: List<ListPluginComponent>,
+    callback: Consumer<List<AnAction>>,
+  ) {
+    val customizer = component.getCustomizer()
+    if (customizer == null) {
+      callback.accept(emptyList())
+      return
+    }
+    val modelFacade = component.getModelFacade()
+    component.getCoroutineScope().launch(Dispatchers.IO) {
+      val stateForComponent = ModalityState.stateForComponent(component)
+      val popupSelection = selection.map {
+        PluginPopupMenuActionData(it.getPluginModel(), it.getInstalledDescriptorForMarketplace(), it.getDescriptorForActions())
+      }
+      val popupActions = customizer.getPopupMenuActions(modelFacade, popupSelection, stateForComponent)
+      withContext(Dispatchers.EDT + stateForComponent.asContextElement()) {
+        callback.accept(popupActions)
+      }
+    }
+  }
+
   fun findPlugins(downloaders: Collection<PluginDownloader>, callback: Function<Map<PluginId, PluginUiModel>, Unit>) {
     val coroutineScope = service<CoreUiCoroutineScopeHolder>().coroutineScope
     coroutineScope.launch(Dispatchers.IO) {
-      val pluginModels = UiPluginManager.getInstance().findInstalledPlugins(downloaders.map(PluginDownloader::getId).toSet())
+      val pluginModels = UiPluginManager.getInstance().findInstalledPlugins(downloaders.map(PluginDownloader::id).toSet())
       withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
         callback.apply(pluginModels)
       }
@@ -160,7 +173,7 @@ internal object PluginModelAsyncOperationsExecutor {
   fun switchPlugins(coroutineScope: CoroutineScope, pluginModelFacade: PluginModelFacade, enable: Boolean, callback: (List<PluginUiModel>) -> Unit) {
     coroutineScope.launch(Dispatchers.EDT + ModalityState.any().asContextElement()) {
       val models = mutableListOf<PluginUiModel>()
-      val group = pluginModelFacade.getModel().downloadedGroup
+      val group = pluginModelFacade.getModel().userInstalled
       if (group == null || group.ui == null) {
         val appInfo = ApplicationInfoEx.getInstanceEx()
 
@@ -172,8 +185,8 @@ internal object PluginModelAsyncOperationsExecutor {
         }
       }
       else {
-        for (component in group.ui.plugins) {
-          val plugin: PluginUiModel = component.pluginModel
+        for (component in group.ui!!.plugins) {
+          val plugin: PluginUiModel = component.getPluginModel()
           if (pluginModelFacade.isEnabled(plugin) != enable) {
             models.add(plugin)
           }

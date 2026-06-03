@@ -1,7 +1,126 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.performancePlugin;
 
-import com.jetbrains.performancePlugin.commands.*;
+import com.jetbrains.performancePlugin.commands.OptimizeImportsOnDirectoryCommand;
+import com.jetbrains.performancePlugin.commands.AcceptDecompileNotice;
+import com.jetbrains.performancePlugin.commands.AddContentRootToModule;
+import com.jetbrains.performancePlugin.commands.AddFileCommand;
+import com.jetbrains.performancePlugin.commands.AssertCaretPositionCommand;
+import com.jetbrains.performancePlugin.commands.AssertCompletionCommand;
+import com.jetbrains.performancePlugin.commands.AssertCurrentFileCommand;
+import com.jetbrains.performancePlugin.commands.AssertEncodingFileCommand;
+import com.jetbrains.performancePlugin.commands.AssertModuleJdkVersionCommand;
+import com.jetbrains.performancePlugin.commands.AssertOpenedFileInSpecificRoot;
+import com.jetbrains.performancePlugin.commands.AssertProblemsViewCountCommand;
+import com.jetbrains.performancePlugin.commands.AwaitCompleteProjectConfigurationCommand;
+import com.jetbrains.performancePlugin.commands.CallInlineCompletionCommand;
+import com.jetbrains.performancePlugin.commands.CaptureMemoryMetricsCommand;
+import com.jetbrains.performancePlugin.commands.ChooseCompletionCommand;
+import com.jetbrains.performancePlugin.commands.CleanCaches;
+import com.jetbrains.performancePlugin.commands.CloseAllTabsCommand;
+import com.jetbrains.performancePlugin.commands.CloseLookupCommand;
+import com.jetbrains.performancePlugin.commands.CloseOtherProjectsCommand;
+import com.jetbrains.performancePlugin.commands.CloseProjectCommand;
+import com.jetbrains.performancePlugin.commands.CodeAnalysisCommand;
+import com.jetbrains.performancePlugin.commands.CollectAllFilesCommand;
+import com.jetbrains.performancePlugin.commands.CompletionCommand;
+import com.jetbrains.performancePlugin.commands.ConditionalMemoryDumpCommand;
+import com.jetbrains.performancePlugin.commands.ConfigureNamedScopeCommand;
+import com.jetbrains.performancePlugin.commands.CreateAllServicesAndExtensionsCommand;
+import com.jetbrains.performancePlugin.commands.CreateScratchFile;
+import com.jetbrains.performancePlugin.commands.DebugRunConfigurationCommand;
+import com.jetbrains.performancePlugin.commands.DebugStepCommand;
+import com.jetbrains.performancePlugin.commands.DebugToggleBreakpointCommand;
+import com.jetbrains.performancePlugin.commands.DelayTypeCommand;
+import com.jetbrains.performancePlugin.commands.DeleteFileCommand;
+import com.jetbrains.performancePlugin.commands.DetectProjectLeaksCommand;
+import com.jetbrains.performancePlugin.commands.DisableKotlinNotificationCommand;
+import com.jetbrains.performancePlugin.commands.DoLocalInspection;
+import com.jetbrains.performancePlugin.commands.DropErrorCommand;
+import com.jetbrains.performancePlugin.commands.EvaluateExpressionCompletionCommand;
+import com.jetbrains.performancePlugin.commands.ExecuteEditorActionCommand;
+import com.jetbrains.performancePlugin.commands.ExitAppCommand;
+import com.jetbrains.performancePlugin.commands.ExitAppWithTimeoutCommand;
+import com.jetbrains.performancePlugin.commands.ExpandEditorMenuCommand;
+import com.jetbrains.performancePlugin.commands.ExpandMainMenuCommand;
+import com.jetbrains.performancePlugin.commands.ExpandProjectMenuCommand;
+import com.jetbrains.performancePlugin.commands.ExpandProjectViewCommand;
+import com.jetbrains.performancePlugin.commands.FindInFilesCommand;
+import com.jetbrains.performancePlugin.commands.FindUsagesInToolWindowCommand;
+import com.jetbrains.performancePlugin.commands.FinishInlineRename;
+import com.jetbrains.performancePlugin.commands.FlushFusEventsCommand;
+import com.jetbrains.performancePlugin.commands.FreezeUICommand;
+import com.jetbrains.performancePlugin.commands.GoToCommand;
+import com.jetbrains.performancePlugin.commands.GoToNamedElementCommand;
+import com.jetbrains.performancePlugin.commands.GoToNextPsiElement;
+import com.jetbrains.performancePlugin.commands.HandleSpanCommand;
+import com.jetbrains.performancePlugin.commands.HideAllToolWindowsCommand;
+import com.jetbrains.performancePlugin.commands.IdeEditorKeyCommand;
+import com.jetbrains.performancePlugin.commands.InspectionCommand;
+import com.jetbrains.performancePlugin.commands.InspectionCommandEx;
+import com.jetbrains.performancePlugin.commands.InstallCustomJBR;
+import com.jetbrains.performancePlugin.commands.JBRFullGCCommand;
+import com.jetbrains.performancePlugin.commands.MeasureVFSUpdateCommand;
+import com.jetbrains.performancePlugin.commands.MeasureVfsMassUpdateCommand;
+import com.jetbrains.performancePlugin.commands.MemoryDumpCommand;
+import com.jetbrains.performancePlugin.commands.MoveCaretCommand;
+import com.jetbrains.performancePlugin.commands.MoveDirectoryCommand;
+import com.jetbrains.performancePlugin.commands.MoveFilesCommand;
+import com.jetbrains.performancePlugin.commands.OpenFileCommand;
+import com.jetbrains.performancePlugin.commands.OpenFileWithTerminateCommand;
+import com.jetbrains.performancePlugin.commands.OpenProblemViewPanelCommand;
+import com.jetbrains.performancePlugin.commands.OpenProjectCommand;
+import com.jetbrains.performancePlugin.commands.OpenProjectViewCommand;
+import com.jetbrains.performancePlugin.commands.OpenRandomFileCommand;
+import com.jetbrains.performancePlugin.commands.RecordCounterCollectorBaselinesCommand;
+import com.jetbrains.performancePlugin.commands.RecordStateCollectorsCommand;
+import com.jetbrains.performancePlugin.commands.ReformatCommand;
+import com.jetbrains.performancePlugin.commands.RefreshFilesInVfsCommand;
+import com.jetbrains.performancePlugin.commands.ReloadFilesCommand;
+import com.jetbrains.performancePlugin.commands.RemoveBreakpointCommand;
+import com.jetbrains.performancePlugin.commands.RenameFileCommand;
+import com.jetbrains.performancePlugin.commands.RenameModuleCommand;
+import com.jetbrains.performancePlugin.commands.ReplaceBrowser;
+import com.jetbrains.performancePlugin.commands.ReplaceTextCommand;
+import com.jetbrains.performancePlugin.commands.RunClassInPlugin;
+import com.jetbrains.performancePlugin.commands.RunClassInPluginModule;
+import com.jetbrains.performancePlugin.commands.RunConfigurationCommand;
+import com.jetbrains.performancePlugin.commands.RunServiceInPlugin;
+import com.jetbrains.performancePlugin.commands.SaveDocumentsAndSettingsCommand;
+import com.jetbrains.performancePlugin.commands.ScrollEditorCommand;
+import com.jetbrains.performancePlugin.commands.SearchEverywhereCommand;
+import com.jetbrains.performancePlugin.commands.SelectCommand;
+import com.jetbrains.performancePlugin.commands.SelectFileInProjectViewCommand;
+import com.jetbrains.performancePlugin.commands.SetBreakpointCommand;
+import com.jetbrains.performancePlugin.commands.SetModuleJdkCommand;
+import com.jetbrains.performancePlugin.commands.SetupInlineCompletionListenerCommand;
+import com.jetbrains.performancePlugin.commands.SetupProjectSdkCommand;
+import com.jetbrains.performancePlugin.commands.ShowAltEnter;
+import com.jetbrains.performancePlugin.commands.ShowEvaluateExpressionCommand;
+import com.jetbrains.performancePlugin.commands.ShowFileStructurePopupCommand;
+import com.jetbrains.performancePlugin.commands.SingleInspectionCommand;
+import com.jetbrains.performancePlugin.commands.SleepCommand;
+import com.jetbrains.performancePlugin.commands.StartInlineRenameCommand;
+import com.jetbrains.performancePlugin.commands.StartPowerSave;
+import com.jetbrains.performancePlugin.commands.StartProfileCommand;
+import com.jetbrains.performancePlugin.commands.StopDebugProcessCommand;
+import com.jetbrains.performancePlugin.commands.StopPowerSave;
+import com.jetbrains.performancePlugin.commands.StopProfileCommand;
+import com.jetbrains.performancePlugin.commands.StoreHighlightingResultsCommand;
+import com.jetbrains.performancePlugin.commands.SystemGCCommand;
+import com.jetbrains.performancePlugin.commands.TakeScreenshotCommand;
+import com.jetbrains.performancePlugin.commands.TakeThreadDumpCommand;
+import com.jetbrains.performancePlugin.commands.WaitForCodeVisionCommand;
+import com.jetbrains.performancePlugin.commands.WaitForDumbCommand;
+import com.jetbrains.performancePlugin.commands.WaitForEDTQueueUnstuckCommand;
+import com.jetbrains.performancePlugin.commands.WaitForFinishedCodeAnalysis;
+import com.jetbrains.performancePlugin.commands.WaitForInitialRefreshCommand;
+import com.jetbrains.performancePlugin.commands.WaitForDebugSessionsEndCommand;
+import com.jetbrains.performancePlugin.commands.WaitForProjectViewCommand;
+import com.jetbrains.performancePlugin.commands.WaitForReOpenedFileCommand;
+import com.jetbrains.performancePlugin.commands.WaitForSmartCommand;
+import com.jetbrains.performancePlugin.commands.WaitForVfsRefreshSelectedEditorCommand;
+import com.jetbrains.performancePlugin.commands.WaitJpsBuildCommand;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
@@ -30,37 +149,30 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(OpenFileWithTerminateCommand.PREFIX, OpenFileWithTerminateCommand::new),
       Map.entry(WaitForSmartCommand.PREFIX, WaitForSmartCommand::new),
       Map.entry(WaitForInitialRefreshCommand.PREFIX, WaitForInitialRefreshCommand::new),
+      Map.entry(RefreshFilesInVfsCommand.PREFIX, RefreshFilesInVfsCommand::new),
       Map.entry(SingleInspectionCommand.PREFIX, SingleInspectionCommand::new),
       Map.entry(StartPowerSave.PREFIX, StartPowerSave::new),
       Map.entry(StopPowerSave.PREFIX, StopPowerSave::new),
       Map.entry(MemoryDumpCommand.PREFIX, MemoryDumpCommand::new),
       Map.entry(CleanCaches.PREFIX, CleanCaches::new),
-      Map.entry(FindUsagesCommand.PREFIX, FindUsagesCommand::new),
-      Map.entry(FindUsagesInBackgroundCommand.PREFIX, FindUsagesInBackgroundCommand::new),
       Map.entry(FindUsagesInToolWindowCommand.PREFIX, FindUsagesInToolWindowCommand::new),
       Map.entry(IdeEditorKeyCommand.PREFIX, IdeEditorKeyCommand::new),
       Map.entry(ShowAltEnter.PREFIX, ShowAltEnter::new),
       Map.entry(SelectCommand.PREFIX, SelectCommand::new),
-      Map.entry(CompareIndicesKt.PREFIX, CompareIndices::new),
-      Map.entry(StoreIndices.PREFIX, StoreIndices::new),
       Map.entry(OpenProjectViewCommand.PREFIX, OpenProjectViewCommand::new),
       Map.entry(MoveDirectoryCommand.PREFIX, MoveDirectoryCommand::new),
       Map.entry(RunClassInPlugin.PREFIX, RunClassInPlugin::new),
+      Map.entry(RunClassInPluginModule.PREFIX, RunClassInPluginModule::new),
       Map.entry(RunServiceInPlugin.PREFIX, RunServiceInPlugin::new),
       Map.entry(SetupProjectSdkCommand.PREFIX, SetupProjectSdkCommand::new),
       Map.entry(OpenProjectCommand.PREFIX, OpenProjectCommand::new),
       Map.entry(CloseProjectCommand.PREFIX, CloseProjectCommand::new),
       Map.entry(CloseOtherProjectsCommand.PREFIX, CloseOtherProjectsCommand::new),
       Map.entry(CodeAnalysisCommand.PREFIX, CodeAnalysisCommand::new),
-      Map.entry(DumpProjectFiles.PREFIX, DumpProjectFiles::new),
-      Map.entry(CompareProjectFiles.PREFIX, CompareProjectFiles::new),
       Map.entry(RecordCounterCollectorBaselinesCommand.PREFIX, RecordCounterCollectorBaselinesCommand::new),
       Map.entry(RecordStateCollectorsCommand.PREFIX, RecordStateCollectorsCommand::new),
       Map.entry(FlushFusEventsCommand.PREFIX, FlushFusEventsCommand::new),
       Map.entry(CreateAllServicesAndExtensionsCommand.PREFIX, CreateAllServicesAndExtensionsCommand::new),
-      Map.entry(RecoveryActionCommand.PREFIX, RecoveryActionCommand::new),
-      Map.entry(CorruptIndexesCommand.PREFIX, CorruptIndexesCommand::new),
-      Map.entry(FlushIndexesCommand.PREFIX, FlushIndexesCommand::new),
       Map.entry(SearchEverywhereCommand.PREFIX, SearchEverywhereCommand::new),
       Map.entry(SelectFileInProjectViewCommand.PREFIX, SelectFileInProjectViewCommand::new),
       Map.entry(ExpandProjectMenuCommand.PREFIX, ExpandProjectMenuCommand::new),
@@ -80,12 +192,11 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(FinishInlineRename.PREFIX, FinishInlineRename::new),
       Map.entry(AssertOpenedFileInSpecificRoot.PREFIX, AssertOpenedFileInSpecificRoot::new),
       Map.entry(CloseAllTabsCommand.PREFIX, CloseAllTabsCommand::new),
+      Map.entry(HideAllToolWindowsCommand.PREFIX, HideAllToolWindowsCommand::new),
       Map.entry(CollectAllFilesCommand.PREFIX, CollectAllFilesCommand::new),
       Map.entry(ExecuteEditorActionCommand.PREFIX, ExecuteEditorActionCommand::new),
       Map.entry(AssertCompletionCommand.PREFIX, AssertCompletionCommand::new),
       Map.entry(ChooseCompletionCommand.PREFIX, ChooseCompletionCommand::new),
-      Map.entry(AssertFindUsagesCommand.PREFIX, AssertFindUsagesCommand::new),
-      Map.entry(AssertFindUsagesEntryCommand.PREFIX, AssertFindUsagesEntryCommand::new),
       Map.entry(SetBreakpointCommand.PREFIX, SetBreakpointCommand::new),
       Map.entry(DebugRunConfigurationCommand.PREFIX, DebugRunConfigurationCommand::new),
       Map.entry(DebugStepCommand.PREFIX, DebugStepCommand::new),
@@ -97,7 +208,6 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(InstallCustomJBR.PREFIX, InstallCustomJBR::new),
       Map.entry(ShowEvaluateExpressionCommand.PREFIX, ShowEvaluateExpressionCommand::new),
       Map.entry(EvaluateExpressionCompletionCommand.PREFIX, EvaluateExpressionCompletionCommand::new),
-      Map.entry(CollectFilesNotMarkedAsIndex.PREFIX, CollectFilesNotMarkedAsIndex::new),
       Map.entry(RemoveBreakpointCommand.PREFIX, RemoveBreakpointCommand::new),
       Map.entry(DropErrorCommand.PREFIX, DropErrorCommand::new),
       Map.entry(SaveDocumentsAndSettingsCommand.PREFIX, SaveDocumentsAndSettingsCommand::new),
@@ -115,7 +225,6 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(StoreHighlightingResultsCommand.PREFIX, StoreHighlightingResultsCommand::new),
       Map.entry(AddContentRootToModule.PREFIX, AddContentRootToModule::new),
       Map.entry(DisableKotlinNotificationCommand.PREFIX, DisableKotlinNotificationCommand::new),
-      Map.entry(RequestHeavyScanningOnNextStartCommand.PREFIX, RequestHeavyScanningOnNextStartCommand::new),
       Map.entry(AssertCaretPositionCommand.PREFIX, AssertCaretPositionCommand::new),
       Map.entry(AssertCurrentFileCommand.PREFIX, AssertCurrentFileCommand::new),
       Map.entry(AwaitCompleteProjectConfigurationCommand.PREFIX, AwaitCompleteProjectConfigurationCommand::new),
@@ -136,7 +245,10 @@ public final class BaseCommandProvider implements CommandProvider {
       Map.entry(OpenProblemViewPanelCommand.PREFIX, OpenProblemViewPanelCommand::new),
       Map.entry(AssertProblemsViewCountCommand.PREFIX, AssertProblemsViewCountCommand::new),
       Map.entry(DetectProjectLeaksCommand.PREFIX, DetectProjectLeaksCommand::new),
-      Map.entry(WaitForReOpenedFileCommand.PREFIX, WaitForReOpenedFileCommand::new)
+      Map.entry(WaitForReOpenedFileCommand.PREFIX, WaitForReOpenedFileCommand::new),
+      Map.entry(WaitForCodeVisionCommand.PREFIX, WaitForCodeVisionCommand::new),
+      Map.entry(WaitForDebugSessionsEndCommand.PREFIX, WaitForDebugSessionsEndCommand::new),
+      Map.entry(OptimizeImportsOnDirectoryCommand.PREFIX, OptimizeImportsOnDirectoryCommand::new)
     );
   }
 }

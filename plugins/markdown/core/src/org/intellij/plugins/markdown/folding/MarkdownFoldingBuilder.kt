@@ -12,6 +12,7 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiRecursiveVisitor
 import com.intellij.psi.util.PsiUtilCore
 import com.intellij.psi.util.childrenOfType
+import com.intellij.psi.util.parentOfType
 import com.intellij.psi.util.siblings
 import org.intellij.plugins.markdown.MarkdownBundle
 import org.intellij.plugins.markdown.editor.toc.GenerateTableOfContentsAction
@@ -19,7 +20,15 @@ import org.intellij.plugins.markdown.lang.MarkdownElementTypes
 import org.intellij.plugins.markdown.lang.MarkdownTokenTypes
 import org.intellij.plugins.markdown.lang.psi.MarkdownElementVisitor
 import org.intellij.plugins.markdown.lang.psi.MarkdownRecursiveElementVisitor
-import org.intellij.plugins.markdown.lang.psi.impl.*
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownBlockQuote
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownCodeFence
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownFile
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownHeader
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownLinkDestination
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownList
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownListItem
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownParagraph
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownTable
 import org.intellij.plugins.markdown.lang.psi.util.hasType
 import org.intellij.plugins.markdown.settings.MarkdownCodeFoldingSettings
 import org.intellij.plugins.markdown.util.MarkdownPsiStructureUtil
@@ -49,6 +58,10 @@ internal class MarkdownFoldingBuilder: CustomFoldingBuilder(), DumbAware {
       }
 
       override fun visitLinkDestination(linkDestination: MarkdownLinkDestination) {
+        if (linkDestination.parentOfType<MarkdownTable>() != null) {
+          super.visitLinkDestination(linkDestination)
+          return
+        }
         val node = linkDestination.node
         val descriptor = FoldingDescriptor(
           node,
@@ -196,7 +209,6 @@ private val foldedElementsPresentations = hashMapOf(
   MarkdownElementTypes.UNORDERED_LIST to MarkdownBundle.message("markdown.folding.unordered.list.name"),
   MarkdownElementTypes.BLOCK_QUOTE to MarkdownBundle.message("markdown.folding.block.quote.name"),
   MarkdownElementTypes.TABLE to MarkdownBundle.message("markdown.folding.table.name"),
-  MarkdownElementTypes.CODE_FENCE to MarkdownBundle.message("markdown.folding.code.fence.name"),
   MarkdownElementTypes.FRONT_MATTER_HEADER to MarkdownBundle.message("markdown.folding.front.matter.name")
 )
 

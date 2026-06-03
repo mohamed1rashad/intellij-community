@@ -14,7 +14,7 @@ import com.intellij.packaging.elements.PackagingElementType;
 import com.intellij.packaging.ui.ArtifactEditorContext;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,7 +37,8 @@ public class DirectoryCopyElementType extends PackagingElementType<DirectoryCopy
   @Override
   public @NotNull List<? extends DirectoryCopyPackagingElement> chooseAndCreate(@NotNull ArtifactEditorContext context, @NotNull Artifact artifact,
                                                                                 @NotNull CompositePackagingElement<?> parent) {
-    final FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createMultipleFoldersDescriptor();
+    final FileChooserDescriptor descriptor = FileChooserDescriptorFactory.createMultipleFoldersDescriptor()
+      .withEnvironmentRestricted(true);
     final VirtualFile[] files = FileChooser.chooseFiles(descriptor, context.getProject(), null);
     final List<DirectoryCopyPackagingElement> list = new ArrayList<>();
     for (VirtualFile file : files) {

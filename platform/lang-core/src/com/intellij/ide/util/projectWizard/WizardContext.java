@@ -17,7 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.SystemDependent;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
@@ -185,7 +185,7 @@ public class WizardContext extends UserDataHolderBase {
   }
 
   public void requestSwitchTo(@NotNull String placeId) {
-    requestSwitchTo(placeId, __ -> {});
+    requestSwitchTo(placeId, _ -> {});
   }
 
   public void requestSwitchTo(@NotNull String placeId, @NotNull Consumer<? super Step> configure) {

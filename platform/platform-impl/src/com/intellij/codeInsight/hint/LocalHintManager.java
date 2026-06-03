@@ -4,7 +4,11 @@ package com.intellij.codeInsight.hint;
 import com.intellij.ide.IdeTooltip;
 import com.intellij.ide.plugins.DynamicPluginListener;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
 import com.intellij.openapi.actionSystem.ex.AnActionListener;
 import com.intellij.openapi.application.ApplicationManager;
@@ -12,10 +16,24 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.LogicalPosition;
-import com.intellij.openapi.editor.event.*;
+import com.intellij.openapi.editor.event.BulkAwareDocumentListener;
+import com.intellij.openapi.editor.event.CaretEvent;
+import com.intellij.openapi.editor.event.CaretListener;
+import com.intellij.openapi.editor.event.DocumentEvent;
+import com.intellij.openapi.editor.event.DocumentListener;
+import com.intellij.openapi.editor.event.EditorMouseEvent;
+import com.intellij.openapi.editor.event.EditorMouseListener;
+import com.intellij.openapi.editor.event.SelectionEvent;
+import com.intellij.openapi.editor.event.SelectionListener;
+import com.intellij.openapi.editor.event.VisibleAreaEvent;
+import com.intellij.openapi.editor.event.VisibleAreaListener;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.EditorGutterComponentEx;
-import com.intellij.openapi.editor.markup.*;
+import com.intellij.openapi.editor.markup.EffectType;
+import com.intellij.openapi.editor.markup.HighlighterLayer;
+import com.intellij.openapi.editor.markup.HighlighterTargetArea;
+import com.intellij.openapi.editor.markup.RangeHighlighter;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.ComponentPopupBuilder;
@@ -37,9 +55,16 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.JComponent;
+import javax.swing.JLayeredPane;
+import javax.swing.JRootPane;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import java.awt.Component;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.util.EventObject;
 import java.util.List;
 
@@ -88,7 +113,7 @@ public final class LocalHintManager implements ClientHintManager {
     myEditorMouseListener = new EditorMouseListener() {
       @Override
       public void mousePressed(@NotNull EditorMouseEvent event) {
-        hideAllHints();
+        hideHints(HintManager.HIDE_BY_ANY_KEY, false, false);
       }
     };
 
@@ -378,28 +403,29 @@ public final class LocalHintManager implements ClientHintManager {
                                final @NotNull Point p,
                                final int offset1,
                                final int offset2,
+                               final @Nullable TextAttributes attributesOverride,
                                final @NotNull LightweightHint hint,
                                int flags,
                                final @NotNull QuestionAction action,
                                @HintManager.PositionFlags short constraint) {
     ThreadingAssertions.assertEventDispatchThread();
     hideQuestionHint();
-    RangeHighlighter highlighter;
-    if (offset1 != offset2) {
-      TextAttributes attributes = new TextAttributes();
-      attributes.setEffectColor(HintUtil.QUESTION_UNDERSCORE_COLOR);
-      attributes.setEffectType(EffectType.LINE_UNDERSCORE);
-      highlighter = editor.getMarkupModel()
-        .addRangeHighlighter(offset1, offset2, HighlighterLayer.ERROR + 1, attributes, HighlighterTargetArea.EXACT_RANGE);
-    }
-    else {
-      highlighter = null;
+
+    TextAttributes attributesCandidate = attributesOverride;
+
+    if (attributesCandidate == null && offset1 != offset2) {
+      attributesCandidate = new TextAttributes();
+      attributesCandidate.setEffectColor(HintUtil.QUESTION_UNDERSCORE_COLOR);
+      attributesCandidate.setEffectType(EffectType.LINE_UNDERSCORE);
     }
 
+    TextAttributes attributes = attributesCandidate;
+
     hint.addHintListener(new HintListener() {
+      private RangeHighlighter highlighter;
+
       @Override
       public void hintHidden(@NotNull EventObject event) {
-        hint.removeHintListener(this);
         if (highlighter != null) {
           highlighter.dispose();
         }
@@ -408,6 +434,14 @@ public final class LocalHintManager implements ClientHintManager {
           myQuestionAction = null;
           myQuestionHint = null;
         }
+      }
+
+      @Override
+      public void beforeShow(@NotNull EventObject event) {
+        if (offset1 == offset2) return;
+
+        highlighter = editor.getMarkupModel()
+          .addRangeHighlighter(offset1, offset2, HighlighterLayer.ERROR + 1, attributes, HighlighterTargetArea.EXACT_RANGE);
       }
     });
 
@@ -430,7 +464,7 @@ public final class LocalHintManager implements ClientHintManager {
     if (myLastEditor != editor) {
       if (myLastEditor != null) {
         myLastEditor.removeEditorMouseListener(myEditorMouseListener);
-        myLastEditor.getDocument().removeDocumentListener(myEditorDocumentListener);
+        myLastEditor.getElfDocument().removeDocumentListener(myEditorDocumentListener);
         myLastEditor.getScrollingModel().removeVisibleAreaListener(myVisibleAreaListener);
         myLastEditor.getCaretModel().removeCaretListener(myCaretMoveListener);
         myLastEditor.getSelectionModel().removeSelectionListener(mySelectionListener);
@@ -439,7 +473,7 @@ public final class LocalHintManager implements ClientHintManager {
       myLastEditor = editor;
       if (myLastEditor != null) {
         myLastEditor.addEditorMouseListener(myEditorMouseListener);
-        myLastEditor.getDocument().addDocumentListener(myEditorDocumentListener);
+        myLastEditor.getElfDocument().addDocumentListener(myEditorDocumentListener);
         myLastEditor.getScrollingModel().addVisibleAreaListener(myVisibleAreaListener);
         myLastEditor.getCaretModel().addCaretListener(myCaretMoveListener);
         myLastEditor.getSelectionModel().addSelectionListener(mySelectionListener);

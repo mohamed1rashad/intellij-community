@@ -10,6 +10,7 @@ import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.python.community.plugin.impl.facet.PythonFacetUtil
 import com.jetbrains.python.configuration.PyActiveSdkConfigurable
 import com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable
+import com.jetbrains.python.module.PyModuleService
 import com.jetbrains.python.sdk.removeTransferredRoots
 import com.jetbrains.python.sdk.transferRoots
 import org.jetbrains.annotations.ApiStatus
@@ -22,7 +23,14 @@ internal class PyPluginSdkModuleConfigurable(project: Project?) : PyActiveSdkMod
       }
 
       override fun getSdk(): Sdk? {
-        return getSdkFromFacet(module)
+        // Read from the Python facet, which is the authoritative SDK storage for CLion.
+        // PyModuleService.findPythonSdk() checks ModuleRootManager.sdk first, but that
+        // may hold a stale value if the Python SDK was previously set via a different
+        // path. setSdkToFacet() (our setSdk override) only writes to the facet, so
+        // getSdk() must also read from the facet to keep isModified() consistent.
+        val facet = FacetManager.getInstance(module).getFacetByType(MinorPythonFacet.ID)
+        return facet?.configuration?.sdk
+          ?: PyModuleService.getInstance(module.project).findPythonSdk(module)
       }
     }
   }
@@ -40,13 +48,6 @@ fun setSdkToFacet(item: Sdk?, module: Module) {
   else {
     setFacetSdk(facet, item, module)
   }
-}
-
-@ApiStatus.Internal
-fun getSdkFromFacet(module: Module): Sdk? {
-  val facetManager = FacetManager.getInstance(module)
-  val facet = facetManager.getFacetByType(MinorPythonFacet.ID)
-  return facet?.configuration?.sdk
 }
 
 private fun setFacetSdk(facet: MinorPythonFacet,

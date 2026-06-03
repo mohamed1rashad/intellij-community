@@ -18,7 +18,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.*;
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -41,7 +41,7 @@ public class MarkupModelTest extends AbstractEditorTest {
     List<String> expected = new ArrayList<>();
     assertEventsFired(expected, events, "(1,2): AA");
     highlighter.setCustomRenderer((editor, highlighter1, g) -> {}); assertEventsFired(expected, events, "(1,2): AC");
-    highlighter.setEditorFilter(__ -> true); assertEventsFired(expected, events, "(1,2): AC");
+    highlighter.setEditorFilter(_ -> true); assertEventsFired(expected, events, "(1,2): AC");
     highlighter.setErrorStripeMarkColor(new Color(1)); assertEventsFired(expected, events, "(1,2): AC");
     highlighter.setErrorStripeTooltip(this); assertEventsFired(expected, events, "(1,2): AC");
     highlighter.setGutterIconRenderer(MarkupModelStressTest.DUMMY_GUTTER_ICON_RENDERER); assertEventsFired(expected, events, "(1,2): AC");

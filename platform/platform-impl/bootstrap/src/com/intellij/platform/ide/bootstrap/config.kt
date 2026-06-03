@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ide.bootstrap
 
 import com.intellij.accessibility.enableScreenReaderSupportIfNecessary
@@ -9,14 +9,18 @@ import com.intellij.openapi.application.InitialConfigImportState
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.getOrLogException
-import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.util.io.NioFiles
 import com.intellij.openapi.util.registry.EarlyAccessRegistryManager
 import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.ui.ExperimentalUI
 import com.intellij.util.ui.RawSwingDispatcher
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CancellationException
@@ -41,6 +45,10 @@ internal suspend fun importConfigIfNeeded(
     scope.launch {
       logDeferred.await().info("Will skip the config import to directory \"$configDir\" (exists = $configDirExists). Current entries: ${entries}.")
     }
+    if (ClassicUiToIslandsMigration.isEnabledFeature && !isHeadless) {
+      // Possible minor update
+      ClassicUiToIslandsMigration.enableNewUiWithIslands(logDeferred)
+    }
     return null
   }
 
@@ -60,13 +68,19 @@ internal suspend fun importConfigIfNeeded(
 
   initLafJob.join()
   val log = logDeferred.await()
-  val targetDirectoryToImportConfig = customTargetDirectoryToImportConfig ?: PathManager.getConfigDir()
-  val entries = NioFiles.list(targetDirectoryToImportConfig).joinToString(", ") { "\"${it.name}\"" }
-  log.info("Will import config to directory \"$targetDirectoryToImportConfig\" (exists = ${Files.exists(targetDirectoryToImportConfig)}). Current entries: ${entries}.")
-  importConfig(args, targetDirectoryToImportConfig, log, appStarterDeferred.await(), euaDocumentDeferred)
+  val importTo = customTargetDirectoryToImportConfig ?: PathManager.getConfigDir()
+  val entries = NioFiles.list(importTo).joinToString(", ") { "\"${it.name}\"" }
+  log.info("Will import config to directory \"${importTo}\": exists=${Files.exists(importTo)} custom=${customTargetDirectoryToImportConfig != null} entries=[${entries}]")
+  importConfig(args, importTo, log, appStarterDeferred.await(), euaDocumentDeferred)
 
   val isNewUser = InitialConfigImportState.isNewUser()
-  enableNewUi(logDeferred, isNewUser)
+
+  if (ClassicUiToIslandsMigration.isEnabledFeature) {
+    ClassicUiToIslandsMigration.enableNewUiWithIslands(logDeferred)
+  } else {
+    enableNewUi(logDeferred, isNewUser)
+  }
+
   if (isNewUser && InitialConfigImportState.isStartupWizardEnabled()) {
     log.info("Will enter initial app wizard flow.")
     val result = CompletableDeferred<Boolean>()
@@ -97,24 +111,21 @@ private suspend fun importConfig(
   appStarter: AppStarter,
   euaDocumentDeferred: Deferred<EndUserAgreementStatus>,
 ) {
-  span("screen reader checking") {
-    runCatching {
-      enableScreenReaderSupportIfNecessary()
-    }.getOrLogException(log)
-  }
-
   span("config importing") {
     appStarter.beforeImportConfigs()
-
-    val euaDocumentStatus = euaDocumentDeferred.await()
-    val veryFirstStartOnThisComputer = euaDocumentStatus is EndUserAgreementStatus.Required
-    val log = logger<ConfigImportHelper>()
+    euaDocumentDeferred.await()
     withContext(RawSwingDispatcher) {
-      ConfigImportHelper.importConfigsTo(veryFirstStartOnThisComputer, targetDirectoryToImportConfig, args, log)
+      ConfigImportHelper.importConfigsTo(targetDirectoryToImportConfig, args)
     }
     appStarter.importFinished(targetDirectoryToImportConfig)
     EarlyAccessRegistryManager.invalidate()
     IconLoader.clearCache()
+  }
+
+  span("screen reader checking") {
+    runCatching {
+      enableScreenReaderSupportIfNecessary()
+    }.getOrLogException(log)
   }
 }
 

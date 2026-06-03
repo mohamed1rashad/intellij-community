@@ -10,9 +10,6 @@ import java.nio.file.Paths
 
 const val GRADLE_LOCAL_JAVA_HOME_PROPERTY: String = "java.home"
 
-@Deprecated("Use GradleConstants#GRADLE_LOCAL_PROPERTIES_FILE_NAME instead")
-const val GRADLE_LOCAL_PROPERTIES_FILE_NAME: String = GRADLE_LOCAL_PROPERTIES_FILE_NAME
-
 object GradleLocalPropertiesFile {
 
   @JvmStatic

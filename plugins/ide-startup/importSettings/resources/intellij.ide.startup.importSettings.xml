@@ -1,7 +1,32 @@
 <idea-plugin visibility="internal" package="com.intellij.ide.startup.importSettings">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.libraries.jackson"/>
+    <module name="intellij.libraries.jackson.databind"/>
+    <module name="intellij.libraries.kotlinx.serialization.core"/>
+    <module name="intellij.libraries.kotlinx.serialization.json"/>
+    <module name="intellij.platform.analysis"/>
+    <module name="intellij.platform.codeStyle"/>
+    <module name="intellij.platform.configurationStore.impl"/>
+    <module name="intellij.platform.core"/>
+    <module name="intellij.platform.core.impl"/>
+    <module name="intellij.platform.core.ui"/>
+    <module name="intellij.platform.editor.ui"/>
+    <module name="intellij.platform.ide.core"/>
+    <module name="intellij.platform.ide.core.plugins"/>
+    <module name="intellij.platform.ide.impl"/>
+    <module name="intellij.platform.ide.initialConfigImport"/>
+    <module name="intellij.platform.lang.impl"/>
+    <module name="intellij.platform.projectModel"/>
+    <module name="intellij.platform.rd.community"/>
+    <module name="intellij.platform.statistics"/>
+    <module name="intellij.platform.util.ex"/>
+    <module name="intellij.platform.util.ui"/>
+  </dependencies>
+  <!-- endregion -->
   <actions>
     <!--suppress PluginXmlI18n -->
-    <action id="ImportSettingDialogAction" class="com.intellij.ide.startup.importSettings.testActions.ImportSettingDialogAction" text="[INTERNAL] 3 Transfer: ONE" internal="true"/>
+    <action id="ImportSettingDialogAction" class="com.intellij.ide.startup.importSettings.testActions.ImportSettingDialogAction" text="[INTERNAL] 3 Transfer: Show Import Settings Dialog" internal="true"/>
     <action id="StartWizardAction" class="com.intellij.ide.startup.importSettings.testActions.StartWizardAction" text="[INTERNAL] 5 Transfer: StartWizardAction" internal="true"/>
     <action id="OnboardingTestDialogAction" class="com.intellij.ide.startup.importSettings.testActions.OnboardingTestDialogAction" text="[INTERNAL] 4 Transfer: Onboarding Test Dialog Action" internal="true"/>
     <!--suppress PluginXmlCapitalization -->
@@ -28,7 +53,7 @@
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
-    <applicationService serviceInterface="com.intellij.ide.startup.importSettings.data.StartupWizardService"
+    <applicationService serviceInterface="com.intellij.ide.startup.importSettings.data.StartupWizardService" open="true"
                         serviceImplementation="com.intellij.ide.startup.importSettings.data.DisabledStartupWizardPages"/>
 
     <transferSettings.thirdPartyProductSettingsTransfer id="VSCodeSettingsTransfer"

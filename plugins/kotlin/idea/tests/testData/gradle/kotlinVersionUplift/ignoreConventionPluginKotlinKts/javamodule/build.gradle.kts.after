@@ -5,11 +5,11 @@ plugins {
 
 java {
 }
-dependencies {
-    implementation(kotlin("stdlib-jdk8"))
-}
 repositories {
     mavenCentral()
+}
+dependencies {
+    testImplementation(kotlin("test"))
 }
 kotlin {
     jvmToolchain(11)

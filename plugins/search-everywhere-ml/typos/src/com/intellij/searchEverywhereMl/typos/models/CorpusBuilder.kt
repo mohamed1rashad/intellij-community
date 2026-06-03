@@ -3,9 +3,9 @@ package com.intellij.searchEverywhereMl.typos.models
 import com.intellij.ide.actions.ShowSettingsUtilImpl.Companion.getConfigurables
 import com.intellij.ide.ui.search.SearchableOptionsRegistrar
 import com.intellij.ide.ui.search.SearchableOptionsRegistrarImpl
+import com.intellij.ide.util.gotoByName.getAnActionText
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionManager
-import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.impl.ActionManagerImpl
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -17,18 +17,16 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.wm.WindowManager
 import com.intellij.openapi.wm.ex.WindowManagerEx
+import com.intellij.platform.ide.progress.TaskCancellation
 import com.intellij.platform.ide.progress.withBackgroundProgress
-import com.intellij.searchEverywhereMl.typos.SearchEverywhereStringToken
 import com.intellij.searchEverywhereMl.typos.TyposBundle
 import com.intellij.searchEverywhereMl.typos.isTypoFixingEnabled
-import com.intellij.searchEverywhereMl.typos.splitText
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
-import java.util.regex.Pattern
 
 @Service(Service.Level.APP)
-internal class CorpusBuilder(coroutineScope: CoroutineScope) {
+internal class CorpusBuilder(private val coroutineScope: CoroutineScope) {
+
   companion object {
     /**
      * Returns null if typo-tolerant search is disabled in the Advanced Settings
@@ -41,17 +39,20 @@ internal class CorpusBuilder(coroutineScope: CoroutineScope) {
     }
   }
 
-  val deferredCorpus: Deferred<Set<List<String>>> = coroutineScope.async {
+  suspend fun buildCorpus(): Set<List<String>> {
     val project = guessProject()
-    if (project == null) {
-      computeCorpus(coroutineScope)
-    } else {
+    return if (project == null) {
+      computeCorpus()
+    }
+    else {
       withBackgroundProgress(
         project,
         TyposBundle.getMessage("progress.title.computing.actions.language.model"),
-        cancellable = false
+        TaskCancellation.nonCancellable(),
+        suspender = null,
+        visibleInStatusBar = false
       ) {
-        computeCorpus(coroutineScope)
+        computeCorpus()
       }
     }
   }
@@ -59,7 +60,7 @@ internal class CorpusBuilder(coroutineScope: CoroutineScope) {
   /**
    * Computes the corpus by aggregating and tokenizing data from actions and settings
    */
-  private suspend fun computeCorpus(coroutineScope: CoroutineScope): Set<List<String>> {
+  private suspend fun computeCorpus(): Set<List<String>> {
     val actionWordsDeferred = coroutineScope.async { getWordsFromActions() }
     val settingWordsDeferred = coroutineScope.async { getWordsFromSettings() }
 
@@ -78,9 +79,8 @@ internal class CorpusBuilder(coroutineScope: CoroutineScope) {
     return actionManager.actionsOrStubs()
       .filterNot { it is ActionGroup && !it.isSearchable }
       .mapNotNull { action ->
-        val presentation = action.templatePresentation
-        action.applyTextOverride(ActionPlaces.ACTION_SEARCH, presentation)
-        presentation.text?.let { tokenizeText(it) }
+        val text = getAnActionText(action)
+        text?.let { tokenizeText(it) }
       }
       .toSet()
   }
@@ -123,8 +123,8 @@ internal class CorpusBuilder(coroutineScope: CoroutineScope) {
     }
 
     if (configurable is ConfigurableWrapper) {
-      configurable.extensionPoint.pluginDescriptor.description
-        ?.replace(Regex("<[^>]*>"), "") // matches everything enclosed in < and > and removes any HTML-like tags.
+      configurable.extensionPoint.pluginDescriptor?.description
+        ?.replace(HTML_TAGS_REGEX, "") // matches everything enclosed in < and > and removes any HTML-like tags.
         ?.split('.', '\n')
         ?.mapNotNull { tokenizeText(it) }
         ?.let { collectedTokens.addAll(it) }
@@ -138,15 +138,10 @@ internal class CorpusBuilder(coroutineScope: CoroutineScope) {
 
     return collectedTokens
   }
-
-  private val alphabeticPattern = Pattern.compile("^[a-zA-Z]+$")
+  private val HTML_TAGS_REGEX = Regex("<[^>]*>")
 
   private fun tokenizeText(text: String): List<String>? =
-    splitText(text)
-      .filterIsInstance<SearchEverywhereStringToken.Word>()
-      .map { it.value.lowercase() }
-      .filter { alphabeticPattern.matcher(it).matches() }
-      .toList()
+    tokenizeTextForTypoLookup(text)
       .takeIf { it.isNotEmpty() }
 
   private suspend fun guessProject(): Project? {

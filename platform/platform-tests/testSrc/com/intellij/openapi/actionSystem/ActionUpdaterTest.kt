@@ -1,10 +1,11 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.actionSystem
 
 import com.intellij.concurrency.currentThreadContext
 import com.intellij.concurrency.installThreadContext
 import com.intellij.ide.IdeEventQueue
 import com.intellij.ide.actions.NonTrivialActionGroup
+import com.intellij.ide.actions.PopupInMainMenuActionGroup
 import com.intellij.openapi.actionSystem.impl.PresentationFactory
 import com.intellij.openapi.actionSystem.impl.SkipOperation
 import com.intellij.openapi.actionSystem.impl.Utils
@@ -35,6 +36,7 @@ import kotlinx.coroutines.withContext
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 
@@ -85,6 +87,59 @@ class ActionUpdaterTest {
     val actions = expandActionGroup(group, presentations)
     assertEmpty(actions)
     assertFalse(presentations.getPresentation(group).isEnabled)
+  }
+
+  @Test
+  @RunMethodInEdt
+  fun testPopupInMainMenuActionGroupShowsDisabledChildrenInContextMenu() {
+    val group = PopupInMainMenuActionGroup()
+    val child = newAction(ActionUpdateThread.BGT) {
+      it.presentation.isVisible = true
+      it.presentation.isEnabled = false
+    }
+    group.add(child)
+
+    val presentations = PresentationFactory()
+    val actions = Utils.expandActionGroup(group, presentations, DataContext.EMPTY_CONTEXT, ActionPlaces.EDITOR_POPUP, ActionUiKind.POPUP)
+
+    assertOrderedEquals(actions, child)
+    assertTrue(presentations.getPresentation(group).isVisible)
+    assertFalse(presentations.getPresentation(group).isEnabled)
+    assertFalse(presentations.getPresentation(group).isPopupGroup)
+  }
+
+  @Test
+  @RunMethodInEdt
+  fun testPopupInMainMenuActionGroupKeepsNonContextBehaviorOutsideMainMenu() {
+    val group = PopupInMainMenuActionGroup()
+    group.add(newAction(ActionUpdateThread.BGT) {
+      it.presentation.isVisible = true
+      it.presentation.isEnabled = false
+    })
+
+    val presentations = PresentationFactory()
+    val actions = Utils.expandActionGroup(group, presentations, DataContext.EMPTY_CONTEXT, ActionPlaces.UNKNOWN, ActionUiKind.NONE)
+
+    assertEmpty(actions)
+    assertFalse(presentations.getPresentation(group).isVisible)
+    assertFalse(presentations.getPresentation(group).isPopupGroup)
+  }
+
+  @Test
+  @RunMethodInEdt
+  fun testPopupInMainMenuActionGroupKeepsMainMenuBehavior() {
+    val group = PopupInMainMenuActionGroup()
+    group.add(newAction(ActionUpdateThread.BGT) {
+      it.presentation.isVisible = true
+      it.presentation.isEnabled = false
+    })
+
+    val presentations = PresentationFactory()
+    val actions = Utils.expandActionGroup(group, presentations, DataContext.EMPTY_CONTEXT, ActionPlaces.MAIN_MENU, ActionUiKind.NONE)
+
+    assertEmpty(actions)
+    assertFalse(presentations.getPresentation(group).isVisible)
+    assertTrue(presentations.getPresentation(group).isPopupGroup)
   }
 
   @Test
@@ -419,6 +474,52 @@ class ActionUpdaterTest {
     assertCyclicDependencyReported(object : ActionGroup() {
       override fun getChildren(e: AnActionEvent?): Array<AnAction> = arrayOf(DefaultActionGroup(this))
     })
+  }
+
+  @Test
+  fun testDispatcherIsAdaptedToLockPolicy() = timeoutRunBlocking {
+    val registryKey = Registry.get("actions.allow.update.and.perform.without.rw.lock")
+    val prevValue = registryKey.asBoolean()
+    try {
+      registryKey.setValue(true)
+
+      val lockingActionHadReadAccess = AtomicBoolean(false)
+      val nonLockingActionHadReadAccess = AtomicBoolean(false)
+
+      val lockingAction = object : AnAction("locking") {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+        override fun actionPerformed(e: AnActionEvent) {}
+        override fun update(e: AnActionEvent) {
+          lockingActionHadReadAccess.set(application.isReadAccessAllowed)
+        }
+      }
+
+      val nonLockingAction = object : AnAction("non-locking") {
+        init {
+          templatePresentation.isRWLockRequired = false
+        }
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+        override fun actionPerformed(e: AnActionEvent) {}
+        override fun update(e: AnActionEvent) {
+          nonLockingActionHadReadAccess.set(application.isReadAccessAllowed)
+        }
+      }
+
+      val group = DefaultActionGroup(lockingAction, nonLockingAction)
+
+      withContext(Dispatchers.EDT) {
+        Utils.expandActionGroupSuspend(
+          group, PresentationFactory(), DataContext.EMPTY_CONTEXT,
+          ActionPlaces.UNKNOWN, ActionUiKind.NONE, fastTrack = false
+        )
+      }
+
+      assertTrue(lockingActionHadReadAccess.get(), "Locking action should have read access")
+      assertTrue(!nonLockingActionHadReadAccess.get(), "Non-locking action should NOT have read access")
+    }
+    finally {
+      registryKey.setValue(prevValue)
+    }
   }
 
   private suspend fun assertCyclicDependencyReported(group: ActionGroup) {

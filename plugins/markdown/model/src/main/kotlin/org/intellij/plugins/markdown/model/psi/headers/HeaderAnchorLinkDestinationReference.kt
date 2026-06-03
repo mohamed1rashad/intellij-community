@@ -4,15 +4,20 @@ import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.model.Symbol
 import com.intellij.model.psi.PsiCompletableReference
+import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.SyntaxTraverser
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.CachedValue
+import com.intellij.psi.util.CachedValueProvider
+import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.childrenOfType
 import com.intellij.psi.xml.XmlAttributeValue
 import com.intellij.util.PlatformIcons
 import org.intellij.plugins.markdown.MarkdownIcons
+import org.intellij.plugins.markdown.lang.MarkdownTokenTypes
 import org.intellij.plugins.markdown.lang.index.HeaderAnchorIndex
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownHeader
 import org.intellij.plugins.markdown.model.psi.MarkdownPsiSymbolReferenceBase
@@ -32,7 +37,8 @@ class HeaderAnchorLinkDestinationReference(
     val headers = HeaderAnchorIndex.collectHeaders(element.project, GlobalSearchScope.fileScope(file), anchorText)
     val headerSymbols = headers.mapNotNull { HeaderSymbol.createPointer(it)?.dereference() }
     val injectedSymbols = collectInjectedHtmlAnchors()
-    return headerSymbols + injectedSymbols
+    val inlineSymbols = collectInlineHtmlAnchors()
+    return headerSymbols + injectedSymbols + inlineSymbols
   }
 
   private fun collectInjectedHtmlAnchors(): Sequence<HtmlAnchorSymbol> {
@@ -65,9 +71,29 @@ class HeaderAnchorLinkDestinationReference(
     return result
   }
 
+  private fun collectInlineHtmlAnchors(): Sequence<HtmlAnchorSymbol> = getCachedInlineAnchors(file)[anchorText]?.asSequence() ?: emptySequence()
+
   private fun collectHtmlAnchorAttributesValues(file: PsiFile): Sequence<XmlAttributeValue> {
     val traverser = SyntaxTraverser.psiTraverser(file).asSequence()
     val values = traverser.filterIsInstance<XmlAttributeValue>()
     return values.filter { it.isValidAnchorAttributeValue() }
+  }
+
+  companion object {
+    private val inlineAnchors = Regex("""<a\s[^>]*\b(?:name|id)="([^"]+)"""")
+    private val inlineHtmlAnchorKeys = Key.create<CachedValue<Map<String, List<HtmlAnchorSymbol>>>>("markdown.inlineHtmlAnchors")
+
+    private fun getCachedInlineAnchors(file: PsiFile): Map<String, List<HtmlAnchorSymbol>> =
+      CachedValuesManager.getCachedValue(file, inlineHtmlAnchorKeys) {
+        val traverser = SyntaxTraverser.psiTraverser(file).asSequence()
+        var htmlFiles = traverser.filter { it.node?.elementType == MarkdownTokenTypes.HTML_TAG }
+        val result = htmlFiles.mapNotNull { token ->
+            inlineAnchors.find(token.text)?.groups?.get(1)?.let { group ->
+              group.value to HtmlAnchorSymbol(file, TextRange.from(token.textRange.startOffset + group.range.first, group.value.length), group.value)
+            }
+          }
+          .groupBy({ it.first }, { it.second })
+        CachedValueProvider.Result.create(result, file)
+      }
   }
 }

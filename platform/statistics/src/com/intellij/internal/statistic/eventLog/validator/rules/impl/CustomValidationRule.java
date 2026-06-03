@@ -1,11 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.internal.statistic.eventLog.validator.rules.impl;
 
+import com.jetbrains.fus.reporting.api.IEventContext;
 import com.intellij.internal.statistic.eventLog.validator.IntellijSensitiveDataValidator;
 import com.intellij.internal.statistic.eventLog.validator.ValidationResultType;
 import com.intellij.internal.statistic.eventLog.validator.rules.EventContext;
-import com.intellij.internal.statistic.eventLog.validator.rules.FUSRule;
-import com.intellij.internal.statistic.eventLog.validator.rules.PayloadKey;
+import com.jetbrains.fus.reporting.api.FUSRule;
+import com.jetbrains.fus.reporting.api.PayloadKey;
 import com.intellij.internal.statistic.eventLog.validator.rules.PerformanceCareRule;
 import com.intellij.internal.statistic.utils.PluginInfo;
 import com.intellij.internal.statistic.utils.PluginInfoDetectorKt;
@@ -124,5 +125,23 @@ public abstract class CustomValidationRule extends PerformanceCareRule implement
 
   protected @Nullable String getEventDataField(@NotNull EventContext context, @NotNull String name) {
     return context.eventData.containsKey(name) ? context.eventData.get(name).toString() : null;
+  }
+
+  /**
+   * @deprecated This method was added for compatibility with existing custom rules.
+   * Use {@link #doValidate(String, IEventContext)} instead.
+   */
+  @Deprecated(forRemoval = true)
+  protected @NotNull ValidationResultType doValidate(@NotNull String data, @NotNull EventContext context) {
+    return ValidationResultType.REJECTED;
+  }
+
+  @Override
+  protected @NotNull com.jetbrains.fus.reporting.api.ValidationResultType doValidate(@NotNull String data, @NotNull IEventContext context) {
+    if (context instanceof EventContext) {
+      return ValidationResultType.toFusApiResultType(this.doValidate(data, (EventContext)context));
+    } else {
+      return com.jetbrains.fus.reporting.api.ValidationResultType.REJECTED;
+    }
   }
 }

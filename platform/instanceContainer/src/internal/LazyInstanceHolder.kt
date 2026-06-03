@@ -7,13 +7,28 @@ import com.intellij.platform.instanceContainer.CycleInitializationException
 import com.intellij.util.findCycle
 import kotlinx.collections.immutable.PersistentSet
 import kotlinx.collections.immutable.persistentHashSetOf
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.VarHandle
-import kotlin.coroutines.*
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 internal abstract class LazyInstanceHolder(
   parentScope: CoroutineScope,
+  private val additionalContext: CoroutineContext,
   initializer: InstanceInitializer,
 ) : InstanceHolder {
   private companion object {
@@ -27,6 +42,7 @@ internal abstract class LazyInstanceHolder(
   private class CannotLoadClass(@JvmField val instanceClassName: String, @JvmField val classLoadingError: Throwable)
   private class CannotInitialize(@JvmField val instanceClass: Class<*>, @JvmField val initializationError: Throwable)
 
+  override val overridable = initializer.overridable
   private var _state: Any = Initial(parentScope, initializer)
   private fun state(): Any = stateHandle.getVolatile(this)
 
@@ -135,7 +151,7 @@ internal abstract class LazyInstanceHolder(
     return suspendCancellableCoroutine { waiter ->
       tryAwait(newState, waiter)
       // publish waiter before `initialize()` because it's undispatched
-      initialize(state.parentScope, callerCtx, initializer, instanceClass)
+      initialize(state.parentScope, callerCtx + additionalContext, initializer, instanceClass)
     }
   }
 
@@ -175,7 +191,8 @@ internal abstract class LazyInstanceHolder(
   private fun complete(finalState: Any) {
     val result = when (finalState) {
       is Initial,
-      is InProgress -> error("Unexpected completion $finalState")
+      is InProgress,
+        -> error("Unexpected completion $finalState")
       is CannotLoadClass -> Result.failure(finalState.classLoadingError)
       is CannotInitialize -> Result.failure(finalState.initializationError)
       else -> Result.success(finalState)
@@ -277,17 +294,19 @@ internal abstract class LazyInstanceHolder(
   }
 }
 
-private class CurrentlyInitializingInstance(@JvmField val holder: LazyInstanceHolder)
-  : AbstractCoroutineContextElement(CurrentlyInitializingInstance), IntelliJContextElement {
+private class CurrentlyInitializingInstance(@JvmField val holder: LazyInstanceHolder) :
+  AbstractCoroutineContextElement(CurrentlyInitializingInstance), IntelliJContextElement {
   override fun produceChildElement(parentContext: CoroutineContext, isStructured: Boolean): IntelliJContextElement = this
+
   companion object : CoroutineContext.Key<CurrentlyInitializingInstance>
 }
 
-internal class StaticInstanceHolder(scope: CoroutineScope, initializer: InstanceInitializer)
-  : LazyInstanceHolder(scope, initializer)
+internal class StaticInstanceHolder(scope: CoroutineScope, additionalContext: CoroutineContext, initializer: InstanceInitializer) :
+  LazyInstanceHolder(scope, additionalContext, initializer)
 
 /**
  * This class is separate from [StaticInstanceHolder] to differentiate them via `instanceof` later.
  * Another solution is to store a flag in a field.
  */
-internal class DynamicInstanceHolder(scope: CoroutineScope, initializer: InstanceInitializer) : LazyInstanceHolder(scope, initializer)
+internal class DynamicInstanceHolder(scope: CoroutineScope, additionalContext: CoroutineContext, initializer: InstanceInitializer) :
+  LazyInstanceHolder(scope, additionalContext, initializer)

@@ -8,16 +8,34 @@ package com.intellij.debugger.impl;
 
 import com.intellij.debugger.JavaDebuggerBundle;
 import com.intellij.debugger.SourcePosition;
-import com.intellij.debugger.engine.*;
-import com.intellij.debugger.engine.evaluation.*;
+import com.intellij.debugger.engine.DebugProcess;
+import com.intellij.debugger.engine.DebugProcessImpl;
+import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
+import com.intellij.debugger.engine.DebuggerUtils;
+import com.intellij.debugger.engine.JVMNameUtil;
+import com.intellij.debugger.engine.JavaValue;
+import com.intellij.debugger.engine.PositionManagerImpl;
+import com.intellij.debugger.engine.SourcePositionHighlighter;
+import com.intellij.debugger.engine.SuspendContextImpl;
+import com.intellij.debugger.engine.evaluation.CodeFragmentFactory;
+import com.intellij.debugger.engine.evaluation.CodeFragmentFactoryContextWrapper;
+import com.intellij.debugger.engine.evaluation.DefaultCodeFragmentFactory;
+import com.intellij.debugger.engine.evaluation.EvaluateException;
+import com.intellij.debugger.engine.evaluation.EvaluateExceptionUtil;
+import com.intellij.debugger.engine.evaluation.EvaluationContext;
+import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
+import com.intellij.debugger.engine.evaluation.TextWithImports;
 import com.intellij.debugger.engine.evaluation.expression.ExpressionEvaluator;
 import com.intellij.debugger.engine.evaluation.expression.UnBoxingEvaluator;
+import com.intellij.debugger.engine.jdi.VirtualMachineProxy;
 import com.intellij.debugger.engine.requests.RequestManagerImpl;
+import com.intellij.debugger.engine.requests.StepRequestor;
 import com.intellij.debugger.jdi.GeneratedLocation;
 import com.intellij.debugger.jdi.GeneratedReferenceType;
 import com.intellij.debugger.jdi.JvmtiError;
 import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
 import com.intellij.debugger.memory.ui.CollectionHistoryView;
+import com.intellij.debugger.requests.ClassPrepareRequestor;
 import com.intellij.debugger.requests.Requestor;
 import com.intellij.debugger.settings.DebuggerSettingsUtils;
 import com.intellij.debugger.ui.breakpoints.Breakpoint;
@@ -35,11 +53,33 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.InvalidDataException;
+import com.intellij.openapi.util.JDOMExternalizable;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.ThrowableComputable;
+import com.intellij.openapi.util.WriteExternalException;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.Navigatable;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaRecursiveElementVisitor;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassInitializer;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterListOwner;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.SyntaxTraverser;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.threadDumpParser.ThreadState;
@@ -58,25 +98,50 @@ import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XValueContainer;
 import com.intellij.xdebugger.frame.XValueNode;
 import com.intellij.xdebugger.impl.XDebuggerUtilImpl;
-import com.intellij.xdebugger.impl.ui.ExecutionPointHighlighter;
 import com.intellij.xdebugger.impl.ui.tree.nodes.XValueNodeImpl;
+import com.intellij.xdebugger.ui.ExecutionPointHighlighterProvider;
 import com.jetbrains.jdi.ArrayReferenceImpl;
 import com.jetbrains.jdi.JNITypeParser;
 import com.jetbrains.jdi.LocationImpl;
 import com.jetbrains.jdi.ObjectReferenceImpl;
-import com.sun.jdi.*;
+import com.sun.jdi.AbsentInformationException;
+import com.sun.jdi.ArrayReference;
+import com.sun.jdi.ArrayType;
+import com.sun.jdi.BooleanValue;
+import com.sun.jdi.ClassNotLoadedException;
+import com.sun.jdi.ClassType;
+import com.sun.jdi.Field;
+import com.sun.jdi.InternalException;
+import com.sun.jdi.InvalidTypeException;
+import com.sun.jdi.Location;
+import com.sun.jdi.Method;
+import com.sun.jdi.ObjectCollectedException;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.ReferenceType;
+import com.sun.jdi.StackFrame;
+import com.sun.jdi.StringReference;
+import com.sun.jdi.ThreadReference;
+import com.sun.jdi.Value;
+import com.sun.jdi.VirtualMachine;
 import com.sun.jdi.event.Event;
 import com.sun.jdi.event.EventSet;
 import one.util.streamex.StreamEx;
 import org.jdom.Attribute;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.JComponent;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -124,56 +189,6 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return null;
   }
 
-  /**
-   * Does not handle array types correctly
-   * @deprecated use {@link DebuggerUtils#instanceOf(Type, String)}
-   */
-  @Deprecated(forRemoval = true)
-  public static boolean isAssignableFrom(@NotNull String baseQualifiedName, @NotNull Type checkedType) {
-    if (checkedType instanceof ReferenceType) {
-      if (CommonClassNames.JAVA_LANG_OBJECT.equals(baseQualifiedName)) {
-        return true;
-      }
-      return getSuperClass(baseQualifiedName, (ReferenceType)checkedType) != null;
-    }
-    return baseQualifiedName.equals(checkedType.name());
-  }
-
-  @Deprecated
-  public static ReferenceType getSuperClass(final @NotNull String baseQualifiedName, @NotNull ReferenceType checkedType) {
-    if (baseQualifiedName.equals(checkedType.name())) {
-      return checkedType;
-    }
-
-    if (checkedType instanceof ClassType classType) {
-      ClassType superClassType = classType.superclass();
-      if (superClassType != null) {
-        ReferenceType superClass = getSuperClass(baseQualifiedName, superClassType);
-        if (superClass != null) {
-          return superClass;
-        }
-      }
-      List<InterfaceType> interfaces = classType.allInterfaces();
-      for (InterfaceType iface : interfaces) {
-        ReferenceType superClass = getSuperClass(baseQualifiedName, iface);
-        if (superClass != null) {
-          return superClass;
-        }
-      }
-    }
-
-    if (checkedType instanceof InterfaceType) {
-      List<InterfaceType> list = ((InterfaceType)checkedType).superinterfaces();
-      for (InterfaceType superInterface : list) {
-        ReferenceType superClass = getSuperClass(baseQualifiedName, superInterface);
-        if (superClass != null) {
-          return superClass;
-        }
-      }
-    }
-    return null;
-  }
-
   public static ClassFilter create(Element element) throws InvalidDataException {
     return DebuggerSettingsUtils.create(element);
   }
@@ -210,32 +225,6 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
 
   public static int getEnabledNumber(ClassFilter[] classFilters) {
     return (int)Arrays.stream(classFilters).filter(ClassFilter::isEnabled).count();
-  }
-
-  /**
-   * @deprecated Use {@link DebuggerSettingsUtils#readFilters} directly
-   */
-  @Deprecated
-  public static ClassFilter[] readFilters(List<? extends Element> children) {
-    return DebuggerSettingsUtils.readFilters(children);
-  }
-
-  /**
-   * @deprecated Use {@link DebuggerSettingsUtils#writeFilters} directly
-   */
-  @Deprecated
-  public static void writeFilters(@NotNull Element parentNode,
-                                  @NonNls String tagName,
-                                  ClassFilter[] filters) throws WriteExternalException {
-    DebuggerSettingsUtils.writeFilters(parentNode, tagName, filters);
-  }
-
-  /**
-   * @deprecated Use {@link DebuggerSettingsUtils#filterEquals} directly
-   */
-  @Deprecated(forRemoval = true)
-  public static boolean filterEquals(ClassFilter[] filters1, ClassFilter[] filters2) {
-    return DebuggerSettingsUtils.filterEquals(filters1, filters2);
   }
 
   private static boolean elementListsEqual(List<? extends Element> l1, List<? extends Element> l2) {
@@ -318,6 +307,12 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
           if (requestor instanceof Breakpoint) {
             eventDescriptors.add(Pair.create((Breakpoint)requestor, event));
           }
+          if (requestor instanceof StepRequestor stepRequestor) {
+            Requestor originalRequestor = stepRequestor.getOriginalRequestor();
+            if (originalRequestor instanceof Breakpoint<?> originalBreakpoint) {
+              eventDescriptors.add(Pair.create(originalBreakpoint, event));
+            }
+          }
         }
         return eventDescriptors;
       }
@@ -368,18 +363,78 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     ui.selectAndFocus(content, true, true);
   }
 
+  protected static <R, T> R processCollectibleValue(
+    @NotNull ThrowableComputable<? extends T, ? extends EvaluateException> valueComputable,
+    @NotNull Function<? super T, ? extends R> processor,
+    @NotNull SuspendContextImpl suspendContext) throws EvaluateException {
+    int retries = 3;
+    while (true) {
+      try {
+        T result = valueComputable.compute();
+        return processor.apply(result);
+      }
+      catch (ObjectCollectedException oce) {
+        if (--retries < 0) {
+          return suspendAllAndEvaluate(valueComputable, processor, suspendContext.getVirtualMachineProxy());
+        }
+      }
+      catch (EvaluateException e) {
+        if (e.getCause() instanceof ObjectCollectedException) {
+          if (--retries < 0) {
+            return suspendAllAndEvaluate(valueComputable, processor, suspendContext.getVirtualMachineProxy());
+          }
+        }
+        else {
+          throw e;
+        }
+      }
+    }
+  }
+
+  private static <R, T> R suspendAllAndEvaluate(@NotNull ThrowableComputable<? extends T, ? extends EvaluateException> valueComputable,
+                                                @NotNull Function<? super T, ? extends R> processor,
+                                                @NotNull VirtualMachineProxyImpl virtualMachineProxy) throws EvaluateException {
+    if (Registry.is("debugger.collectible.value.retries.error", true)) {
+      LOG.error("Retries exhausted, applying suspend-all evaluation");
+    }
+    virtualMachineProxy.suspend();
+    try {
+      return processor.apply(valueComputable.compute());
+    }
+    finally {
+      virtualMachineProxy.resume();
+    }
+  }
+
+  @SuppressWarnings("SSBasedInspection")
+  public static StringReference mirrorOfString(@NotNull String s, @NotNull SuspendContextImpl context) {
+    VirtualMachine vm = context.getVirtualMachineProxy().getVirtualMachine();
+    try {
+      return processCollectibleValue(() -> vm.mirrorOf(s),
+                                     value -> {
+                                       context.keep(value);
+                                       return value;
+                                     }, context);
+    }
+    catch (EvaluateException e) { // should not happen
+      throw new RuntimeException(e);
+    }
+  }
+
   public static StringReference mirrorOfString(@NotNull String s, @NotNull EvaluationContext context)
     throws EvaluateException {
-    return mirrorOfString(s, ((SuspendContextImpl)context.getSuspendContext()).getVirtualMachineProxy(), context);
+    return mirrorOfString(s, (SuspendContextImpl)context.getSuspendContext());
   }
 
   /**
    * @deprecated use {@link #mirrorOfString(String, EvaluationContext)}
    */
+  @SuppressWarnings("SSBasedInspection")
   @Deprecated
   public static StringReference mirrorOfString(@NotNull String s, VirtualMachineProxyImpl virtualMachineProxy, EvaluationContext context)
     throws EvaluateException {
-    return context.computeAndKeep(() -> virtualMachineProxy.mirrorOf(s));
+    VirtualMachine vm = virtualMachineProxy.getVirtualMachine();
+    return context.computeAndKeep(() -> vm.mirrorOf(s));
   }
 
   public static @NotNull ArrayReference mirrorOfArray(@NotNull ArrayType arrayType, int dimension, EvaluationContext context)
@@ -439,12 +494,13 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
         fileType = file != null ? file.getFileType() : null;
       }
     }
-    for (CodeFragmentFactory factory : CodeFragmentFactory.EXTENSION_POINT_NAME.getExtensionList()) {
-      if (factory != defaultFactory && (fileType == null || factory.getFileType().equals(fileType)) && factory.isContextAccepted(context)) {
-        return factory;
-      }
-    }
-    return defaultFactory;
+    @Nullable FileType finalFileType = fileType;
+    CodeFragmentFactory factory = CodeFragmentFactory.EXTENSION_POINT_NAME.findFirstSafe(f -> {
+      return f != defaultFactory &&
+             (finalFileType == null || f.getFileType().equals(finalFileType)) &&
+             f.isContextAccepted(context);
+    });
+    return factory != null ? factory : defaultFactory;
   }
 
   public static @NotNull CodeFragmentFactory findAppropriateCodeFragmentFactory(final TextWithImports text, final PsiElement context) {
@@ -760,7 +816,40 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return null;
   }
 
-  private static class JavaXSourcePosition implements XSourcePosition, ExecutionPointHighlighter.HighlighterProvider {
+  @ApiStatus.Internal
+  public static void setStaticBooleanField(@NotNull DebugProcessImpl process,
+                                           @NotNull String className,
+                                           @NotNull String fieldName,
+                                           boolean value) {
+    DebuggerManagerThreadImpl.assertIsManagerThread();
+    final RequestManagerImpl requestsManager = process.getRequestsManager();
+    ClassPrepareRequestor requestor = new ClassPrepareRequestor() {
+      @Override
+      public void processClassPrepare(DebugProcess debuggerProcess, ReferenceType referenceType) {
+        try {
+          requestsManager.deleteRequest(this);
+          Field field = findField(referenceType, fieldName);
+          BooleanValue mirror = referenceType.virtualMachine().mirrorOf(value);
+          ((ClassType)referenceType).setValue(field, mirror);
+        }
+        catch (Exception e) {
+          LOG.warn("Error while setting field '" + fieldName + "' in class '" + className + "'", e);
+        }
+      }
+    };
+    requestsManager.callbackOnPrepareClasses(requestor, className);
+    try {
+      ClassType classType = (ClassType)process.findClass(null, className, null);
+      if (classType != null) {
+        requestor.processClassPrepare(process, classType);
+      }
+    }
+    catch (Exception e) {
+      LOG.warn("Error while setting field '" + fieldName + "' in class '" + className + "'", e);
+    }
+  }
+
+  private static class JavaXSourcePosition implements XSourcePosition, ExecutionPointHighlighterProvider {
     private final SourcePosition mySourcePosition;
     private final @NotNull VirtualFile myFile;
 
@@ -1033,7 +1122,7 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
           return true;
         }
         if (methodClassName != null) {
-          if (ContainerUtil.exists(process.getVirtualMachineProxy().classesByName(className), t -> instanceOf(t, methodClassName))) {
+          if (ContainerUtil.exists(VirtualMachineProxy.getCurrent().classesByName(className), t -> instanceOf(t, methodClassName))) {
             return true;
           }
           PsiClass aClass = PositionManagerImpl.findClass(process.getProject(), className, process.getSearchScope(), true);

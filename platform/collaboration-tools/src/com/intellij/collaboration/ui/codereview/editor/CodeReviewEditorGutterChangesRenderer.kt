@@ -2,6 +2,7 @@
 package com.intellij.collaboration.ui.codereview.editor
 
 import com.intellij.collaboration.messages.CollaborationToolsBundle
+import com.intellij.collaboration.ui.codereview.editor.ReviewInEditorUtil.getReviewChangesTextAttribute
 import com.intellij.diff.comparison.ComparisonManager
 import com.intellij.diff.comparison.ComparisonPolicy
 import com.intellij.diff.util.DiffUtil
@@ -9,9 +10,14 @@ import com.intellij.diff.util.LineRange
 import com.intellij.icons.AllIcons
 import com.intellij.ide.lightEdit.LightEditCompatible
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CompositeShortcutSet
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.diff.DefaultFlagsProvider
 import com.intellij.openapi.diff.LineStatusMarkerColorScheme
 import com.intellij.openapi.diff.LineStatusMarkerDrawUtil
@@ -34,9 +40,11 @@ import com.intellij.openapi.vcs.ex.LineStatusMarkerPopupPanel
 import com.intellij.openapi.vcs.ex.LineStatusMarkerRendererWithPopup
 import com.intellij.openapi.vcs.ex.Range
 import com.intellij.ui.EditorTextField
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
-import java.awt.Color
 import java.awt.Graphics
 import java.awt.Point
 import java.awt.datatransfer.StringSelection
@@ -57,12 +65,7 @@ open class CodeReviewEditorGutterChangesRenderer(
                                           lineStatusMarkerColorScheme, 0)
   }
 
-  override fun createErrorStripeTextAttributes(diffType: Byte): TextAttributes = ReviewChangesTextAttributes()
-
-  private inner class ReviewChangesTextAttributes : TextAttributes() {
-    override fun getErrorStripeColor(): Color = ReviewInEditorUtil.REVIEW_CHANGES_STATUS_COLOR
-  }
-
+  override fun createErrorStripeTextAttributes(diffType: Byte): TextAttributes = getReviewChangesTextAttribute(lineStatusMarkerColorScheme)
 
   override fun createPopupPanel(editor: Editor,
                                 range: Range,
@@ -99,7 +102,7 @@ open class CodeReviewEditorGutterChangesRenderer(
     val factory = EditorFactory.getInstance()
     val editor = factory.createViewer(factory.createDocument(vcsContent), project, EditorKind.DIFF) as EditorEx
 
-    ReadAction.run<RuntimeException> {
+    runReadActionBlocking {
       with(editor) {
         setCaretEnabled(false)
         getContentComponent().setFocusCycleRoot(false)

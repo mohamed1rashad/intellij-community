@@ -18,11 +18,15 @@ import com.jetbrains.python.documentation.PythonDocumentationProvider
 import com.jetbrains.python.psi.PyCallExpression
 import com.jetbrains.python.psi.PyFunction
 import com.jetbrains.python.psi.types.PyType
-import com.jetbrains.python.psi.types.PyTypeUtil
+import com.jetbrains.python.psi.types.PyTypeUtil.isSameType
 
 class PyUnnecessaryCastInspection : PyInspection() {
   override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean, session: LocalInspectionToolSession): PsiElementVisitor {
-    return object : PyInspectionVisitor(holder, getContext(session)) {
+    val context = PyInspectionVisitor.getContext(session)
+    return object : PyInspectionVisitor(holder, context) {
+      init {
+        downgradeHighlightForTypeEngine = context.usesExternalTypeEngine
+      }
       override fun visitPyCallExpression(callExpression: PyCallExpression) {
         val callees = callExpression.multiResolveCalleeFunction(resolveContext)
         val isCastCall = callees.any {
@@ -33,11 +37,11 @@ class PyUnnecessaryCastInspection : PyInspection() {
 
         val args = callExpression.getArguments()
         if (args.size != 2) return
-        val targetTypeRef: Ref<PyType>? = PyTypingTypeProvider.getType(args[0], myTypeEvalContext)
+        val targetTypeRef = PyTypingTypeProvider.getType(args[0], myTypeEvalContext)
         val targetType = Ref.deref(targetTypeRef)
         val actualType: PyType? = myTypeEvalContext.getType(args[1])
 
-        if (!PyTypeUtil.isSameType(targetType, actualType, myTypeEvalContext)) return
+        if (!targetType.isSameType(actualType, myTypeEvalContext)) return
         val toName = PythonDocumentationProvider.getTypeName(targetType, myTypeEvalContext)
         registerProblem(
           callExpression,

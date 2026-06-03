@@ -10,7 +10,15 @@ import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
 import com.intellij.ide.plugins.PluginDescriptorLoader;
 import com.intellij.ide.plugins.PluginEnabler;
 import com.intellij.ide.plugins.PluginManagerCore;
-import com.intellij.lang.*;
+import com.intellij.lang.DefaultASTFactory;
+import com.intellij.lang.DefaultASTFactoryImpl;
+import com.intellij.lang.Language;
+import com.intellij.lang.LanguageExtension;
+import com.intellij.lang.LanguageParserDefinitions;
+import com.intellij.lang.MetaLanguage;
+import com.intellij.lang.MetaLanguageProvider;
+import com.intellij.lang.ParserDefinition;
+import com.intellij.lang.PsiBuilderFactory;
 import com.intellij.lang.impl.PsiBuilderFactoryImpl;
 import com.intellij.mock.MockApplication;
 import com.intellij.mock.MockFileDocumentManagerImpl;
@@ -47,11 +55,17 @@ import com.intellij.psi.PsiReferenceService;
 import com.intellij.psi.PsiReferenceServiceImpl;
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry;
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistryImpl;
-import com.intellij.psi.stubs.*;
+import com.intellij.psi.stubs.CoreStubTreeLoader;
+import com.intellij.psi.stubs.StubElementRegistryService;
+import com.intellij.psi.stubs.StubElementRegistryServiceImpl;
+import com.intellij.psi.stubs.StubElementRegistryServiceImplKt;
+import com.intellij.psi.stubs.StubRegistryExtension;
+import com.intellij.psi.stubs.StubTreeLoader;
 import com.intellij.util.KeyedLazyInstanceEP;
 import com.intellij.util.graph.GraphAlgorithms;
 import com.intellij.util.graph.impl.GraphAlgorithmsImpl;
 import com.intellij.util.pico.DefaultPicoContainer;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -232,6 +246,8 @@ public class CoreApplicationEnvironment {
       ExtensionPoint.Kind kind = aClass.isInterface() || Modifier.isAbstract(aClass.getModifiers()) ? ExtensionPoint.Kind.INTERFACE : ExtensionPoint.Kind.BEAN_CLASS;
       //noinspection TestOnlyProblems
       area.registerExtensionPoint(name, aClass.getName(), kind, isDynamic);
+
+      registerCompatibilityEPsIfNeeded(area, name, isDynamic, kind);
     }
   }
 
@@ -256,7 +272,7 @@ public class CoreApplicationEnvironment {
     if (!extensionPoints.isEmpty()) {
       areaImpl.registerExtensionPoints(extensionPoints, descriptor);
     }
-    descriptor.registerExtensions(areaImpl.getNameToPointMap(), null);
+    areaImpl.registerExtensions(descriptor.getExtensions(), descriptor, null);
   }
 
   public @NotNull CoreLocalFileSystem getLocalFileSystem() {
@@ -270,5 +286,26 @@ public class CoreApplicationEnvironment {
   @SuppressWarnings("unused")
   public @Nullable VirtualFileSystem getJrtFileSystem() {
     return myJrtFileSystem;
+  }
+
+  /**
+   * @deprecated Temporary compatibility plumbing KTIJ-38259
+   * @noinspection TestOnlyProblems, DeprecatedIsStillUsed
+   **/
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval
+  private static void registerCompatibilityEPsIfNeeded(
+    @NotNull ExtensionsArea area,
+    @NotNull String name,
+    boolean isDynamic,
+    ExtensionPoint.Kind kind
+  ) {
+    if (name.equals(MetaLanguage.EP_NAME.getName()) &&
+        !area.hasExtensionPoint(MetaLanguage.PROVIDER_EP_NAME.getName())) {
+      area.registerExtensionPoint(MetaLanguage.PROVIDER_EP_NAME.getName(), MetaLanguageProvider.class.getName(), kind, isDynamic);
+    }
+    else if (name.equals(MetaLanguage.PROVIDER_EP_NAME.getName()) && !area.hasExtensionPoint(MetaLanguage.EP_NAME.getName())) {
+      area.registerExtensionPoint(MetaLanguage.EP_NAME.getName(), MetaLanguage.class.getName(), kind, isDynamic);
+    }
   }
 }

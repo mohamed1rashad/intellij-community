@@ -6,7 +6,11 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
 import org.apache.velocity.VelocityContext
-import org.jetbrains.plugins.gradle.jvmcompat.*
+import org.jetbrains.plugins.gradle.jvmcompat.IdeVersionedDataParser
+import org.jetbrains.plugins.gradle.jvmcompat.IdeVersionedDataState
+import org.jetbrains.plugins.gradle.jvmcompat.IdeVersionedDataStorage
+import org.jetbrains.plugins.gradle.jvmcompat.asSafeJsonObject
+import org.jetbrains.plugins.gradle.jvmcompat.asSafeString
 import kotlin.reflect.typeOf
 
 internal object KotlinWizardVersionParser : IdeVersionedDataParser<KotlinWizardVersionState>() {
@@ -18,10 +22,8 @@ internal object KotlinWizardVersionParser : IdeVersionedDataParser<KotlinWizardV
         versionData.kotlinPluginVersion = obj["kotlinVersion"]?.asSafeString ?: return null
         versionData.kotlinForComposeVersion = obj["kotlinForComposeVersion"]?.asSafeString ?: return null
         versionData.composeCompilerExtension = obj["composeCompilerExtension"]?.asSafeString ?: return null
-        versionData.minGradleFoojayVersion = obj["minGradleFoojayVersion"]?.asSafeString ?: return null
         versionData.minKotlinFoojayVersion = obj["minKotlinFoojayVersion"]?.asSafeString ?: return null
         versionData.gradleAndroidVersion = obj["gradleAndroidVersion"]?.asSafeString ?: return null
-        versionData.foojayVersion = obj["foojayVersion"]?.asSafeString ?: return null
         versionData.failsafeVersion = obj["failsafeVersion"]?.asSafeString ?: return null
         versionData.surefireVersion = obj["surefireVersion"]?.asSafeString ?: return null
         versionData.codehausMojoExecVersion = obj["codehausMojoExecVersion"]?.asSafeString ?: return null
@@ -35,9 +37,7 @@ class KotlinWizardVersionState() : IdeVersionedDataState() {
         kotlinPluginVersion: String,
         kotlinForComposeVersion: String,
         composeCompilerExtension: String,
-        minGradleFoojayVersion: String,
         minKotlinFoojayVersion: String,
-        foojayVersion: String,
         failsafeVersion: String,
         surefireVersion: String,
         gradleAndroidVersion: String,
@@ -46,9 +46,7 @@ class KotlinWizardVersionState() : IdeVersionedDataState() {
         this.kotlinPluginVersion = kotlinPluginVersion
         this.kotlinForComposeVersion = kotlinForComposeVersion
         this.composeCompilerExtension = composeCompilerExtension
-        this.minGradleFoojayVersion = minGradleFoojayVersion
         this.minKotlinFoojayVersion = minKotlinFoojayVersion
-        this.foojayVersion = foojayVersion
         this.failsafeVersion = failsafeVersion
         this.surefireVersion = surefireVersion
         this.gradleAndroidVersion = gradleAndroidVersion
@@ -59,9 +57,7 @@ class KotlinWizardVersionState() : IdeVersionedDataState() {
     var kotlinPluginVersion by string()
     var kotlinForComposeVersion by string()
     var composeCompilerExtension by string()
-    var minGradleFoojayVersion by string()
     var minKotlinFoojayVersion by string()
-    var foojayVersion by string()
     var failsafeVersion by string()
     var surefireVersion by string()
     var gradleAndroidVersion by string()

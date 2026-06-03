@@ -3,7 +3,7 @@ package com.intellij.openapi.vcs.changes
 
 import com.intellij.configurationStore.OLD_NAME_CONVERTER
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
@@ -15,7 +15,13 @@ import com.intellij.openapi.project.InitialVfsRefreshService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectCloseListener
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.vcs.*
+import com.intellij.openapi.vcs.AbstractVcs
+import com.intellij.openapi.vcs.FilePath
+import com.intellij.openapi.vcs.Ignored
+import com.intellij.openapi.vcs.IgnoredCheckResult
+import com.intellij.openapi.vcs.NotIgnored
+import com.intellij.openapi.vcs.VcsBundle
+import com.intellij.openapi.vcs.VcsIgnoreChecker
 import com.intellij.openapi.vcs.actions.VcsContextFactory
 import com.intellij.openapi.vcs.changes.ignore.lang.IgnoreFileType
 import com.intellij.openapi.vfs.VfsUtil
@@ -148,11 +154,10 @@ class VcsIgnoreManagerImpl(private val project: Project, coroutineScope: Corouti
   override fun isPotentiallyIgnoredFile(file: VirtualFile): Boolean = isPotentiallyIgnoredFile(VcsUtil.getFilePath(file))
 
   override fun isPotentiallyIgnoredFile(filePath: FilePath): Boolean {
-    return runReadAction {
-      if (project.isDisposed) {
-        return@runReadAction false
-      }
-      return@runReadAction IgnoredFileProvider.IGNORE_FILE.extensionList.any { it.isIgnoredFile(project, filePath) }
+    return runReadActionBlocking {
+      if (project.isDisposed) return@runReadActionBlocking false
+
+      IgnoredFileProvider.IGNORE_FILE.extensionList.any { it.isIgnoredFile(project, filePath) }
     }
   }
 }

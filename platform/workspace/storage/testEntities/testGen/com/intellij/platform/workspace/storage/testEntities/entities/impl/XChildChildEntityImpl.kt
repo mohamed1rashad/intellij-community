@@ -1,24 +1,31 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.impl
 
-import com.intellij.platform.workspace.storage.*
-import com.intellij.platform.workspace.storage.annotations.Parent
+import com.intellij.platform.workspace.storage.ConnectionId
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
+import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
+import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.extractOneToManyParent
-import com.intellij.platform.workspace.storage.impl.updateOneToManyParentOfChild
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableXChildChildEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableXChildEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableXParentEntity
 import com.intellij.platform.workspace.storage.testEntities.entities.XChildChildEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.XChildChildEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.XChildEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.XChildEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.XParentEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.XParentEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
@@ -26,23 +33,20 @@ import com.intellij.platform.workspace.storage.testEntities.entities.XParentEnti
 internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityData) : XChildChildEntity, WorkspaceEntityBase(dataSource) {
 
   private companion object {
-    internal val PARENT1_CONNECTION_ID: ConnectionId = ConnectionId.create(XParentEntity::class.java, XChildChildEntity::class.java,
-                                                                           ConnectionId.ConnectionType.ONE_TO_MANY, false)
-    internal val PARENT2_CONNECTION_ID: ConnectionId = ConnectionId.create(XChildEntity::class.java, XChildChildEntity::class.java,
-                                                                           ConnectionId.ConnectionType.ONE_TO_MANY, false)
-
-    private val connections = listOf<ConnectionId>(
-      PARENT1_CONNECTION_ID,
-      PARENT2_CONNECTION_ID,
-    )
+    internal val PARENT1_CONNECTION_ID: ConnectionId =
+      ConnectionId.create(XParentEntity::class.java, XChildChildEntity::class.java, ConnectionId.ConnectionType.ONE_TO_MANY, false)
+    internal val PARENT2_CONNECTION_ID: ConnectionId =
+      ConnectionId.create(XChildEntity::class.java, XChildChildEntity::class.java, ConnectionId.ConnectionType.ONE_TO_MANY, false)
+    private val connections = listOf<ConnectionId>(PARENT1_CONNECTION_ID, PARENT2_CONNECTION_ID)
 
   }
 
   override val parent1: XParentEntity
-    get() = snapshot.extractOneToManyParent(PARENT1_CONNECTION_ID, this)!!
-
+    get() = snapshot.instrumentation.getParent(PARENT1_CONNECTION_ID, this) as? XParentEntity
+            ?: error("Parent parent1 not found for XChildChildEntity")
   override val parent2: XChildEntity
-    get() = snapshot.extractOneToManyParent(PARENT2_CONNECTION_ID, this)!!
+    get() = snapshot.instrumentation.getParent(PARENT2_CONNECTION_ID, this) as? XChildEntity
+            ?: error("Parent parent2 not found for XChildChildEntity")
 
   override val entitySource: EntitySource
     get() {
@@ -55,8 +59,8 @@ internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityDa
   }
 
 
-  internal class Builder(result: XChildChildEntityData?) : ModifiableWorkspaceEntityBase<XChildChildEntity, XChildChildEntityData>(
-    result), ModifiableXChildChildEntity {
+  internal class Builder(result: XChildChildEntityData?) : ModifiableWorkspaceEntityBase<XChildChildEntity, XChildChildEntityData>(result),
+                                                           XChildChildEntityBuilder {
     internal constructor() : this(XChildChildEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -69,15 +73,13 @@ internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityDa
           error("Entity XChildChildEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -88,7 +90,7 @@ internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityDa
         error("Field WorkspaceEntity#entitySource should be initialized")
       }
       if (_diff != null) {
-        if (_diff.extractOneToManyParent<WorkspaceEntityBase>(PARENT1_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(PARENT1_CONNECTION_ID, this) == null) {
           error("Field XChildChildEntity#parent1 should be initialized")
         }
       }
@@ -98,7 +100,7 @@ internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityDa
         }
       }
       if (_diff != null) {
-        if (_diff.extractOneToManyParent<WorkspaceEntityBase>(PARENT2_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(PARENT2_CONNECTION_ID, this) == null) {
           error("Field XChildChildEntity#parent2 should be initialized")
         }
       }
@@ -129,82 +131,81 @@ internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityDa
         changedProperty.add("entitySource")
 
       }
-
-    override var parent1: ModifiableXParentEntity
+    override var parent1: XParentEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(PARENT1_CONNECTION_ID, this) as? ModifiableXParentEntity)
-          ?: (this.entityLinks[EntityLink(false, PARENT1_CONNECTION_ID)]!! as ModifiableXParentEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(PARENT1_CONNECTION_ID, this) as? XParentEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, PARENT1_CONNECTION_ID)] as? XParentEntityBuilder)
+          ?: error("parent1 is null for XChildChildEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, PARENT1_CONNECTION_ID)]!! as ModifiableXParentEntity
+          (this.entityLinks[EntityLink(false, PARENT1_CONNECTION_ID)] as? XParentEntityBuilder)
+          ?: error("parent1 is null for XChildChildEntity")
         }
       }
       set(value) {
         checkModificationAllowed()
         val _diff = diff
         if (_diff != null && value is ModifiableWorkspaceEntityBase<*, *> && value.diff == null) {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, PARENT1_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, PARENT1_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToManyParentOfChild(PARENT1_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(PARENT1_CONNECTION_ID, value, this)
         }
         else {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, PARENT1_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, PARENT1_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, PARENT1_CONNECTION_ID)] = value
         }
         changedProperty.add("parent1")
       }
 
-    override var parent2: ModifiableXChildEntity
+    override var parent2: XChildEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(PARENT2_CONNECTION_ID, this) as? ModifiableXChildEntity)
-          ?: (this.entityLinks[EntityLink(false, PARENT2_CONNECTION_ID)]!! as ModifiableXChildEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(PARENT2_CONNECTION_ID, this) as? XChildEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, PARENT2_CONNECTION_ID)] as? XChildEntityBuilder)
+          ?: error("parent2 is null for XChildChildEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, PARENT2_CONNECTION_ID)]!! as ModifiableXChildEntity
+          (this.entityLinks[EntityLink(false, PARENT2_CONNECTION_ID)] as? XChildEntityBuilder)
+          ?: error("parent2 is null for XChildChildEntity")
         }
       }
       set(value) {
         checkModificationAllowed()
         val _diff = diff
         if (_diff != null && value is ModifiableWorkspaceEntityBase<*, *> && value.diff == null) {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, PARENT2_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, PARENT2_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToManyParentOfChild(PARENT2_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(PARENT2_CONNECTION_ID, value, this)
         }
         else {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, PARENT2_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, PARENT2_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, PARENT2_CONNECTION_ID)] = value
         }
         changedProperty.add("parent2")
@@ -212,20 +213,20 @@ internal class XChildChildEntityImpl(private val dataSource: XChildChildEntityDa
 
     override fun getEntityClass(): Class<XChildChildEntity> = XChildChildEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
 internal class XChildChildEntityData : WorkspaceEntityData<XChildChildEntity>() {
 
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<XChildChildEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<XChildChildEntity> {
     val modifiable = XChildChildEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): XChildChildEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -237,18 +238,17 @@ internal class XChildChildEntityData : WorkspaceEntityData<XChildChildEntity>() 
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.XChildChildEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.XChildChildEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return XChildChildEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return XChildChildEntity(entitySource) {
-      parents.filterIsInstance<ModifiableXParentEntity>().singleOrNull()?.let { this.parent1 = it }
-      parents.filterIsInstance<ModifiableXChildEntity>().singleOrNull()?.let { this.parent2 = it }
+      parents.filterIsInstance<XParentEntityBuilder>().singleOrNull()?.let { this.parent1 = it }
+      parents.filterIsInstance<XChildEntityBuilder>().singleOrNull()?.let { this.parent2 = it }
     }
   }
 
@@ -262,9 +262,7 @@ internal class XChildChildEntityData : WorkspaceEntityData<XChildChildEntity>() 
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as XChildChildEntityData
-
     if (this.entitySource != other.entitySource) return false
     return true
   }
@@ -272,9 +270,7 @@ internal class XChildChildEntityData : WorkspaceEntityData<XChildChildEntity>() 
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as XChildChildEntityData
-
     return true
   }
 

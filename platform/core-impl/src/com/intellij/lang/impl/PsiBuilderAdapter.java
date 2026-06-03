@@ -1,7 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.lang.impl;
 
-import com.intellij.lang.*;
+import com.intellij.lang.ASTNode;
+import com.intellij.lang.ITokenTypeRemapper;
+import com.intellij.lang.LighterASTNode;
+import com.intellij.lang.PsiBuilder;
+import com.intellij.lang.WhitespaceSkippedCallback;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.psi.tree.IElementType;
@@ -169,5 +173,10 @@ public class PsiBuilderAdapter implements PsiBuilder {
   @Override
   public <T> void putUserDataUnprotected(final @NotNull Key<T> key, final @Nullable T value) {
     myDelegate.putUserDataUnprotected(key, value);
+  }
+
+  @Override
+  public void advanceToEOF() {
+    myDelegate.advanceToEOF();
   }
 }

@@ -5,12 +5,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.util.Iterators;
 
-import java.io.*;
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.io.UTFDataFormatException;
 import java.lang.ref.SoftReference;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.function.Consumer;
 
 public final class RW {
   private static final int STRING_HEADER_SIZE = 1;
@@ -42,11 +46,15 @@ public final class RW {
   }
 
   public static <T, C extends Collection<? super T>> C readCollection(DataInput in, Reader<? extends T> reader, C acc) throws IOException {
+    readCollection(in, reader, (Consumer<? super T>) acc::add);
+    return acc;
+  }
+
+  public static <T> void readCollection(DataInput in, Reader<? extends T> reader, Consumer<? super T> acc) throws IOException {
     int size = in.readInt();
     while (size-- > 0) {
-      acc.add(reader.read());
+      acc.accept(reader.read());
     }
-    return acc;
   }
 
   public static void writeUTF(@NotNull DataOutput storage, @NotNull CharSequence value) throws IOException {

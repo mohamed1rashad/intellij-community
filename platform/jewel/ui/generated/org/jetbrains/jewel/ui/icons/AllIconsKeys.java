@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.jewel.ui.icons;
 
 import org.jetbrains.annotations.NotNull;
@@ -33,6 +33,9 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey AddToDictionary = new IntelliJIconKey("actions/addToDictionary.svg", "expui/actions/addToDictionary.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey AiIntentionBulb = new IntelliJIconKey("expui/actions/aiIntentionBulb.svg", "expui/actions/aiIntentionBulb.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Annotate = new IntelliJIconKey("actions/annotate.svg", "expui/general/listFiles.svg", AllIconsKeys.class);
@@ -135,12 +138,6 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey EditSource = new IntelliJIconKey("actions/editSource.svg", "expui/general/edit.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey EnableNewUi = new IntelliJIconKey("actions/enableNewUi.svg", "actions/enableNewUi.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey EnableNewUiSelected = new IntelliJIconKey("actions/enableNewUiSelected.svg", "actions/enableNewUiSelected.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Execute = new IntelliJIconKey("actions/execute.svg", "expui/run/run.svg", AllIconsKeys.class);
@@ -286,30 +283,14 @@ public final class AllIconsKeys {
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MenuCut = new IntelliJIconKey("actions/menu-cut.svg", "expui/general/cut.svg", AllIconsKeys.class);
     /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Menu_cut = MenuCut;
-    /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MenuOpen = new IntelliJIconKey("actions/menu-open.svg", "expui/general/open.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Menu_open = MenuOpen;
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MenuPaste = new IntelliJIconKey("actions/menu-paste.svg", "expui/general/paste.svg", AllIconsKeys.class);
     /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Menu_paste = MenuPaste;
-    /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MenuSaveall = new IntelliJIconKey("actions/menu-saveall.svg", "expui/general/save.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Menu_saveall = MenuSaveall;
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Minimap = new IntelliJIconKey("actions/minimap.svg", "expui/actions/minimap.svg", AllIconsKeys.class);
@@ -527,10 +508,6 @@ public final class AllIconsKeys {
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey RunAnything = new IntelliJIconKey("actions/runAnything.svg", "expui/general/runAnything.svg", AllIconsKeys.class);
     /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Run_anything = RunAnything;
-    /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey RunToCursor = new IntelliJIconKey("actions/runToCursor.svg", "expui/run/runToCursor.svg", AllIconsKeys.class);
     /** 16x16 */ 
@@ -663,13 +640,13 @@ public final class AllIconsKeys {
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey WordsSelected = new IntelliJIconKey("actions/wordsSelected.svg", "expui/inline/exactWords.svg", AllIconsKeys.class);
 
-    /** @deprecated to be removed (use expandable text field instead, see https://plugins.jetbrains.com/docs/intellij/built-in-button.html) */
+    /** @deprecated to be removed without replacement */
     @SuppressWarnings("unused")
     @Deprecated
     @ScheduledForRemoval
 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey ShowViewer = new IntelliJIconKey("actions/showViewer.png", "actions/showViewer.png", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey EnableNewUi = new IntelliJIconKey("actions/enableNewUi.svg", "actions/enableNewUi.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
@@ -685,10 +662,26 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey BreakpointUnsuspendentDisabled = new IntelliJIconKey("expui/breakpoints/breakpointUnsuspendentDisabled.svg", "expui/breakpoints/breakpointUnsuspendentDisabled.svg", AllIconsKeys.class);
     /** 14x14 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey ConditionalInstrumentation = new IntelliJIconKey("expui/breakpoints/conditionalInstrumentation.svg", "expui/breakpoints/conditionalInstrumentation.svg", AllIconsKeys.class);
+    /** 14x14 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey LoggingInstrumentation = new IntelliJIconKey("expui/breakpoints/loggingInstrumentation.svg", "expui/breakpoints/loggingInstrumentation.svg", AllIconsKeys.class);
+    /** 14x14 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MultipleBreakpointsDisabled = new IntelliJIconKey("expui/breakpoints/multipleBreakpointsDisabled.svg", "expui/breakpoints/multipleBreakpointsDisabled.svg", AllIconsKeys.class);
     /** 14x14 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MultipleBreakpointsMuted = new IntelliJIconKey("expui/breakpoints/multipleBreakpointsMuted.svg", "expui/breakpoints/multipleBreakpointsMuted.svg", AllIconsKeys.class);
+  }
+
+  @GeneratedFromIntelliJSources
+  public static final class Build {
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey CompletionCloud = new IntelliJIconKey("expui/build/completionCloud.svg", "expui/build/completionCloud.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey CompletionLocalCache = new IntelliJIconKey("expui/build/completionLocalCache.svg", "expui/build/completionLocalCache.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
@@ -1023,6 +1016,17 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Overhead = new IntelliJIconKey("debugger/overhead.svg", "expui/debugger/overhead.svg", AllIconsKeys.class);
+
+    @GeneratedFromIntelliJSources
+    public static final class PinToTop {
+      /** 16x16 */ 
+      @GeneratedFromIntelliJSources
+      public static final @NotNull IntelliJIconKey PinnedItem = new IntelliJIconKey("expui/debugger/pinToTop/pinnedItem.svg", "expui/debugger/pinToTop/pinnedItem.svg", AllIconsKeys.class);
+      /** 16x16 */ 
+      @GeneratedFromIntelliJSources
+      public static final @NotNull IntelliJIconKey UnpinnedItem = new IntelliJIconKey("expui/debugger/pinToTop/unpinnedItem.svg", "expui/debugger/pinToTop/unpinnedItem.svg", AllIconsKeys.class);
+    }
+
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey PromptInput = new IntelliJIconKey("debugger/promptInput.svg", "expui/debugger/promptInput.svg", AllIconsKeys.class);
@@ -1197,6 +1201,12 @@ public final class AllIconsKeys {
     /** 12x12 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Revert = new IntelliJIconKey("diff/revert.svg", "expui/diff/revert@14x14.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey SideBySide = new IntelliJIconKey("expui/diff/sideBySide.svg", "expui/diff/sideBySide.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Unified = new IntelliJIconKey("expui/diff/unified.svg", "expui/diff/unified.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
@@ -1238,7 +1248,13 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey Aspectj = new IntelliJIconKey("fileTypes/aspectj.svg", "expui/fileTypes/aspectJ.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Bazel = new IntelliJIconKey("expui/fileTypes/bazel.svg", "expui/fileTypes/bazel.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey BinaryData = new IntelliJIconKey("fileTypes/binaryData.svg", "expui/fileTypes/binaryData.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey C = new IntelliJIconKey("expui/fileTypes/c.svg", "expui/fileTypes/c.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Config = new IntelliJIconKey("fileTypes/config.svg", "expui/fileTypes/config.svg", AllIconsKeys.class);
@@ -1248,6 +1264,12 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey ContextsModifier = new IntelliJIconKey("fileTypes/contextsModifier.svg", "expui/fileTypes/contextsModifier.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Cpp = new IntelliJIconKey("expui/fileTypes/cpp.svg", "expui/fileTypes/cpp.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Csharp = new IntelliJIconKey("fileTypes/Csharp.svg", "expui/fileTypes/Csharp.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Css = new IntelliJIconKey("fileTypes/css.svg", "expui/fileTypes/css.svg", AllIconsKeys.class);
@@ -1262,6 +1284,9 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey Diagram = new IntelliJIconKey("fileTypes/diagram.svg", "expui/fileTypes/diagram.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Docker = new IntelliJIconKey("expui/fileTypes/docker.svg", "expui/fileTypes/docker.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Dtd = new IntelliJIconKey("fileTypes/dtd.svg", "expui/fileTypes/xml.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
@@ -1271,7 +1296,19 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey Gitignore = new IntelliJIconKey("expui/fileTypes/gitignore.svg", "expui/fileTypes/gitignore.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey Hprof = new IntelliJIconKey("fileTypes/hprof.svg", "fileTypes/hprof.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey Gradle = new IntelliJIconKey("expui/fileTypes/gradle.svg", "expui/fileTypes/gradle.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Graphql = new IntelliJIconKey("expui/fileTypes/graphql.svg", "expui/fileTypes/graphql.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Groovy = new IntelliJIconKey("expui/fileTypes/groovy.svg", "expui/fileTypes/groovy.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey H = new IntelliJIconKey("expui/fileTypes/h.svg", "expui/fileTypes/h.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Hprof = new IntelliJIconKey("fileTypes/hprof.svg", "expui/fileTypes/hprof.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Htaccess = new IntelliJIconKey("fileTypes/htaccess.svg", "fileTypes/htaccess.svg", AllIconsKeys.class);
@@ -1304,6 +1341,9 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey JavaScript = new IntelliJIconKey("fileTypes/javaScript.svg", "expui/fileTypes/javaScript.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Jenkins = new IntelliJIconKey("expui/fileTypes/jenkins.svg", "expui/fileTypes/jenkins.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Jfr = new IntelliJIconKey("fileTypes/jfr.svg", "expui/fileTypes/jfr.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
@@ -1319,7 +1359,13 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey Jspx = new IntelliJIconKey("fileTypes/jspx.svg", "expui/fileTypes/jspx.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Jupyter = new IntelliJIconKey("fileTypes/jupyter.svg", "expui/fileTypes/jupyter.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Manifest = new IntelliJIconKey("fileTypes/manifest.svg", "expui/fileTypes/manifest.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Markdown = new IntelliJIconKey("expui/fileTypes/markdown.svg", "expui/fileTypes/markdown.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey MicrosoftWindows = new IntelliJIconKey("fileTypes/microsoftWindows.svg", "expui/fileTypes/microsoftWindows.svg", AllIconsKeys.class);
@@ -1334,16 +1380,34 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey Regexp = new IntelliJIconKey("fileTypes/regexp.svg", "expui/fileTypes/regexp.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Rst = new IntelliJIconKey("expui/fileTypes/rst.svg", "expui/fileTypes/rst.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey SourceMap = new IntelliJIconKey("expui/fileTypes/sourceMap.svg", "expui/fileTypes/sourceMap.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Sql = new IntelliJIconKey("expui/fileTypes/sql.svg", "expui/fileTypes/sql.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey SwiftLang = new IntelliJIconKey("expui/fileTypes/swiftLang.svg", "expui/fileTypes/swiftLang.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Terraform = new IntelliJIconKey("expui/fileTypes/terraform.svg", "expui/fileTypes/terraform.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Text = new IntelliJIconKey("fileTypes/text.svg", "expui/fileTypes/text.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Toml = new IntelliJIconKey("expui/fileTypes/toml.svg", "expui/fileTypes/toml.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey UiForm = new IntelliJIconKey("fileTypes/uiForm.svg", "expui/fileTypes/uiForm.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Unknown = new IntelliJIconKey("fileTypes/unknown.svg", "expui/fileTypes/unknown.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Vue = new IntelliJIconKey("expui/fileTypes/vue.svg", "expui/fileTypes/vue.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey WsdlFile = new IntelliJIconKey("fileTypes/wsdlFile.svg", "expui/fileTypes/wsdl.svg", AllIconsKeys.class);
@@ -1640,10 +1704,6 @@ public final class AllIconsKeys {
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Language = new IntelliJIconKey("general/language.svg", "expui/general/language.svg", AllIconsKeys.class);
     /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey LocalizationSettings = Language;
-    /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Layout = new IntelliJIconKey("general/layout.svg", "expui/general/related.svg", AllIconsKeys.class);
     /** 16x16 */ 
@@ -1664,6 +1724,9 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Locate = new IntelliJIconKey("general/locate.svg", "expui/general/locate.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey LockedUltimate = new IntelliJIconKey("expui/general/lockedUltimate.svg", "expui/general/lockedUltimate.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Menu = new IntelliJIconKey("expui/general/menu.svg", "expui/general/menu.svg", AllIconsKeys.class);
@@ -2040,7 +2103,10 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey FeedbackRatingOnFocused = new IntelliJIconKey("ide/feedbackRatingOnFocused.svg", "ide/feedbackRatingOnFocused.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey Gift = new IntelliJIconKey("ide/gift.svg", "ide/gift.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey Gift = new IntelliJIconKey("ide/gift.svg", "expui/ide/gift.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey GrayDot = new IntelliJIconKey("ide/grayDot.svg", "ide/grayDot.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey HectorOff = new IntelliJIconKey("ide/hectorOff.svg", "ide/hectorOff.svg", AllIconsKeys.class);
@@ -2150,10 +2216,6 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey PipetteRollover = new IntelliJIconKey("ide/pipetteRollover.svg", "expui/image/colorPickerRollover.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Pipette_rollover = PipetteRollover;
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey PowerSaveMode = new IntelliJIconKey("ide/powerSaveMode.svg", "expui/general/inspections/inspectionsPowerSaveMode.svg", AllIconsKeys.class);
@@ -2445,32 +2507,14 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey DarkTheme = new IntelliJIconKey("expui/meetNewUi/darkTheme.svg", "expui/meetNewUi/darkTheme.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey DarkThemeSelected = new IntelliJIconKey("expui/meetNewUi/darkThemeSelected.svg", "expui/meetNewUi/darkThemeSelected.svg", AllIconsKeys.class);
-    /** 88x48 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey DensityCompact = new IntelliJIconKey("expui/meetNewUi/densityCompact.svg", "expui/meetNewUi/densityCompact.svg", AllIconsKeys.class);
-    /** 88x48 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey DensityDefault = new IntelliJIconKey("expui/meetNewUi/densityDefault.svg", "expui/meetNewUi/densityDefault.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey LightTheme = new IntelliJIconKey("expui/meetNewUi/lightTheme.svg", "expui/meetNewUi/lightTheme.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey LightThemeSelected = new IntelliJIconKey("expui/meetNewUi/lightThemeSelected.svg", "expui/meetNewUi/lightThemeSelected.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey SystemTheme = new IntelliJIconKey("expui/meetNewUi/systemTheme.svg", "expui/meetNewUi/systemTheme.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey SystemThemeSelected = new IntelliJIconKey("expui/meetNewUi/systemThemeSelected.svg", "expui/meetNewUi/systemThemeSelected.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
   public static final class Modules {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey AddExcludedRoot = new IntelliJIconKey("modules/addExcludedRoot.svg", "modules/addExcludedRoot.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey AddExcludedRoot = new IntelliJIconKey("modules/addExcludedRoot.svg", "expui/actions/addExcludedRoot.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Annotation = new IntelliJIconKey("modules/annotation.svg", "expui/nodes/annotationFolder.svg", AllIconsKeys.class);
@@ -2687,7 +2731,7 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey JarDirectory = new IntelliJIconKey("nodes/jarDirectory.svg", "nodes/jarDirectory.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey JavaDocFolder = new IntelliJIconKey("nodes/javaDocFolder.svg", "nodes/javaDocFolder.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey JavaDocFolder = new IntelliJIconKey("nodes/javaDocFolder.svg", "expui/nodes/javaDocFolder.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey JavaModule = new IntelliJIconKey("nodes/javaModule.svg", "expui/nodes/moduleJava.svg", AllIconsKeys.class);
@@ -2721,6 +2765,12 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey LogFolder = new IntelliJIconKey("nodes/logFolder.svg", "expui/nodes/logFolder.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey McpServer = new IntelliJIconKey("expui/nodes/mcpServer.svg", "expui/nodes/mcpServer.svg", AllIconsKeys.class);
+    /** 16x16 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey McpServerWidget = new IntelliJIconKey("expui/nodes/mcpServerWidget.svg", "expui/nodes/mcpServerWidget.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Method = new IntelliJIconKey("nodes/method.svg", "expui/nodes/method.svg", AllIconsKeys.class);
@@ -2863,10 +2913,6 @@ public final class AllIconsKeys {
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey RwAccess = new IntelliJIconKey("nodes/rw-access.svg", "nodes/rw-access.svg", AllIconsKeys.class);
     /** 16x16 */ 
-    @SuppressWarnings("DeprecationMismatch")
-    @GeneratedFromIntelliJSources
-    public static final @Deprecated @NotNull IntelliJIconKey Rw_access = RwAccess;
-    /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey SecurityRole = new IntelliJIconKey("nodes/securityRole.svg", "expui/nodes/securityRole.svg", AllIconsKeys.class);
     /** 16x16 */ 
@@ -2971,22 +3017,6 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey WriteAccess = new IntelliJIconKey("nodes/write-access.svg", "expui/actions/showWriteAccess.svg", AllIconsKeys.class);
-
-    /** @deprecated to be removed without replacement */
-    @SuppressWarnings("unused")
-    @Deprecated
-    @ScheduledForRemoval
-
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey InspectionResults = new IntelliJIconKey("nodes/inspectionResults.svg", "nodes/inspectionResults.svg", AllIconsKeys.class);
-
-    /** @deprecated to be removed without replacement */
-    @SuppressWarnings("unused")
-    @Deprecated
-    @ScheduledForRemoval
-
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey Weblistener = new IntelliJIconKey("nodes/weblistener.svg", "nodes/weblistener.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
@@ -3043,6 +3073,9 @@ public final class AllIconsKeys {
     /** 12x12 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Rating = new IntelliJIconKey("plugins/rating.svg", "plugins/rating.svg", AllIconsKeys.class);
+    /** 12x12 */ 
+    @GeneratedFromIntelliJSources
+    public static final @NotNull IntelliJIconKey Refresh = new IntelliJIconKey("plugins/refresh.svg", "plugins/refresh.svg", AllIconsKeys.class);
     /** 12x12 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Updated = new IntelliJIconKey("plugins/updated.svg", "plugins/updated.svg", AllIconsKeys.class);
@@ -3438,14 +3471,6 @@ public final class AllIconsKeys {
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Yugabyte = new IntelliJIconKey("providers/yugabyte.svg", "providers/yugabyte.svg", AllIconsKeys.class);
-
-    /** @deprecated to be removed (Use AllIcons.Providers.AmazonWebServices instead) */
-    @SuppressWarnings("unused")
-    @Deprecated
-    @ScheduledForRemoval
-
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey Aws = new IntelliJIconKey("providers/aws.svg", "providers/aws.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
@@ -3731,7 +3756,7 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey AddJira = new IntelliJIconKey("toolbarDecorator/addJira.svg", "toolbarDecorator/addJira.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey AddLink = new IntelliJIconKey("toolbarDecorator/addLink.svg", "toolbarDecorator/addLink.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey AddLink = new IntelliJIconKey("toolbarDecorator/addLink.svg", "expui/actions/addLink.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey AddPattern = new IntelliJIconKey("toolbarDecorator/addPattern.svg", "toolbarDecorator/addPattern.svg", AllIconsKeys.class);
@@ -3772,9 +3797,6 @@ public final class AllIconsKeys {
     /** 13x13 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey Learn = new IntelliJIconKey("toolwindows/learn.svg", "expui/toolwindows/learn.svg", AllIconsKeys.class);
-    /** 16x16 */ 
-    @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey MeetNewUi = new IntelliJIconKey("expui/toolwindows/meetNewUi.svg", "expui/toolwindows/meetNewUi.svg", AllIconsKeys.class);
     /** 13x13 */ 
     @GeneratedFromIntelliJSources
     public static final @NotNull IntelliJIconKey NoEvents = new IntelliJIconKey("toolwindows/noEvents.svg", "toolwindows/noEvents.svg", AllIconsKeys.class);
@@ -3920,7 +3942,7 @@ public final class AllIconsKeys {
     @ScheduledForRemoval
 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey ToolWindowFavorites = new IntelliJIconKey("toolwindows/toolWindowFavorites.svg", "toolwindows/toolWindowFavorites.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey MeetNewUi = new IntelliJIconKey("expui/toolwindows/meetNewUi.svg", "expui/toolwindows/meetNewUi.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources
@@ -4090,7 +4112,7 @@ public final class AllIconsKeys {
     public static final @NotNull IntelliJIconKey Server = new IntelliJIconKey("webreferences/server.svg", "expui/webReferences/server.svg", AllIconsKeys.class);
     /** 16x16 */ 
     @GeneratedFromIntelliJSources
-    public static final @NotNull IntelliJIconKey WebSocket = new IntelliJIconKey("webreferences/webSocket.svg", "webreferences/webSocket.svg", AllIconsKeys.class);
+    public static final @NotNull IntelliJIconKey WebSocket = new IntelliJIconKey("webreferences/webSocket.svg", "expui/webReferences/webSocket.svg", AllIconsKeys.class);
   }
 
   @GeneratedFromIntelliJSources

@@ -1,6 +1,7 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.gradleTooling
 
+import com.intellij.gradle.toolingExtension.impl.telemetry.GradleOpenTelemetry
 import com.intellij.gradle.toolingExtension.util.GradleReflectionUtil
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil
 import org.gradle.api.Project
@@ -32,6 +33,12 @@ class PrepareKotlinIdeaImportTaskModelBuilder : AbstractModelBuilderService() {
     }
 
     override fun buildAll(modelName: String, project: Project, context: ModelBuilderContext): PrepareKotlinIdeImportTaskModel? {
+        return GradleOpenTelemetry.callWithSpan("kotlin_import_daemon_prepare_kotlin_ide_import_buildAll") {
+            buildAllWithTelemetry(project)
+        }
+    }
+
+    private fun buildAllWithTelemetry(project: Project): PrepareKotlinIdeImportTaskModel? {
         val prepareKotlinIdeaImportTaskNames = project.tasks.names
             .filter { taskName -> taskName.startsWith(TaskNames.prepareKotlinIdeaImport) }
             .toSet()
@@ -65,7 +72,7 @@ class PrepareKotlinIdeaImportTaskModelBuilder : AbstractModelBuilderService() {
     }
 
     private fun Project.findRegisteredPodImportTask(): String? {
-        return if (TaskNames.podImport in tasks.names) return TaskNames.podImport else null
+        return if (TaskNames.podImport in tasks.names) TaskNames.podImport else null
     }
 
     private fun Project.findRunCommonizerTask(): String? {
@@ -154,7 +161,7 @@ class PrepareKotlinIdeaImportTaskModelBuilder : AbstractModelBuilderService() {
                 buildPath
             } else {
                 val name = GradleReflectionUtil.getValue(this@buildPathCompat, "getName", String::class.java)
-                return if (name.startsWith(":")) {
+                if (name.startsWith(":")) {
                     name
                 } else {
                     ":$name"

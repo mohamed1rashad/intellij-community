@@ -2,7 +2,13 @@
 package org.jetbrains.plugins.groovy.transformations;
 
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
@@ -102,10 +108,17 @@ public interface TransformationContext {
 
   void addMethods(@NotNull Collection<? extends PsiMethod> methods);
 
+  /**
+   * Removes non-synthetic method from the context class.
+   */
   void removeMethod(@NotNull PsiMethod codeMethod);
 
   void addField(@NotNull GrField field);
 
+  /**
+   * NB: the inner class addition is only supported for {@code LightAstTransformationSupport}
+   * @see org.jetbrains.plugins.groovy.transformations.singleton.LightAstTransformationSupport
+   */
   void addInnerClass(@NotNull PsiClass innerClass);
 
   void setSuperType(@NotNull String fqn);

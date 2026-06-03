@@ -1,6 +1,6 @@
 ### auto-generated section `build intellij.kotlin.injection` start
 load("//build:compiler-options.bzl", "create_kotlinc_options")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 create_kotlinc_options(
   name = "custom_kotlin-injection",
@@ -8,18 +8,13 @@ create_kotlinc_options(
   x_context_parameters = True
 )
 
-resourcegroup(
-  name = "kotlin-injection_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
-
 jvm_library(
   name = "kotlin-injection",
   module_name = "intellij.kotlin.injection",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":kotlin-injection_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_kotlin-injection",
   deps = [
     "@lib//:kotlin-stdlib",
@@ -39,4 +34,34 @@ jvm_library(
     "//plugins/kotlin/base/code-insight",
   ]
 )
+
+jvm_library(
+  name = "kotlin-injection_test_lib",
+  testonly = True,
+  module_name = "intellij.kotlin.injection",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_kotlin-injection",
+  runtime_deps = [
+    ":kotlin-injection",
+    "//plugins/kotlin/injection/base:kotlin-base-injection_test_lib",
+    "//plugins/kotlin/base/util:util_test_lib",
+    "//plugins/kotlin/base/psi:psi_test_lib",
+    "//plugins/kotlin/base/project-structure:project-structure_test_lib",
+    "//plugins/kotlin/fir:fir_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//platform/indexing-api:indexing_test_lib",
+    "//plugins/IntelliLang:langInjection_test_lib",
+    "//java/java-psi-api:psi_test_lib",
+    "//plugins/kotlin/base/code-insight:code-insight_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.kotlin.injection` end
+
+### auto-generated section `iml intellij.kotlin.injection` start
+exports_files([
+  "intellij.kotlin.injection.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.kotlin.injection` end

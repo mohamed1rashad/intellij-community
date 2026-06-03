@@ -48,7 +48,7 @@ object PyCommunityToUnifiedTooltip {
     fun @Nls String.h3(): String = "<html><b><span style='font-size:1.17em'>$this</span></b></html>"
 
     return GotItTooltip(TOOLTIP_ID, PyPromoSharedComponents.mainText)
-      .withImage(image)
+      .withImage(image, false)
       .withHeader(PyPromoSharedComponents.headerTitle.h3())
       .withButtonLabel(PyPromoSharedComponents.updateNow)
       .withLink(PyPromoSharedComponents.learnMore) {
@@ -61,7 +61,7 @@ object PyCommunityToUnifiedTooltip {
       }
       .withGotItButtonAction {
         PyCommunityUnifiedPromoFusCollector.TooltipClosed.log(PyCommunityUnifiedPromoFusCollector.TooltipCloseReason.UPDATE_NOW)
-        PyCommunityToUnifiedShowPromoActivity.launchUpdateDialog(project)
+        PyCommunityToUnifiedShowPromoActivity.Helper.launchUpdateDialog(project)
       }
       .withShowCount(Int.MAX_VALUE)
       .withFocus()

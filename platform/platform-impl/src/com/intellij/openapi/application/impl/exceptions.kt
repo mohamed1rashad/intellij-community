@@ -9,10 +9,13 @@ import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ex.ActionContextElement
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.Interactive
+import com.intellij.openapi.application.UnhandledExceptionLoggingMode
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.UnhandledException
 import com.intellij.openapi.diagnostic.fileLogger
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.util.ui.EDT
 import org.jetbrains.annotations.Nls
 import javax.swing.SwingUtilities
 import kotlin.coroutines.CoroutineContext
@@ -21,7 +24,7 @@ import kotlin.coroutines.CoroutineContext
 private val LOG: Logger = fileLogger()
 
 internal fun processUnhandledException(
-  exception: Throwable,
+  cause: Throwable,
   coroutineContext: CoroutineContext?,
 ) {
   val coroutineContext = coroutineContext ?: currentThreadContextOrNull()
@@ -29,26 +32,35 @@ internal fun processUnhandledException(
 
   when (val interactiveMode = interactiveMode(coroutineContext)) {
     is Mode.Interactive -> {
+      val exception = UnhandledException(cause, isInteractive = true)
       SwingUtilities.invokeLater {
-        logExceptionSafely(message, exception, interactive = true)
+        logExceptionSafely(message, exception)
         val defaultMessage = LogMessage(exception, message, emptyList())
         // "clear" button doesn't play well with interactive message. Once cleared, windows becomes empty.
-        val showError = Registry.get("ide.exceptions.show.interactive").asBoolean()
-                        && !ApplicationManager.getApplication().isHeadlessEnvironment
+        val application = ApplicationManager.getApplication()
+        val messagePool = MessagePool.getInstance()
+
+        val showError = application != null // Early stage: app and registry aren't initialized yet
+                        && Registry.`is`("ide.exceptions.show.interactive", false)
+                        && !application.isHeadlessEnvironment
+                        // Sunsetting app might produce lots of errors due to races.
+                        // While all of them needs to be fixed, no need to bother user with them,
+                        && !application.isExitInProgress
+                        && messagePool.getFatalErrors(true, true).isNotEmpty()
         if (showError) {
-          IdeErrorsDialog(MessagePool.getInstance(), null, false, defaultMessage, isModal = true, actionLeadToError = interactiveMode.action, hideClearButton = true).show()
+          IdeErrorsDialog(messagePool, null, false, defaultMessage, isModal = true, actionLeadToError = interactiveMode.action, hideClearButton = true).show()
         }
       }
     }
     Mode.NonInteractive -> {
-      logExceptionSafely(message, exception, interactive = false)
+      logExceptionSafely(message, UnhandledException(cause, isInteractive = false))
     }
   }
 }
 
-private fun logExceptionSafely(message: String, exception: Throwable, interactive: Boolean) {
+private fun logExceptionSafely(message: String, exception: UnhandledException) {
   try {
-    LOG.error("$message, interactive mode: $interactive", exception)
+    LOG.error(message, exception)
   }
   catch (_: Throwable) {
   }
@@ -59,21 +71,31 @@ private fun logExceptionSafely(message: String, exception: Throwable, interactiv
  */
 private fun interactiveMode(coroutineContext: CoroutineContext?): Mode {
 
+  // kept just in case for binary compatibility
+  val deprecatedInteractive = coroutineContext?.get(Interactive.Key)
+  if (deprecatedInteractive != null) {
+    return Mode.Interactive(deprecatedInteractive.action)
+  }
+
   val action = coroutineContext?.get(ActionContextElement)
-  val interactive = coroutineContext?.get(Interactive.Key)
+  val loggingMode = coroutineContext?.get(UnhandledExceptionLoggingMode.Key)
 
-
-  // interactive mode set explicitly
-  if (interactive != null) {
-    return Mode.Interactive(interactive.action)
+  // logging mode set explicitly
+  if (loggingMode != null) {
+    return when (loggingMode) {
+      is UnhandledExceptionLoggingMode.Interactive -> Mode.Interactive(loggingMode.action)
+      UnhandledExceptionLoggingMode.NonInteractive -> Mode.NonInteractive
+    }
   }
   else if (action != null) {
     val text = ActionManager.getInstance().getAction(action.actionId)?.templatePresentation?.text
     return Mode.Interactive(action = text)
   }
   // Exception thrown on EDT with modal dialog (or no project) has something to do with current user task
-  if ((SwingUtilities.isEventDispatchThread() && LaterInvocator.isInModalContext()) ||
-      ProjectManager.getInstanceIfCreated()?.openProjects?.isEmpty() == true) {
+  if ((EDT.isCurrentThreadEdt() && LaterInvocator.isInModalContext()) ||
+      ApplicationManager.getApplication()
+        ?.getServiceIfCreated(ProjectManager::class.java)
+        ?.openProjects?.isEmpty() == true) {
     return Mode.Interactive(action = null)
   }
   else {

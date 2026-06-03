@@ -7,9 +7,11 @@ import com.intellij.execution.target.getTargetType
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CustomShortcutSet
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
 import com.intellij.openapi.observable.properties.ObservableMutableProperty
+import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.observable.util.and
 import com.intellij.openapi.observable.util.not
 import com.intellij.openapi.observable.util.transform
@@ -18,6 +20,7 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.TextComponentAccessor
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.openapi.ui.getParentOfType
 import com.intellij.openapi.ui.validation.DialogValidationRequestor
 import com.intellij.openapi.ui.validation.WHEN_PROPERTY_CHANGED
 import com.intellij.openapi.ui.validation.and
@@ -25,6 +28,7 @@ import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.ui.AnimatedIcon
+import com.intellij.ui.ComponentUtil
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.fields.ExtendableTextComponent
@@ -36,32 +40,34 @@ import com.intellij.ui.dsl.builder.components.ValidationType
 import com.intellij.ui.dsl.builder.components.validationTooltip
 import com.intellij.util.asDisposable
 import com.jetbrains.python.PyBundle.message
-import com.jetbrains.python.onFailure
 import com.jetbrains.python.onSuccess
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.Nls
-import java.awt.AlphaComposite
-import java.awt.Component
-import java.awt.Graphics
-import java.awt.Graphics2D
 import java.awt.event.ActionListener
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
 import java.awt.event.KeyEvent
-import java.util.concurrent.atomic.AtomicLong
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.Icon
+import javax.swing.JPanel
+import javax.swing.JRootPane
 import javax.swing.JTextField
 import javax.swing.KeyStroke
 import javax.swing.event.DocumentEvent
 import kotlin.concurrent.atomics.AtomicBoolean
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
-import kotlin.math.cos
 
 interface PathValidator<T, P : PathHolder, VP : ValidatedPath<T, P>> {
+  /**
+   * [backProperty] should only be used in [PathValidator] and its inheritors
+   */
   val backProperty: ObservableMutableProperty<VP?>
   val isDirtyValue: ObservableMutableProperty<Boolean>
   val isValidationInProgress: Boolean
@@ -70,9 +76,14 @@ interface PathValidator<T, P : PathHolder, VP : ValidatedPath<T, P>> {
     isDirtyValue.set(true)
     backProperty.set(null)
   }
+
+  val isValidationSuccessful: ObservableProperty<Boolean>
+    get() = backProperty.transform { it?.validationResult?.successOrNull != null }
 }
 
-private class ValidationSuccessExtension<T>(val validationInfo: T) : ExtendableTextComponent.Extension {
+private interface ValidationStatusExtension
+
+private class ValidationSuccessExtension<T>(val validationInfo: T) : ExtendableTextComponent.Extension, ValidationStatusExtension {
   override fun getIcon(hovered: Boolean): Icon = AllIcons.General.GreenCheckmark
   override fun getTooltip(): @NlsContexts.Tooltip String? {
     val tooltip = when (validationInfo) {
@@ -83,67 +94,12 @@ private class ValidationSuccessExtension<T>(val validationInfo: T) : ExtendableT
   }
 }
 
-private object ValidationErrorExtension : ExtendableTextComponent.Extension {
-  override fun getIcon(hovered: Boolean): Icon = AllIcons.Status.FailedInProgress
-}
-
-private object ValidationInProgressExtension : ExtendableTextComponent.Extension {
+private object ValidationInProgressExtension : ExtendableTextComponent.Extension, ValidationStatusExtension {
   override fun getIcon(hovered: Boolean): Icon = AnimatedIcon.Default()
   override fun getTooltip(): @NlsContexts.Tooltip String {
     return message("python.add.sdk.wait.for.validation")
   }
 }
-
-private class DebounceCounterIcon(val icon: Icon, val period: Int) : Icon {
-  private val time: AtomicLong = AtomicLong(System.currentTimeMillis())
-
-  fun reset() {
-    time.set(System.currentTimeMillis())
-  }
-
-  override fun getIconWidth(): Int {
-    return icon.iconWidth
-  }
-
-  override fun getIconHeight(): Int {
-    return icon.iconHeight
-  }
-
-  override fun paintIcon(c: Component?, g: Graphics?, x: Int, y: Int) {
-    assert(period > 0) { "unexpected" }
-    val time = (System.currentTimeMillis() - this.time.get()) % period
-    val alpha = ((cos(2 * Math.PI * time / period) + 1) / 2).toFloat()
-    if (alpha > 0) {
-      if (alpha < 1 && g is Graphics2D) {
-        val g2d = g.create() as Graphics2D
-        try {
-          g2d.composite = AlphaComposite.SrcAtop.derive(alpha)
-          icon.paintIcon(c, g2d, x, y)
-        }
-        finally {
-          g2d.dispose()
-        }
-      }
-      else {
-        icon.paintIcon(c, g, x, y)
-      }
-    }
-  }
-}
-
-private class AnimatedFadingIcon(private val icon: DebounceCounterIcon) : AnimatedIcon(50, icon) {
-  fun reset() {
-    icon.reset()
-  }
-
-  companion object {
-    fun build(icon: Icon, period: Int = VALIDATION_DELAY * 2): AnimatedFadingIcon {
-      return AnimatedFadingIcon(DebounceCounterIcon(icon, period))
-    }
-  }
-}
-
-private const val VALIDATION_DELAY = 2000
 
 @OptIn(FlowPreview::class, ExperimentalAtomicApi::class)
 internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
@@ -170,21 +126,10 @@ internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
     }
 
     override fun actionPerformed(e: AnActionEvent) {
-      with(textField as ExtendableTextComponent) {
-        if (extensions.contains(validationWaitExtension)) {
-          doValidate()
-        }
-      }
+      doValidate()
     }
   }.apply {
     registerCustomShortcutSet(CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)), this@ValidatedPathField)
-  }
-
-  private val validationWaitIcon = AnimatedFadingIcon.build(AllIcons.Gutter.SuggestedRefactoringBulb)
-  private val validationWaitExtension: ExtendableTextComponent.Extension = ExtendableTextComponent.Extension.create(
-    validationWaitIcon, message("python.add.sdk.wait.for.validation")
-  ) {
-    validationAction.doValidate()
   }
 
   private val fieldAccessor = object : TextComponentAccessor<JTextField> {
@@ -199,14 +144,20 @@ internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
     }
   }
 
-  private val browseFolderActionLister: ActionListener? = createBrowseFolderListener(browseFolderDialogTitle, isFileSelectionMode)?.also {
-    addActionListener(it)
-  }
-
   init {
     addDocumentListener(object : DocumentAdapter() {
       override fun textChanged(e: DocumentEvent) {
         textInputFlow.value = text
+      }
+    })
+
+    createBrowseFolderListener(browseFolderDialogTitle, isFileSelectionMode)?.also {
+      addActionListener(it)
+    }
+
+    textField.addFocusListener(object : FocusAdapter() {
+      override fun focusLost(e: FocusEvent) {
+        validationAction.doValidate()
       }
     })
   }
@@ -227,27 +178,22 @@ internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
 
     pathValidator.isDirtyValue.afterChange(scope.asDisposable()) { isDirtyValue ->
       with(textField as ExtendableTextComponent) {
-        extensions.forEach { removeExtension(it) }
+        extensions
+          .filter { it is ValidationStatusExtension }
+          .forEach { removeExtension(it) }
 
         if (isDirtyValue) {
           if (pathValidator.isValidationInProgress) {
             isEnabled = false
             addExtension(ValidationInProgressExtension)
           }
-          else {
-            addExtension(validationWaitExtension)
-          }
         }
         else {
           editorMode.store(false)
-          browseFolderActionLister?.let { setButtonVisible(true) }
           isEnabled = true
 
           pathValidator.backProperty.get()?.validationResult?.let { validationResult ->
             validationResult
-              .onFailure {
-                addExtension(ValidationErrorExtension)
-              }
               .onSuccess {
                 addExtension(ValidationSuccessExtension(it))
               }
@@ -261,27 +207,33 @@ internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
     this.scope = scope
     registerPropertyCallbacks()
 
-    scope.launch {
+    val rootPane = this.getParentOfType<JRootPane>()
+    val topPanel = ComponentUtil.findParentByCondition(this) { it.parent !is JPanel }
+
+    listOfNotNull(topPanel, rootPane).forEach { component ->
+      component.addMouseListener(object : MouseAdapter() {
+        override fun mouseClicked(e: MouseEvent?) {
+          if (!this@ValidatedPathField.isVisible) return
+          validationAction.doValidate()
+        }
+      })
+    }
+
+
+    scope.launch(Dispatchers.EDT) {
       textInputFlow
         .debounce(50) // setText method is a combination of two calls - remove + insert, should count them as 1
         .map {
           if (it == null) return@map null
 
-          if (editorMode.load()) {
-            validationWaitIcon.reset()
-          }
-          else if ((pathValidator.backProperty.get()?.pathHolder?.toString() ?: "") != it) {
+          if (!editorMode.load() && (pathValidator.backProperty.get()?.pathHolder?.toString() ?: "") != it) {
             editorMode.store(true)
             pathValidator.markDirty()
           }
 
           it
         }
-        .debounce(VALIDATION_DELAY.toLong())
-        .collectLatest {
-          if (it == null) return@collectLatest
-          validationAction.doValidate()
-        }
+        .collect {}
     }
   }
 
@@ -309,7 +261,7 @@ internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
   private fun createBrowseFolderListener(browseFolderDialogTitle: @Nls String, isFileSelectionMode: Boolean): ActionListener? {
     val descriptor = getFileChooserDescriptor(browseFolderDialogTitle, isFileSelectionMode)
     val targetBrowserHints = TargetBrowserHints(showLocalFsInBrowser = true, descriptor)
-    val targetEnvironmentConfiguration = (fileSystem as? FileSystem.Target)?.targetEnvironmentConfiguration
+    val targetEnvironmentConfiguration = (fileSystem as? TargetFileSystem)?.targetEnvironmentConfiguration
 
     val listener = if (targetEnvironmentConfiguration == null) {
       BrowseFolderActionListener(this, null, descriptor, fieldAccessor)
@@ -338,23 +290,18 @@ internal class ValidatedPathField<T, P : PathHolder, VP : ValidatedPath<T, P>>(
 private fun <T, P : PathHolder, V : ValidatedPath<T, P>> Panel.installToolRow(
   fileSystem: FileSystem<*>,
   missingExecutableText: @Nls String,
-  installAction: ActionLink? = null,
+  installAction: ActionLink,
   validatedPathField: ValidatedPathField<T, P, V>,
 ): Row {
-  val selectExecutableLink = ActionLink(message("sdk.create.custom.select.executable.link")) {
+  val selectExecutableLink = if (fileSystem.isBrowsable) ActionLink(message("sdk.create.custom.select.executable.link")) {
     validatedPathField.button.doClick()
   }
-  val (firstFix, secondFix) = if (installAction == null || fileSystem.isReadOnly) {
-    Pair(selectExecutableLink, null)
-  }
-  else {
-    Pair(installAction, selectExecutableLink)
-  }
+  else null
 
   return row("") {
     validationTooltip(missingExecutableText,
-                      firstFix,
-                      secondFix,
+                      installAction,
+                      selectExecutableLink,
                       validationType = ValidationType.WARNING,
                       inline = true)
       .align(Align.FILL)
@@ -370,6 +317,7 @@ internal fun <T, P : PathHolder, VP : ValidatedPath<T, P>> Panel.validatablePath
   missingExecutableText: @Nls String?,
   installAction: ActionLink? = null,
   isFileSelectionMode: Boolean = true,
+  venvExistenceValidationState: ObservableProperty<VenvExistenceValidationState>? = null,
 ): ValidatedPathField<T, P, VP> {
 
   val validatedPathField = ValidatedPathField(
@@ -379,7 +327,7 @@ internal fun <T, P : PathHolder, VP : ValidatedPath<T, P>> Panel.validatablePath
     isFileSelectionMode = isFileSelectionMode,
   )
 
-  missingExecutableText?.let {
+  if (missingExecutableText != null && installAction != null && !fileSystem.isReadOnly) {
     installToolRow(
       fileSystem = fileSystem,
       missingExecutableText = missingExecutableText,
@@ -388,15 +336,28 @@ internal fun <T, P : PathHolder, VP : ValidatedPath<T, P>> Panel.validatablePath
     ).visibleIf(pathValidator.backProperty.transform { it?.pathHolder == null }.and(pathValidator.isDirtyValue.not()))
   }
 
+  val initialValidationRequestor = (validationRequestor
+    and WHEN_PROPERTY_CHANGED(pathValidator.isDirtyValue)
+    and WHEN_PROPERTY_CHANGED(pathValidator.backProperty))
+
+  val finalValidationRequestor = if (venvExistenceValidationState != null) {
+    initialValidationRequestor and WHEN_PROPERTY_CHANGED(venvExistenceValidationState)
+  }
+  else initialValidationRequestor
+
   row(labelText) {
     cell(validatedPathField)
       .align(AlignX.FILL)
-      .validationRequestor(validationRequestor
-                             and WHEN_PROPERTY_CHANGED(pathValidator.isDirtyValue)
-                             and WHEN_PROPERTY_CHANGED(pathValidator.backProperty)
-      )
+      .validationRequestor(finalValidationRequestor)
       .validationOnInput { component ->
         if (!component.isVisible) return@validationOnInput null
+
+        val isVenvOverridden = when (venvExistenceValidationState?.get()) {
+          is VenvExistenceValidationState.Warning -> true
+          is VenvExistenceValidationState.Invisible, is VenvExistenceValidationState.Error, null -> false
+        }
+
+        if (isVenvOverridden) return@validationOnInput null
 
         val pyErrorMessage = pathValidator.backProperty.get()?.validationResult?.errorOrNull?.message
 
@@ -404,8 +365,11 @@ internal fun <T, P : PathHolder, VP : ValidatedPath<T, P>> Panel.validatablePath
           pyErrorMessage != null -> {
             ValidationInfo(pyErrorMessage)
           }
-          pathValidator.isDirtyValue.get() -> {
+          pathValidator.isValidationInProgress -> {
             ValidationInfo(message("python.add.sdk.wait.for.validation"))
+          }
+          pathValidator.isDirtyValue.get() -> {
+            ValidationInfo(message("python.add.sdk.press.enter.to.validate")).asWarning()
           }
           else -> null
         }

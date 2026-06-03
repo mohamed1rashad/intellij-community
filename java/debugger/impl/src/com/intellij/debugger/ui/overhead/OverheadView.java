@@ -6,32 +6,48 @@ import com.intellij.debugger.JavaDebuggerBundle;
 import com.intellij.debugger.engine.DebugProcessImpl;
 import com.intellij.debugger.ui.breakpoints.Breakpoint;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.CustomShortcutSet;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.UiDataProvider;
+import com.intellij.openapi.application.CoroutinesKt;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.pom.Navigatable;
-import com.intellij.ui.*;
+import com.intellij.ui.ColoredTableCellRenderer;
+import com.intellij.ui.DoubleClickListener;
+import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.SimpleColoredComponent;
+import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.TableUtil;
 import com.intellij.ui.table.TableView;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.util.ui.ListTableModel;
 import com.intellij.util.ui.components.BorderLayoutPanel;
-import com.intellij.util.ui.update.MergingUpdateQueue;
-import com.intellij.util.ui.update.Update;
+import com.intellij.util.ui.update.DebouncedUpdates;
+import com.intellij.util.ui.update.UpdateQueue;
 import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
+import kotlinx.coroutines.Dispatchers;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JTable;
+import javax.swing.KeyStroke;
+import javax.swing.SortOrder;
 import javax.swing.table.TableCellRenderer;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.Function;
 
@@ -47,7 +63,7 @@ public class OverheadView extends BorderLayoutPanel implements Disposable, UiDat
   private final TableView<OverheadProducer> myTable;
   private final ListTableModel<OverheadProducer> myModel;
 
-  private final MergingUpdateQueue myUpdateQueue;
+  private final UpdateQueue<OverheadProducer> myUpdateQueue;
   private Runnable myBouncer;
 
   private static final SimpleTextAttributes STRIKEOUT_ATTRIBUTES = new SimpleTextAttributes(SimpleTextAttributes.STYLE_STRIKEOUT, null);
@@ -67,22 +83,28 @@ public class OverheadView extends BorderLayoutPanel implements Disposable, UiDat
     addToCenter(ScrollPaneFactory.createScrollPane(myTable, true));
     TableUtil.setupCheckboxColumn(myTable.getColumnModel().getColumn(0));
 
-    myUpdateQueue = new MergingUpdateQueue("OverheadView", 500, true, null, this);
+    myUpdateQueue = DebouncedUpdates.<OverheadProducer>forScope(process.getChildScope("OverheadView"), "OverheadView", 500)
+      .withContext(CoroutinesKt.getEDT(Dispatchers.INSTANCE))
+      .runBatched(producers -> {
+        List<OverheadProducer> distinctProducers = new ArrayList<>(new LinkedHashSet<>(producers));
+        List<Integer> indices = new ArrayList<>();
+        for (OverheadProducer o : distinctProducers) {
+          int idx = myModel.indexOf(o);
+          if (idx == -1) {
+            myModel.setItems(new ArrayList<>(OverheadTimings.getProducers(process)));
+            return;
+          }
+          indices.add(idx);
+        }
+        for (int idx : indices) {
+          myModel.fireTableRowsUpdated(idx, idx);
+        }
+      });
 
     OverheadTimings.addListener(new OverheadTimings.OverheadTimingsListener() {
                                   @Override
                                   public void timingAdded(OverheadProducer o) {
-                                    myUpdateQueue.queue(new Update(o) {
-                                      @Override
-                                      public void run() {
-                                        int idx = myModel.indexOf(o);
-                                        if (idx != -1) {
-                                          myModel.fireTableRowsUpdated(idx, idx);
-                                          return;
-                                        }
-                                        myModel.setItems(new ArrayList<>(OverheadTimings.getProducers(process)));
-                                      }
-                                    });
+                                    myUpdateQueue.queue(o);
                                   }
 
                                   @Override

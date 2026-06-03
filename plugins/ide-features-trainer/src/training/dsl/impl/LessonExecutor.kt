@@ -16,7 +16,13 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Alarm
 import com.intellij.util.concurrency.ThreadingAssertions
 import org.intellij.lang.annotations.Language
-import training.dsl.*
+import training.dsl.LessonSample
+import training.dsl.PreviousTaskInfo
+import training.dsl.TaskContext
+import training.dsl.TaskTestContext
+import training.dsl.TaskTextProperties
+import training.dsl.parseLessonSample
+import training.dsl.prepareSampleFromCurrentState
 import training.learn.ActionsRecorder
 import training.learn.course.KLesson
 import training.learn.exceptons.NoTextEditor
@@ -150,13 +156,13 @@ internal class LessonExecutor(val lesson: KLesson,
   override fun dispose() {
     if (hasBeenStopped) return
     ThreadingAssertions.assertEventDispatchThread()
+    hasBeenStopped = true
     val lessonPassed = currentTaskIndex == taskActions.size
     val visualIndex = if(lessonPassed) currentVisualIndex else (taskActions[currentTaskIndex].taskVisualIndex ?: 0)
     lesson.onStop(project, lessonPassed, currentTaskIndex, visualIndex, internalProblems)
     continueHighlighting.set(false)
     clearRestore()
     disposeRecorders()
-    hasBeenStopped = true
     taskActions.clear()
   }
 

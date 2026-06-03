@@ -11,7 +11,11 @@ import com.intellij.testFramework.common.timeoutRunBlocking
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
-import org.jetbrains.plugins.terminal.session.impl.*
+import org.jetbrains.plugins.terminal.session.impl.TerminalCloseEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalPromptFinishedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalSession
+import org.jetbrains.plugins.terminal.session.impl.TerminalSessionTerminatedEvent
+import org.jetbrains.plugins.terminal.session.impl.TerminalWriteBytesEvent
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -64,7 +68,12 @@ internal class TerminalSessionTest(private val shellPath: Path) {
 
   private suspend fun startTerminalSession(scope: CoroutineScope): TerminalSession {
     TerminalSessionTestUtil.assumeCommandBlockShellIntegration(listOf(shellPath.toString()))
-    val session = TerminalSessionTestUtil.startTestTerminalSession(projectRule.project, shellPath.toString(), scope)
+    val session = TerminalSessionTestUtil.startTestTerminalSession(
+      projectRule.project,
+      shellPath.toString(),
+      System.getProperty("user.home"),
+      scope
+    ).session
     session.awaitOutputEvent(TerminalPromptFinishedEvent)
     return session
   }

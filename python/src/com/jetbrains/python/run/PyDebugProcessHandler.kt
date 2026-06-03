@@ -3,7 +3,13 @@ package com.jetbrains.python.run
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.util.io.BaseOutputReader
+import com.intellij.util.io.awaitExit
+import com.jetbrains.python.debugger.PythonDebuggerScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.charset.Charset
+import kotlin.time.Duration.Companion.seconds
 
 class PyDebugProcessHandler : PythonProcessHandler {
   constructor(commandLine: GeneralCommandLine) : super(commandLine)
@@ -14,6 +20,21 @@ class PyDebugProcessHandler : PythonProcessHandler {
       BaseOutputReader.Options.forTerminalPtyProcess()
     } else {
       BaseOutputReader.Options.forMostlySilentProcess()
+    }
+  }
+
+  protected override fun doDestroyProcess() {
+    super.doDestroyProcess()
+
+    PythonDebuggerScope.childScope(name = "PyDebugProcessHandler destroy").launch(Dispatchers.IO) {
+      withTimeoutOrNull(1.seconds) {
+        process.awaitExit()
+      } ?: if (shouldDestroyProcessRecursively() && processCanBeKilledByOS(process)) {
+        killProcessTree(process)
+      }
+      else {
+        process.destroy()
+      }
     }
   }
 }

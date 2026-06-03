@@ -10,19 +10,22 @@ import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.ui.components.JBCheckBox
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.bindText
+import com.intellij.ui.dsl.builder.panel
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.sdk.PythonSdkType
 import com.jetbrains.python.sdk.PythonSdkUpdater
 import com.jetbrains.python.sdk.associatedModulePath
 import com.jetbrains.python.sdk.flavors.PythonSdkFlavor
-import com.jetbrains.python.sdk.flavors.VirtualEnvSdkFlavor
+import com.intellij.python.venv.sdk.flavors.VirtualEnvSdkFlavor
 import com.jetbrains.python.sdk.flavors.conda.CondaEnvSdkFlavor
 
 /**
  * Configurable for local Python interpreter.
  *
- * Replaces [EditSdkDialog].
  */
 class PythonLocalInterpreterConfigurable(private val project: Project, private val module: Module?, private val sdk: Sdk)
   : BoundConfigurable(sdk.name) {
@@ -45,7 +48,7 @@ class PythonLocalInterpreterConfigurable(private val project: Project, private v
         .bindText(interpreterPath)
         .align(AlignX.FILL)
     }
-    val sdkFlavor = PythonSdkFlavor.getPlatformIndependentFlavor(sdk.homePath)
+    val sdkFlavor = PythonSdkFlavor.getFlavor(sdk)
     if (sdkFlavor is VirtualEnvSdkFlavor || sdkFlavor is CondaEnvSdkFlavor) {
       // Add SDK association components only for Virtualenv and Conda interpreters
       val sdkAssociatedModulePath = sdk.associatedModulePath

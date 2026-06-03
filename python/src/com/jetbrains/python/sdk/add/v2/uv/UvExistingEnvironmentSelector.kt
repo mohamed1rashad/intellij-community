@@ -2,72 +2,64 @@
 package com.jetbrains.python.sdk.add.v2.uv
 
 import com.intellij.openapi.module.Module
+import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.projectRoots.Sdk
+import com.intellij.python.uv.common.UV_UI_INFO
 import com.jetbrains.python.PyBundle
-import com.jetbrains.python.PythonInfo
-import com.jetbrains.python.Result
 import com.jetbrains.python.errorProcessing.PyResult
 import com.jetbrains.python.sdk.ModuleOrProject
-import com.jetbrains.python.sdk.add.v2.*
-import com.jetbrains.python.sdk.associatedModulePath
-import com.jetbrains.python.sdk.basePath
-import com.jetbrains.python.sdk.isAssociatedWithModule
-import com.jetbrains.python.sdk.legacy.PythonSdkUtil
-import com.jetbrains.python.sdk.uv.isUv
+import com.jetbrains.python.sdk.add.v2.CustomExistingEnvironmentSelector
+import com.jetbrains.python.sdk.add.v2.DetectedSelectableInterpreter
+import com.jetbrains.python.sdk.add.v2.PathHolder
+import com.jetbrains.python.sdk.add.v2.PythonMutableTargetAddInterpreterModel
+import com.jetbrains.python.sdk.add.v2.ToolValidator
+import com.jetbrains.python.sdk.add.v2.ValidatedPath
+import com.jetbrains.python.sdk.add.v2.savePathForEelOnly
+import com.jetbrains.python.sdk.baseDir
+import com.jetbrains.python.sdk.uv.impl.setUvExecutableLocal
 import com.jetbrains.python.sdk.uv.setupExistingEnvAndSdk
 import com.jetbrains.python.statistics.InterpreterType
-import com.jetbrains.python.statistics.version
-import com.jetbrains.python.venvReader.VirtualEnvReader
-import com.jetbrains.python.venvReader.tryResolvePath
+import com.jetbrains.python.uv.sdk.configuration.isUvEnv
 import java.nio.file.Path
-import kotlin.io.path.pathString
 
-internal class UvExistingEnvironmentSelector<P : PathHolder>(model: PythonMutableTargetAddInterpreterModel<P>, module: Module?)
-  : CustomExistingEnvironmentSelector<P>("uv", model, module) {
-  override val toolState: PathValidator<Version, P, ValidatedPath.Executable<P>> = model.uvViewModel.toolValidator
+
+internal class UvExistingEnvironmentSelector<P : PathHolder>(model: PythonMutableTargetAddInterpreterModel<P>, module: Module?) :
+  CustomExistingEnvironmentSelector<P>("uv", model, module) {
   override val interpreterType: InterpreterType = InterpreterType.UV
+  override val toolState: ToolValidator<P> = model.uvViewModel.toolValidator
+  override val toolExecutable: ObservableProperty<ValidatedPath.Executable<P>?> = model.uvViewModel.uvExecutable
+  override val toolExecutablePersister: suspend (P) -> Unit = { pathHolder ->
+    savePathForEelOnly(pathHolder) { path -> setUvExecutableLocal(path) }
+  }
 
   override suspend fun getOrCreateSdk(moduleOrProject: ModuleOrProject): PyResult<Sdk> {
     val sdkHomePath = selectedEnv.get()?.homePath
-    val selectedInterpreterPath = sdkHomePath as? PathHolder.Eel
-                                  ?: return PyResult.localizedError(PyBundle.message("python.sdk.provided.path.is.invalid", sdkHomePath))
-    val allSdk = PythonSdkUtil.getAllSdks()
-    val existingSdk = allSdk.find { it.homePath == selectedInterpreterPath.path.pathString }
+    val selectedInterpreterPath =
+      sdkHomePath ?: return PyResult.localizedError(PyBundle.message("python.sdk.provided.path.is.invalid", sdkHomePath))
+
     val associatedModule = extractModule(moduleOrProject)
-    val basePathString = associatedModule?.basePath ?: moduleOrProject.project.basePath
-    val projectDir = tryResolvePath(basePathString)
-                     ?: return PyResult.localizedError(PyBundle.message("python.sdk.provided.path.is.invalid", basePathString))
 
-    // uv sdk in current module
-    if (existingSdk != null && existingSdk.isUv && existingSdk.isAssociatedWithModule(associatedModule)) {
-      return Result.success(existingSdk)
-    }
-
-    val workingDirectory =
-      VirtualEnvReader().getVenvRootPath(selectedInterpreterPath.path)
-      ?: tryResolvePath(existingSdk?.associatedModulePath)
-      ?: projectDir
+    val basePathString = associatedModule?.baseDir?.path
+                         ?: moduleOrProject.project.basePath
+                         ?: return PyResult.localizedError(PyBundle.message("python.sdk.provided.path.is.invalid", null))
+    val workingDir = Path.of(basePathString)
 
     return setupExistingEnvAndSdk(
-      envExecutable = selectedInterpreterPath.path,
-      envWorkingDir = workingDirectory,
-      usePip = existingSdk?.isUv == true,
-      projectDir = projectDir,
-      existingSdks = allSdk.toList()
+      pythonBinary = selectedInterpreterPath,
+      uvPath = toolExecutable.get()!!.pathHolder!!,
+      workingDir = workingDir,
+      fileSystem = model.fileSystem,
+      usePip = false
     )
   }
 
   override suspend fun detectEnvironments(modulePath: Path): List<DetectedSelectableInterpreter<P>> {
-    val existingEnvs = PythonSdkUtil.getAllSdks().filter {
-      it.isUv && (it.associatedModulePath == modulePath.pathString || it.associatedModulePath == null)
-    }.mapNotNull { env ->
-      env.homePath?.let { path ->
-        model.fileSystem.parsePath(path).successOrNull?.let { homePath ->
-          DetectedSelectableInterpreter(homePath, PythonInfo(env.version), false)
-        }
+    return model.fileSystem.detectEnvironments(modulePath) { pythonBinary ->
+      when (pythonBinary) {
+        is PathHolder.Eel -> if (pythonBinary.path.isUvEnv()) UV_UI_INFO else null
+        is PathHolder.Target -> UV_UI_INFO
       }
     }
-    return existingEnvs
   }
 
   private fun extractModule(moduleOrProject: ModuleOrProject): Module? =

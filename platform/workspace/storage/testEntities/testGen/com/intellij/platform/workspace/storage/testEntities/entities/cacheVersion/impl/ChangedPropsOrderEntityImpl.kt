@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -20,19 +21,17 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedPropsOrderDataClass
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedPropsOrderEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableChangedPropsOrderEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedPropsOrderEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsOrderEntityData) : ChangedPropsOrderEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsOrderEntityData) : ChangedPropsOrderEntity,
+                                                                                                  WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -46,13 +45,11 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
       readField("string")
       return dataSource.string
     }
-
   override val list: List<Set<Int>>
     get() {
       readField("list")
       return dataSource.list
     }
-
   override val data: ChangedPropsOrderDataClass
     get() {
       readField("data")
@@ -70,8 +67,8 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
   }
 
 
-  internal class Builder(result: ChangedPropsOrderEntityData?) : ModifiableWorkspaceEntityBase<ChangedPropsOrderEntity, ChangedPropsOrderEntityData>(
-    result), ModifiableChangedPropsOrderEntity {
+  internal class Builder(result: ChangedPropsOrderEntityData?) :
+    ModifiableWorkspaceEntityBase<ChangedPropsOrderEntity, ChangedPropsOrderEntityData>(result), ChangedPropsOrderEntityBuilder {
     internal constructor() : this(ChangedPropsOrderEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -84,15 +81,13 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
           error("Entity ChangedPropsOrderEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -144,7 +139,6 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
         changedProperty.add("entitySource")
 
       }
-
     override var version: Int
       get() = getEntityData().version
       set(value) {
@@ -152,7 +146,6 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
         getEntityData(true).version = value
         changedProperty.add("version")
       }
-
     override var string: String
       get() = getEntityData().string
       set(value) {
@@ -160,7 +153,6 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
         getEntityData(true).string = value
         changedProperty.add("string")
       }
-
     private val listUpdater: (value: List<Set<Int>>) -> Unit = { value ->
 
       changedProperty.add("list")
@@ -182,7 +174,6 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
         getEntityData(true).list = value
         listUpdater.invoke(value)
       }
-
     override var data: ChangedPropsOrderDataClass
       get() = getEntityData().data
       set(value) {
@@ -194,6 +185,7 @@ internal class ChangedPropsOrderEntityImpl(private val dataSource: ChangedPropsO
 
     override fun getEntityClass(): Class<ChangedPropsOrderEntity> = ChangedPropsOrderEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -208,14 +200,13 @@ internal class ChangedPropsOrderEntityData : WorkspaceEntityData<ChangedPropsOrd
   internal fun isListInitialized(): Boolean = ::list.isInitialized
   internal fun isDataInitialized(): Boolean = ::data.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ChangedPropsOrderEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ChangedPropsOrderEntity> {
     val modifiable = ChangedPropsOrderEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ChangedPropsOrderEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -227,8 +218,7 @@ internal class ChangedPropsOrderEntityData : WorkspaceEntityData<ChangedPropsOrd
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedPropsOrderEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedPropsOrderEntity") as EntityMetadata
   }
 
   override fun clone(): ChangedPropsOrderEntityData {
@@ -242,9 +232,8 @@ internal class ChangedPropsOrderEntityData : WorkspaceEntityData<ChangedPropsOrd
     return ChangedPropsOrderEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ChangedPropsOrderEntity(version, string, list, data, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ChangedPropsOrderEntity(version, string, list, data, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -255,9 +244,7 @@ internal class ChangedPropsOrderEntityData : WorkspaceEntityData<ChangedPropsOrd
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ChangedPropsOrderEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.version != other.version) return false
     if (this.string != other.string) return false
@@ -269,9 +256,7 @@ internal class ChangedPropsOrderEntityData : WorkspaceEntityData<ChangedPropsOrd
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ChangedPropsOrderEntityData
-
     if (this.version != other.version) return false
     if (this.string != other.string) return false
     if (this.list != other.list) return false

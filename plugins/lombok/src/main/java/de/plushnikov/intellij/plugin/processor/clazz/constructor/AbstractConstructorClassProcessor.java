@@ -3,7 +3,22 @@ package de.plushnikov.intellij.plugin.processor.clazz.constructor;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightMessageUtil;
 import com.intellij.codeInsight.daemon.impl.quickfix.SafeDeleteFix;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.impl.RecordAugmentProvider;
 import com.intellij.psi.impl.light.LightReferenceListBuilder;
 import com.intellij.psi.impl.light.LightTypeParameterBuilder;
@@ -22,11 +37,20 @@ import de.plushnikov.intellij.plugin.quickfix.PsiQuickFixFactory;
 import de.plushnikov.intellij.plugin.thirdparty.LombokAddNullAnnotations;
 import de.plushnikov.intellij.plugin.thirdparty.LombokCopyableAnnotations;
 import de.plushnikov.intellij.plugin.thirdparty.LombokUtils;
-import de.plushnikov.intellij.plugin.util.*;
+import de.plushnikov.intellij.plugin.util.LombokProcessorUtil;
+import de.plushnikov.intellij.plugin.util.PsiAnnotationSearchUtil;
+import de.plushnikov.intellij.plugin.util.PsiAnnotationUtil;
+import de.plushnikov.intellij.plugin.util.PsiClassUtil;
+import de.plushnikov.intellij.plugin.util.PsiElementUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.stream.Collectors;
 
 /**
@@ -328,6 +352,10 @@ public abstract class AbstractConstructorClassProcessor extends AbstractClassPro
       .withModifier(modifier)
       .withWriteAccess();
 
+    for (PsiField param : params) {
+      constructorBuilder.withRelatedMember(param);
+    }
+
     LombokCopyableAnnotations.copyOnXAnnotations(psiAnnotation, constructorBuilder.getModifierList(), "onConstructor");
 
     if (useJavaDefaults) {
@@ -395,21 +423,38 @@ public abstract class AbstractConstructorClassProcessor extends AbstractClassPro
       .withModifier(PsiModifier.STATIC)
       .withWriteAccess();
 
+    for (PsiField param : params) {
+      methodBuilder.withRelatedMember(param);
+    }
+
+    PsiElementFactory factory = JavaPsiFacade.getElementFactory(psiClass.getProject());
     PsiSubstitutor substitutor = PsiSubstitutor.EMPTY;
     if (psiClass.hasTypeParameters()) {
       final PsiTypeParameter[] classTypeParameters = psiClass.getTypeParameters();
+      List<LightTypeParameterBuilder> methodTypeParameters = new ArrayList<>(classTypeParameters.length);
 
-      // need to create new type parameters
+      // Create method type parameters first so all class type parameters can be substituted in one pass.
       for (int index = 0; index < classTypeParameters.length; index++) {
         final PsiTypeParameter classTypeParameter = classTypeParameters[index];
-        final LightTypeParameterBuilder methodTypeParameter = createTypeParameter(methodBuilder, index, classTypeParameter);
+        final LightTypeParameterBuilder methodTypeParameter =
+          new LightTypeParameterBuilder(StringUtil.notNullize(classTypeParameter.getName()), methodBuilder, index);
         methodBuilder.withTypeParameter(methodTypeParameter);
+        methodTypeParameters.add(methodTypeParameter);
+        substitutor = substitutor.put(classTypeParameter, factory.createType(methodBuilder.getTypeParameters()[index]));
+      }
 
-        substitutor = substitutor.put(classTypeParameter, PsiSubstitutor.EMPTY.substitute(methodTypeParameter));
+      for (int index = 0; index < classTypeParameters.length; index++) {
+        PsiTypeParameter classTypeParameter = classTypeParameters[index];
+        final LightReferenceListBuilder methodExtendsList = methodTypeParameters.get(index).getExtendsList();
+        for (PsiClassType classReferencedType : classTypeParameter.getExtendsList().getReferencedTypes()) {
+          final PsiType substitutedType = substitutor.substitute(classReferencedType);
+          if (substitutedType instanceof PsiClassType psiClassSubstitutedType) {
+            methodExtendsList.addReference(psiClassSubstitutedType);
+          }
+        }
       }
     }
 
-    final PsiElementFactory factory = JavaPsiFacade.getElementFactory(psiClass.getProject());
     final PsiType returnType = factory.createType(psiClass, substitutor);
     methodBuilder.withMethodReturnType(returnType);
 
@@ -430,19 +475,6 @@ public abstract class AbstractConstructorClassProcessor extends AbstractClassPro
     LombokAddNullAnnotations.createRelevantNonNullAnnotation(psiClass, methodBuilder);
 
     return methodBuilder;
-  }
-
-  private static @NotNull LightTypeParameterBuilder createTypeParameter(LombokLightMethodBuilder method,
-                                                                        int index,
-                                                                        PsiTypeParameter psiClassTypeParameter) {
-    final String nameOfTypeParameter = StringUtil.notNullize(psiClassTypeParameter.getName());
-
-    final LightTypeParameterBuilder result = new LightTypeParameterBuilder(nameOfTypeParameter, method, index);
-    final LightReferenceListBuilder resultExtendsList = result.getExtendsList();
-    for (PsiClassType referencedType : psiClassTypeParameter.getExtendsList().getReferencedTypes()) {
-      resultExtendsList.addReference(referencedType);
-    }
-    return result;
   }
 
   private static @NotNull String createStaticCodeBlockText(@NotNull PsiType psiType,

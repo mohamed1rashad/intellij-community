@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.source;
 
 import com.intellij.application.options.CodeStyle;
@@ -14,6 +14,8 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationListener;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteActionListener;
+import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -21,25 +23,49 @@ import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Computable;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NotNullLazyValue;
+import com.intellij.openapi.util.NullableComputable;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Segment;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.PomModelAspect;
 import com.intellij.pom.core.impl.PomModelImpl;
 import com.intellij.pom.event.PomModelEvent;
 import com.intellij.pom.tree.TreeAspect;
-import com.intellij.pom.tree.events.ChangeInfo;
+import com.intellij.pom.tree.events.ChangeInfoKind;
 import com.intellij.pom.tree.events.TreeChange;
 import com.intellij.pom.tree.events.TreeChangeEvent;
 import com.intellij.pom.tree.events.impl.ChangeInfoImpl;
 import com.intellij.pom.tree.events.impl.TreeChangeImpl;
-import com.intellij.psi.*;
+import com.intellij.psi.AbstractFileViewProvider;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.TokenType;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.impl.PsiDocumentManagerBase;
+import com.intellij.psi.impl.PsiDocumentManagerEx;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.impl.file.impl.FileManager;
 import com.intellij.psi.impl.source.codeStyle.CodeEditUtil;
 import com.intellij.psi.impl.source.codeStyle.IndentHelperImpl;
-import com.intellij.psi.impl.source.tree.*;
+import com.intellij.psi.impl.source.tree.CompositeElement;
+import com.intellij.psi.impl.source.tree.FileElement;
+import com.intellij.psi.impl.source.tree.LeafElement;
+import com.intellij.psi.impl.source.tree.RecursiveTreeElementVisitor;
+import com.intellij.psi.impl.source.tree.RecursiveTreeElementWalkingVisitor;
+import com.intellij.psi.impl.source.tree.SharedImplUtil;
+import com.intellij.psi.impl.source.tree.TreeElement;
+import com.intellij.psi.impl.source.tree.TreeUtil;
+import com.intellij.psi.impl.source.tree.mvcc.InternalPsiVersioning;
 import com.intellij.util.Function;
 import com.intellij.util.InjectionUtils;
 import com.intellij.util.containers.ContainerUtil;
@@ -47,9 +73,22 @@ import com.intellij.util.containers.JBIterable;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.text.CharArrayUtil;
 import com.intellij.util.text.TextRangeUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 @ApiStatus.Internal
 public final class PostprocessReformattingAspectImpl extends PostprocessReformattingAspect {
@@ -90,10 +129,14 @@ public final class PostprocessReformattingAspectImpl extends PostprocessReformat
   public PostprocessReformattingAspectImpl(@NotNull Project project) {
     myProject = project;
     myTreeAspect = NotNullLazyValue.createValue(() -> TreeAspect.getInstance(myProject));
+    // we must register versioning listeners BEFORE the postprocess reformatting listeners
+    // because postprocess reformatting performs modification of PSI
+    InternalPsiVersioning.PsiVersioningWriteActionActivity.addListeners();
 
-    ApplicationManager.getApplication().addApplicationListener(new ApplicationListener() {
+    ApplicationManagerEx.getApplicationEx().addWriteActionListener(new WriteActionListener() {
+
       @Override
-      public void writeActionStarted(@NotNull Object action) {
+      public void writeActionStarted(@NotNull Class<?> action) {
         CommandProcessor processor = CommandProcessor.getInstance();
         if (processor != null && processor.getCurrentCommandProject() == myProject) {
           incrementPostponedCounter();
@@ -101,7 +144,7 @@ public final class PostprocessReformattingAspectImpl extends PostprocessReformat
       }
 
       @Override
-      public void writeActionFinished(@NotNull Object action) {
+      public void writeActionFinished(@NotNull Class<?> action) {
         Application app = ApplicationManager.getApplication();
         CommandProcessor processor = app == null ? null : app.getServiceIfCreated(CommandProcessor.class);
         if (processor != null && processor.getCurrentCommandProject() == myProject) {
@@ -221,12 +264,12 @@ public final class PostprocessReformattingAspectImpl extends PostprocessReformat
           getContext().myRaisingCandidates.putValue(viewProvider, node);
         }
 
-        final ChangeInfo childChange = treeChange.getChangeByChild(affectedChild);
-        switch (childChange.getChangeType()) {
-          case ChangeInfo.ADD, ChangeInfo.REPLACE -> postponeFormatting(viewProvider, affectedChild);
-          case ChangeInfo.CONTENTS_CHANGED -> {
+        final ChangeInfoKind changeType = treeChange.getChangeByChild(affectedChild).getChangeType();
+        switch (changeType) {
+          case Added, Replaced -> postponeFormatting(viewProvider, affectedChild);
+          case ContentsChanged -> {
             if (!CodeEditUtil.isNodeGenerated(affectedChild)) {
-              ((TreeElement)affectedChild).acceptTree(new RecursiveTreeElementWalkingVisitor() {
+              ((TreeElement)affectedChild).acceptTree(new RecursiveTreeElementWalkingVisitor(affectedChild) {
                 @Override
                 protected void visitNode(TreeElement element) {
                   if (CodeEditUtil.isNodeGenerated(element) && CodeEditUtil.isSuspendedNodesReformattingAllowed()) {
@@ -443,7 +486,7 @@ public final class PostprocessReformattingAspectImpl extends PostprocessReformat
 
       for (PsiFile file : viewProvider.getAllFiles()) {
         if (file.getUserData(REPARSE_PENDING) != null || rootsToReparse.contains(file)) {
-          ((PsiDocumentManagerBase)PsiDocumentManager.getInstance(myProject)).reparseFileFromText((PsiFileImpl)file);
+          ((PsiDocumentManagerEx)PsiDocumentManager.getInstance(myProject)).reparseFileFromText((PsiFileImpl)file);
           file.putUserData(REPARSE_PENDING, null);
         }
       }
@@ -669,7 +712,7 @@ public final class PostprocessReformattingAspectImpl extends PostprocessReformat
       return;
     }
     for (final FileASTNode fileElement : ((AbstractFileViewProvider)key).getKnownTreeRoots()) {
-      ((TreeElement) fileElement).acceptTree(new RecursiveTreeElementWalkingVisitor() {
+      ((TreeElement) fileElement).acceptTree(new RecursiveTreeElementWalkingVisitor(fileElement, true) {
         @Override
         protected void visitNode(TreeElement element) {
           if (CodeEditUtil.isMarkedToReformatBefore(element)) {

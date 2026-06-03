@@ -4,13 +4,12 @@ package com.intellij.polySymbols.html.elements
 import com.intellij.documentation.mdn.MdnSymbolDocumentation
 import com.intellij.documentation.mdn.getHtmlApiNamespace
 import com.intellij.documentation.mdn.getHtmlMdnTagDocumentation
-import com.intellij.polySymbols.html.StandardHtmlSymbol
 import com.intellij.model.Pointer
 import com.intellij.openapi.project.Project
 import com.intellij.polySymbols.PolySymbol
-import com.intellij.polySymbols.PolySymbolOrigin
-import com.intellij.polySymbols.PolySymbolQualifiedKind
+import com.intellij.polySymbols.PolySymbolKind
 import com.intellij.polySymbols.html.HTML_ELEMENTS
+import com.intellij.polySymbols.html.StandardHtmlSymbol
 import com.intellij.psi.PsiElement
 import com.intellij.psi.createSmartPointer
 import com.intellij.psi.html.HtmlTag
@@ -31,13 +30,10 @@ internal class HtmlElementDescriptorBasedSymbol(
     getHtmlMdnTagDocumentation(getHtmlApiNamespace(descriptor.nsDescriptor?.name, tag, name),
                                name)
 
-  override val qualifiedKind: PolySymbolQualifiedKind
+  override val kind: PolySymbolKind
     get() = HTML_ELEMENTS
 
   override val name: String = descriptor.name
-
-  override val origin: PolySymbolOrigin
-    get() = PolySymbolOrigin.Companion.empty()
 
   override val priority: PolySymbol.Priority
     get() = PolySymbol.Priority.LOW
@@ -45,7 +41,7 @@ internal class HtmlElementDescriptorBasedSymbol(
   override val defaultValue: String?
     get() = descriptor.defaultValue
 
-  override val source: PsiElement?
+  override val linkedElement: PsiElement?
     get() = descriptor.declaration
 
   override fun createPointer(): Pointer<HtmlElementDescriptorBasedSymbol> {

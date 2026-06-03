@@ -13,10 +13,20 @@ import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.openapi.vcs.changes.LocalChangeList
 import com.intellij.openapi.vcs.changes.createNameForChangeList
 import com.intellij.openapi.wm.IdeFocusManager
-import com.intellij.ui.*
+import com.intellij.ui.EditorCustomization
+import com.intellij.ui.EditorTextField
+import com.intellij.ui.EditorTextFieldProvider
+import com.intellij.ui.HorizontalScrollBarEditorCustomization
+import com.intellij.ui.OneLineEditorCustomization
+import com.intellij.ui.SoftWrapsEditorCustomization
 import com.intellij.ui.components.panels.Wrapper
-import com.intellij.ui.dsl.builder.*
-import com.intellij.ui.dsl.gridLayout.UnscaledGaps
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.AlignY
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.RowLayout
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.util.Consumer
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.ui.JBDimension
@@ -69,27 +79,23 @@ abstract class NewEditChangelistPanel(protected val project: Project) : Wrapper(
   }
 
   private fun buildMainPanel() = panel {
-    val gap = 3
     row(VcsBundle.message("edit.changelist.name")) {
       cell(nameComponent.myComponent)
-        .resizableColumn()
         .align(AlignX.FILL)
-        .applyToComponent {
-          putClientProperty(DslComponentProperty.VISUAL_PADDINGS, UnscaledGaps(gap))
-        }
     }.bottomGap(BottomGap.SMALL)
 
     row {
       label(VcsBundle.message("edit.changelist.description"))
         .align(AlignY.TOP)
         .gap(RightGap.SMALL)
+        .applyToComponent {
+          labelFor = descriptionTextArea
+        }
 
       cell(descriptionTextArea)
-        .resizableColumn()
         .align(Align.FILL)
-        .customize(UnscaledGaps(left = gap, right = gap))
     }.resizableRow()
-      .layout(RowLayout.PARENT_GRID)
+      .layout(RowLayout.LABEL_ALIGNED)
       .bottomGap(BottomGap.SMALL)
 
     row {

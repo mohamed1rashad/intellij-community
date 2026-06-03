@@ -8,7 +8,11 @@ import com.intellij.ide.highlighter.ProjectFileType
 import com.intellij.ide.impl.MultipleFileOpener
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
-import com.intellij.ide.lightEdit.*
+import com.intellij.ide.lightEdit.LightEdit
+import com.intellij.ide.lightEdit.LightEditCompatible
+import com.intellij.ide.lightEdit.LightEditFeatureUsagesUtil
+import com.intellij.ide.lightEdit.LightEditService
+import com.intellij.ide.lightEdit.LightEditUtil
 import com.intellij.ide.util.PsiNavigationSupport
 import com.intellij.idea.ActionsBundle
 import com.intellij.openapi.actionSystem.ActionUpdateThread
@@ -36,7 +40,13 @@ import com.intellij.openapi.wm.impl.welcomeScreen.FlatWelcomeFrame
 import com.intellij.openapi.wm.impl.welcomeScreen.NewWelcomeScreen
 import com.intellij.openapi.wm.impl.welcomeScreen.WelcomeScreenActionsUtil
 import com.intellij.platform.PlatformProjectOpenProcessor
+import com.intellij.platform.eel.provider.LocalEelDescriptor
+import com.intellij.platform.eel.provider.asNioPath
+import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.eel.provider.toEelApi
 import com.intellij.platform.ide.CoreUiCoroutineScopeHolder
+import com.intellij.platform.ide.progress.ModalTaskOwner
+import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.project.ProjectStoreOwner
 import com.intellij.projectImport.ProjectOpenProcessor.Companion.getImportProvider
 import com.intellij.util.SlowOperations
@@ -62,7 +72,7 @@ open class OpenFileAction : AnAction(), DumbAware, LightEditCompatible, ActionRe
       NonProjectFileWritingAccessProvider.allowWriting(listOf(file))
       if (LightEdit.owns(project)) {
         LightEditService.getInstance().openFile(file)
-        LightEditFeatureUsagesUtil.logFileOpen(project, LightEditFeatureUsagesUtil.OpenPlace.LightEditOpenAction)
+        LightEditFeatureUsagesUtil.logFileOpen(project, file, LightEditFeatureUsagesUtil.OpenPlace.LightEditOpenAction)
       }
       else {
         PsiNavigationSupport.getInstance().createNavigatable(project, file, -1).navigate(true)
@@ -82,7 +92,7 @@ open class OpenFileAction : AnAction(), DumbAware, LightEditCompatible, ActionRe
       toSelect = VfsUtil.findFileByIoFile(File(defaultProjectDirectory), true)
     }
     val descriptor = createFileChooserDescriptor(project, toSelect)
-    FileChooser.chooseFiles(descriptor, project, toSelect ?: pathToSelect) { files ->
+    FileChooser.chooseFiles(descriptor, project, toSelect ?: getPathToSelect(project)) { files ->
       for (file in files) {
         if (!descriptor.isFileSelectable(file)) {
           val message = IdeBundle.message("error.dir.contains.no.project", file.presentableUrl)
@@ -114,7 +124,7 @@ open class OpenFileAction : AnAction(), DumbAware, LightEditCompatible, ActionRe
   }
 
   @Suppress("unused")
-  private class OnWelcomeScreen : OpenFileAction() {
+  internal class OnWelcomeScreen : OpenFileAction() {
     override fun update(e: AnActionEvent) {
       val presentation = e.presentation
       if (!NewWelcomeScreen.isNewWelcomeScreen(e)) {
@@ -137,8 +147,22 @@ open class OpenFileAction : AnAction(), DumbAware, LightEditCompatible, ActionRe
     }
   }
 
-  protected val pathToSelect: VirtualFile?
-    get() = VfsUtil.getUserHomeDir()
+  private fun getPathToSelect(project: Project?): VirtualFile? {
+    val projectFilePath = project?.projectFile?.toNioPath() ?: return VfsUtil.getUserHomeDir()
+    val descriptor = projectFilePath.getEelDescriptor()
+    return if (descriptor is LocalEelDescriptor) {
+      VfsUtil.getUserHomeDir()
+    }
+    else {
+      runWithModalProgressBlocking(
+        owner = ModalTaskOwner.project(project),
+        title = IdeBundle.message("title.open.file.or.project"),
+      ) {
+        val userHome = descriptor.toEelApi().userInfo.home
+        VfsUtil.findFile(userHome.asNioPath(), true)
+      }
+    }
+  }
 
   override fun update(e: AnActionEvent) {
     if (NewWelcomeScreen.isNewWelcomeScreen(e)) {
@@ -171,7 +195,7 @@ open class OpenFileAction : AnAction(), DumbAware, LightEditCompatible, ActionRe
     val file = virtualFile.toNioPath()
     if (Files.isDirectory(file)) {
       @Suppress("TestOnlyProblems")
-      ProjectUtil.openExistingDir(file, project)
+      ProjectUtil.openExistingDir(file, ProjectUtil.FolderOpeningMode.AS_PROJECT, project)
       return
     }
 
@@ -205,7 +229,7 @@ open class OpenFileAction : AnAction(), DumbAware, LightEditCompatible, ActionRe
       NonProjectFileWritingAccessProvider.allowWriting(listOf(virtualFile))
       if (LightEdit.owns(project)) {
         LightEditService.getInstance().openFile(virtualFile)
-        LightEditFeatureUsagesUtil.logFileOpen(project, LightEditFeatureUsagesUtil.OpenPlace.LightEditOpenAction)
+        LightEditFeatureUsagesUtil.logFileOpen(project, virtualFile, LightEditFeatureUsagesUtil.OpenPlace.LightEditOpenAction)
       }
       else {
         val navigatable = PsiNavigationSupport.getInstance().createNavigatable(project, virtualFile, -1)

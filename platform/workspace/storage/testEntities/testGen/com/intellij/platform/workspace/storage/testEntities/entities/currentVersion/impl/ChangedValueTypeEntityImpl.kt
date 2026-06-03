@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -19,19 +20,17 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ChangedValueTypeEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ModifiableChangedValueTypeEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ChangedValueTypeEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTypeEntityData) : ChangedValueTypeEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTypeEntityData) : ChangedValueTypeEntity,
+                                                                                                WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -40,13 +39,11 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
       readField("type")
       return dataSource.type
     }
-
   override val someKey: String
     get() {
       readField("someKey")
       return dataSource.someKey
     }
-
   override val text: List<String>
     get() {
       readField("text")
@@ -64,8 +61,8 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
   }
 
 
-  internal class Builder(result: ChangedValueTypeEntityData?) : ModifiableWorkspaceEntityBase<ChangedValueTypeEntity, ChangedValueTypeEntityData>(
-    result), ModifiableChangedValueTypeEntity {
+  internal class Builder(result: ChangedValueTypeEntityData?) :
+    ModifiableWorkspaceEntityBase<ChangedValueTypeEntity, ChangedValueTypeEntityData>(result), ChangedValueTypeEntityBuilder {
     internal constructor() : this(ChangedValueTypeEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -78,15 +75,13 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
           error("Entity ChangedValueTypeEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -137,7 +132,6 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
         changedProperty.add("entitySource")
 
       }
-
     override var type: String
       get() = getEntityData().type
       set(value) {
@@ -145,7 +139,6 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
         getEntityData(true).type = value
         changedProperty.add("type")
       }
-
     override var someKey: String
       get() = getEntityData().someKey
       set(value) {
@@ -153,7 +146,6 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
         getEntityData(true).someKey = value
         changedProperty.add("someKey")
       }
-
     private val textUpdater: (value: List<String>) -> Unit = { value ->
 
       changedProperty.add("text")
@@ -178,6 +170,7 @@ internal class ChangedValueTypeEntityImpl(private val dataSource: ChangedValueTy
 
     override fun getEntityClass(): Class<ChangedValueTypeEntity> = ChangedValueTypeEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -190,14 +183,13 @@ internal class ChangedValueTypeEntityData : WorkspaceEntityData<ChangedValueType
   internal fun isSomeKeyInitialized(): Boolean = ::someKey.isInitialized
   internal fun isTextInitialized(): Boolean = ::text.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ChangedValueTypeEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ChangedValueTypeEntity> {
     val modifiable = ChangedValueTypeEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ChangedValueTypeEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -209,8 +201,7 @@ internal class ChangedValueTypeEntityData : WorkspaceEntityData<ChangedValueType
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ChangedValueTypeEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ChangedValueTypeEntity") as EntityMetadata
   }
 
   override fun clone(): ChangedValueTypeEntityData {
@@ -224,9 +215,8 @@ internal class ChangedValueTypeEntityData : WorkspaceEntityData<ChangedValueType
     return ChangedValueTypeEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ChangedValueTypeEntity(type, someKey, text, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ChangedValueTypeEntity(type, someKey, text, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -237,9 +227,7 @@ internal class ChangedValueTypeEntityData : WorkspaceEntityData<ChangedValueType
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ChangedValueTypeEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.type != other.type) return false
     if (this.someKey != other.someKey) return false
@@ -250,9 +238,7 @@ internal class ChangedValueTypeEntityData : WorkspaceEntityData<ChangedValueType
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ChangedValueTypeEntityData
-
     if (this.type != other.type) return false
     if (this.someKey != other.someKey) return false
     if (this.text != other.text) return false

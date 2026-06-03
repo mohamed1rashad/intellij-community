@@ -8,13 +8,12 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.ModificationTracker
 import com.intellij.openapi.util.SimpleModificationTracker
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import org.jetbrains.annotations.ApiStatus
+import java.nio.file.Path
 
 abstract class SaveAndSyncHandler {
   companion object {
     @JvmStatic
-    @RequiresBlockingContext
     fun getInstance(): SaveAndSyncHandler = service()
   }
 
@@ -39,6 +38,13 @@ abstract class SaveAndSyncHandler {
   }
 
   abstract fun scheduleRefresh()
+
+  @ApiStatus.Internal
+  open fun scheduleRefresh(paths: Collection<Path>) {
+    if (paths.isNotEmpty()) {
+      scheduleRefresh()
+    }
+  }
 
   abstract fun refreshOpenFiles()
 

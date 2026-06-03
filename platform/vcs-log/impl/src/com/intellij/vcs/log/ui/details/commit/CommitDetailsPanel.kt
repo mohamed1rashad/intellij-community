@@ -7,6 +7,8 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.toolbarLayout.autoLayoutStrategy
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.util.NlsContexts
@@ -20,18 +22,31 @@ import com.intellij.ui.ColorUtil
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.scale.JBUIScale
-import com.intellij.util.ui.*
+import com.intellij.util.ui.CheckboxIcon
+import com.intellij.util.ui.ColorIcon
+import com.intellij.util.ui.ExtendableHTMLViewFactory
+import com.intellij.util.ui.HTMLEditorKitBuilder
+import com.intellij.util.ui.HtmlPanel
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.components.BorderLayoutPanel
 import com.intellij.vcs.log.CommitId
 import com.intellij.vcs.log.VcsRef
-import com.intellij.vcs.log.ui.frame.CommitPresentationUtil.*
+import com.intellij.vcs.log.ui.frame.CommitPresentationUtil.CommitPresentation
+import com.intellij.vcs.log.ui.frame.CommitPresentationUtil.getBranchesLinkText
+import com.intellij.vcs.log.ui.frame.CommitPresentationUtil.isGoToHash
+import com.intellij.vcs.log.ui.frame.CommitPresentationUtil.isShowHideBranches
 import com.intellij.vcs.log.ui.frame.VcsCommitExternalStatusPresentation
 import com.intellij.vcs.log.util.VcsLogUiUtil
 import net.miginfocom.layout.CC
 import net.miginfocom.layout.HideMode
 import net.miginfocom.layout.LC
 import net.miginfocom.swing.MigLayout
-import java.awt.*
+import java.awt.Color
+import java.awt.Dimension
+import java.awt.Font
+import java.awt.Graphics
+import java.awt.Point
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.BoxLayout
@@ -96,7 +111,7 @@ class CommitDetailsPanel @JvmOverloads constructor(navigate: (CommitId) -> Unit 
     val maxHeight = 22 * 4
     add(statusesToolbar.component, CC().alignY("top").maxHeight("$maxHeight").minHeight("$TOOLBAR_MIN_HEIGHT"))
 
-    updateStatusToolbar(false)
+    scheduleStatusToolbarUpdate()
   }
 
   fun setCommit(presentation: CommitPresentation) {
@@ -134,14 +149,16 @@ class CommitDetailsPanel @JvmOverloads constructor(navigate: (CommitId) -> Unit 
     statusesActionGroup.removeAll()
     statusesActionGroup.addAll(nonSignaturesStatuses.map(::statusToAction))
 
-    updateStatusToolbar(nonSignaturesStatuses.isNotEmpty())
+    scheduleStatusToolbarUpdate()
   }
 
   private fun statusToAction(status: VcsCommitExternalStatusPresentation) =
     object : DumbAwareAction(status.text, null, status.icon) {
-      override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
+      init {
+        templatePresentation.isRWLockRequired = false
       }
+
+      override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
       override fun update(e: AnActionEvent) {
         e.presentation.apply {
@@ -159,10 +176,16 @@ class CommitDetailsPanel @JvmOverloads constructor(navigate: (CommitId) -> Unit 
       }
     }
 
-  private fun updateStatusToolbar(hasStatuses: Boolean) {
-    border = if (hasStatuses) JBUI.Borders.empty() else JBUI.Borders.emptyRight(SIDE_BORDER)
-    statusesToolbar.updateActionsImmediately()
-    statusesToolbar.component.isVisible = hasStatuses
+  private fun scheduleStatusToolbarUpdate() {
+    val modality = ModalityState.stateForComponent(this)
+    // even async toolbar update may need a ReadAction and we might not be allowed to launch it here
+    ApplicationManager.getApplication().invokeLater(
+      {
+        val hasStatuses = statusesActionGroup.childrenCount > 0
+        border = if (hasStatuses) JBUI.Borders.empty() else JBUI.Borders.emptyRight(SIDE_BORDER)
+        statusesToolbar.updateActionsAsync()
+        statusesToolbar.component.isVisible = hasStatuses
+      }, modality)
   }
 
   fun update() {

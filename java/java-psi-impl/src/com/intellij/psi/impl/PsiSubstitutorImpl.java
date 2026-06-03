@@ -5,7 +5,24 @@ import com.intellij.codeInsight.TypeNullability;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.RecursionManager;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.EmptySubstitutor;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiCapturedWildcardType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiEllipsisType;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeMapper;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeVisitor;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiWildcardType;
 import com.intellij.psi.impl.light.LightTypeParameter;
 import com.intellij.psi.impl.source.PsiImmediateClassType;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceVariable;
@@ -183,7 +200,8 @@ public final class PsiSubstitutorImpl implements PsiSubstitutor {
 
       if (type.isExtends()) {
         if (newBound.equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
-          return PsiWildcardType.createUnbounded(type.getManager());
+          return PsiWildcardType.createUnbounded(type.getManager())
+            .withNullability(newBound.getNullability());
         }
         return PsiWildcardType.createExtends(type.getManager(), newBound);
       }
@@ -213,7 +231,8 @@ public final class PsiSubstitutorImpl implements PsiSubstitutor {
       }
       PsiSubstitutor resultSubstitutor = processClass(aClass, resolveResult.getSubstitutor());
       return new PsiImmediateClassType(aClass, resultSubstitutor, classType.getLanguageLevel(),
-                                       classType.getAnnotationProvider(), classType.getPsiContext());
+                                       classType.getAnnotationProvider(), classType.getPsiContext())
+        .withNullability(classType.getNullability());
     }
 
     private @NotNull PsiSubstitutor processClass(@NotNull PsiClass resolve, @NotNull PsiSubstitutor originalSubstitutor) {
@@ -221,7 +240,10 @@ public final class PsiSubstitutorImpl implements PsiSubstitutor {
       while (true) {
         final PsiTypeParameter[] params = resolve.getTypeParameters();
         for (final PsiTypeParameter param : params) {
-          final PsiType original = originalSubstitutor.substitute(param);
+          PsiType original = originalSubstitutor.substitute(param);
+          if (original != null && original.getNullability().equals(TypeNullability.UNKNOWN)) {
+            original = original.withNullability(TypeNullability.ofTypeParameter(param));
+          }
           PsiType mapping = original == null ? null : original.accept(this);
           substMap = substMap.with(param, mapping);
         }

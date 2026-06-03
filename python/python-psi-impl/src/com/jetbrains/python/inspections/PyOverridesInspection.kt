@@ -12,17 +12,23 @@ import com.jetbrains.python.psi.search.PySuperMethodsSearch
 import com.jetbrains.python.psi.types.TypeEvalContext
 
 class PyOverridesInspection : PyInspection() {
-
-  override fun buildVisitor(holder: ProblemsHolder,
-                            isOnTheFly: Boolean,
-                            session: LocalInspectionToolSession): PsiElementVisitor =
-    Visitor(holder, PyInspectionVisitor.getContext(session))
+  override fun buildVisitor(
+    holder: ProblemsHolder,
+    isOnTheFly: Boolean,
+    session: LocalInspectionToolSession,
+  ): PsiElementVisitor {
+    val context = PyInspectionVisitor.getContext(session)
+    if (context.usesExternalTypeEngine) {
+      return PsiElementVisitor.EMPTY_VISITOR
+    }
+    return Visitor(holder, context)
+  }
 
   private class Visitor(holder: ProblemsHolder, context: TypeEvalContext) : PyInspectionVisitor(holder, context) {
 
     override fun visitPyFunction(node: PyFunction) {
       super.visitPyFunction(node)
-      
+
       if (node.containingClass?.getAncestorTypes(myTypeEvalContext)?.contains(null) ?: false) return
 
       val overrideDecorator = node.decoratorList?.decorators?.firstOrNull { decorator ->

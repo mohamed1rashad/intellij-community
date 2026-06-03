@@ -1,21 +1,46 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application.impl
 
+import com.intellij.concurrency.JobLauncher
 import com.intellij.concurrency.currentThreadContext
 import com.intellij.concurrency.installThreadContext
+import com.intellij.ide.util.DelegatingProgressIndicator
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.EdtImmediate
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.TransactionGuard
+import com.intellij.openapi.application.UiWithModelAccess
+import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.application.backgroundWriteAction
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.application.ex.ApplicationManagerEx
-import com.intellij.openapi.progress.*
+import com.intellij.openapi.application.installSuvorovProgress
+import com.intellij.openapi.application.invokeLater
+import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
+import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.application.useBackgroundWriteAction
+import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.progress.Cancellation
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.coroutineToIndicator
 import com.intellij.openapi.progress.util.ProgressIndicatorUtils
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.locking.impl.getGlobalThreadingSupport
+import com.intellij.platform.util.progress.reportProgress
 import com.intellij.testFramework.LoggedErrorProcessor
 import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.testFramework.junit5.TestApplication
@@ -24,20 +49,34 @@ import com.intellij.util.cancelOnDispose
 import com.intellij.util.ref.DebugReflectionUtil
 import com.intellij.util.ui.EDT
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.asCompletableFuture
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.fail
-import org.jetbrains.concurrency.AsyncPromise
-import org.jetbrains.concurrency.Promise
 import org.jetbrains.concurrency.resolvedPromise
+import org.jetbrains.concurrency.toPromise
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Assumptions
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JComponent
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
@@ -48,23 +87,6 @@ import kotlin.time.Duration.Companion.seconds
 
 @TestApplication
 class PlatformUtilitiesTest {
-
-  @Test
-  fun `relaxing preventive actions leads to absence of lock`(): Unit = timeoutRunBlocking(context = Dispatchers.EDT) {
-    withContext(Dispatchers.UiWithModelAccess) {
-      assertThat(application.isWriteIntentLockAcquired).isFalse
-      getGlobalThreadingSupport().runPreventiveWriteIntentReadAction {
-        assertThat(application.isWriteIntentLockAcquired).isTrue
-      }
-      getGlobalThreadingSupport().relaxPreventiveLockingActions {
-        getGlobalThreadingSupport().runPreventiveWriteIntentReadAction {
-          assertThat(application.isWriteIntentLockAcquired).isFalse
-        }
-      }
-
-    }
-
-  }
 
   @Test
   fun `invokeAndWaitRelaxed does not take lock`(): Unit = timeoutRunBlocking(context = Dispatchers.Default) {
@@ -78,11 +100,9 @@ class PlatformUtilitiesTest {
   }
 
   @Test
-  fun `raw background write action is not allowed`(): Unit = timeoutRunBlocking(context = Dispatchers.Default) {
-    assertThrows<IllegalStateException> {
-      ApplicationManager.getApplication().runWriteAction {
-        fail<Nothing>()
-      }
+  fun `raw background write action is allowed`(): Unit = timeoutRunBlocking(context = Dispatchers.Default) {
+    // no errors should be thrown
+    ApplicationManager.getApplication().runWriteAction {
     }
   }
 
@@ -259,7 +279,7 @@ class PlatformUtilitiesTest {
   fun `transferredWriteAction is not available without write lock`(): Unit = timeoutRunBlocking(context = Dispatchers.Default) {
     assertThrows<AssertionError> {
       InternalThreading.invokeAndWaitWithTransferredWriteAction {
-        fail<Nothing>()
+        throw IllegalStateException("should not run")
       }
     }
   }
@@ -268,7 +288,7 @@ class PlatformUtilitiesTest {
   fun `transferredWriteAction is not available on EDT`(): Unit = timeoutRunBlocking(context = Dispatchers.UiWithModelAccess) {
     assertThrows<AssertionError> {
       InternalThreading.invokeAndWaitWithTransferredWriteAction {
-        fail<Nothing>()
+        throw IllegalStateException("should not run")
       }
     }
   }
@@ -303,6 +323,168 @@ class PlatformUtilitiesTest {
         }
       }
     }
+  }
+
+  @Test
+  fun `transferredWriteAction can run on pooled thread`(): Unit = timeoutRunBlocking(context = Dispatchers.EDT) {
+    Assumptions.assumeTrue(useBackgroundWriteAction)
+    edtWriteAction {
+      InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+        assertThat(EDT.isCurrentThreadEdt()).isFalse
+        assertThat(application.isWriteAccessAllowed).isTrue
+        assertThat(application.isReadAccessAllowed).isTrue
+        runWriteAction {}
+        runReadActionBlocking { }
+        assertThat(TransactionGuard.getInstance().isWritingAllowed).isTrue
+      }
+    }
+  }
+
+  @Test
+  fun `transferredWriteAction to pooled thread is not available without write lock`(): Unit = timeoutRunBlocking(context = Dispatchers.EDT) {
+    assertThrows<AssertionError> {
+      InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+        throw IllegalStateException("should not run")
+      }
+    }
+  }
+
+  @Test
+  fun `transferredWriteAction to pooled thread is not available on background thread`(): Unit = timeoutRunBlocking(context = Dispatchers.Default) {
+    Assumptions.assumeTrue(useBackgroundWriteAction)
+    backgroundWriteAction {
+      assertThrows<AssertionError> {
+        InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+          throw IllegalStateException("should not run")
+        }
+      }
+    }
+  }
+
+  @Test
+  fun `transferredWriteAction to pooled thread rethrows exceptions`(): Unit = timeoutRunBlocking(context = Dispatchers.EDT) {
+    Assumptions.assumeTrue(useBackgroundWriteAction)
+    edtWriteAction {
+      val exception = assertThrows<IllegalStateException> {
+        InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+          throw IllegalStateException("custom message")
+        }
+      }
+      assertThat(exception.message).isEqualTo("custom message")
+    }
+  }
+
+  @Test
+  fun `transferred write action to pooled thread captures thread context`(): Unit = timeoutRunBlocking(context = Dispatchers.EDT) {
+    Assumptions.assumeTrue(useBackgroundWriteAction)
+    edtWriteAction {
+      val element = MyElement()
+      installThreadContext(currentThreadContext() + element, true) {
+        val currentThread = Thread.currentThread()
+        InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+          val transferredThread = Thread.currentThread()
+          assertNotEquals(currentThread, transferredThread)
+          val innerElement = currentThreadContext()[MyElement]
+          assertEquals(element, innerElement)
+        }
+      }
+    }
+  }
+
+  @Test
+  fun `invokeAndWait transferred write action can run inside pooled transferred write action`(): Unit = timeoutRunBlocking(timeout = 10.seconds, context = Dispatchers.EDT) {
+    Assumptions.assumeTrue(useBackgroundWriteAction)
+
+    val events = ConcurrentLinkedQueue<String>()
+    lateinit var originalEdtThread: Thread
+    lateinit var pooledThread: Thread
+
+    edtWriteAction {
+      originalEdtThread = Thread.currentThread()
+      events.add("outer:edt:start")
+
+      InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+        pooledThread = Thread.currentThread()
+        events.add("outer:pooled:start")
+        assertThat(EDT.isCurrentThreadEdt()).isFalse
+        assertThat(application.isWriteAccessAllowed).isTrue
+        assertThat(application.isReadAccessAllowed).isTrue
+        assertThat(TransactionGuard.getInstance().isWritingAllowed).isTrue
+
+        InternalThreading.invokeAndWaitWithTransferredWriteAction {
+          events.add("inner:edt")
+          assertThat(EDT.isCurrentThreadEdt()).isTrue
+          assertThat(Thread.currentThread()).isSameAs(originalEdtThread)
+          assertThat(Thread.currentThread()).isNotSameAs(pooledThread)
+          assertThat(application.isWriteAccessAllowed).isTrue
+          assertThat(application.isReadAccessAllowed).isTrue
+          assertThat(TransactionGuard.getInstance().isWritingAllowed).isTrue
+        }
+
+        events.add("outer:pooled:end")
+        assertThat(Thread.currentThread()).isSameAs(pooledThread)
+      }
+
+      events.add("outer:edt:end")
+      assertThat(Thread.currentThread()).isSameAs(originalEdtThread)
+    }
+
+    assertThat(events).containsExactly(
+      "outer:edt:start",
+      "outer:pooled:start",
+      "inner:edt",
+      "outer:pooled:end",
+      "outer:edt:end",
+    )
+  }
+
+  @Test
+  fun `pooled transferred write action can run inside invokeAndWait transferred write action`(): Unit = timeoutRunBlocking(timeout = 10.seconds, context = Dispatchers.Default) {
+    Assumptions.assumeTrue(useBackgroundWriteAction)
+
+    val events = ConcurrentLinkedQueue<String>()
+    lateinit var originalBackgroundThread: Thread
+    lateinit var transferredEdtThread: Thread
+
+    backgroundWriteAction {
+      originalBackgroundThread = Thread.currentThread()
+      events.add("outer:bg:start")
+
+      InternalThreading.invokeAndWaitWithTransferredWriteAction {
+        transferredEdtThread = Thread.currentThread()
+        events.add("outer:edt:start")
+        assertThat(EDT.isCurrentThreadEdt()).isTrue
+        assertThat(Thread.currentThread()).isNotSameAs(originalBackgroundThread)
+        assertThat(application.isWriteAccessAllowed).isTrue
+        assertThat(application.isReadAccessAllowed).isTrue
+        assertThat(TransactionGuard.getInstance().isWritingAllowed).isTrue
+
+        InternalThreading.executeOnPooledThreadWithTransferredWriteAction {
+          val nestedPooledThread = Thread.currentThread()
+          events.add("inner:pooled")
+          assertThat(EDT.isCurrentThreadEdt()).isFalse
+          assertThat(nestedPooledThread).isNotSameAs(originalBackgroundThread)
+          assertThat(nestedPooledThread).isNotSameAs(transferredEdtThread)
+          assertThat(application.isWriteAccessAllowed).isTrue
+          assertThat(application.isReadAccessAllowed).isTrue
+          assertThat(TransactionGuard.getInstance().isWritingAllowed).isTrue
+        }
+
+        events.add("outer:edt:end")
+        assertThat(Thread.currentThread()).isSameAs(transferredEdtThread)
+      }
+
+      events.add("outer:bg:end")
+      assertThat(Thread.currentThread()).isSameAs(originalBackgroundThread)
+    }
+
+    assertThat(events).containsExactly(
+      "outer:bg:start",
+      "outer:edt:start",
+      "inner:pooled",
+      "outer:edt:end",
+      "outer:bg:end",
+    )
   }
 
 
@@ -361,7 +543,7 @@ class PlatformUtilitiesTest {
 
   @Test
   fun `parallelization of write-intent lock removes write-intent access`(): Unit = timeoutRunBlocking(context = Dispatchers.EDT) {
-    val (lockContext, lockCleanup) = getGlobalThreadingSupport().getPermitAsContextElement(currentThreadContext(), true)
+    val (lockContext, lockCleanup) = getGlobalThreadingSupport().parallelizeLock()
     installThreadContext(lockContext).use {
       try {
         assertThat(application.isWriteIntentLockAcquired).isFalse
@@ -403,18 +585,6 @@ class PlatformUtilitiesTest {
     assertThat(counter.get()).isEqualTo(numberOfNonBlockingReadActions)
   }
 
-
-  fun <T> Deferred<T>.toPromise(): Promise<T> = AsyncPromise<T>().also { promise ->
-    invokeOnCompletion { throwable ->
-      if (throwable != null) {
-        promise.setError(throwable)
-      }
-      else {
-        @Suppress("OPT_IN_USAGE")
-        promise.setResult(getCompleted())
-      }
-    }
-  }
 
   @Test
   fun `async promise does not leak cancellation`(): Unit = timeoutRunBlocking {
@@ -489,4 +659,98 @@ class PlatformUtilitiesTest {
    `interesting caller`()
   }
 
+  @Test
+  fun `callbacks to futures obtained from coroutines do not throw`(): Unit = runBlocking {
+    @Suppress("OPT_IN_USAGE") val job = GlobalScope.async(Dispatchers.Default, start = CoroutineStart.LAZY) {
+    }
+    val future = job.asCompletableFuture()
+    val ref = AtomicReference<Throwable>()
+    val finalization = Job()
+    future.thenRun {
+      try {
+        Cancellation.checkCancelled()
+      } catch (e: Throwable) {
+        ref.set(e)
+        throw e
+      } finally {
+        finalization.complete()
+      }
+    }
+    job.start()
+    finalization.asCompletableFuture().join()
+    ref.get()?.let { throw it }
+  }
+
+  @Test
+  fun `NBRA is cancellable in its busy wait`(): Unit = timeoutRunBlocking {
+    val currentJob = Job(coroutineContext.job)
+    launch(Dispatchers.Default) {
+      backgroundWriteAction {
+        currentJob.asCompletableFuture().join()
+      }
+    }
+    delay(10)
+    val raJob = launch(Dispatchers.Default) {
+      ReadAction.nonBlocking(Callable { true }).executeSynchronously()
+    }
+    delay(100)
+    raJob.cancelAndJoin()
+    currentJob.complete()
+  }
+
+  @Test
+  fun `JobLauncher can be canceled on termination of the context job`(): Unit = concurrencyTest {
+    ProgressManager.getInstance()
+    val j1 = Job(coroutineContext.job)
+    val j2 = Job(coroutineContext.job)
+    val job = launch(Dispatchers.Default) {
+      JobLauncher.getInstance().invokeConcurrentlyUnderContextProgress(listOf(1, 2), { num ->
+        if (num == 1) {
+          j1.complete()
+          j2.asCompletableFuture().join()
+        }
+        if (num == 2) {
+          j2.asCompletableFuture().join()
+          // checkCanceled might not throw here,
+          // as cancellation machinery on another thread can work in parallel to the processing of this element.
+          // but the indicator should be canceled here anyway, so we assert exactly thatc          assertThat { ProgressManager.getGlobalProgressIndicator().isCanceled }
+        }
+        true
+      })
+    }
+    j1.join()
+    job.cancel()
+    j2.complete()
+    job.join()
+  }
+
+  @Test
+  fun `runProcess cannot resurrect canceled indicator`(): Unit = timeoutRunBlocking {
+    launch {
+      coroutineToIndicator {
+        val indicator = DelegatingProgressIndicator(ProgressManager.getGlobalProgressIndicator())
+        currentThreadContext().job.cancel()
+        indicator.stop()
+        ProgressManager.getInstance().runProcess({
+          Assertions.assertTrue(indicator.isCanceled, "indicator should be canceled")
+                                                 }, indicator)
+      }
+    }.join()
+  }
+
+  @Test
+  fun `runProcess cannot resurrect raw progress reporting indicator`(): Unit = timeoutRunBlocking {
+    launch {
+      reportProgress {
+        coroutineToIndicator {
+          val indicator = DelegatingProgressIndicator(ProgressManager.getGlobalProgressIndicator())
+          currentThreadContext().job.cancel()
+          indicator.stop()
+          ProgressManager.getInstance().runProcess({
+                                                     Assertions.assertTrue(indicator.isCanceled, "indicator should be canceled")
+                                                   }, indicator)
+        }
+      }
+    }.join()
+  }
 }

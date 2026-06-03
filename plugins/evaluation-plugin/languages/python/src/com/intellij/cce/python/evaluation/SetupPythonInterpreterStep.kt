@@ -16,21 +16,23 @@ import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.projectRoots.impl.SdkConfigurationUtil
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.jetbrains.python.PYTHON_FREE_PLUGIN_ID
 import com.jetbrains.python.PYTHON_PROF_PLUGIN_ID
+import com.jetbrains.python.Result
 import com.jetbrains.python.packaging.PyRequirement
 import com.jetbrains.python.packaging.PyRequirementParser
 import com.jetbrains.python.packaging.management.PythonPackageManager
 import com.jetbrains.python.packaging.management.ui.PythonPackageManagerUI
 import com.jetbrains.python.packaging.management.ui.installPyRequirementsBackground
 import com.jetbrains.python.packaging.pip.PipPythonPackageManager
-import com.jetbrains.python.sdk.PythonSdkType
-import com.jetbrains.python.sdk.configuration.PyProjectSdkConfiguration
+import com.jetbrains.python.sdk.ModuleOrProject
+import com.jetbrains.python.sdk.configurePythonSdk
+import com.jetbrains.python.sdk.createLocalSdkGuessingTypeByPath
+import com.jetbrains.python.venvReader.VirtualEnvReader
 import java.io.IOException
 import java.nio.file.Path
 import kotlin.io.path.exists
@@ -76,7 +78,7 @@ private class SetupPythonInterpreterStep(
   }
 
   private fun configureSdk(): Sdk? {
-    val projectLocalVenvDir = Path.of(project.basePath ?: error("Project path is not found")).resolve(".venv")
+    val projectLocalVenvDir = Path.of(project.basePath ?: error("Project path is not found")).resolve(VirtualEnvReader.DEFAULT_VIRTUALENV_DIRNAME)
     val existingSdkPath = providedSdkPath() ?: projectLocalVenvSdkPath(projectLocalVenvDir)
 
     val sdkPath =
@@ -115,7 +117,20 @@ private class SetupPythonInterpreterStep(
         println("Failed to find SDK home directory at path: $sdkHomePath")
         return@invokeAndWait
       }
-      val sdk = SdkConfigurationUtil.setupSdk(emptyArray(), sdkHome, PythonSdkType.getInstance(), true, null, sdkHome.path)
+
+      @Suppress("HardCodedStringLiteral")
+      val sdkResult = runWithModalProgressBlocking(project, "Creating Python SDK") {
+        createLocalSdkGuessingTypeByPath(sdkHome.toNioPath(), ModuleOrProject.ProjectOnly(project))
+      }
+
+      val sdk = when (sdkResult) {
+        is Result.Failure -> {
+          println("Couldn't create SDK due to ${sdkResult.error.message}")
+          null
+        }
+        is Result.Success -> sdkResult.result
+      }
+
       if (sdk != null) {
         WriteAction.run<Throwable> {
           val sdkTable = ProjectJdkTable.getInstance()
@@ -131,7 +146,7 @@ private class SetupPythonInterpreterStep(
         for (module in ModuleManager.getInstance(project).modules) {
           @Suppress("HardCodedStringLiteral")
           runWithModalProgressBlocking(project, "Set Sdk") {
-            PyProjectSdkConfiguration.setReadyToUseSdk(project, module, sdk)
+            configurePythonSdk(project, module, sdk)
           }
         }
 

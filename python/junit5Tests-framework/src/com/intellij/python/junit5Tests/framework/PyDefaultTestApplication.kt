@@ -6,20 +6,31 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDirectory
 import com.intellij.psi.PsiDocumentManager
-import com.intellij.testFramework.EditorTestUtil
-import com.intellij.testFramework.IndexingTestUtil
-import com.intellij.testFramework.junit5.TestApplication
-import com.intellij.testFramework.junit5.fixture.*
-import com.intellij.testFramework.junit5.fixture.LookupFixtureExtension.Companion.getLookupFixtureManager
-import com.intellij.testFramework.junit5.fixture.LookupFixtureExtension.Companion.registerImplicitFixtures
-import com.jetbrains.python.PyNames
 import com.intellij.python.junit5Tests.framework.metaInfo.TestMetaInfoExtension
 import com.intellij.python.junit5Tests.framework.metaInfo.TestMetaInfoExtension.Companion.getTestClassInfo
 import com.intellij.python.junit5Tests.framework.metaInfo.TestMetaInfoExtension.Companion.getTestMethodInfo
+import com.intellij.testFramework.EditorTestUtil
+import com.intellij.testFramework.IndexingTestUtil
+import com.intellij.testFramework.junit5.TestApplication
+import com.intellij.testFramework.junit5.fixture.LookupFixture
+import com.intellij.testFramework.junit5.fixture.LookupFixtureExtension
+import com.intellij.testFramework.junit5.fixture.LookupFixtureExtension.Companion.getLookupFixtureManager
+import com.intellij.testFramework.junit5.fixture.LookupFixtureExtension.Companion.registerImplicitFixtures
+import com.intellij.testFramework.junit5.fixture.TestFixture
+import com.intellij.testFramework.junit5.fixture.editorFixture
+import com.intellij.testFramework.junit5.fixture.moduleFixture
+import com.intellij.testFramework.junit5.fixture.pathInProjectFixture
+import com.intellij.testFramework.junit5.fixture.projectFixture
+import com.intellij.testFramework.junit5.fixture.sourceRootFixture
+import com.jetbrains.python.PyNames
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import org.junit.jupiter.api.extension.*
+import org.junit.jupiter.api.extension.BeforeAllCallback
+import org.junit.jupiter.api.extension.BeforeEachCallback
+import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.Extension
+import org.junit.jupiter.api.extension.ExtensionContext
 import java.nio.file.Path
 
 /**
@@ -61,14 +72,14 @@ private class PyWithDefaultFixturesExtension : BeforeAllCallback, BeforeEachCall
     }
 
     val module = manager.getOrDefault {
-      project.moduleFixture(name = context.uniqueId, moduleType = PyNames.PYTHON_MODULE_ID).also {
+      project.moduleFixture(project.pathInProjectFixture(Path.of(".")), moduleTypeId = PyNames.PYTHON_MODULE_ID).also {
         implicitFixtures += LookupFixture(DEFAULT_PY_MODULE, it, true)
       }
     }
 
     manager.getOrDefault {
       module.sourceRootFixture(
-        pathFixture = project.pathInProjectFixture(Path.of("")),
+        pathFixture = project.pathInProjectFixture(Path.of(".")),
         blueprintResourcePath = context.getTestClassInfo().testDataPath
       ).also {
         implicitFixtures += LookupFixture(DEFAULT_SOURCE_ROOT, it, true)
@@ -91,7 +102,7 @@ private class PyWithDefaultFixturesExtension : BeforeAllCallback, BeforeEachCall
    */
   override fun beforeEach(context: ExtensionContext) {
     val testMethodInfo = context.getTestMethodInfo()
-    val testCaseFilePath = testMethodInfo.testCaseFilePath ?: return
+    val testCaseFilePath = testMethodInfo.testCaseRelativePath ?: return
 
     val implicitFixtures = mutableListOf<LookupFixture>()
 

@@ -1,6 +1,7 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.impl
 
+import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.project.Project
 import com.intellij.projectImport.ProjectOpenedCallback
@@ -37,6 +38,7 @@ data class OpenProjectTask @Internal constructor(
   val runConfigurators: Boolean,
   val runConversionBeforeOpen: Boolean,
   val projectWorkspaceId: String?,
+  @JvmField @Internal val projectFrameTypeId: String?,
   val isProjectCreatedWithWizard: Boolean,
   @TestOnly
   val preloadServices: Boolean,
@@ -80,6 +82,7 @@ data class OpenProjectTask @Internal constructor(
     runConfigurators = false,
     runConversionBeforeOpen = true,
     projectWorkspaceId = null,
+    projectFrameTypeId = null,
     isProjectCreatedWithWizard = false,
 
     preloadServices = true,
@@ -145,6 +148,7 @@ class OpenProjectTaskBuilder @PublishedApi internal constructor() {
   var showWelcomeScreen: Boolean = true
 
   var projectWorkspaceId: String? = null
+  var projectFrameTypeId: String? = null
   var implOptions: Any? = null
 
   var line: Int = -1
@@ -164,9 +168,16 @@ class OpenProjectTaskBuilder @PublishedApi internal constructor() {
   var createModule: Boolean = true
 
   var project: Project? = null
+    set(value) {
+      field = value
+      createModule = false
+    }
 
   @PublishedApi internal inline fun build(builder: OpenProjectTaskBuilder.() -> Unit): OpenProjectTask {
     builder()
+    if (project != null && createModule) {
+      thisLogger().warn("Project is explicitly set (name=${project?.name}), but createModule is true")
+    }
     return OpenProjectTask(
       forceOpenInNewFrame = forceOpenInNewFrame,
       forceReuseFrame = forceReuseFrame,
@@ -192,6 +203,7 @@ class OpenProjectTaskBuilder @PublishedApi internal constructor() {
       processorChooser = processorChooser,
 
       projectWorkspaceId = projectWorkspaceId,
+      projectFrameTypeId = projectFrameTypeId,
       implOptions = implOptions,
       createModule = createModule,
 

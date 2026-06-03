@@ -1,0 +1,174 @@
+<idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="fleet.andel"/>
+    <module name="fleet.rhizomedb"/>
+    <module name="fleet.util.core"/>
+    <module name="intellij.libraries.aalto.xml"/>
+    <module name="intellij.libraries.asm"/>
+    <module name="intellij.libraries.blockmap"/>
+    <module name="intellij.libraries.bouncy.castle.provider"/>
+    <module name="intellij.libraries.caffeine"/>
+    <module name="intellij.libraries.classgraph"/>
+    <module name="intellij.libraries.commons.imaging"/>
+    <module name="intellij.libraries.fastutil"/>
+    <module name="intellij.libraries.gson"/>
+    <module name="intellij.libraries.guava"/>
+    <module name="intellij.libraries.hash4j"/>
+    <module name="intellij.libraries.hdr.histogram"/>
+    <module name="intellij.libraries.http.client"/>
+    <module name="intellij.libraries.icu4j"/>
+    <module name="intellij.libraries.imgscalr"/>
+    <module name="intellij.libraries.jackson3"/>
+    <module name="intellij.libraries.jackson3.databind"/>
+    <module name="intellij.libraries.jackson3.jr.objects"/>
+    <module name="intellij.libraries.jackson3.module.kotlin"/>
+    <module name="intellij.libraries.java.compatibility"/>
+    <module name="intellij.libraries.jbr"/>
+    <module name="intellij.libraries.jcef"/>
+    <module name="intellij.libraries.jgoodies.common"/>
+    <module name="intellij.libraries.jgoodies.forms"/>
+    <module name="intellij.libraries.jsoup"/>
+    <module name="intellij.libraries.jvm.native.trusted.roots"/>
+    <module name="intellij.libraries.kotlin.reflect"/>
+    <module name="intellij.libraries.kotlinx.collections.immutable"/>
+    <module name="intellij.libraries.kotlinx.coroutines.core"/>
+    <module name="intellij.libraries.kotlinx.serialization.core"/>
+    <module name="intellij.libraries.kotlinx.serialization.json"/>
+    <module name="intellij.libraries.lz4"/>
+    <module name="intellij.libraries.miglayout.swing"/>
+    <module name="intellij.libraries.netty.buffer"/>
+    <module name="intellij.libraries.netty.codec.http"/>
+    <module name="intellij.libraries.opentelemetry"/>
+    <module name="intellij.libraries.opentelemetry.extension.kotlin"/>
+    <module name="intellij.libraries.opentelemetry.semconv"/>
+    <module name="intellij.libraries.oro.matcher"/>
+    <module name="intellij.libraries.protobuf"/>
+    <module name="intellij.libraries.pty4j"/>
+    <module name="intellij.libraries.rd.core"/>
+    <module name="intellij.libraries.stream"/>
+    <module name="intellij.libraries.swingx"/>
+    <module name="intellij.libraries.winp"/>
+    <module name="intellij.platform.analysis"/>
+    <module name="intellij.platform.analysis.impl"/>
+    <module name="intellij.platform.builtInServer"/>
+    <module name="intellij.platform.codeStyle"/>
+    <module name="intellij.platform.core"/>
+    <module name="intellij.platform.core.impl"/>
+    <module name="intellij.platform.core.ui"/>
+    <module name="intellij.platform.credentialStore"/>
+    <module name="intellij.platform.diagnostic.telemetry"/>
+    <module name="intellij.platform.diff"/>
+    <module name="intellij.platform.editor.ex"/>
+    <module name="intellij.platform.editor.ui"/>
+    <module name="intellij.platform.eel.impl"/>
+    <module name="intellij.platform.execution"/>
+    <module name="intellij.platform.ide"/>
+    <module name="intellij.platform.ide.concurrency"/>
+    <module name="intellij.platform.ide.core"/>
+    <module name="intellij.platform.ide.core.plugins"/>
+    <module name="intellij.platform.indexing"/>
+    <module name="intellij.platform.kernel"/>
+    <module name="intellij.platform.lang"/>
+    <module name="intellij.platform.lang.core"/>
+    <module name="intellij.platform.locking.impl"/>
+    <module name="intellij.platform.lvcs"/>
+    <module name="intellij.platform.projectFrame"/>
+    <module name="intellij.platform.projectModel"/>
+    <module name="intellij.platform.projectModel.impl"/>
+    <module name="intellij.platform.rd.community"/>
+    <module name="intellij.platform.runtime.product"/>
+    <module name="intellij.platform.statistics"/>
+    <module name="intellij.platform.util.coroutines"/>
+    <module name="intellij.platform.util.diff"/>
+    <module name="intellij.platform.util.ex"/>
+    <module name="intellij.platform.util.ui"/>
+    <module name="intellij.platform.welcomeScreen.impl"/>
+  </dependencies>
+  <!-- endregion -->
+  <extensionPoints>
+    <extensionPoint qualifiedName="com.intellij.editor.interLineBreakpointConfigurationProvider"
+                    interface="com.intellij.openapi.editor.impl.InterLineBreakpointConfigurationProvider"
+                    dynamic="true"/>
+    <extensionPoint name="imageReaderWriterSpi"
+                    beanClass="com.intellij.util.imageio.ImageReaderWriterSpiBean"
+                    dynamic="true">
+      <with attribute="implementationClass" implements="javax.imageio.spi.IIOServiceProvider"/>
+    </extensionPoint>
+  </extensionPoints>
+  <extensions defaultExtensionNs="com.intellij">
+    <ApplicationLoadListener implementation="com.intellij.util.imageio.ImageReaderWriterSpiRegistrar"/>
+    <applicationActivity implementation="com.intellij.ide.debug.ImageDebugUtilLoader"/>
+    <applicationService serviceImplementation="com.intellij.ui.WaylandAppIconPatcher"
+                        preload="notHeadless"
+                        os="linux"/>
+    <registryKey
+      key="universal.file.chooser.is.enabled"
+      defaultValue="true"
+      description="Enable the universal file chooser dialog"
+    />
+    <registryKey
+      key="ide.project.frame.auto.fix.size.windows.interval"
+      defaultValue="60"
+      description="The interval between too-small window size checks on Windows and attempts to restore the size. Set to zero to disable"
+    />
+    <registryKey
+      key="ide.windows.main.menu.focus.on.alt"
+      defaultValue="true"
+      description="Enable Alt key to focus the main menu bar on Windows"
+      restartRequired="true"
+    />
+    <registryKey
+      key="ea.diagnostic.endpoint"
+      defaultValue=""
+      description="Custom ITN error reporting endpoint. Only HTTPS URLs whose host ends with .jetbrains.com are accepted"
+    />
+    <registryKey
+      key="ea.diagnostic.endpoint.public.key"
+      defaultValue=""
+      description="Pinned public key for the ITN error reporting endpoint. Required when ea.diagnostic.endpoint is set. Accepts Base64-encoded SubjectPublicKeyInfo bytes or PEM text"
+    />
+    <registryKey
+      key="ea.auto.report.feature.visible"
+      defaultValue="true"
+      description="Makes the automatic error reporting feature visible in UI and available to enable/disable"
+      restartRequired="true"/>
+    <registryKey
+      key="ea.auto.report.forced" defaultValue="none"
+      description="Forces the automatic error reporting feature to be enabled with a certain level. Values: all | freezes | none"
+      restartRequired="true"/>
+    <registryKey
+      key="ea.auto.report.forced.tag" defaultValue=""
+      description="Additional tag for error reports"/>
+    <registryKey
+      key="ide.linux.ijpl43505"
+      defaultValue="true"
+      description="Enable the fix for IJPL-43505 Window header disappears after opening more than one project"
+      restartRequired="true"
+    />
+    <registryKey
+      key="ide.ui.keymap.ijpl187594"
+      defaultValue="true"
+      description="Enable the fix for IJPL-187594 Keymaps: shortcuts overlap long action names. The Classic UI is not affected"
+    />
+
+    <statistics.counterUsagesCollector implementationClass="com.intellij.platform.ide.menu.MainMenuCollector"/>
+    <statistics.counterUsagesCollector implementationClass="com.intellij.ide.minimap.MinimapUsageCollector"/>
+    <projectSettings service="com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.UnknownFeaturesCollector"/>
+    <projectSettings service="com.intellij.ui.RecentsManager"/>
+    <projectSettings service="com.intellij.ide.errorTreeView.impl.ErrorTreeViewConfiguration"/>
+    <applicationSettings service="com.intellij.execution.wsl.WSLDistributionService"/>
+    <applicationSettings service="com.intellij.util.singleProduct.MigrationToSingleProductSettings"/>
+    <projectSettings service="com.intellij.openapi.project.impl.ProjectRootPersistentStateComponent"/>
+    <projectSettings service="com.intellij.ide.ProjectColorInfoManager"/>
+    <projectSettings service="com.intellij.platform.OpenProjectSettingsService"/>
+    <applicationSettings service="com.intellij.diagnostic.ExceptionEAPAutoReportManager"/>
+    <applicationSettings service="com.intellij.diagnostic.logs.LogLevelConfigurationManager"/>
+    <projectSettings service="com.intellij.openapi.fileEditor.impl.EditorHistoryManager"/>
+    <applicationSettings service="com.intellij.toolWindow.ButtonsStateService"/>
+    <applicationSettings service="com.intellij.toolWindow.ToolWindowDefaultLayoutManager"/>
+    <applicationSettings service="com.intellij.toolWindow.xNext.toolbar.data.XNextPinnedService"/>
+    <applicationSettings service="com.intellij.notification.impl.RemindLaterManager"/>
+    <applicationSettings service="com.intellij.ide.plugins.org.PluginManagerConfigurableForOrgConfig"/>
+  </extensions>
+</idea-plugin>

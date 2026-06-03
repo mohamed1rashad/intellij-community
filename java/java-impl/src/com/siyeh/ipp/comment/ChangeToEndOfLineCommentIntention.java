@@ -20,7 +20,12 @@ import com.intellij.codeInspection.util.IntentionName;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiParserFacade;
 import com.intellij.util.text.CharArrayUtil;
 import com.siyeh.IntentionPowerPackBundle;
 import com.siyeh.ipp.base.MCIntention;
@@ -63,6 +68,10 @@ public final class ChangeToEndOfLineCommentIntention extends MCIntention impleme
     // newline followed by space convinces formatter to indent line
     final PsiElement ws = PsiParserFacade.getInstance(project).createWhiteSpaceFromText("\n ");
     final PsiElementFactory factory = JavaPsiFacade.getInstance(project).getElementFactory();
+    if (lines.length == 0) {
+      oldComment.replace(factory.createCommentFromText("//", parent));
+      return;
+    }
     final int last = lines[lines.length - 1].trim().isEmpty() ? lines.length - 2 : lines.length - 1;
     final int first = lines[0].trim().isEmpty() ? 1 : 0;
     for (int i = last; i > first; i--) {

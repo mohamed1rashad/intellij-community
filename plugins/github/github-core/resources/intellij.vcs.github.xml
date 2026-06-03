@@ -1,10 +1,20 @@
 <idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <plugin id="com.intellij.modules.lang"/>
     <plugin id="Git4Idea"/>
     <module name="intellij.platform.collaborationTools"/>
     <module name="intellij.platform.collaborationTools.auth"/>
+    <module name="intellij.platform.collaborationTools.auth.base"/>
+    <module name="intellij.platform.vcs.dvcs"/>
+    <module name="intellij.platform.vcs.dvcs.impl"/>
+    <module name="intellij.platform.vcs.dvcs.impl.shared"/>
+    <module name="intellij.platform.vcs.impl"/>
+    <module name="intellij.platform.vcs.impl.shared"/>
+    <module name="intellij.platform.vcs.log"/>
+    <module name="intellij.platform.vcs.log.impl"/>
+    <module name="intellij.vcs.git.shared"/>
   </dependencies>
+  <!-- endregion -->
 
   <resource-bundle>messages.GithubBundle</resource-bundle>
 
@@ -82,6 +92,9 @@
     <fileTypeUsageSchemaDescriptor schema="github"
                                    implementationClass="org.jetbrains.plugins.github.extensions.GithubFileTypeSchemaProvider"/>
 
+    <completion.contributor language="any" implementationClass="org.jetbrains.plugins.github.ui.GithubMarkdownCompletionContributor"/>
+    <typedHandler implementation="org.jetbrains.plugins.github.ui.GithubMarkdownTypedHandler"/>
+
     <registryKey defaultValue="true" description="Applying suggested changes" key="github.suggested.changes.apply"/>
 
     <registryKey defaultValue="14" description="Clear 'last seen state' after this many days" key="github.clear.last.seen.state.days"/>
@@ -89,25 +102,22 @@
                  description="Milliseconds margin used when comparing known last seen date with last updated at date for PRs"
                  key="github.last.seen.state.margin.millis"/>
 
-    <registryKey defaultValue="true"
-                 description="Whether to check that the PR list is up-to-date using ETags"
-                 key="github.pr.list.automatic.refresh.enabled"/>
-    <registryKey defaultValue="30"
-                 description="Seconds between checking the ETag for the PR list"
-                 key="github.pr.list.automatic.refresh.seconds"/>
-    <advancedSetting
-      id="show.review.threads.with.increased.margins"
-      default="true"
-      bundle="messages.CollaborationToolsBundle"
-      groupKey="advanced.settings.collab.tools"
-    />
-
     <vcs.github.gistContentsCollector
       implementation="org.jetbrains.plugins.github.DefaultGithubGistContentsCollector"
       id="default"
       order="last"/>
 
     <statistics.counterUsagesCollector implementationClass="org.jetbrains.plugins.github.authentication.GHLoginCollector"/>
+    <applicationSettings service="org.jetbrains.plugins.github.util.GithubSettings"/>
+    <applicationSettings service="org.jetbrains.plugins.github.authentication.accounts.GHPersistentAccounts"/>
+    <projectSettings service="org.jetbrains.plugins.github.pullrequest.ui.filters.GHPRListPersistentSearchHistory"/>
+    <projectSettings service="org.jetbrains.plugins.github.pullrequest.data.service.GHPRPersistentInteractionState"/>
+    <projectSettings service="org.jetbrains.plugins.github.authentication.accounts.GithubProjectDefaultAccountHolder"/>
+    <projectSettings service="org.jetbrains.plugins.github.util.GithubProjectSettings"/>
+    <projectSettings service="org.jetbrains.plugins.github.pullrequest.config.GithubPullRequestsProjectUISettings"/>
+    <projectSettings service="org.jetbrains.plugins.github.util.GithubSharedProjectSettings"/>
+
+    <advancedSetting default="github.com" id="github.aliases" groupKey="advanced.setting.github"/>
   </extensions>
 
   <extensions defaultExtensionNs="Git4Idea">
@@ -148,10 +158,11 @@
       <synonym key="action.Github.Add.Account.synonym"/>
     </action>
     <group id="Github.Open.In.Browser" class="org.jetbrains.plugins.github.GHOpenInBrowserActionGroup">
+      <override-text place="GoToAction"/>
       <override-text place="EditorTabPopup"/>
       <override-text place="ProjectViewPopup" use-text-of-place="EditorTabPopup"/>
       <override-text place="EditorPopup" use-text-of-place="EditorTabPopup"/>
-      <override-text place="FavoritesPopup" use-text-of-place="EditorTabPopup"/>
+      <override-text place="BookmarksPopup" use-text-of-place="EditorTabPopup"/>
       <add-to-group group-id="Git.Hosting.Open.In.Browser.Group"/>
     </group>
     <group id="GitHub.Copy.Link" class="org.jetbrains.plugins.github.GHCopyLinkActionGroup"
@@ -198,7 +209,9 @@
 
     <action id="Github.PullRequest.Open.Link"
             class="org.jetbrains.plugins.github.pullrequest.action.GHPullRequestOpenURLAction"
-            icon="AllIcons.Vcs.Vendors.Github"/>
+            icon="AllIcons.Vcs.Vendors.Github">
+      <synonym key="action.Github.PullRequest.Open.Link.synonym"/>
+    </action>
     <action id="Github.PullRequest.Copy.Link"
             class="org.jetbrains.plugins.github.pullrequest.action.GHPullRequestCopyURLAction"
             icon="AllIcons.Vcs.Vendors.Github"/>
@@ -273,9 +286,7 @@
            class="org.jetbrains.plugins.github.pullrequest.comment.action.GHPRDiffReviewThreadsToggleAction"
            icon="AllIcons.Actions.Show"
            popup="true">
-      <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings"
-                    relative-to-action="Vcs.Diff.ToggleDiffAligningMode"
-                    anchor="before"/>
+      <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings"/>
     </group>
 
     <group id="Github.Pull.Request.Branch.Popup.Actions">

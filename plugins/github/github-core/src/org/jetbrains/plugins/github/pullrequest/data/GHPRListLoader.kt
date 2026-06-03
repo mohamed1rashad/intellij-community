@@ -2,16 +2,26 @@
 package org.jetbrains.plugins.github.pullrequest.data
 
 import com.intellij.collaboration.api.data.GraphQLRequestPagination
-import com.intellij.collaboration.async.*
+import com.intellij.collaboration.async.GraphQLListLoader
+import com.intellij.collaboration.async.Updated
+import com.intellij.collaboration.async.launchNow
+import com.intellij.collaboration.async.mapState
+import com.intellij.collaboration.async.resultOrErrorFlow
+import com.intellij.collaboration.async.stateInNow
 import com.intellij.collaboration.util.SingleCoroutineLauncher
 import com.intellij.platform.util.coroutines.childScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import org.jetbrains.plugins.github.api.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import org.jetbrains.plugins.github.api.GHGQLRequests
+import org.jetbrains.plugins.github.api.GHRepositoryCoordinates
+import org.jetbrains.plugins.github.api.GHRepositoryPath
+import org.jetbrains.plugins.github.api.GithubApiRequestExecutor
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestShort
 import org.jetbrains.plugins.github.api.data.request.search.GithubIssueSearchType
+import org.jetbrains.plugins.github.api.executeSuspend
 import org.jetbrains.plugins.github.api.util.GithubApiSearchQueryBuilder
 import kotlin.properties.Delegates
 
@@ -38,7 +48,9 @@ internal class GHPRListLoader(
 
     requestReloadFlow = reloadRequests,
     requestRefreshFlow = refreshRequests,
-    requestChangeFlow = updateRequests
+    requestChangeFlow = updateRequests,
+
+    shouldTryToLoadAll = false
   ) { cursor ->
     val page = GraphQLRequestPagination(afterCursor = cursor, pageSize = 50)
     requestExecutor.executeSuspend(
@@ -51,10 +63,6 @@ internal class GHPRListLoader(
   val loadedData: StateFlow<List<GHPullRequestShort>> = dataStateFlow.mapState { it.getOrNull() ?: listOf() }
   val error: StateFlow<Throwable?> = loader.resultOrErrorFlow.map { it.exceptionOrNull() }.stateInNow(cs, null)
   val isLoading: StateFlow<Boolean> = loader.isBusyFlow
-  val refreshOrReloadRequests: Flow<Unit> = channelFlow {
-    launch { reloadRequests.collect { send(it) } }
-    launch { refreshRequests.collect { send(it) } }
-  }
 
   fun tryLoadMore() {
     requestMoreLauncher.launch {

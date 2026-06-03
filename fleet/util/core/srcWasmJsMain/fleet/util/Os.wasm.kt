@@ -2,20 +2,20 @@
 package fleet.util
 
 import fleet.util.multiplatform.Actual
-import kotlinx.browser.window
+import web.navigator.navigator
 
 // todo: define client's os
-@Actual("getName")
+@Actual
 internal fun getNameWasmJs(): String = osName
 
-@Actual("getVersion")
+@Actual
 internal fun getVersionWasmJs(): String = ""
 
-@Actual("getArch")
+@Actual
 internal fun getArchWasmJs(): String = Os.WASM_ARCH
 
 private val osName: String by lazy {
-  window.navigator.userAgent
+  navigator.userAgent
     // System information commonly found in the first parenthesis
     // See https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/User-Agent
     .substringBefore(")")

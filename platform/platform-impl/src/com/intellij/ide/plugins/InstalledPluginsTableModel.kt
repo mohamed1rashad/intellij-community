@@ -3,7 +3,13 @@ package com.intellij.ide.plugins
 
 import com.intellij.ide.DataManager
 import com.intellij.ide.plugins.marketplace.InitSessionResult
-import com.intellij.ide.plugins.newui.*
+import com.intellij.ide.plugins.newui.DefaultUiPluginManagerController
+import com.intellij.ide.plugins.newui.FrontendRpcCoroutineContext
+import com.intellij.ide.plugins.newui.ListPluginComponent
+import com.intellij.ide.plugins.newui.PluginDetailsPageComponent
+import com.intellij.ide.plugins.newui.PluginUiModel
+import com.intellij.ide.plugins.newui.PluginsGroup
+import com.intellij.ide.plugins.newui.UiPluginManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
@@ -13,11 +19,15 @@ import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.options.ex.Settings
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.IntellijInternalApi
-import com.intellij.openapi.util.registry.Registry
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
-import java.util.*
+import java.util.UUID
 import java.util.function.Consumer
 
 @ApiStatus.Internal
@@ -87,6 +97,10 @@ open class InstalledPluginsTableModel @JvmOverloads constructor(
     sessionInitializedDeferred.await()
   }
 
+  fun updatePlugin(pluginId: PluginId){
+    myInstalledPluginComponentMap[pluginId]?.firstOrNull()?.updatePlugin()
+  }
+
   fun isLoaded(pluginId: PluginId): Boolean {
     return isLoaded(pluginId, this.enabledMap)
   }
@@ -132,7 +146,7 @@ open class InstalledPluginsTableModel @JvmOverloads constructor(
     }
     for (plugins in myMarketplacePluginComponentMap.values) {
       for (plugin in plugins) {
-        if (plugin.installedDescriptorForMarketplace != null) {
+        if (plugin.getInstalledDescriptorForMarketplace() != null) {
           plugin.updateEnabledState()
         }
       }
@@ -213,7 +227,7 @@ open class InstalledPluginsTableModel @JvmOverloads constructor(
 
     private fun scheduleCalculateAndUpdate() {
       coroutineScope.launch(Dispatchers.IO) {
-        val modified = UiPluginManager.getInstance().isModified(sessionId)
+        val modified = UiPluginManager.getInstance().isModified()
         if (isModified != modified) {
           isModified = modified
           withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
@@ -229,7 +243,7 @@ open class InstalledPluginsTableModel @JvmOverloads constructor(
   class SyncSessionModificationTracker(private val sessionId: String) : SessionModificationTracker {
     @Suppress("RAW_RUN_BLOCKING") //will take little time for the old implementation, it was always blocking before
     override fun isModified(): Boolean {
-      return runBlocking { UiPluginManager.getInstance().isModified(sessionId) }
+      return runBlocking { UiPluginManager.getInstance().isModified() }
     }
   }
 }

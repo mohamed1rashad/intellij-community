@@ -3,17 +3,26 @@ load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "kotlin-copyright-tests",
+  module_name = "intellij.kotlin.copyright.tests",
   visibility = ["//visibility:public"],
-  srcs = glob([], allow_empty = True)
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    "//plugins/kotlin/copyright/tests",
+    "@lib//:kotlin-stdlib",
+    "//plugins/kotlin/tests-common:common-tests",
+    "//plugins/kotlin/test-framework",
+  ]
 )
 
 jvm_library(
   name = "kotlin-copyright-tests_test_lib",
+  testonly = True,
   module_name = "intellij.kotlin.copyright.tests",
   visibility = ["//visibility:public"],
   srcs = glob(["test/**/*.kt", "test/**/*.java", "test/**/*.form"], allow_empty = True),
   deps = [
     "//plugins/kotlin/plugin/k2",
+    "//plugins/kotlin/plugin/k2:k2_test_lib",
     "//plugins/kotlin/base/plugin",
     "//plugins/kotlin/base/plugin:plugin_test_lib",
     "//plugins/kotlin/copyright/tests",
@@ -22,15 +31,24 @@ jvm_library(
     "//platform/testFramework:testFramework_test_lib",
     "@lib//:kotlin-stdlib",
     "//java/testFramework",
-    "//plugins/kotlin/base/test:test_test_lib",
-    "//plugins/kotlin/tests-common",
-    "//plugins/kotlin/tests-common:tests-common_test_lib",
+    "//java/testFramework:testFramework_test_lib",
+    "//plugins/kotlin/base/testFramework",
+    "//plugins/kotlin/base/testFramework:testFramework_test_lib",
+    "//plugins/kotlin/tests-common:common-tests",
+    "//plugins/kotlin/tests-common:common-tests_test_lib",
     "//plugins/kotlin/test-framework",
     "//plugins/kotlin/test-framework:test-framework_test_lib",
     "@lib//:kotlinc-kotlin-compiler-tests",
-  ]
+  ],
+  runtime_deps = [":kotlin-copyright-tests"]
 )
 ### auto-generated section `build intellij.kotlin.copyright.tests` end
+
+### auto-generated section `iml intellij.kotlin.copyright.tests` start
+exports_files([
+  "intellij.kotlin.copyright.tests.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.kotlin.copyright.tests` end
 
 ### auto-generated section `test intellij.kotlin.copyright.tests` start
 load("@community//build:tests-options.bzl", "jps_test")

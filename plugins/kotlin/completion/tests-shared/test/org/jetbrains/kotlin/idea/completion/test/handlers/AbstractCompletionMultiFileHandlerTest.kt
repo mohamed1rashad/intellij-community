@@ -19,7 +19,11 @@ import java.io.File
 @TestDataPath("/")
 @TestMetadata("testData/handlers/multifile")
 abstract class AbstractCompletionMultiFileHandlerTest : KotlinFixtureCompletionBaseTestCase() {
+    fun testAddImportsChainedCompletionClassCompanionFun() = doTest()
+    fun testAddImportsChainedCompletionClassCompanionProperty() = doTest()
     fun testAddImportsChainedCompletionExtension() = doTest()
+    fun testAddImportsChainedCompletionObjectFunction() = doTest()
+    fun testAddImportsChainedCompletionObjectProperty() = doTest()
     fun testExtensionFunctionImport() = doTest()
     fun testExtensionPropertyImport() = doTest()
     fun testImportAlreadyImportedObject() = doTest()
@@ -84,7 +88,7 @@ abstract class AbstractCompletionMultiFileHandlerTest : KotlinFixtureCompletionB
                     error("Multiple items in completion")
                 }
 
-                CompletionHandlerTestBase.selectItem(myFixture, item, completionChar)
+                selectItem(item, completionChar)
             }
 
             myFixture.checkResultByFile("${getTestName(false)}.kt.after")

@@ -1,25 +1,33 @@
-<idea-plugin>
+<idea-plugin visibility="internal">
   <dependencies>
+    <plugin id="org.toml.lang"/>
+    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+    <module name="intellij.python.common"/>
     <module name="intellij.python.community"/>
     <module name="intellij.python.psi.impl"/>
+    <module name="intellij.python.requirements"/>
     <module name="intellij.python.sdk"/>
-    <plugin id="org.toml.lang"/>
-    <module name="intellij.python.common"/>
+    <module name="intellij.toml.core"/>
+    <!-- endregion -->
   </dependencies>
 
   <resource-bundle>messages.PyProjectTomlBundle</resource-bundle>
   <extensions defaultExtensionNs="com.intellij">
-    <registryKey defaultValue="false" description="Load project structure from pyproject.toml" key="intellij.python.pyproject.model" restartRequired="true"/>
-    <externalSystemUnlinkedProjectAware
-      implementation="com.intellij.python.pyproject.model.internal.PyExternalSystemUnlinkedProjectAware"/>
+    <!-- "ask" means "ask user"-->
+    <registryKey defaultValue="[off*|on|ask]" description="Load project structure from pyproject.toml" key="intellij.python.pyproject.model"
+                 restartRequired="true"/>
+    <notificationGroup id="PyProject.toml" displayType="STICKY_BALLOON" isLogByDefault="true"
+                       bundle="messages.PyProjectTomlBundle" key="pyproject.notification.title"/>
+    <backgroundPostStartupActivity implementation="com.intellij.python.pyproject.model.internal.platformBridge.PyProjectSyncActivity"/>
 
-    <projectOpenProcessor implementation="com.intellij.python.pyproject.model.internal.PyProjectOpenProcessor"/>
-
-    <postStartupActivity implementation="com.intellij.python.pyproject.model.internal.PyProjectSyncActivity"/>
+    <statistics.projectUsagesCollector implementation="com.intellij.python.pyproject.statistics.PythonTomlStatsUsagesCollector"/>
+    <projectSettings service="com.intellij.python.pyproject.model.PyProjectModelSettings"/>
   </extensions>
-  <actions>
-    <action class="com.intellij.python.pyproject.model.internal.PyProjectTomlSyncAction" id="PyProjectTomlSyncAction"/>
-  </actions>
+
+  <extensions defaultExtensionNs="Pythonid">
+    <pyDependenciesFileProvider implementation="com.intellij.python.pyproject.PyProjectTomlFileProvider"/>
+  </extensions>
+
   <extensionPoints>
     <extensionPoint qualifiedName="com.intellij.python.pyproject.model.tool" interface="com.intellij.python.pyproject.model.spi.Tool"
                     dynamic="true"/>

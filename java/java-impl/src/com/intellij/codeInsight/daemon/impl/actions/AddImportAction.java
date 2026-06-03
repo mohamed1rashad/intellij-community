@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl.actions;
 
 import com.intellij.application.options.editor.AutoImportOptionsConfigurable;
@@ -11,12 +11,16 @@ import com.intellij.codeInsight.hint.QuestionAction;
 import com.intellij.codeInsight.navigation.NavigationUtil;
 import com.intellij.ide.util.DefaultPsiElementCellRenderer;
 import com.intellij.java.JavaBundle;
+import com.intellij.lang.ImportOptimizer;
+import com.intellij.lang.java.JavaImportOptimizer;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModCommand;
+import com.intellij.modcommand.ModCommandExecutor;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.module.Module;
@@ -29,7 +33,12 @@ import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.statistics.JavaStatisticsManager;
 import com.intellij.psi.statistics.StatisticsManager;
@@ -43,11 +52,14 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.accessibility.AccessibleContext;
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JPanel;
+import javax.swing.ListCellRenderer;
+import java.awt.BorderLayout;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class AddImportAction implements QuestionAction {
   private static final Logger LOG = Logger.getInstance(AddImportAction.class);
@@ -101,7 +113,7 @@ public class AddImportAction implements QuestionAction {
     }
 
     if (myTargetClasses.length == 1) {
-      addImport(myReference, myTargetClasses[0]);
+      addImport(myTargetClasses[0]);
     }
     else {
       chooseClassAndImport();
@@ -145,7 +157,7 @@ public class AddImportAction implements QuestionAction {
           if (finalChoice) {
             return doFinalStep(() -> {
               PsiDocumentManager.getInstance(myProject).commitAllDocuments();
-              addImport(myReference, selectedValue);
+              addImport(selectedValue);
             });
           }
 
@@ -243,25 +255,48 @@ public class AddImportAction implements QuestionAction {
     return toExclude;
   }
 
-  private void addImport(@NotNull PsiReference ref, @NotNull PsiClass targetClass) {
+  private void addImport(@NotNull PsiClass targetClass) {
     DumbService.getInstance(myProject).withAlternativeResolveEnabled(() -> {
-      if (!ref.getElement().isValid() || !targetClass.isValid()) {
+      if (!myReference.getElement().isValid() || !targetClass.isValid()) {
         return;
       }
 
       StatisticsManager.getInstance().incUseCount(JavaStatisticsManager.createInfo(null, targetClass));
-      WriteCommandAction.runWriteCommandAction(myProject, QuickFixBundle.message("add.import"), null,
-                                               () -> doAddImport(ref, targetClass),
-                                               ref.getElement().getContainingFile());
+      PsiFile file = myReference.getElement().getContainingFile();
+
+      ImportOptimizer importOptimizer = getModCommandFriendlyImportOptimizer();
+      if (importOptimizer != null &&
+          //ModCommand can be run only in dispatch thread
+          ApplicationManager.getApplication().isDispatchThread()) {
+        runImportOptimizerThatIsModCommandFriendly(myReference, targetClass, file, importOptimizer);
+      }
+      else {
+        WriteCommandAction.runWriteCommandAction(myProject, QuickFixBundle.message("add.import"), null,
+                                                 () -> doAddImport(myReference, targetClass, file),
+                                                 file);
+      }
     });
   }
 
-  private void doAddImport(@NotNull PsiReference ref, @NotNull PsiClass targetClass) {
+  private void runImportOptimizerThatIsModCommandFriendly(@NotNull PsiReference ref,
+                                                          @NotNull PsiClass targetClass,
+                                                          PsiFile file,
+                                                          ImportOptimizer importOptimizer) {
+    ActionContext ctx = ActionContext.from(myEditor, file);
+    ModCommandExecutor.executeInteractively(
+      ctx, QuickFixBundle.message("add.import"), myEditor,
+      () -> ModCommand.psiUpdate(ref.getElement(), (e, updater) -> {
+        bindReference(Objects.requireNonNull(e.getReference()), targetClass);
+        if (CodeInsightWorkspaceSettings.getInstance(myProject).isOptimizeImportsOnTheFly()) {
+          importOptimizer.processFile(updater.getPsiFile()).run();
+        }
+      }));
+  }
+
+  private void doAddImport(@NotNull PsiReference ref, @NotNull PsiClass targetClass, @NotNull PsiFile psiFile) {
     try {
       bindReference(ref, targetClass);
       if (CodeInsightWorkspaceSettings.getInstance(myProject).isOptimizeImportsOnTheFly()) {
-        Document document = myEditor.getDocument();
-        PsiFile psiFile = PsiDocumentManager.getInstance(myProject).getPsiFile(document);
         new OptimizeImportsProcessor(myProject, psiFile).runWithoutProgress();
       }
     }
@@ -269,6 +304,14 @@ public class AddImportAction implements QuestionAction {
       LOG.error(e);
     }
     myEditor.getScrollingModel().scrollToCaret(ScrollType.RELATIVE);
+  }
+
+  /**
+   * @return ImportOptimizer that is ModCommand friendly (can be run from ModCommandAction) if available or null otherwise.
+   */
+  protected @Nullable ImportOptimizer getModCommandFriendlyImportOptimizer() {
+    PsiFile file = myReference.getElement().getContainingFile();
+    return file instanceof PsiJavaFile ? new JavaImportOptimizer() : null;
   }
 
   protected void bindReference(@NotNull PsiReference ref, @NotNull PsiClass targetClass) {

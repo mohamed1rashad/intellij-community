@@ -9,6 +9,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
 import com.intellij.openapi.project.Project;
@@ -23,7 +24,7 @@ import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.yaml.YAMLBundle;
 
-import javax.swing.*;
+import javax.swing.ListCellRenderer;
 
 import static org.jetbrains.yaml.navigation.YamlSearchEverywhereResultsCollectorKt.searchForKey;
 
@@ -67,7 +68,7 @@ public class YAMLKeysSearchEverywhereContributor implements SearchEverywhereCont
     Runnable task = () -> findKeys(consumer, pattern);
     Application application = ApplicationManager.getApplication();
     if (application.isUnitTestMode()) {
-      application.runReadAction(task);
+      ReadAction.runBlocking(task::run);
     } else {
       ApplicationManager.getApplication().assertIsNonDispatchThread();
       ProgressIndicatorUtils.yieldToPendingWriteActions();

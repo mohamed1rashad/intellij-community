@@ -7,6 +7,7 @@ import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.roots.impl.assertIteratedContent
+import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.backend.workspace.toVirtualFileUrl
@@ -15,6 +16,7 @@ import com.intellij.testFramework.junit5.TestDisposable
 import com.intellij.testFramework.rules.ProjectModelExtension
 import com.intellij.testFramework.rules.TempDirectoryExtension
 import com.intellij.testFramework.workspaceModel.update
+import com.intellij.util.ThreeState
 import com.intellij.util.indexing.testEntities.IndexableKindFileSetTestContributor
 import com.intellij.util.indexing.testEntities.IndexingTestEntity
 import com.intellij.util.indexing.testEntities.NonIndexableKindFileSetTestContributor
@@ -22,10 +24,14 @@ import com.intellij.util.indexing.testEntities.NonIndexableTestEntity
 import com.intellij.workspaceModel.core.fileIndex.impl.WorkspaceFileIndexImpl
 import com.intellij.workspaceModel.ide.NonPersistentEntitySource
 import kotlinx.coroutines.runBlocking
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
+import kotlin.io.path.invariantSeparatorsPathString
 
 @TestApplication
 class NonIndexableFileSetTest {
@@ -79,9 +85,23 @@ class NonIndexableFileSetTest {
       assertFalse(fileIndex.isIndexable(root))
       assertTrue(projectFileIndex.isInProjectOrExcluded(file))
       assertIteratedContent(projectModel.project, mustContain = listOf(root, file))
-      val fileSet = fileIndex.findFileSet(file, true, true, true, true, true, true)
+      val fileSet = fileIndex.findFileSet(file, true, true, true, true, true, true, true)
       assertNotNull(fileSet)
       assertEquals(WorkspaceFileKind.CONTENT_NON_INDEXABLE, fileSet!!.kind)
+    }
+  }
+
+  @Test
+  fun `non-existing non-indexable content root is in content by url`() = runBlocking {
+    val workspaceModel = projectModel.project.serviceAsync<WorkspaceModel>()
+    val rootUrl = VfsUtilCore.pathToUrl(baseNonProjectDir.rootPath.resolve("nonIndexableRoot").invariantSeparatorsPathString)
+    workspaceModel.update {
+      val url = workspaceModel.getVirtualFileUrlManager().getOrCreateFromUrl(rootUrl)
+      it.addEntity(NonIndexableTestEntity(url, NonPersistentEntitySource))
+    }
+
+    readAction {
+      assertEquals(ThreeState.YES, fileIndex.isUrlInContent("$rootUrl/a.txt"))
     }
   }
 

@@ -1,14 +1,41 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.formatter.java;
 
-import com.intellij.formatting.*;
+import com.intellij.formatting.Alignment;
+import com.intellij.formatting.Block;
+import com.intellij.formatting.ChildAttributes;
+import com.intellij.formatting.FormattingMode;
+import com.intellij.formatting.Indent;
+import com.intellij.formatting.Spacing;
+import com.intellij.formatting.Wrap;
+import com.intellij.formatting.WrapType;
 import com.intellij.formatting.alignment.AlignmentStrategy;
 import com.intellij.lang.ASTNode;
+import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDocTokenType;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.PsiArrayInitializerMemberValue;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiImplicitClass;
+import com.intellij.psi.PsiJavaModule;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.PsiLiteralExpression;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiPolyadicExpression;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiSwitchExpression;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.TokenType;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.formatter.FormatterUtil;
@@ -16,8 +43,11 @@ import com.intellij.psi.formatter.common.AbstractBlock;
 import com.intellij.psi.formatter.java.wrap.ReservedWrapsProvider;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
 import com.intellij.psi.impl.source.codeStyle.ShiftIndentInsideHelper;
-import com.intellij.psi.impl.source.tree.*;
-import com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil;
+import com.intellij.psi.impl.source.tree.ChildRole;
+import com.intellij.psi.impl.source.tree.CompositeElement;
+import com.intellij.psi.impl.source.tree.JavaDocElementType;
+import com.intellij.psi.impl.source.tree.JavaElementType;
+import com.intellij.psi.impl.source.tree.LeafElement;
 import com.intellij.psi.impl.source.tree.java.ClassElement;
 import com.intellij.psi.javadoc.PsiMarkdownCodeBlock;
 import com.intellij.psi.jsp.JspClassLevelDeclarationStatementType;
@@ -199,11 +229,11 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
     if (isStatement(child, child.getTreeParent())) {
       return new CodeBlockBlock(child, wrap, alignment, actualIndent, settings, javaSettings, myFormattingMode);
     }
-    if (!isBuildIndentsOnly() &&
-        child instanceof PsiComment &&
-        child instanceof PsiLanguageInjectionHost &&
-        InjectedLanguageUtil.hasInjections((PsiLanguageInjectionHost)child)) {
-      return new CommentWithInjectionBlock(child, wrap, alignment, indent, settings, javaSettings, formattingMode);
+    if (!isBuildIndentsOnly() && child instanceof PsiComment && child instanceof PsiLanguageInjectionHost psiLanguageInjectionHost) {
+      InjectedLanguageManager injectedLanguageManager = InjectedLanguageManager.getInstance(childPsi.getProject());
+      if (injectedLanguageManager.getInjectedPsiFiles(psiLanguageInjectionHost) != null) {
+        return new CommentWithInjectionBlock(child, wrap, alignment, indent, settings, javaSettings, formattingMode);
+      }
     }
     if (child instanceof LeafElement || child instanceof PsiMarkdownCodeBlock) {
       if (child.getElementType() == JavaTokenType.C_STYLE_COMMENT) {
@@ -222,7 +252,7 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
     if (elementType == JavaElementType.LABELED_STATEMENT) {
       return new LabeledJavaBlock(child, wrap, alignment, actualIndent, settings, javaSettings, formattingMode);
     }
-    if (elementType == JavaDocElementType.DOC_COMMENT) {
+    if (JavaDocElementType.DOC_COMMENT_TOKENS.contains(elementType)) {
       return new DocCommentBlock(child, wrap, alignment, actualIndent, settings, javaSettings, formattingMode);
     }
     if (isTextBlock(childPsi)) {
@@ -337,9 +367,21 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
         }
         return Indent.getNoneIndent();
       }
+
+      if (JavaFormatterConditionalExpressionUtil.isInsideConditionalExpression(parent)) {
+        return Indent.getSpaceIndent(0, true);
+      }
     }
 
     return null;
+  }
+
+  private static @Nullable ASTNode skipParenthesesUp(@NotNull ASTNode node) {
+    ASTNode currNode = node.getTreeParent();
+    while (currNode != null && currNode.getElementType() == JavaElementType.PARENTH_EXPRESSION) {
+      currNode = currNode.getTreeParent();
+    }
+    return currNode;
   }
 
   private static @Nullable ASTNode skipCommentsAndWhitespacesBackwards(@NotNull ASTNode node) {
@@ -369,6 +411,7 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
     if (parentType == JavaElementType.SWITCH_STATEMENT) return Indent.getNoneIndent();
     if (parentType == JavaElementType.METHOD) return Indent.getNoneIndent();
     if (parentType == JavaDocElementType.DOC_COMMENT) return Indent.getNoneIndent();
+    if (parentType == JavaDocElementType.DOC_MARKDOWN_COMMENT) return Indent.getNoneIndent();
     if (parentType == JavaDocElementType.DOC_TAG) return Indent.getNoneIndent();
     if (parentType == JavaDocElementType.DOC_INLINE_TAG) return Indent.getNoneIndent();
     if (parentType == JavaElementType.IMPORT_LIST) return Indent.getNoneIndent();
@@ -561,6 +604,7 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
                                         child,
                                         WrappingStrategy.createDoNotWrapCommaStrategy(wrap),
                                         mySettings.ALIGN_MULTILINE_ARRAY_INITIALIZER_EXPRESSION,
+                                        false,
                                         JavaTokenType.COMMA);
       }
       else if (childType == JavaTokenType.LPARENTH && nodeType == JavaElementType.EXPRESSION_LIST) {
@@ -571,7 +615,8 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
         child = processParenthesisBlock(result, child,
                                         WrappingStrategy.createDoNotWrapCommaAndCommentStrategy(wrap),
                                         mySettings.ALIGN_MULTILINE_PARAMETERS_IN_CALLS,
-                                        JavaTokenType.COMMA, JavaTokenType.END_OF_LINE_COMMENT, JavaTokenType.C_STYLE_COMMENT);
+                                        isFirstArgumentComment(child),
+                                        JavaTokenType.COMMA);
       }
       else if (childType == JavaTokenType.LPARENTH && nodeType == JavaElementType.PARAMETER_LIST) {
         ASTNode parent = myNode.getTreeParent();
@@ -613,8 +658,8 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
                                   WrappingStrategy.DO_NOT_WRAP,
                                   mySettings.ALIGN_MULTILINE_PARENTHESIZED_EXPRESSION);
       }
-      else if (childType == JavaElementType.ENUM_CONSTANT && myNode instanceof ClassElement) {
-        child = processEnumBlock(result, child, ((ClassElement)myNode).findEnumConstantListDelimiterPlace());
+      else if (childType == JavaElementType.ENUM_CONSTANT && myNode instanceof ClassElement classElement) {
+        child = processEnumBlock(result, child, classElement.findEnumConstantListDelimiterPlace());
       }
       else if (mySettings.TERNARY_OPERATION_SIGNS_ON_NEXT_LINE && isTernaryOperationSign(child)) {
         child = processTernaryOperationRange(result, child, defaultWrap, childIndent);
@@ -822,12 +867,12 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
     if (nodes.isEmpty()) {
       return new LeafBlock(node, blockWrap, alignment, indent);
     }
-    if (Registry.is(LegacyChainedMethodCallsBlockBuilder.COMPATIBILITY_KEY)) {
-      return
-        new LegacyChainedMethodCallsBlockBuilder(alignment, blockWrap, indent, mySettings, myJavaSettings, myFormattingMode).build(nodes);
-    }
-    return new ChainMethodCallsBlockBuilder(alignment, blockWrap, indent, mySettings, myJavaSettings, myFormattingMode).build(nodes);
+    boolean enforceSpaceIndent = JavaFormatterConditionalExpressionUtil.isInsideConditionalExpression(node)
+                                 && mySettings.ALIGN_MULTILINE_CHAINED_METHODS;
+    return new ChainMethodCallsBlockBuilder(alignment, blockWrap, indent, mySettings, myJavaSettings, myFormattingMode, enforceSpaceIndent)
+      .build(nodes);
   }
+
 
   private boolean shouldAlignChild(final @NotNull ASTNode child) {
     int role = getChildRole(child);
@@ -957,20 +1002,65 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
                                                    @NotNull WrappingStrategy wrappingStrategy,
                                                    final boolean doAlign,
                                                    IElementType @NotNull ... ignoreAlignmentTypes) {
+    return processParenthesisBlock(result, child, wrappingStrategy, doAlign, false, ignoreAlignmentTypes);
+  }
+
+  private @NotNull ASTNode processParenthesisBlock(@NotNull List<Block> result,
+                                                   @NotNull ASTNode child,
+                                                   @NotNull WrappingStrategy wrappingStrategy,
+                                                   final boolean doAlign,
+                                                   final boolean ignoreFirstArgumentAlignment,
+                                                   IElementType @NotNull ... ignoreAlignmentTypes) {
     myUseChildAttributes = true;
 
     final IElementType from = JavaTokenType.LPARENTH;
     final IElementType to = JavaTokenType.RPARENTH;
 
-    return processParenthesisBlock(from, to, result, child, wrappingStrategy, doAlign, ignoreAlignmentTypes);
+    return processParenthesisBlock(from, to, result, child, wrappingStrategy, doAlign, ignoreFirstArgumentAlignment, ignoreAlignmentTypes);
   }
 
+  /**
+   * Builds formatting blocks for the contents of a parenthesized structure (between {@code from} and {@code to})
+   * such as a method-call argument list, parameter list, array/record initializer, resource list, etc.
+   * Iterates through the children, assigning indents and a shared {@link Alignment}.
+   * <p>
+   * @param ignoreFirstArgumentAlignment when {@code true}, the first non-whitespace child inside the
+   *                                     parentheses is excluded from the shared column alignment
+   *                                     (it receives a {@code null} alignment), while all later
+   *                                     children are still aligned together. It allows calculating the allignment
+   *                                     based on the next child. For example:
+   *                                     <p/> before formatting:
+   *                                     <pre>{@code
+   *                                          void foo(// comment
+   *                                              1,
+   *                                                        2,
+   *                                                            3)
+   *                                       }</pre>
+   *                                     <p/> after formatting:
+   *                                     <pre>{@code
+   *                                           void foo(// comment
+   *                                               1,
+   *                                               2,
+   *                                               3)
+   *                                       }</pre>
+   *                                     <p/> with a disabled option the result of the formatting would be the following:
+   *                                         <pre>{@code
+   *                                               void foo(// comment
+   *                                                        1,
+   *                                                        2,
+   *                                                        3)
+   *                                           }</pre>
+   *
+   * @param ignoreAlignmentTypes element types that must NOT participate in the shared alignment.
+   * @see SkipFirstChildAlignmentStrategy
+   */
   private @NotNull ASTNode processParenthesisBlock(@NotNull IElementType from,
                                                    final @Nullable IElementType to,
                                                    final @NotNull List<Block> result,
                                                    @NotNull ASTNode child,
                                                    final @NotNull WrappingStrategy wrappingStrategy,
                                                    final boolean doAlign,
+                                                   final boolean ignoreFirstArgumentAlignment,
                                                    IElementType @NotNull ... ignoreAlignmentTypes)
   {
     Indent externalIndent = Indent.getNoneIndent();
@@ -980,7 +1070,10 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
       internalIndent = Indent.getSmartIndent(Indent.Type.CONTINUATION);
     }
 
-    AlignmentStrategy alignmentStrategy = AlignmentStrategy.wrap(createAlignment(doAlign, null), ignoreAlignmentTypes);
+    AlignmentStrategy baseAlignmentStrategy = AlignmentStrategy.wrap(createAlignment(doAlign, null), ignoreAlignmentTypes);
+    AlignmentStrategy alignmentStrategy = ignoreFirstArgumentAlignment
+                                          ? new SkipFirstChildAlignmentStrategy(baseAlignmentStrategy)
+                                          : baseAlignmentStrategy;
     setChildIndent(internalIndent);
     setChildAlignment(alignmentStrategy.getAlignment(null));
     boolean methodParametersBlock = true;
@@ -1102,6 +1195,41 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
     }
     ASTNode lastChild = node.getLastChildNode();
     return lastChild != null && lastChild.getElementType() == JavaElementType.ANONYMOUS_CLASS;
+  }
+
+
+  private static boolean isFirstArgumentComment(@NotNull ASTNode lParen) {
+    for (ASTNode node = lParen.getTreeNext(); node != null; node = node.getTreeNext()) {
+      if (FormatterUtil.containsWhiteSpacesOnly(node) || node.getTextLength() == 0) {
+        continue;
+      }
+      IElementType type = node.getElementType();
+      return type == JavaTokenType.END_OF_LINE_COMMENT || type == JavaTokenType.C_STYLE_COMMENT;
+    }
+    return false;
+  }
+
+  /**
+   * {@link AlignmentStrategy} that returns {@code null} for the first request with a non-null child type
+   * and delegates all subsequent requests (and any request with a {@code null} child type) to the wrapped strategy.
+   * <p>
+   */
+  private static final class SkipFirstChildAlignmentStrategy extends AlignmentStrategy {
+    private final AlignmentStrategy myDelegate;
+    private boolean myFirstChildSkipped;
+
+    SkipFirstChildAlignmentStrategy(@NotNull AlignmentStrategy delegate) {
+      myDelegate = delegate;
+    }
+
+    @Override
+    public @Nullable Alignment getAlignment(@Nullable IElementType parentType, @Nullable IElementType childType) {
+      if (childType != null && !myFirstChildSkipped) {
+        myFirstChildSkipped = true;
+        return null;
+      }
+      return myDelegate.getAlignment(parentType, childType);
+    }
   }
 
   private @Nullable ASTNode processEnumBlock(@NotNull List<? super Block> result,
@@ -1241,14 +1369,14 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
   }
 
   protected static @Nullable ASTNode getTreeNode(final Block block) {
-    if (block instanceof JavaBlock) {
-      return ((JavaBlock)block).getFirstTreeNode();
+    if (block instanceof JavaBlock javaBlock) {
+      return javaBlock.getFirstTreeNode();
     }
-    if (block instanceof LeafBlock) {
-      return ((LeafBlock)block).getTreeNode();
+    if (block instanceof LeafBlock leafBlock) {
+      return leafBlock.getTreeNode();
     }
-    if (block instanceof CStyleCommentBlock) {
-      return ((CStyleCommentBlock)block).getNode();
+    if (block instanceof CStyleCommentBlock commentBlock) {
+      return commentBlock.getNode();
     }
     return null;
   }
@@ -1258,7 +1386,7 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
     if (myUseChildAttributes) {
       return new ChildAttributes(myChildIndent, myChildAlignment);
     }
-    if (isAfter(newChildIndex, new IElementType[]{JavaDocElementType.DOC_COMMENT})) {
+    if (isAfter(newChildIndex, new IElementType[]{JavaDocElementType.DOC_COMMENT, JavaDocElementType.DOC_MARKDOWN_COMMENT})) {
       return new ChildAttributes(Indent.getNoneIndent(), myChildAlignment);
     }
     return super.getChildAttributes(newChildIndex);
@@ -1276,8 +1404,8 @@ public abstract class AbstractJavaBlock extends AbstractBlock implements JavaBlo
   protected boolean isAfter(final int newChildIndex, final IElementType @NotNull [] elementTypes) {
     if (newChildIndex == 0) return false;
     final Block previousBlock = getSubBlocks().get(newChildIndex - 1);
-    if (!(previousBlock instanceof AbstractBlock)) return false;
-    final IElementType previousElementType = ((AbstractBlock)previousBlock).getNode().getElementType();
+    if (!(previousBlock instanceof AbstractBlock block)) return false;
+    final IElementType previousElementType = block.getNode().getElementType();
     return ArrayUtil.contains(previousElementType, elementTypes);
   }
 

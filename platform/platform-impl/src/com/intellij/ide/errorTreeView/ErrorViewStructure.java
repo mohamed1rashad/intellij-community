@@ -5,7 +5,7 @@ import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
 import com.intellij.ide.errorTreeView.impl.ErrorTreeViewConfiguration;
 import com.intellij.ide.util.treeView.AbstractTreeStructure;
 import com.intellij.ide.util.treeView.NodeDescriptor;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.fileEditor.OpenFileDescriptor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -18,8 +18,15 @@ import com.intellij.util.ui.MutableErrorTreeView;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.Icon;
+import javax.swing.JTree;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -471,10 +478,11 @@ public class ErrorViewStructure extends AbstractTreeStructure {
       removeGroup(groupingElement.getName());
       final VirtualFile virtualFile = groupingElement.getFile();
       if (virtualFile != null) {
-        ApplicationManager.getApplication().runReadAction(() -> {
-          final PsiFile psiFile = virtualFile.isValid()? PsiManager.getInstance(myProject).findFile(virtualFile) : null;
+        ReadAction.runBlocking(() -> {
+          final PsiFile psiFile = virtualFile.isValid() ? PsiManager.getInstance(myProject).findFile(virtualFile) : null;
           if (psiFile != null) {
-            DaemonCodeAnalyzer.getInstance(myProject).restart(psiFile, this); // urge the daemon to re-highlight the file despite no modification has been made
+            DaemonCodeAnalyzer.getInstance(myProject)
+              .restart(psiFile, this); // urge the daemon to re-highlight the file despite no modification has been made
           }
         });
       }

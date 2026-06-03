@@ -25,11 +25,21 @@ open class WhatsNewInVisionContentProvider {
   companion object {
     suspend fun getInstance(): WhatsNewInVisionContentProvider = serviceAsync()
     const val DEFAULT_VISION_JSON_FILE_NAME: String = "vision-in-product-pages.json"
+    const val DEFAULT_MULTIPAGE_ID: String = "default_id"
   }
 
   open suspend fun isAvailable(): Boolean {
     return content.checkAvailability()
   }
+
+  /**
+   * Returns a set of allowed multipage IDs.
+   * By default, returns a set containing only [DEFAULT_MULTIPAGE_ID].
+   *
+   * @see WhatsNewMultipageStartIdProvider
+   * @see <a href="https://youtrack.jetbrains.com/articles/IJPL-A-495/Vision-Based-Whats-New">Vision Based What's new documentation</a>
+   */
+  open fun getAllowedMultipageIds(): Set<String> = setOf(DEFAULT_MULTIPAGE_ID)
 
   /**
    * Files that will be probed while looking for Vision content.
@@ -72,7 +82,8 @@ open class WhatsNewInVisionContentProvider {
                            val actions: List<Action>,
                            val html: String,
                            val languages: List<Language>,
-                           val publicVars: List<PublicVar>)
+                           val publicVars: List<PublicVar>,
+                           val multipageIds: List<String> = listOf())
 
   @Serializable
   internal data class Action(val value: String, val description: String)
@@ -103,10 +114,27 @@ open class WhatsNewInVisionContentProvider {
   }
 
   private val json = Json { ignoreUnknownKeys = true }
+
   internal suspend fun getContent(): Container {
-    return content.openStream()?.use { inputStream ->
+    val container = content.openStream()?.use { inputStream ->
       json.decodeFromStream<Container>(inputStream)
     } ?: error("Vision page not found")
+
+    val allowedIds = getAllowedMultipageIds()
+
+    // Don't check ids if only default multipage ID is allowed
+    if (allowedIds == setOf(DEFAULT_MULTIPAGE_ID)) {
+      return container
+    }
+    for (page in container.entities) {
+      for (multipageId in page.multipageIds) {
+        if (multipageId !in allowedIds) {
+          logger.error("Multipage ID '$multipageId' is not allowed in this provider. Allowed IDs: $allowedIds")
+        }
+      }
+    }
+
+    return container
   }
 
   internal fun getWhatsNewResource(resourceName: String): ContentSource = getResource(getResourceNameByPath(resourceName))
@@ -133,9 +161,9 @@ class ResourceContentSource(private val classLoader: ClassLoader, private val re
   constructor(classLoader: ClassLoader, resourceName: String) : this(classLoader, listOf(resourceName))
 
   override suspend fun openStream(): InputStream? = withContext(Dispatchers.IO) {
-    resourceNames.asSequence().map {
+    resourceNames.firstNotNullOfOrNull {
       classLoader.getResourceAsStream(it)
-    }.firstOrNull()
+    }
   }
   override suspend fun checkAvailability(): Boolean = withContext(Dispatchers.IO) {
     resourceNames.any { classLoader.getResource(it) != null }

@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.base.fir.analysisApiPlatform.modificationEvents
 
@@ -7,21 +7,29 @@ import com.intellij.openapi.command.executeCommand
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.roots.ModuleRootListener
 import com.intellij.openapi.roots.impl.ModuleRootEventImpl
-import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.util.parentOfType
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModificationEventKind
 import org.jetbrains.kotlin.analysis.api.platform.projectStructure.KotlinProjectStructureProvider
-import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
 import org.jetbrains.kotlin.idea.util.application.executeWriteCommand
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtExpressionCodeFragment
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtScript
+import org.jetbrains.kotlin.psi.KtVariableDeclaration
 import org.jetbrains.kotlin.psi.psiUtil.findDescendantOfType
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
-import org.junit.Assert
 
 class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationEventTest() {
     override val expectedEventKind: KotlinModificationEventKind
@@ -118,7 +126,7 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
             publisher.rootsChanged(rootChangedEvent)
         }
 
-        //on finish writeAction `FirIdeOutOfBlockPsiTreeChangePreprocessor.treeChanged` will collect data
+        //on finish writeAction `FirIdeOutOfBlockModificationService.OutOfBlockTreeChangePreprocessor.treeChanged` will collect data
         project.executeWriteCommand("doc change", null) {
             contentElement.replace(factory.createExpression("42"))
         }
@@ -495,7 +503,14 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
         val moduleC = createModuleInTmpDir("c")
         val fileD = createNotUnderContentRootFile("d", "fun baz() = 10")
 
-        val allowedEventKinds = setOf(KotlinModificationEventKind.GLOBAL_MODULE_STATE_MODIFICATION)
+        val allowedEventKinds = setOf(
+            // `FirIdeDumbModeInvalidationListener` may publish a `GLOBAL_MODULE_STATE_MODIFICATION` after exiting dumb mode.
+            KotlinModificationEventKind.GLOBAL_MODULE_STATE_MODIFICATION,
+
+            // `KotlinScriptEditorListener` may run during editor configuration and publish a `GLOBAL_SCRIPT_MODULE_STATE_MODIFICATION`.
+            KotlinModificationEventKind.GLOBAL_SCRIPT_MODULE_STATE_MODIFICATION,
+        )
+
         val trackerA = createTracker(scriptA, "script A after an out-of-block modification", allowedEventKinds)
         val trackerB = createTracker(scriptB, "script B", allowedEventKinds)
         val trackerC = createTracker(moduleC, "module C", allowedEventKinds)
@@ -521,7 +536,9 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
         val moduleC = createModuleInTmpDir("c")
         val scriptD = createScript("d", "fun baz() = 10")
 
+        // `FirIdeDumbModeInvalidationListener` may publish a `GLOBAL_MODULE_STATE_MODIFICATION` after exiting dumb mode.
         val allowedEventKinds = setOf(KotlinModificationEventKind.GLOBAL_MODULE_STATE_MODIFICATION)
+
         val trackerA = createTracker(fileA, "not-under-content-root file A after an out-of-block modification", allowedEventKinds)
         val trackerB = createTracker(fileB, "not-under-content-root file B", allowedEventKinds)
         val trackerC = createTracker(moduleC, "module C", allowedEventKinds)
@@ -539,7 +556,7 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
         trackerD.assertNotModified()
     }
 
-    @OptIn(KaAllowAnalysisOnEdt::class)
+    @OptIn(KaAllowAnalysisOnEdt::class, KaExperimentalApi::class)
     fun `test code fragment out-of-block modification does not happen after body modification`() {
         val contextModule = createModuleInTmpDir("ctx") {
             val contextFile = FileWithText(
@@ -578,7 +595,7 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
             allowAnalysisOnEdt {
                 analyze(codeFragment) {
                     val callExpression = codeFragment.findDescendantOfType<KtCallExpression>() ?: error("Replaced call is not found")
-                    val resolvedCall = callExpression.resolveToCall()?.successfulFunctionCallOrNull()
+                    val resolvedCall = callExpression.resolveCall()
                     assert(resolvedCall == null)
                 }
             }
@@ -595,7 +612,7 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
             allowAnalysisOnEdt {
                 analyze(codeFragment) {
                     val callExpression = codeFragment.findDescendantOfType<KtCallExpression>() ?: error("Replaced call is not found")
-                    val resolvedCall = callExpression.resolveToCall()?.successfulFunctionCallOrNull()
+                    val resolvedCall = callExpression.resolveCall()
                     val resolvedFunction = resolvedCall?.symbol as? KaNamedFunctionSymbol
                     assert(resolvedFunction != null && resolvedFunction.name.asString() == "main" )
                 }
@@ -651,13 +668,6 @@ class KotlinModuleOutOfBlockModificationTest : AbstractKotlinModuleModificationE
     }
 
     private fun Module.configureEditorForFile(fileName: String): KtFile = findSourceKtFile(fileName).apply { configureEditor() }
-
-    private fun KtFile.modify(textAfterModification: String, targetOffset: Int? = null, edit: () -> Unit) {
-        targetOffset?.let(editor.caretModel::moveToOffset)
-        edit()
-        PsiDocumentManager.getInstance(myProject).commitAllDocuments()
-        Assert.assertEquals(textAfterModification, text)
-    }
 
     private fun KtFile.getSingleFunctionBodyOffset(): Int {
         val singleFunction = declarations.single() as KtNamedFunction

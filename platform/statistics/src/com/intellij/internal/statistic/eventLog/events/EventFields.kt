@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.internal.statistic.eventLog.events
 
 import com.intellij.ide.plugins.IdeaPluginDescriptor
@@ -104,6 +104,42 @@ object EventFields {
     StringListEventField.ValidatedByDictionary(name, dictionary, description)
 
   /**
+   * Creates a field validated by a dictionary, with optional required and default value rules.
+   * @param name name of the field
+   * @param dictionary name of the dictionary
+   * @param description optional description of the field
+   * @param required whether the field is required
+   * @param defaultValue optional default value applied when the field is missing or invalid
+   */
+  @JvmStatic
+  fun StringValidatedByDictionary(
+    name: String,
+    dictionary: String,
+    description: String? = null,
+    required: Boolean? = null,
+    defaultValue: String? = null,
+  ): StringEventField =
+    StringEventField.ValidatedByDictionaryExtended(name, dictionary, description, required, defaultValue)
+
+  /**
+   * Creates a list field where each element is validated by a dictionary, with optional required and default value rules.
+   * @param name name of the field
+   * @param dictionary name of the dictionary
+   * @param description optional description of the field
+   * @param required whether the field is required
+   * @param defaultValue optional default value applied when the field is missing or invalid
+   */
+  @JvmStatic
+  fun StringListValidatedByDictionary(
+    name: String,
+    dictionary: String,
+    description: String? = null,
+    required: Boolean? = null,
+    defaultValue: String? = null,
+  ): StringListEventField =
+    StringListEventField.ValidatedByDictionaryExtended(name, dictionary, description, required, defaultValue)
+
+  /**
    * Creates a field that allows only a specific list of values
    * @param name  name of the field
    * @param allowedValues list of allowed values, e.g [ "bool", "int", "float"]
@@ -114,6 +150,24 @@ object EventFields {
 
   @JvmStatic
   fun String(@NonNls @EventFieldName name: String, allowedValues: List<String>): StringEventField = String(name, allowedValues, null)
+
+  /**
+   * Creates a field that allows only a specific list of values
+   * @param name  name of the field
+   * @param allowedValues list of allowed values, e.g [ "bool", "int", "float"]
+   * @param description optional description of the field
+   * @param required field whether the field is required
+   * @param defaultValue optional default value for the field
+   */
+  @JvmStatic
+  fun String(
+    @NonNls @EventFieldName name: String,
+    allowedValues: List<String>,
+    @NonNls description: String? = null,
+    required: Boolean? = null,
+    defaultValue: String? = null,
+  ): StringEventField =
+    StringEventField.ValidatedByAllowedValuesExtended(name, allowedValues, description, required, defaultValue)
 
   @JvmStatic
   fun Int(@NonNls @EventFieldName name: String, @NonNls description: String?): IntEventField = IntEventField(name, description)
@@ -363,6 +417,10 @@ object EventFields {
   @JvmStatic
   @JvmOverloads
   fun IntList(@NonNls @EventFieldName name: String, @NonNls description: String? = null): IntListEventField = IntListEventField(name, description)
+
+  @JvmStatic
+  @JvmOverloads
+  fun FloatList(@EventFieldName name: String, description: String? = null): FloatListEventField = FloatListEventField(name)
 
   @JvmStatic
   @JvmOverloads

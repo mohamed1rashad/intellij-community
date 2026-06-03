@@ -9,11 +9,14 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public class JavaCompletionSession {
   private final Set<String> myAddedClasses = new HashSet<>();
-  private final Set<String> myKeywords = new HashSet<>();
   private final List<LookupElement> myBatchItems = new ArrayList<>();
   private final CompletionResultSet myResult;
 
@@ -76,13 +79,5 @@ public class JavaCompletionSession {
   public boolean alreadyProcessed(@NotNull PsiClass object) {
     final String name = getClassName(object);
     return name == null || myAddedClasses.contains(name);
-  }
-
-  public boolean isKeywordAlreadyProcessed(@NotNull String keyword) {
-    return myKeywords.contains(keyword);
-  }
-
-  void registerKeyword(@NotNull String keyword) {
-    myKeywords.add(keyword);
   }
 }

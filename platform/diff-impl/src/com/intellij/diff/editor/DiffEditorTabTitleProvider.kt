@@ -9,11 +9,12 @@ import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.NlsSafe
+import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.annotations.CalledInAny
 
-private class DiffEditorTabTitleProvider : EditorTabTitleProvider, DumbAware {
+internal class DiffEditorTabTitleProvider : EditorTabTitleProvider, DumbAware {
   override fun getEditorTabTitle(project: Project, file: VirtualFile): @NlsContexts.TabTitle String? {
     val title = getEditorTabName(project, file) ?: return null
     return shortenTitleIfNeeded(project, file, title)
@@ -30,8 +31,8 @@ private class DiffEditorTabTitleProvider : EditorTabTitleProvider, DumbAware {
     return shortenTitleIfNeeded(project, file, title)
   }
 
-  override fun getEditorTabTooltipText(project: Project, virtualFile: VirtualFile): @NlsContexts.Tooltip String? {
-    return getEditorTabName(project, virtualFile)
+  override fun getEditorTabTooltipHtml(project: Project, virtualFile: VirtualFile): HtmlChunk? {
+    return getEditorTabName(project, virtualFile)?.let { HtmlChunk.text(it) }
   }
 
   private fun shortenTitleIfNeeded(project: Project, file: VirtualFile, title: @NlsContexts.TabTitle String): @NlsContexts.TabTitle String =

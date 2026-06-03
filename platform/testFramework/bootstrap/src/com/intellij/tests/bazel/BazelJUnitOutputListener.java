@@ -6,8 +6,17 @@
  */
 package com.intellij.tests.bazel;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
+import com.intellij.tests.IgnoreException;
+import org.junit.platform.engine.TestExecutionResult;
+import org.junit.platform.engine.UniqueId;
+import org.junit.platform.engine.reporting.ReportEntry;
+import org.junit.platform.launcher.TestExecutionListener;
+import org.junit.platform.launcher.TestIdentifier;
+import org.junit.platform.launcher.TestPlan;
 
+import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamWriter;
 import java.io.BufferedWriter;
 import java.io.Closeable;
 import java.io.IOException;
@@ -27,17 +36,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.xml.stream.XMLOutputFactory;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamWriter;
 
-import com.intellij.tests.IgnoreException;
-import org.junit.platform.engine.TestExecutionResult;
-import org.junit.platform.engine.UniqueId;
-import org.junit.platform.engine.reporting.ReportEntry;
-import org.junit.platform.launcher.TestExecutionListener;
-import org.junit.platform.launcher.TestIdentifier;
-import org.junit.platform.launcher.TestPlan;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class BazelJUnitOutputListener implements TestExecutionListener, Closeable {
   public static final Logger LOG = Logger.getLogger(BazelJUnitOutputListener.class.getName());
@@ -129,22 +129,49 @@ public class BazelJUnitOutputListener implements TestExecutionListener, Closeabl
       }
 
       // Default to the current testCase parent id
-      Optional<TestData> parent = testCase.getId().getParentIdObject().map(results::get);
+      Optional<TestData> directParent = testCase.getId().getParentIdObject().map(results::get);
+      Optional<TestData> parent = directParent;
+      boolean foundClassSegment = false;
 
       // Loop over the segments in reverse to find this test case's class parent. We utilize the
       // closest parent that is either a class or nested class when nested classes are involved.
-      // If no parent exists that is a class, then we default to the current test case.
+      // Vintage descriptors use "test" segments for both suites and test cases, so if no class
+      // parent exists we keep the nearest suite parent instead of reporting each test as a suite.
       List<UniqueId.Segment> segments = testCase.getId().getUniqueIdObject().getSegments();
       for (int i = segments.size() - 2; i >= 0; i--) {
-        if (SegmentClassTypes.contains(segments.get(i).getType()) || parent.isEmpty()) {
+        if (SegmentClassTypes.contains(segments.get(i).getType())) {
+          foundClassSegment = true;
+          break;
+        }
+        if (parent.isEmpty()) {
           break;
         }
 
         parent = parent.get().getId().getParentIdObject().map(results::get);
       }
 
-      // If no class or nested-class segment was found, default to the current test case
-      knownSuites.computeIfAbsent(parent.orElse(testCase), id -> new ArrayList<>()).add(testCase);
+      TestData suite = foundClassSegment ? parent.orElse(testCase) : directParent.orElse(testCase);
+      knownSuites.computeIfAbsent(suite, id -> new ArrayList<>()).add(testCase);
+    }
+
+    // If a container (e.g. a whole test class) fails before any test method starts, there may be
+    // no completed test case to infer a suite from. Keep such failed containers so we can emit a
+    // non-empty suite XML by propagating the suite result to all methods in `output`.
+    for (TestData testCase : testCases) {
+      if (!testCase.getId().isContainer()) {
+        continue;
+      }
+
+      TestExecutionResult result = testCase.getResult();
+      if (result == null || result.getStatus() == TestExecutionResult.Status.SUCCESSFUL) {
+        continue;
+      }
+
+      if (!includeIncompleteTests && testCase.getDuration() == null) {
+        continue;
+      }
+
+      knownSuites.computeIfAbsent(testCase, ignored -> new ArrayList<>());
     }
 
     return knownSuites;
@@ -224,9 +251,14 @@ public class BazelJUnitOutputListener implements TestExecutionListener, Closeabl
           List<TestData> tests = suiteAndTests.getValue();
           if (suite.getResult() != null
               && suite.getResult().getStatus() != TestExecutionResult.Status.SUCCESSFUL) {
-            // If a test suite fails or is skipped, all its tests must be included in the XML output
-            // with the same result as the suite, since the XML format does not support marking a
-            // suite as failed or skipped. This aligns with Bazel's XmlWriter for JUnitRunner.
+            // If a test suite fails or is skipped, include all tests from that suite in the XML.
+            // Existing test method results must be preserved; only missing descendants are added.
+            // For FAILED suite status, add a synthetic test case representing suite failure.
+            TestExecutionResult suiteResult = suite.getResult();
+            if (suiteResult.getStatus() == TestExecutionResult.Status.FAILED) {
+              tests.add(suite);
+            }
+
             getTestsFromSuite(suite.getId())
               .forEach(
                 testIdentifier -> {
@@ -235,8 +267,17 @@ public class BazelJUnitOutputListener implements TestExecutionListener, Closeabl
                     // add test to results.
                     test = getResult(testIdentifier);
                     tests.add(test);
+                    TestExecutionResult descendantResult =
+                      suiteResult.getStatus() == TestExecutionResult.Status.FAILED
+                      ? TestExecutionResult.aborted(suiteResult.getThrowable().orElse(null))
+                      : suiteResult;
+                    String descendantSkipReason = suite.getSkipReason();
+                    if (descendantSkipReason == null
+                        && suiteResult.getStatus() == TestExecutionResult.Status.FAILED) {
+                      descendantSkipReason = "";
+                    }
+                    test.mark(descendantResult).skipReason(descendantSkipReason);
                   }
-                  test.mark(suite.getResult()).skipReason(suite.getSkipReason());
                 });
           }
           new TestSuiteXmlRenderer(testPlan).toXml(xml, suite, tests);

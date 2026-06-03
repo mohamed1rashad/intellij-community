@@ -2,6 +2,7 @@
 package org.jetbrains.kotlin.idea.base.fir.analysisApiPlatform.modificationEvents
 
 import com.intellij.openapi.roots.libraries.Library
+import com.intellij.psi.PsiDocumentManager.getInstance
 import org.jetbrains.kotlin.analysis.api.platform.modification.KotlinModificationEventKind
 import org.jetbrains.kotlin.analysis.api.platform.modification.isGlobalLevel
 import org.jetbrains.kotlin.analysis.api.platform.modification.isModuleLevel
@@ -10,12 +11,12 @@ import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.test.AbstractMultiModuleTest
 import org.jetbrains.kotlin.idea.test.ConfigLibraryUtil
 import org.jetbrains.kotlin.psi.KtFile
+import org.junit.Assert
 import java.io.File
 
 abstract class AbstractKotlinModificationEventTest : AbstractMultiModuleTest() {
-protected abstract val expectedEventKind: KotlinModificationEventKind
-
     protected open val defaultAllowedEventKinds: Set<KotlinModificationEventKind> = emptySet()
+
     override fun getTestDataDirectory(): File = error("Should not be called")
 
     final override val pluginMode: KotlinPluginMode
@@ -37,6 +38,7 @@ protected abstract val expectedEventKind: KotlinModificationEventKind
      */
     protected fun createGlobalTracker(
         label: String,
+        expectedEventKind: KotlinModificationEventKind,
         additionalAllowedEventKinds: Set<KotlinModificationEventKind> = emptySet(),
     ): ModificationEventTracker {
         require(expectedEventKind.isGlobalLevel)
@@ -57,6 +59,7 @@ protected abstract val expectedEventKind: KotlinModificationEventKind
     protected fun createModuleTracker(
         module: KaModule,
         label: String,
+        expectedEventKind: KotlinModificationEventKind,
         additionalAllowedEventKinds: Set<KotlinModificationEventKind> = emptySet(),
     ): ModuleModificationEventTracker {
         require(expectedEventKind.isModuleLevel)
@@ -68,5 +71,12 @@ protected abstract val expectedEventKind: KotlinModificationEventKind
             additionalAllowedEventKinds + defaultAllowedEventKinds,
             testRootDisposable,
         )
+    }
+
+    protected fun KtFile.modify(textAfterModification: String, targetOffset: Int? = null, edit: () -> Unit) {
+        targetOffset?.let(editor.caretModel::moveToOffset)
+        edit()
+        getInstance(this.project).commitAllDocuments()
+        Assert.assertEquals(textAfterModification, this.text)
     }
 }

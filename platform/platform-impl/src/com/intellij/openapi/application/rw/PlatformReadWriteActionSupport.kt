@@ -1,16 +1,25 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.application.rw
 
 import com.intellij.diagnostic.ThreadDumper
 import com.intellij.ide.lightEdit.LightEdit
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.AsyncExecutionService
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.ReadAndWriteScope
+import com.intellij.openapi.application.ReadConstraint
 import com.intellij.openapi.application.ReadResult
+import com.intellij.openapi.application.ReadWriteActionSupport
+import com.intellij.openapi.application.ThreadingSupport
 import com.intellij.openapi.application.impl.AsyncExecutionServiceImpl
 import com.intellij.openapi.application.impl.InternalThreading
+import com.intellij.openapi.application.lambdaToComputable
+import com.intellij.openapi.application.useBackgroundWriteAction
+import com.intellij.openapi.application.useTrueSuspensionForWriteAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Ref
 import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.util.ObjectUtils
@@ -72,6 +81,17 @@ class PlatformReadWriteActionSupport : ReadWriteActionSupport {
     }
   }
 
+
+  private sealed interface ReadResultImpl<out R> : ReadResult<R> {
+    class WriteAction<out V>(val action: () -> V) : ReadResultImpl<V>
+    class Value<out V>(val value: V) : ReadResultImpl<V>
+  }
+
+  private object ReadAndWriteScopeImpl : ReadAndWriteScope {
+    override fun <R> value(value: R): ReadResultImpl<R> = ReadResultImpl.Value(value)
+    override fun <R> writeAction(action: () -> R): ReadResultImpl<R> = ReadResultImpl.WriteAction(action)
+  }
+
   override suspend fun <X> executeReadAndWriteAction(
     constraints: Array<out ReadConstraint>,
     runWriteActionOnEdt: Boolean,
@@ -80,19 +100,27 @@ class PlatformReadWriteActionSupport : ReadWriteActionSupport {
   ): X {
     while (true) {
       val (readResult: ReadResult<X>, stamp: Long) = executeReadAction(constraints.toList(), undispatched = undispatched, blocking = false) {
-        Pair(ReadResult.Companion.action(), AsyncExecutionServiceImpl.getWriteActionCounter())
+        Pair(ReadAndWriteScopeImpl.action(), AsyncExecutionServiceImpl.getWriteActionCounter())
+      }
+      require(readResult is ReadResultImpl<X>) {
+        "Unexpected implementation of `ReadResult`: Expected ReadResultImpl, got ${readResult::class.simpleName}"
       }
       when (readResult) {
-        is ReadResult.Value -> {
+        is ReadResultImpl.Value -> {
           return readResult.value
         }
-        is ReadResult.WriteAction -> {
+        is ReadResultImpl.WriteAction -> {
           val lock = application.threadingSupport
           val writeResult = if (runWriteActionOnEdt || lock == null) {
             executeWriteActionOnEdt(stamp, readResult.action)
           }
           else {
-            executeWriteActionOnBackgroundWithAtomicCheck(lock, stamp, readResult.action)
+            try {
+              InternalThreading.incrementBackgroundWriteActionCount()
+              executeWriteActionOnBackgroundWithAtomicCheck(lock, stamp, readResult.action)
+            } finally {
+              InternalThreading.decrementBackgroundWriteActionCount()
+            }
           }
           if (writeResult !== retryMarker) {
             @Suppress("UNCHECKED_CAST")
@@ -107,9 +135,7 @@ class PlatformReadWriteActionSupport : ReadWriteActionSupport {
     return withContext(Dispatchers.EDT) {
       val writeStamp = AsyncExecutionServiceImpl.getWriteActionCounter()
       if (originalStamp == writeStamp) {
-        application.runWriteAction(Computable {
-          action()
-        })
+        application.runWriteAction(lambdaToComputable(action))
       }
       else {
         retryMarker
@@ -119,7 +145,7 @@ class PlatformReadWriteActionSupport : ReadWriteActionSupport {
 
   private suspend fun <T> executeWriteActionOnBackgroundWithAtomicCheck(lock: ThreadingSupport, originalStamp: Long, action: () -> T): /*T or retryMarker */ Any? {
     val dispatcher = backgroundWriteActionDispatcher
-    val ref = withContext(dispatcher + InternalThreading.RunInBackgroundWriteActionMarker) {
+    val ref = withContext(dispatcher) {
       executeWriteActionWithPossibleRetry {
         lock.runWriteActionWithCheckInWriteIntent(
           {
@@ -146,7 +172,7 @@ class PlatformReadWriteActionSupport : ReadWriteActionSupport {
 
   override suspend fun <T> runWriteAction(action: () -> T): T {
     val context = if (useBackgroundWriteAction) {
-      backgroundWriteActionDispatcher + InternalThreading.RunInBackgroundWriteActionMarker
+      backgroundWriteActionDispatcher
     }
     else {
       Dispatchers.EDT
@@ -181,9 +207,7 @@ ${dump.rawDump}""")
           InternalThreading.incrementBackgroundWriteActionCount()
           try {
             executeWriteActionWithPossibleRetry {
-              lock.runWriteAction {
-                action()
-              }
+              lock.runWriteAction(action)
             }
           } finally {
             InternalThreading.decrementBackgroundWriteActionCount()
@@ -191,7 +215,7 @@ ${dump.rawDump}""")
         }
         else {
           @Suppress("ForbiddenInSuspectContextMethod")
-          application.runWriteAction(ThrowableComputable(action))
+          application.runWriteAction(lambdaToComputable(action))
         }
       }
       finally {

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.siyeh.ig.junit;
 
 import org.jetbrains.annotations.NonNls;
@@ -73,6 +73,8 @@ public final @NonNls class JUnitCommonClassNames {
   public static final String ORG_JUNIT_JUPITER_API_EXTENSION_REGISTER_EXTENSION = "org.junit.jupiter.api.extension.RegisterExtension";
   public static final String ORG_JUNIT_JUPITER_API_EXTENSION_BEFORE_ALL_CALLBACK = "org.junit.jupiter.api.extension.BeforeAllCallback";
   public static final String ORG_JUNIT_JUPITER_API_EXTENSION_AFTER_ALL_CALLBACK = "org.junit.jupiter.api.extension.AfterAllCallback";
+  public static final String ORG_JUNIT_JUPITER_API_EXTENSION_BEFORE_EACH_CALLBACK = "org.junit.jupiter.api.extension.BeforeEachCallback";
+  public static final String ORG_JUNIT_JUPITER_API_EXTENSION_AFTER_EACH_CALLBACK = "org.junit.jupiter.api.extension.AfterEachCallback";
   public static final String ORG_JUNIT_JUPITER_API_EXTENSION_PARAMETER_RESOLVER = "org.junit.jupiter.api.extension.ParameterResolver";
   public static final String ORG_JUNIT_JUPITER_API_EXTENSION_EXTENSION = "org.junit.jupiter.api.extension.Extension";
   public static final String ORG_JUNIT_JUPITER_API_EXTENSION_EXTENSIONS = "org.junit.jupiter.api.extension.Extensions";
@@ -85,6 +87,30 @@ public final @NonNls class JUnitCommonClassNames {
   public static final String ORG_JUNIT_EXPERIMENTAL_RUNNERS_ENCLOSED = "org.junit.experimental.runners.Enclosed";
   public static final String ORG_JUNIT_JUPITER_API_IO_TEMPDIR = "org.junit.jupiter.api.io.TempDir";
   public static final String ORG_JUNIT_PLATFORM_SUITE_API_SUITE = "org.junit.platform.suite.api.Suite";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_AFTERSUITE = "org.junit.platform.suite.api.AfterSuite";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_BEFORESUITE = "org.junit.platform.suite.api.BeforeSuite";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT = "org.junit.platform.suite.api.Select";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECTS = "org.junit.platform.suite.api.Selects";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_CLASSES = "org.junit.platform.suite.api.SelectClasses";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_CLASSPATH_RESOURCE = "org.junit.platform.suite.api.SelectClasspathResource";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_CLASSPATH_RESOURCES = "org.junit.platform.suite.api.SelectClasspathResources";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_DIRECTORIES = "org.junit.platform.suite.api.SelectDirectories";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_FILE = "org.junit.platform.suite.api.SelectFile";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_FILES = "org.junit.platform.suite.api.SelectFiles";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_METHOD = "org.junit.platform.suite.api.SelectMethod";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_METHODS = "org.junit.platform.suite.api.SelectMethods";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_MODULES = "org.junit.platform.suite.api.SelectModules";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_PACKAGES = "org.junit.platform.suite.api.SelectPackages";
+  public static final String ORG_JUNIT_PLATFORM_SUITE_API_SELECT_URIS = "org.junit.platform.suite.api.SelectUris";
+  public static final Collection<String> SUITE_SELECTOR_ANNOTATIONS =
+    List.of(ORG_JUNIT_PLATFORM_SUITE_API_SELECT, ORG_JUNIT_PLATFORM_SUITE_API_SELECTS,
+            ORG_JUNIT_PLATFORM_SUITE_API_SELECT_CLASSES, ORG_JUNIT_PLATFORM_SUITE_API_SELECT_PACKAGES,
+            ORG_JUNIT_PLATFORM_SUITE_API_SELECT_CLASSPATH_RESOURCE, ORG_JUNIT_PLATFORM_SUITE_API_SELECT_CLASSPATH_RESOURCES,
+            ORG_JUNIT_PLATFORM_SUITE_API_SELECT_DIRECTORIES, ORG_JUNIT_PLATFORM_SUITE_API_SELECT_MODULES,
+            ORG_JUNIT_PLATFORM_SUITE_API_SELECT_FILE, ORG_JUNIT_PLATFORM_SUITE_API_SELECT_FILES,
+            ORG_JUNIT_PLATFORM_SUITE_API_SELECT_METHOD, ORG_JUNIT_PLATFORM_SUITE_API_SELECT_METHODS,
+            ORG_JUNIT_PLATFORM_SUITE_API_SELECT_URIS);
+  public static final String ORG_JUNIT_JUPITER_API_METHOD_ORDERER = "org.junit.jupiter.api.MethodOrderer";
   // junit 6
   public static final String ORG_JUNIT_JUPITER_API_METHOD_ORDERER_DEFAULT = "org.junit.jupiter.api.MethodOrderer.Default";
 }

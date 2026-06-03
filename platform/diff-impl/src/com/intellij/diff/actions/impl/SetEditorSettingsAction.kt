@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.actions.impl
 
 import com.intellij.diff.tools.util.DiffDataKeys
@@ -7,7 +7,12 @@ import com.intellij.diff.tools.util.base.TextDiffSettingsHolder
 import com.intellij.diff.util.CombinedDiffToggle
 import com.intellij.diff.util.DiffUserDataKeysEx
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.impl.PresentationFactory
 import com.intellij.openapi.diff.DiffBundle
@@ -23,9 +28,11 @@ import javax.swing.JList
 import javax.swing.ListCellRenderer
 import javax.swing.SwingConstants
 
+@Deprecated("Use SetEditorSettingsActionGroup instead",
+            replaceWith = ReplaceWith("SetEditorSettingsActionGroup", "com.intellij.diff.actions.impl.SetEditorSettingsActionGroup"))
 class SetEditorSettingsAction @ApiStatus.Internal constructor(
   settings: TextDiffSettingsHolder.TextDiffSettings,
-  editors: List<Editor?>,
+  editors: List<Editor>,
 ) : DumbAwareAction(DiffBundle.message("editor.settings"), null, AllIcons.General.GearPlain) {
 
   private val editorSettingsActionGroup = SetEditorSettingsActionGroup(settings, editors)
@@ -47,6 +54,10 @@ class SetEditorSettingsAction @ApiStatus.Internal constructor(
     editorSettingsActionGroup.applyDefaults()
   }
 
+  fun setDiffActions(gutterActions: List<AnAction>, diffActions: List<AnAction>) {
+    editorSettingsActionGroup.setDiffActions(gutterActions, diffActions)
+  }
+
   fun setSyncScrollSupport(syncScrollSupport: SyncScrollSupport.Support) {
     editorSettingsActionGroup.setSyncScrollSupport(syncScrollSupport)
   }
@@ -60,7 +71,7 @@ class SetEditorSettingsAction @ApiStatus.Internal constructor(
 
   private inner class MyPopup(
     group: ActionGroup,
-    context: DataContext
+    context: DataContext,
   ) : PopupFactoryImpl.ActionGroupPopup(
     null, null, group, context,
     ActionPlaces.getPopupPlace("SetEditorSettingsAction"), presentationFactory,
@@ -73,7 +84,7 @@ class SetEditorSettingsAction @ApiStatus.Internal constructor(
 
   private class MyRenderer(
     private val presentationFactory: PresentationFactory,
-    myPopup: MyPopup
+    myPopup: MyPopup,
   ) : PopupListElementRenderer<Any>(myPopup) {
     override fun customizeComponent(list: JList<out Any>?, value: Any, isSelected: Boolean) {
       myTextLabel.icon = null

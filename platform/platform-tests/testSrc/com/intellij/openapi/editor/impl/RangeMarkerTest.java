@@ -1,8 +1,7 @@
 // Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.editor.impl;
 
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
-import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerImpl;
+import com.intellij.codeInsight.daemon.impl.TestDaemonCodeAnalyzerImpl;
 import com.intellij.lang.FileASTNode;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
@@ -10,7 +9,12 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.command.impl.UndoManagerImpl;
 import com.intellij.openapi.command.undo.UndoManager;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.FoldRegion;
+import com.intellij.openapi.editor.LazyRangeMarkerFactory;
+import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.ex.DocumentEx;
@@ -21,7 +25,11 @@ import com.intellij.openapi.editor.markup.HighlighterTargetArea;
 import com.intellij.openapi.editor.markup.MarkupModel;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.TextRangeScalarUtil;
+import com.intellij.openapi.util.ThrowableComputable;
+import com.intellij.openapi.util.Trinity;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiDocumentListener;
@@ -29,7 +37,13 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.impl.PsiDocumentManagerImpl;
 import com.intellij.psi.impl.PsiToDocumentSynchronizer;
-import com.intellij.testFramework.*;
+import com.intellij.testFramework.HeavyPlatformTestCase;
+import com.intellij.testFramework.LeakHunter;
+import com.intellij.testFramework.LightPlatformTestCase;
+import com.intellij.testFramework.PerformanceUnitTest;
+import com.intellij.testFramework.PlatformTestUtil;
+import com.intellij.testFramework.Timings;
+import com.intellij.testFramework.VfsTestUtil;
 import com.intellij.tools.ide.metrics.benchmark.Benchmark;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.TestTimeOut;
@@ -44,7 +58,13 @@ import java.io.IOException;
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
@@ -293,7 +313,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     String s = "12345\n \n12345";
     RangeMarker marker = createMarker(s, 6, 8);
 
-    replaceString(marker.getDocument(), 0, s.length(), s.replaceAll(" ", ""));
+    replaceString(marker.getDocument(), 0, s.length(), s.replace(" ", ""));
 
     assertValidMarker(marker, 6, 7);
   }
@@ -406,11 +426,11 @@ public class RangeMarkerTest extends LightPlatformTestCase {
         public void documentChanged(@NotNull DocumentEvent e) {
           events.add(e);
         }
-      });
+      }, getTestRootDisposable());
       synchronizer.commitTransaction(document);
       assertEquals(newText, document.getText());
       DocumentEvent event = assertOneElement(events);
-      assertEquals("DocumentEventImpl[myOffset=22, myOldLength=28, myNewLength=0].", event.toString());
+      assertEquals("DocumentEventImpl[myOffset=22, myOldLength=28, myNewLength=0]", event.toString());
     });
 
   }
@@ -926,6 +946,47 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     }
   }
 
+  public void testRandomAddDeleteStress_NoCommand() {
+    int N_TRIES = Timings.adjustAccordingToMySpeed(100_000, false);
+    LOG.debug("N_TRIES = " + N_TRIES);
+    int LEN = 1000;
+    Random random = new Random();
+    IntStream.range(0, N_TRIES)
+      .parallel()
+      .forEach(_-> {
+        long seed = random.nextLong();
+        addDelete(seed, LEN);
+      });
+  }
+
+  private static void addDelete(long seed, int LEN) {
+    Random gen = new Random(seed);
+    DocumentEx document = (DocumentEx)EditorFactory.getInstance().createDocument(StringUtil.repeatSymbol(' ', LEN));
+
+    List<RangeMarker> adds = new ArrayList<>();
+    try {
+      for (int i = 0; i < 1000; i++) {
+        boolean create = gen.nextBoolean();
+        if (create || adds.isEmpty()) {
+          int x = gen.nextInt(LEN);
+          int y = x + gen.nextInt(LEN - x);
+          RangeMarkerEx r = (RangeMarkerEx)document.createRangeMarker(x, y);
+          adds.add(r);
+        }
+        else {
+          int c = gen.nextInt(adds.size());
+          RangeMarker marker = adds.get(c);
+          marker.dispose();
+          adds.remove(c);
+        }
+      }
+    }
+    catch (AssertionError e) {
+      System.err.println("Error during testing seed="+seed+"L");
+      throw e;
+    }
+  }
+
   private static void printFailingSteps(List<Pair<RangeMarker, TextRange>> adds,
                                         List<Pair<RangeMarker, TextRange>> dels,
                                         List<Trinity<Integer, Integer, Integer>> edits) {
@@ -994,8 +1055,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     RangeMarker m3 = document.createRangeMarker(2, 5);
     assertEquals(2, ((DocumentImpl)document).getRangeMarkersNodeSize());
     deleteString(document, 4, 5);
-    DaemonCodeAnalyzerImpl myDaemonCodeAnalyzer = (DaemonCodeAnalyzerImpl)DaemonCodeAnalyzerImpl.getInstanceEx(getProject());
-    myDaemonCodeAnalyzer.waitForUpdateFileStatusBackgroundQueueInTests();
+    new TestDaemonCodeAnalyzerImpl(getProject()).waitForUpdateFileStatusBackgroundQueueInTests();
     assertTrue(m1.isValid());
     assertTrue(m2.isValid());
     assertTrue(m3.isValid());
@@ -1115,6 +1175,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     assertFalse(m.isValid());
   }
 
+  @PerformanceUnitTest
   public void testRangeHighlighterLinesInRangeForLongLinePerformance() {
     final int N = 50000;
     Document document = EditorFactory.getInstance().createDocument(StringUtil.repeatSymbol('x', 2 * N));
@@ -1321,6 +1382,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     }
   }
 
+  @PerformanceUnitTest
   public void testGetOffsetPerformance() {
     DocumentEx doc = new DocumentImpl(StringUtil.repeat("blah", 1000));
     List<RangeMarker> markers = new ArrayList<>();
@@ -1344,6 +1406,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testGetOffsetDuringModificationsPerformance() {
     DocumentEx doc = new DocumentImpl(StringUtil.repeat("blah", 1000));
     List<RangeMarker> markers = new ArrayList<>();
@@ -1369,6 +1432,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testDocModificationPerformance() {
     DocumentEx doc = new DocumentImpl(StringUtil.repeat("blah", 1000));
     List<RangeMarker> markers = new ArrayList<>();
@@ -1390,6 +1454,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     }
   }
 
+  @PerformanceUnitTest
   public void testRMInsertDisposePerformance() {
     DocumentEx doc = new DocumentImpl(StringUtil.repeat("blah", 1000));
     int N = 1_000_000;
@@ -1407,6 +1472,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testProcessOverlappingPerformance() {
     DocumentEx doc = new DocumentImpl(StringUtil.repeat("blah", 1000));
     int N = 100_000;
@@ -1420,7 +1486,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     Benchmark.newBenchmark(getTestName(false), ()->{
       for (int it = 0; it < 2_000; it++) {
         for (int i = 1; i < doc.getTextLength() - 1; i++) {
-          boolean result = doc.processRangeMarkersOverlappingWith(i, i + 1, __ -> false);
+          boolean result = doc.processRangeMarkersOverlappingWith(i, i + 1, _ -> false);
           assertFalse(result);
         }
       }
@@ -1553,7 +1619,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     Reference<RangeMarker> persistentMarkerRef = new WeakReference<>(persistentMarker[0]);
     marker[0] = null;
     persistentMarker[0] = null;
-    ((DaemonCodeAnalyzerImpl)DaemonCodeAnalyzer.getInstance(getProject())).waitForUpdateFileStatusBackgroundQueueInTests();
+    new TestDaemonCodeAnalyzerImpl(getProject()).waitForUpdateFileStatusBackgroundQueueInTests();
     PsiDocumentManager.getInstance(getProject()).commitAllDocuments();
     while (markerRef.get() != null || persistentMarkerRef.get() != null) {
       GCUtil.tryGcSoftlyReachableObjects();
@@ -1618,7 +1684,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     RangeMarkerImpl m = (RangeMarkerImpl)LazyRangeMarkerFactory.getInstance(getProject()).createRangeMarker(vf, 1);
     assertNull(m.getCachedDocument());
 
-    getProject().getMessageBus().connect(getTestRootDisposable()).subscribe(PsiDocumentListener.TOPIC, (doc, __, ___) -> {
+    getProject().getMessageBus().connect(getTestRootDisposable()).subscribe(PsiDocumentListener.TOPIC, (doc, _, _) -> {
       if (vf.equals(FileDocumentManager.getInstance().getFile(doc))) {
         fail("document created");
       }

@@ -5,7 +5,6 @@ import com.intellij.codeHighlighting.HighlightingPass;
 import com.intellij.codeInsight.daemon.GutterMark;
 import com.intellij.codeInsight.multiverse.CodeInsightContext;
 import com.intellij.codeInsight.multiverse.CodeInsightContextHighlightingUtil;
-import com.intellij.codeInsight.multiverse.CodeInsightContextUtil;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.diagnostic.Logger;
@@ -19,14 +18,24 @@ import com.intellij.openapi.editor.ex.MarkupModelEx;
 import com.intellij.openapi.editor.ex.RangeHighlighterEx;
 import com.intellij.openapi.editor.impl.DocumentMarkupModel;
 import com.intellij.openapi.editor.impl.SweepProcessor;
-import com.intellij.openapi.editor.markup.*;
+import com.intellij.openapi.editor.markup.GutterIconRenderer;
+import com.intellij.openapi.editor.markup.HighlighterLayer;
+import com.intellij.openapi.editor.markup.HighlighterTargetArea;
+import com.intellij.openapi.editor.markup.MarkupModel;
+import com.intellij.openapi.editor.markup.RangeHighlighter;
+import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.ProperTextRange;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.TextRangeScalarUtil;
 import com.intellij.psi.PsiCompiledFile;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
+import com.intellij.util.CommonProcessors;
 import com.intellij.util.Consumer;
 import com.intellij.util.SlowOperations;
 import com.intellij.util.concurrency.ThreadingAssertions;
@@ -38,11 +47,12 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Predicate;
 
 /**
@@ -180,9 +190,9 @@ public final class UpdateHighlightersUtil {
     }
     if (psiFile != null) {
       DaemonCodeAnalyzerEx.getInstanceEx(project).cleanFileLevelHighlights(group, psiFile);
-      HighlightingSessionImpl.runInsideHighlightingSessionInEDT(psiFile, CodeInsightContextUtil.getCodeInsightContext(psiFile), colorsScheme, ProperTextRange.create(startOffset, endOffset), false, session ->
-        setHighlightersInRange(document, range, new ArrayList<>(infos), markup, group, session)
-      );
+      DaemonCodeAnalyzerEx.getInstanceEx(project).runInsideAdditionalHighlightingSession(psiFile, colorsScheme, ProperTextRange.create(startOffset, endOffset), false, session -> {
+        setHighlightersInRange(document, range, new ArrayList<>(infos), markup, group, session);
+      });
     }
   }
 
@@ -215,7 +225,7 @@ public final class UpdateHighlightersUtil {
       Long2ObjectMap<RangeMarker> range2markerCache = new Long2ObjectOpenHashMap<>(10);
       DaemonCodeAnalyzerEx codeAnalyzer = DaemonCodeAnalyzerEx.getInstanceEx(project);
       SweepProcessor.Generator<HighlightInfo> generator = processor -> ContainerUtil.process(filteredInfos, processor);
-      SweepProcessor.sweep(generator, (__, info, atStart, overlappingIntervals) -> {
+      SweepProcessor.sweep(generator, (_, info, atStart, overlappingIntervals) -> {
         if (!atStart) {
           return true;
         }
@@ -307,7 +317,7 @@ public final class UpdateHighlightersUtil {
       if (infoErrorStripeColor != null && !infoErrorStripeColor.equals(attributesErrorStripeColor)) {
         finalHighlighter.setErrorStripeMarkColor(infoErrorStripeColor);
       }
-      finalHighlighter.setErrorStripeTooltip(info);
+      BackgroundUpdateHighlightersUtil.associateInfoAndHighlighter(info, finalHighlighter);
       GutterMark renderer = info.getGutterIconRenderer();
       finalHighlighter.setGutterIconRenderer((GutterIconRenderer)renderer);
 
@@ -327,7 +337,6 @@ public final class UpdateHighlightersUtil {
     else {
       markup.changeAttributesInBatch(highlighter, changeAttributes);
     }
-    info.setHighlighter(highlighter);
     range2markerCache.put(finalInfoRange, highlighter);
 
     if (infoAttributes != null) {
@@ -399,6 +408,7 @@ public final class UpdateHighlightersUtil {
     document.putUserData(TYPING_INSIDE_HIGHLIGHTER_OCCURRED, null);
   }
 
+  @RequiresEdt
   @ApiStatus.Internal
   public static void updateHighlightersByTyping(@NotNull Project project, @NotNull DocumentEvent e) {
     ThreadingAssertions.assertEventDispatchThread();
@@ -452,15 +462,12 @@ public final class UpdateHighlightersUtil {
     }
   }
   // disposes highlighter, and schedules removal from the file-level component if this highlighter happened to be file-level
-  static void disposeWithFileLevelIgnoreErrors(@NotNull HighlightInfo info, @NotNull HighlightingSession highlightingSession) {
-    if (LOG.isTraceEnabled()) {
-      LOG.trace("disposeWithFileLevelIgnoreErrors: " + info);
-    }
+  static void disposeWithFileLevelIgnoreErrors(@NotNull HighlightInfo info, @NotNull HighlightingSession session) {
     if (info.isFileLevelAnnotation()) {
-      ((HighlightingSessionImpl)highlightingSession).removeFileLevelHighlight(info);
+      session.removeFileLevelHighlight(info);
     }
+    RangeHighlighter highlighter = info.getHighlighter();
     try {
-      RangeHighlighter highlighter = info.getHighlighter();
       if (highlighter != null) {
         highlighter.dispose();
       }
@@ -472,6 +479,23 @@ public final class UpdateHighlightersUtil {
       // in theory, rogue plugin might register a listener on range marker 'dispose', which can do nasty things, including throwing exceptions,
       // but in highlighting, range highlighters must be removed no matter what, to avoid sticky highlighters, so ignore these exceptions
       LOG.warn(e);
+    }
+    if (LOG.isTraceEnabled()) {
+      MarkupModel model = highlighter == null ? null : DocumentMarkupModel.forDocument(highlighter.getDocument(), session.getProject(), false);
+      List<RangeHighlighterEx> dups = new ArrayList<>();
+      if (model != null) {
+        ((MarkupModelEx)model).processRangeHighlightersOverlappingWith(highlighter.getStartOffset(), highlighter.getEndOffset(), new CommonProcessors.CollectProcessor<>(dups));
+        dups.removeIf(h-> {
+          HighlightInfo hi;
+          return !h.getTextRange().equals(highlighter.getTextRange()) ||
+                 h.getTextAttributesKey() != highlighter.getTextAttributesKey() ||
+                 (hi=HighlightInfo.fromRangeHighlighter(h)) == null ||
+                 !Objects.equals(hi.getDescription(), info.getDescription()) ||
+                 !Objects.equals(hi.getToolId(), info.getToolId())
+            ;
+        });
+      }
+      LOG.trace("disposeWithFileLevelIgnoreErrors: " + info +(highlighter == null ? " (highlighter is null)":"")+(dups.isEmpty() ? "" : "; same range highlighters remain: "+dups));
     }
   }
 }

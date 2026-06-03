@@ -21,7 +21,20 @@ import com.intellij.modcommand.ActionContext;
 import com.intellij.modcommand.ModPsiUpdater;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiBlockStatement;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiCodeFragment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiIfStatement;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypes;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.util.FileTypeUtils;
 import org.jetbrains.annotations.NonNls;
@@ -32,13 +45,13 @@ public class JavaWithIfExpressionSurrounder extends JavaExpressionModCommandSurr
   public boolean isApplicable(PsiExpression expr) {
     PsiType type = expr.getType();
     if (!(type != null && (PsiTypes.booleanType().equals(type) || PsiTypes.booleanType().equals(PsiPrimitiveType.getUnboxedType(type))))) return false;
-    if (!expr.isPhysical()) return false;
     PsiElement expressionStatement = expr.getParent();
     if (!(expressionStatement instanceof PsiExpressionStatement)) return false;
 
     PsiElement statementParent = expressionStatement.getParent();
     if (!isElseBranch(expr, statementParent) &&
         !(statementParent instanceof PsiCodeBlock) &&
+        !(statementParent instanceof PsiCodeFragment) &&
         !(FileTypeUtils.isInServerPageFile(statementParent) && statementParent instanceof PsiFile)) {
       return false;
     }

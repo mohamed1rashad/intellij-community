@@ -5,7 +5,7 @@ import com.intellij.CommonBundle;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorBundle;
@@ -15,7 +15,13 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.vfs.VfsUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiBinaryFile;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileSystemItem;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.file.PsiDirectoryFactory;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectRBTreeMap;
@@ -29,7 +35,12 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 final class ExportToHTMLManager {
   private static final Logger LOG = Logger.getInstance(ExportToHTMLManager.class);
@@ -131,7 +142,7 @@ final class ExportToHTMLManager {
           selectionStart = firstLine = selectionEnd = 0;
         }
         ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> {
-          ApplicationManager.getApplication().runReadAction(() -> {
+          ReadAction.runBlocking(() -> {
             if (!psiFile.isValid()) {
               return;
             }
@@ -155,7 +166,7 @@ final class ExportToHTMLManager {
       }
     }
     finally {
-      VfsUtil.markDirtyAndRefresh(true, true, false, new File(exportToHTMLSettings.OUTPUT_DIRECTORY));
+      VfsUtil.markDirtyAndRefresh(true, true, false, Path.of(exportToHTMLSettings.OUTPUT_DIRECTORY));
     }
   }
 
@@ -177,7 +188,7 @@ final class ExportToHTMLManager {
       return true;
     }
 
-    ApplicationManager.getApplication().runReadAction(() -> {
+    ReadAction.runBlocking(() -> {
       if (!psiFile.isValid()) {
         return;
       }
@@ -275,7 +286,7 @@ final class ExportToHTMLManager {
       List<PsiFile> filesList = new ArrayList<>();
       boolean isRecursive = myExportToHTMLSettings.isIncludeSubdirectories();
 
-      ApplicationManager.getApplication().runReadAction(() -> {
+      ReadAction.runBlocking(() -> {
         try {
           addToPsiFileList(myPsiDirectory, filesList, isRecursive, outDir);
         }

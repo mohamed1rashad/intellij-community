@@ -13,8 +13,12 @@ import com.intellij.openapi.vcs.VcsShowConfirmationOption;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 
+/**
+ * @deprecated Please use {@link com.intellij.openapi.ui.MessageDialogBuilder} or {@link com.intellij.openapi.ui.Messages}
+ */
+@Deprecated(forRemoval = true)
 public class ConfirmationDialog extends OptionsMessageDialog {
   private final VcsShowConfirmationOption myOption;
   private @Checkbox String myDoNotShowAgainMessage;

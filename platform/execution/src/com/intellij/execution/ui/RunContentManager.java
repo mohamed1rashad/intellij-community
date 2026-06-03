@@ -5,7 +5,6 @@ import com.intellij.execution.Executor;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RunProfile;
-import com.intellij.execution.dashboard.RunDashboardUiManager;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.openapi.project.Project;
@@ -83,7 +82,10 @@ public interface RunContentManager {
    * @return Tool window id where content should be shown. Null if content tool window is determined by executor.
    */
   default @Nullable String getContentDescriptorToolWindowId(@NotNull ExecutionEnvironment environment) {
-    if (!RunDashboardUiManager.getInstance(environment.getProject()).isSupported(environment.getExecutor())) return null;
+    String runnerToolWindowId = environment.getRunner().getContentToolWindowId(environment);
+    if (runnerToolWindowId != null) {
+      return runnerToolWindowId;
+    }
 
     RunProfile runProfile = environment.getRunProfile();
     if (runProfile instanceof RunConfiguration) {

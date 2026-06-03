@@ -3,7 +3,11 @@ package training.learn
 
 import com.intellij.ide.IdeEventQueue
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.AnActionResult
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.ex.AnActionListener
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.CommandEvent
@@ -17,6 +21,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.FileOpenedSyncListener
 import com.intellij.openapi.fileEditor.ex.FileEditorWithProvider
+import com.intellij.openapi.progress.Cancellation
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFile
@@ -273,7 +278,11 @@ internal class ActionsRecorder(private val project: Project,
         if (document != null && PsiDocumentManager.getInstance(project).isUncommited(document)) {
           lessonExecutor.taskInvokeLater {
             if (!disposed && !project.isDisposed) {
-              PsiDocumentManager.getInstance(project).commitAndRunReadAction { onDocumentChange() }
+              PsiDocumentManager.getInstance(project).commitAndRunReadAction {
+                Cancellation.executeInNonCancelableSection {
+                  onDocumentChange()
+                }
+              }
             }
           }
         }

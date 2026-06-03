@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi;
 
 import com.intellij.codeInsight.multiverse.CodeInsightContext;
@@ -9,6 +9,7 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
+import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -48,10 +49,12 @@ public abstract class PsiDocumentManager {
 
   // todo IJPL-339 rework usages
   @RequiresBackgroundThread(generateAssertion = false)
+  @RequiresReadLock
   public abstract @Nullable PsiFile getPsiFile(@NotNull Document document);
 
   @ApiStatus.Experimental
   @RequiresBackgroundThread(generateAssertion = false)
+  @RequiresReadLock
   public abstract @Nullable PsiFile getPsiFile(@NotNull Document document, @NotNull CodeInsightContext context);
 
   /**
@@ -60,9 +63,11 @@ public abstract class PsiDocumentManager {
    * @param document the document for which the PSI file is requested.
    * @return the PSI file instance, or {@code null} if there is currently no cached PSI tree for the file.
    */
-  public abstract @Nullable PsiFile getCachedPsiFile(@NotNull Document document) ;
+  @RequiresReadLock
+  public abstract @Nullable PsiFile getCachedPsiFile(@NotNull Document document);
 
   @ApiStatus.Experimental
+  @RequiresReadLock
   public abstract @Nullable PsiFile getCachedPsiFile(@NotNull Document document, @NotNull CodeInsightContext context);
 
   /**
@@ -71,6 +76,7 @@ public abstract class PsiDocumentManager {
    * @param psiFile the file for which the document is requested.
    * @return the document instance, or {@code null} if the file is binary or has no associated document.
    */
+  @RequiresReadLock
   public abstract @Nullable Document getDocument(@NotNull PsiFile psiFile);
 
   /**
@@ -79,6 +85,7 @@ public abstract class PsiDocumentManager {
    * @param psiFile the file for which the document is requested.
    * @return the document instance, or {@code null} if there is currently no cached document for the file.
    */
+  @RequiresReadLock
   public abstract @Nullable Document getCachedDocument(@NotNull PsiFile psiFile);
 
   /**
@@ -102,6 +109,7 @@ public abstract class PsiDocumentManager {
   /**
    * If the {@code document} is committed, run {@code action} immediately.
    * Otherwise, schedule the execution of the {@code action} sometime in the future right after the {@code document} is committed.
+   * The action is going to be executed on EDT without write-action.
    */
   public abstract void performForCommittedDocument(@NotNull Document document, @NotNull Runnable action);
 
@@ -150,16 +158,20 @@ public abstract class PsiDocumentManager {
    * @return the array of uncommitted documents.
    * @see #commitDocument(Document)
    */
+  @RequiresReadLock
   public abstract @NotNull Document @NotNull [] getUncommittedDocuments();
 
   /**
    * Checks if the specified document has been committed.
+   * Is equivalent to {@code !isUncommitted(document)}.
    *
    * @param document the document to check.
    * @return true if the document was modified but not committed, false otherwise
    * @see #commitDocument(Document)
    */
-  public abstract boolean isUncommited(@NotNull Document document);
+  public final boolean isUncommited(@NotNull Document document) {
+    return !isCommitted(document);
+  }
 
   /**
    * Checks if any modified documents have not been committed.
@@ -178,7 +190,7 @@ public abstract class PsiDocumentManager {
   }
 
   /**
-   * Commits the documents and runs the specified operation, which does not return a value, in a read action.
+   * Commits the documents and runs the specified operation, which does not return a value, in a non-blocking read action.
    * Can be called from a thread other than the Swing dispatch thread.
    *
    * @param runnable the operation to execute.
@@ -186,7 +198,7 @@ public abstract class PsiDocumentManager {
   public abstract void commitAndRunReadAction(@NotNull Runnable runnable);
 
   /**
-   * Commits the documents and runs the specified operation, which returns a value, in a read action.
+   * Commits the documents and runs the specified operation, which returns a value, in a non-blocking read action.
    * Can be called from a thread other than the Swing dispatch thread.
    *
    * @param computation the operation to execute.
@@ -219,7 +231,7 @@ public abstract class PsiDocumentManager {
     /**
      * Called when a file instance is created for a document.
      *
-     * @param psiFile     the created file instance.
+     * @param psiFile  the created file instance.
      * @param document the document for which the file was created.
      * @see PsiDocumentManager#getDocument(PsiFile)
      */

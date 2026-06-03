@@ -12,6 +12,7 @@ import com.intellij.xdebugger.breakpoints.XBreakpoint;
 import com.intellij.xdebugger.breakpoints.XBreakpointHandler;
 import com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider;
 import com.intellij.xdebugger.evaluation.XDebuggerEvaluator;
+import com.intellij.xdebugger.frame.XDescriptor;
 import com.intellij.xdebugger.frame.XDropFrameHandler;
 import com.intellij.xdebugger.frame.XStackFrame;
 import com.intellij.xdebugger.frame.XSuspendContext;
@@ -19,6 +20,7 @@ import com.intellij.xdebugger.frame.XValueMarkerProvider;
 import com.intellij.xdebugger.mixedMode.XMixedModeDebugProcessExtension;
 import com.intellij.xdebugger.stepping.XSmartStepIntoHandler;
 import com.intellij.xdebugger.ui.XDebugTabLayouter;
+import kotlinx.coroutines.flow.Flow;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -27,16 +29,19 @@ import org.jetbrains.concurrency.Promise;
 import org.jetbrains.concurrency.Promises;
 
 import javax.swing.event.HyperlinkListener;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Extend this class to provide debugging capabilities for a custom language/framework.
  * <p>
  * In order to start the debugger by a 'Debug' action for a specific run configuration,
  * implement {@link com.intellij.execution.runners.ProgramRunner}
- * and call {@link XDebuggerManager#startSession}
+ * and call {@link XDebuggerManager#newSessionBuilder} and {@link XDebugSessionBuilder#startSession()} without setting {@link XDebugSessionBuilder#showTab}
  * from the {@link com.intellij.execution.runners.ProgramRunner#execute(ExecutionEnvironment)} method.
  * <p>
- * Otherwise, use method {@link XDebuggerManager#startSessionAndShowTab} to start a new debugging session.
+ * Otherwise, use {@link XDebuggerManager#newSessionBuilder} with {@link XDebugSessionBuilder#showTab}
+ * and {@link XDebugSessionBuilder#startSession()} to start a new debugging session.
  */
 public abstract class XDebugProcess {
   private final @NotNull XDebugSession mySession;
@@ -264,9 +269,18 @@ public abstract class XDebugProcess {
 
   /**
    * @return the message to show in the Variables View when the debugger isn't paused
+   * @see XDebugProcess#getCurrentStateMessageFlow
    */
   public @Nls String getCurrentStateMessage() {
     return mySession.isStopped() ? XDebuggerBundle.message("debugger.state.message.disconnected") : XDebuggerBundle.message("debugger.state.message.connected");
+  }
+
+  /**
+   * Override this method to push updates for {@link #getCurrentStateMessage()} to split debugger clients.
+   */
+  @ApiStatus.Internal
+  public @Nullable Flow<@Nls String> getCurrentStateMessageFlow() {
+    return null;
   }
 
   public @Nullable HyperlinkListener getCurrentStateHyperlinkListener() {
@@ -293,6 +307,19 @@ public abstract class XDebugProcess {
   public @Nullable XDebuggerEvaluator getEvaluator() {
     XStackFrame frame = getSession().getCurrentStackFrame();
     return frame == null ? null : frame.getEvaluator();
+  }
+
+  @ApiStatus.Internal
+  public @Nullable XDebugSessionEventsProvider getSessionEventsProvider() {
+    return null;
+  }
+
+  /**
+   * Provide execution stacks corresponding to all the live threads in the debug process to the {@code container}.
+   */
+  @ApiStatus.Internal
+  public void computeRunningExecutionStacks(XSuspendContext.XExecutionStackGroupContainer container, @Nullable XSuspendContext suspendContext) {
+    container.addExecutionStack(List.of(), true);
   }
 
   /**
@@ -322,6 +349,18 @@ public abstract class XDebugProcess {
   @ApiStatus.Internal
   @Nullable
   public XMixedModeDebugProcessExtension getMixedModeDebugProcessExtension() {
+    return null;
+  }
+
+  /**
+   * Provides additional information about the debug process
+   * which can be used by UI and actions on the Frontend.
+   *
+   * @see XDescriptor
+   * @see com.intellij.xdebugger.frame.CustomXDescriptorSerializerProvider
+   */
+  @ApiStatus.Internal
+  public @Nullable CompletableFuture<@NotNull XDescriptor> getProcessDescriptor() {
     return null;
   }
 }

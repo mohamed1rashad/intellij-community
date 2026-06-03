@@ -19,11 +19,12 @@
     <module name="intellij.tasks.jira"/>
   </content>
   <dependencies>
-    <plugin id="com.intellij.modules.xml" />
-    <module name="intellij.platform.vcs.impl"/>
+    <plugin id="com.intellij.modules.xml"/>
+    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+    <module name="intellij.platform.tasks"/>
     <module name="intellij.platform.tasks.impl"/>
-    <module name="intellij.libraries.gson"/>
-    <module name="intellij.regexp"/>
+    <module name="intellij.platform.vcs.impl"/>
+    <!-- endregion -->
   </dependencies>
 
   <depends optional="true" config-file="java-contexts.xml">com.intellij.java</depends>
@@ -121,8 +122,6 @@
     <applicationService serviceImplementation="com.intellij.tasks.config.TaskSettings"/>
     <search.optionContributor implementation="com.intellij.tasks.config.TaskSearchableOptionContributor"/>
 
-    <lang.documentationProvider language="TEXT" implementationClass="com.intellij.tasks.doc.TaskDocumentationProvider"/>
-
     <tasks.repositoryType implementation="com.intellij.tasks.youtrack.YouTrackRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.lighthouse.LighthouseRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.pivotal.PivotalTrackerRepositoryType"/>
@@ -132,6 +131,7 @@
     <tasks.repositoryType implementation="com.intellij.tasks.generic.GenericRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.trello.TrelloRepositoryType"/>
     <tasks.repositoryType implementation="com.intellij.tasks.gitlab.GitlabRepositoryType"/>
+    <tasks.repositoryType implementation="com.intellij.tasks.core.forgejo.ForgejoRepositoryType"/>
 
     <checkinHandlerFactory implementation="com.intellij.tasks.impl.TaskCheckinHandlerFactory"/>
     <!-- YouTrack support -->
@@ -143,10 +143,13 @@
     <tasks.commitPlaceholderProvider implementation="com.intellij.tasks.impl.DefaultCommitPlaceholderProvider"/>
 
     <vcs.changeListDecorator implementation="com.intellij.tasks.impl.TaskManagerDecorator"/>
+    <vcs.issueDocumentationTargetProvider implementation="com.intellij.tasks.impl.TaskIssueLinkDocumentationTargetProvider"/>
     <notificationGroup id="Task Group" displayType="BALLOON" bundle="messages.TaskBundle" key="notification.group.tasks"/>
 
     <statistics.counterUsagesCollector implementationClass="com.intellij.tasks.impl.TaskManagementUsageCollector"/>
     <statistics.projectUsagesCollector implementation="com.intellij.tasks.impl.TaskManagementConfigurationCollector"/>
     <statistics.projectUsagesCollector implementation="com.intellij.tasks.core.fus.TasksStateCollector"/>
+    <applicationSettings service="com.intellij.tasks.config.TaskSettings"/>
+    <applicationSettings service="com.intellij.tasks.config.RecentTaskRepositories"/>
   </extensions>
 </idea-plugin>

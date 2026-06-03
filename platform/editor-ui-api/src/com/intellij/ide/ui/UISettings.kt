@@ -5,7 +5,11 @@ import com.intellij.diagnostic.LoadingState
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponentWithModificationTracker
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.options.advanced.AdvancedSettings
@@ -22,7 +26,6 @@ import com.intellij.util.ComponentTreeEventDispatcher
 import com.intellij.util.ui.EDT
 import com.intellij.util.ui.GraphicsUtil
 import com.intellij.util.ui.UIUtil
-import com.intellij.util.xmlb.annotations.Transient
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.ApiStatus.ScheduledForRemoval
 import java.awt.Graphics
@@ -783,7 +786,6 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
       }
       return
     }
-    updateDeprecatedProperties()
 
     // todo remove when all old properties will be converted
     state._incrementModificationCount()
@@ -802,11 +804,6 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     }
   }
 
-  @Suppress("DEPRECATION")
-  private fun updateDeprecatedProperties() {
-    EDITOR_TAB_LIMIT = editorTabLimit
-  }
-
   @Internal
   override fun getState(): UISettingsState = state
 
@@ -819,7 +816,6 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
   @Internal
   override fun loadState(state: UISettingsState) {
     this.state = state
-    updateDeprecatedProperties()
 
     migrateOldSettings()
     if (migrateOldFontSettings()) {
@@ -921,14 +917,6 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     }
   }
 
-  //<editor-fold desc="Deprecated stuff.">
-  @Suppress("PropertyName")
-  @Deprecated("Use editorTabLimit", replaceWith = ReplaceWith("editorTabLimit"))
-  @JvmField
-  @Transient
-  @ScheduledForRemoval
-  var EDITOR_TAB_LIMIT: Int = editorTabLimit
-  //</editor-fold>
 }
 
 private const val SEARCH_EVERYWHERE_PREVIEW_LEGACY_STATE_KEY = "SearchEverywhere.previewPropertyKey"

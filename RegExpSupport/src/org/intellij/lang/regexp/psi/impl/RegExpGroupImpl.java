@@ -16,6 +16,7 @@
 package org.intellij.lang.regexp.psi.impl;
 
 import com.intellij.lang.ASTNode;
+import com.intellij.openapi.util.NlsSafe;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.util.IncorrectOperationException;
@@ -26,6 +27,7 @@ import org.intellij.lang.regexp.psi.RegExpGroup;
 import org.intellij.lang.regexp.psi.RegExpPattern;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public class RegExpGroupImpl extends RegExpElementImpl implements RegExpGroup {
   public RegExpGroupImpl(ASTNode astNode) {
@@ -57,7 +59,7 @@ public class RegExpGroupImpl extends RegExpElementImpl implements RegExpGroup {
   }
 
   @Override
-  public Type getType() {
+  public @NotNull Type getType() {
     final IElementType elementType = getNode().getFirstChildNode().getElementType();
     if (elementType == RegExpTT.GROUP_BEGIN) {
       return Type.CAPTURING_GROUP;
@@ -98,6 +100,12 @@ public class RegExpGroupImpl extends RegExpElementImpl implements RegExpGroup {
     throw new AssertionError();
   }
 
+  @Override
+  public @Nullable PsiElement getNameIdentifier() {
+    final ASTNode nameNode = getNode().findChildByType(RegExpTT.NAME);
+    return nameNode == null ? null : nameNode.getPsi();
+  }
+
   public static boolean isPcreConditionalGroup(ASTNode node) {
     return node != null && node.findChildByType(RegExpTT.PCRE_CONDITIONS) != null;
   }
@@ -107,13 +115,13 @@ public class RegExpGroupImpl extends RegExpElementImpl implements RegExpGroup {
   }
 
   @Override
-  public String getGroupName() {
+  public @Nullable @NlsSafe String getGroupName() {
     final ASTNode nameNode = getNode().findChildByType(RegExpTT.NAME);
     return nameNode != null ? nameNode.getText() : null;
   }
 
   @Override
-  public String getName() {
+  public @Nullable @NlsSafe String getName() {
     return getGroupName();
   }
 

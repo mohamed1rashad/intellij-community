@@ -31,7 +31,7 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 
 public class CodeInspectionAction extends BaseAnalysisAction {
   private static final Logger LOG = Logger.getInstance(CodeInspectionAction.class);
@@ -114,7 +114,7 @@ public class CodeInspectionAction extends BaseAnalysisAction {
     final SchemesCombo<InspectionProfileImpl> profiles = ui.getBrowseProfilesCombo();
     final InspectionProfileManager profileManager = InspectionProfileManager.getInstance();
     final ProjectInspectionProfileManager projectProfileManager = ProjectInspectionProfileManager.getInstance(project);
-    ui.getLink().addActionListener(__ -> {
+    ui.getLink().addActionListener(_ -> {
       final ExternalProfilesComboboxAwareInspectionToolsConfigurable errorConfigurable = createConfigurable(projectProfileManager, profiles);
       final MySingleConfigurableEditor editor = new MySingleConfigurableEditor(project, errorConfigurable, manager);
       if (editor.showAndGet()) {
@@ -132,7 +132,7 @@ public class CodeInspectionAction extends BaseAnalysisAction {
         dialog.setOKActionEnabled(canExecute);
       }
     });
-    profiles.addActionListener(__ -> {
+    profiles.addActionListener(_ -> {
       myExternalProfile = profiles.getSelectedScheme();
       final boolean canExecute = myExternalProfile != null && myExternalProfile.isExecutable(project);
       dialog.setOKActionEnabled(canExecute);

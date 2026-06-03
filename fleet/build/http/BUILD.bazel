@@ -9,6 +9,7 @@ create_kotlinc_options(
     "kotlin.ExperimentalStdlibApi",
   ],
   x_consistent_data_class_copy_visibility = True,
+  x_context_parameters = True,
   x_jvm_default = "all-compatibility",
   x_lambdas = "class"
 )
@@ -17,7 +18,9 @@ jvm_library(
   name = "http",
   module_name = "fleet.build.http",
   visibility = ["//visibility:public"],
-  srcs = glob(["srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form"], allow_empty = True, exclude = ["**/module-info.java"]),
+  srcs = glob(["srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form"], allow_empty = True),
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_http",
   deps = [
     "@lib//:kotlin-stdlib",
@@ -36,28 +39,37 @@ jvm_library(
 
 jvm_library(
   name = "http_test_lib",
+  testonly = True,
   visibility = ["//visibility:public"],
-  srcs = glob(["srcJvmTest/**/*.kt", "srcJvmTest/**/*.java", "srcJvmTest/**/*.form"], allow_empty = True, exclude = ["**/module-info.java"]),
+  srcs = glob(["srcJvmTest/**/*.kt", "srcJvmTest/**/*.java", "srcJvmTest/**/*.form"], allow_empty = True),
   kotlinc_opts = ":custom_http",
   associates = [":http"],
   deps = [
     "@lib//:kotlin-stdlib",
     "@lib//:kotlinx-coroutines-core",
     "//fleet/ktor/client/core",
+    "//fleet/ktor/client/core:core_test_lib",
     "//fleet/build/fs",
     "//fleet/build/fs:fs_test_lib",
     "@lib//:fleet-io-ktor-client-logging",
     "@lib//:slf4j-api",
-    "//fleet/junit4",
-    "@lib//:kotlin-test",
+    "//fleet/test-runtime",
+    "//fleet/test-runtime:test-runtime_test_lib",
     "@lib//:fleet-io-ktor-client-mock",
   ],
   exports = [
     "@lib//:kotlinx-coroutines-core",
     "//fleet/ktor/client/core",
+    "//fleet/ktor/client/core:core_test_lib",
   ]
 )
 ### auto-generated section `build fleet.build.http` end
+
+### auto-generated section `iml fleet.build.http` start
+exports_files([
+  "fleet.build.http.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml fleet.build.http` end
 
 ### auto-generated section `test fleet.build.http` start
 load("@community//build:tests-options.bzl", "jps_test")

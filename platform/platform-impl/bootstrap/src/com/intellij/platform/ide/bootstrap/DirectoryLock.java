@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ide.bootstrap;
 
 import com.intellij.execution.process.ProcessIOExecutorService;
@@ -8,7 +8,12 @@ import com.intellij.ide.SpecialConfigFiles;
 import com.intellij.idea.AppExitCodes;
 import com.intellij.idea.LoggerFactory;
 import com.intellij.jna.JnaLoader;
-import com.intellij.openapi.diagnostic.*;
+import com.intellij.openapi.diagnostic.Attachment;
+import com.intellij.openapi.diagnostic.DelegatingLogger;
+import com.intellij.openapi.diagnostic.ExceptionWithAttachments;
+import com.intellij.openapi.diagnostic.IdeaLogRecordFormatter;
+import com.intellij.openapi.diagnostic.LogLevel;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.ui.User32Ex;
 import com.intellij.util.Suppressions;
@@ -16,12 +21,31 @@ import com.intellij.util.TimeoutUtil;
 import com.intellij.util.system.OS;
 import com.sun.jna.platform.win32.WinDef;
 import com.sun.tools.attach.VirtualMachine;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 
-import java.io.*;
-import java.net.*;
+import java.io.BufferedReader;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.StreamCorruptedException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.*;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +64,7 @@ import static java.util.Objects.requireNonNullElse;
  * and participates in the CLI bypassing arguments and relaying back exit codes and error messages.
  */
 @ApiStatus.Internal
+@SuppressWarnings("UseOptimizedEelFunctions")
 public final class DirectoryLock {
   private static final CollectingLogger LOG = new CollectingLogger(DirectoryLock.class);
 
@@ -62,6 +87,7 @@ public final class DirectoryLock {
     }
 
     @Override
+    @SuppressWarnings("SSBasedInspection")
     public @NotNull Attachment @NotNull [] getAttachments() {
       return myAttachments;
     }
@@ -196,7 +222,7 @@ public final class DirectoryLock {
             "competing processes:\n" +
             competition.stream().map(ph -> "  PID=" + ph.pid() + " (" + ph.info().user() + ") " + ph.info().command()).collect(Collectors.joining())
           );
-          cannotActivate(command, competition.get(0).pid(), suppressed);
+          cannotActivate(command, competition.getFirst().pid(), suppressed);
         }
       }
 
@@ -367,7 +393,7 @@ public final class DirectoryLock {
         ProcessIOExecutorService.INSTANCE.execute(() -> handleConnection(socketChannel));
       }
       catch (ClosedChannelException e) {
-        LOG.debug(e);
+        LOG.debug("channel closed");
         break;
       }
       catch (Throwable t) {

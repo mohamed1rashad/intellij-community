@@ -23,7 +23,11 @@ import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.uiDesigner.core.Spacer
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.kotlin.idea.projectConfiguration.KotlinProjectConfigurationBundle
 import java.awt.Dimension
 import javax.swing.DefaultComboBoxModel
@@ -61,12 +65,13 @@ internal class KotlinVersionChooser(
             // Use IO dispatcher because loadVersions is blocking
             val loadedVersions = withContext(Dispatchers.IO) {
                 runCatching {
-                    ConfigureDialogWithModulesAndVersion.loadVersions(minimumVersion)
+                    ConfigureDialogWithModulesAndVersion.loadVersions(project, minimumVersion)
                 }.getOrNull()
             }
             error.set(loadedVersions == null)
 
             val kotlinVersions = loadedVersions ?: listOf(ConfigureDialogWithModulesAndVersion.DEFAULT_KOTLIN_VERSION)
+
             comboBoxModel.addAll(kotlinVersions)
             @Suppress("HardCodedStringLiteral")
             comboBoxModel.selectedItem = kotlinVersions.firstOrNull()

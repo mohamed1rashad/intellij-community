@@ -2,7 +2,9 @@
 package com.intellij.psi.codeStyle;
 
 import com.intellij.openapi.util.NlsContexts;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 public interface CodeStyleSettingsCustomizable {
   enum OptionAnchor {NONE, BEFORE, AFTER}
@@ -213,7 +215,8 @@ public interface CodeStyleSettingsCustomizable {
     LINE_COMMENT_ADD_SPACE_IN_SUPPRESSION,
     LINE_COMMENT_AT_FIRST_COLUMN,
     BLOCK_COMMENT_AT_FIRST_COLUMN,
-    BLOCK_COMMENT_ADD_SPACE
+    BLOCK_COMMENT_ADD_SPACE,
+    DOCUMENTATION_LINE_COMMENT_PREFERRED
   }
 
   int[] WRAP_VALUES = {CommonCodeStyleSettings.DO_NOT_WRAP,
@@ -278,60 +281,4 @@ public interface CodeStyleSettingsCustomizable {
   default void moveStandardOption(@NonNls @NotNull String fieldName, @NlsContexts.Label @NotNull String newGroup) {
   }
 
-  //<editor-fold desc="Deprecated members">
-
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#SPACES_BEFORE_PARENTHESES}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String SPACES_BEFORE_PARENTHESES = CodeStyleSettingsCustomizableOptions.ourStaticInstance.SPACES_BEFORE_PARENTHESES;
-
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#SPACES_BEFORE_LEFT_BRACE}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String SPACES_BEFORE_LEFT_BRACE = CodeStyleSettingsCustomizableOptions.ourStaticInstance.SPACES_BEFORE_LEFT_BRACE;
-
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#SPACES_WITHIN}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String SPACES_WITHIN = CodeStyleSettingsCustomizableOptions.ourStaticInstance.SPACES_WITHIN;
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#SPACES_OTHER}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String SPACES_OTHER = CodeStyleSettingsCustomizableOptions.ourStaticInstance.SPACES_OTHER;
-
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#BLANK_LINES_KEEP}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String BLANK_LINES_KEEP = CodeStyleSettingsCustomizableOptions.ourStaticInstance.BLANK_LINES_KEEP;
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#BLANK_LINES}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String BLANK_LINES = CodeStyleSettingsCustomizableOptions.ourStaticInstance.BLANK_LINES;
-
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#WRAP_OPTIONS}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String[] WRAP_OPTIONS = CodeStyleSettingsCustomizableOptions.ourStaticInstance.WRAP_OPTIONS;
-
-  /**
-   * @deprecated this is not locale-friendly,
-   * use {@link CodeStyleSettingsCustomizableOptions#getInstance} and {@link CodeStyleSettingsCustomizableOptions#BRACE_OPTIONS}
-   */
-  @Deprecated(forRemoval = true)
-  @Nls String[] BRACE_OPTIONS = CodeStyleSettingsCustomizableOptions.ourStaticInstance.BRACE_OPTIONS;
-  //</editor-fold>
 }

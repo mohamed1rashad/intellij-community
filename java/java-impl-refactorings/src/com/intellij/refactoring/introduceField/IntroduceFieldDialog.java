@@ -7,11 +7,20 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.NlsContexts;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiNameHelper;
+import com.intellij.psi.PsiType;
 import com.intellij.refactoring.HelpID;
 import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.RefactoringBundle;
-import com.intellij.refactoring.ui.*;
+import com.intellij.refactoring.ui.NameSuggestionsField;
+import com.intellij.refactoring.ui.NameSuggestionsManager;
+import com.intellij.refactoring.ui.TypeSelector;
+import com.intellij.refactoring.ui.TypeSelectorManager;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.JavaNameSuggestionUtil;
 import com.intellij.refactoring.util.RefactoringMessageUtil;
@@ -20,11 +29,14 @@ import com.intellij.util.ui.update.Activatable;
 import com.intellij.util.ui.update.UiNotifyConnector;
 import org.jetbrains.annotations.Nls;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 
 class IntroduceFieldDialog extends DialogWrapper {
-  public static BaseExpressionToFieldHandler.InitializationPlace ourLastInitializerPlace;
+  public static JavaIntroduceFieldService.InitializationPlace ourLastInitializerPlace;
 
   private final Project myProject;
   private final PsiClass myParentClass;
@@ -79,7 +91,7 @@ class IntroduceFieldDialog extends DialogWrapper {
     return myNameField.getEnteredName();
   }
 
-  public BaseExpressionToFieldHandler.InitializationPlace getInitializerPlace() {
+  public JavaIntroduceFieldService.InitializationPlace getInitializerPlace() {
     return myCentralPanel.getInitializerPlace();
   }
 
@@ -203,7 +215,7 @@ class IntroduceFieldDialog extends DialogWrapper {
     }
     if (errorString != null) {
       CommonRefactoringUtil.showErrorMessage(
-	IntroduceFieldHandler.getRefactoringNameText(),
+        IntroduceFieldHelper.getRefactoringNameText(),
 	errorString,
 	HelpID.INTRODUCE_FIELD,
 	myProject
@@ -217,7 +229,7 @@ class IntroduceFieldDialog extends DialogWrapper {
 	myProject,
 	RefactoringBundle.message("field.exists", fieldName,
                                    oldField.getContainingClass().getQualifiedName()),
-	IntroduceFieldHandler.getRefactoringNameText(),
+  IntroduceFieldHelper.getRefactoringNameText(),
 	Messages.getWarningIcon()
       );
       if (answer != Messages.YES) {

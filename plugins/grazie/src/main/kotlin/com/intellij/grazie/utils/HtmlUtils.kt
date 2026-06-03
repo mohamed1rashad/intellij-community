@@ -7,6 +7,7 @@ import com.intellij.grazie.text.TextContent.Exclusion
 import com.intellij.grazie.text.TextContent.ExclusionKind
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.util.TextRange
+import org.jetbrains.annotations.ApiStatus
 import java.util.regex.Pattern
 
 private val anyTag = Pattern.compile("</?(\\w+)[^>]*>")
@@ -17,11 +18,14 @@ val commonBlockElements: Set<String> =
   setOf("body", "p", "br", "td", "li", "title", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "table", "ol", "ul", "pre")
 
 private val commonMarkupElements = setOf("span", "i", "b", "u", "font", "a", "s", "strong", "sub", "sup")
+private val htmlEntityPattern = Pattern.compile("&([a-z]+|#[0-9]+|#[xX][0-9a-fA-F]+);")
 
 /**
  * Remove HTML markup from a text, splitting it at block elements (like {@code <p>}),
  * marking common HTML markup tags (like {@code <i>}) as markup offsets,
- * and replacing all other tags with unknown fragments.
+ * replacing all other tags with unknown fragments,
+ * converting {@code &nbsp;} to a non-breaking space,
+ * and marking all other HTML entities as unknown fragments.
  */
 fun excludeHtml(content: TextContent?): List<TextContent> {
   if (content == null) return emptyList()
@@ -43,10 +47,17 @@ fun excludeHtml(content: TextContent?): List<TextContent> {
   content.subText(TextRange(lastComponentStart, content.length))?.let(components::add)
 
   @Suppress("DEPRECATION")
-  return components.mapNotNull { removeHtml(it)?.trimWhitespace() }
+  return components.mapNotNull { component ->
+    val noTags = removeHtml(component)?.trimWhitespace() ?: return@mapNotNull null
+    val noNbsp = nbspToSpace(noTags) ?: return@mapNotNull null
+    val entityRanges = Text.allOccurrences(htmlEntityPattern, noNbsp)
+    if (entityRanges.isEmpty()) noNbsp
+    else noNbsp.excludeRanges(entityRanges.map { Exclusion.markUnknown(it) })
+  }
 }
 
 /** Remove HTML markup from a text, replacing it with unknown or markup (for some common HTML tags) offsets. */
+@ApiStatus.ScheduledForRemoval
 @Deprecated("use excludeHtml", ReplaceWith("excludeHtml"))
 fun removeHtml(_content: TextContent?): TextContent? {
   var content: TextContent = _content ?: return null
@@ -99,6 +110,7 @@ private val nbsp = Pattern.compile("&nbsp;")
 private val tab = Pattern.compile("&#9;")
 
 fun isSpaceEntity(text: String): Boolean = text == nbsp.pattern() || text == tab.pattern()
+fun isShyEntity(text: String): Boolean = text == "&shy;"
 
 private fun inlineEntity(content: TextContent?, pattern: Pattern, space: Char): TextContent? {
   if (content == null) return null

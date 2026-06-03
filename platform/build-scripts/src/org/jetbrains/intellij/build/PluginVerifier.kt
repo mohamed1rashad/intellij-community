@@ -4,6 +4,7 @@ package org.jetbrains.intellij.build
 import org.jetbrains.intellij.build.BuildPaths.Companion.COMMUNITY_ROOT
 import org.jetbrains.intellij.build.dependencies.JdkDownloader
 import org.jetbrains.intellij.build.io.runProcess
+import org.jetbrains.intellij.build.telemetry.block
 import java.nio.file.Path
 import kotlin.io.path.appendText
 import kotlin.io.path.exists
@@ -54,32 +55,43 @@ class PluginVerifier internal constructor(
     reportDir: Path,
     plugin: VerifierPluginInfo,
     ide: VerifierIdeInfo,
-    errFile: Path?,
-    outFile: Path?,
+    errFile: Path? = null,
+    outFile: Path? = null,
     runtimeDir: Path? = null,
-  ): Boolean {
+    mute: List<String> = emptyList(),
+    offline: Boolean = true,
+  ): Boolean = block("Checking compatibility of $plugin with $ide") {
     val java = JdkDownloader.getJavaExecutable(JdkDownloader.getJdkHomeAndLog(COMMUNITY_ROOT))
 
+    val args = mutableListOf(
+      java.pathString,
+      "-Xmx4g",
+      "-Dplugin.verifier.home.dir=${homeDir.pathString}",
+      "-jar",
+      verifierJar.pathString,
+      "check-plugin",
+      plugin.path.pathString,
+      ide.installationPath.pathString,
+      "-verification-reports-dir",
+      reportDir.pathString,
+    )
+    if (offline) {
+      args += "-offline"
+    }
+    args += listOf(
+      "-mute",
+      mute.joinToString(","),
+    )
+    if (runtimeDir != null) {
+      args += listOf("-runtime-dir", runtimeDir.pathString)
+    }
+
     runProcess(
-      args = listOf(
-        java.pathString,
-        "-Xmx4g",
-        "-Dplugin.verifier.home.dir=${homeDir.pathString}",
-        "-jar",
-        verifierJar.pathString,
-        "check-plugin",
-        plugin.path.pathString,
-        ide.installationPath.pathString,
-        "-verification-reports-dir",
-        reportDir.pathString,
-        "-offline"
-      ).plus(
-        if (runtimeDir != null) listOf("-runtime-dir", runtimeDir.pathString) else emptyList()
-      ),
+      args = args,
       workingDir = reportDir,
       additionalEnvVariables = emptyMap(),
-      inheritOut = false,
-      inheritErrToOut = false,
+      inheritOut = outFile == null,
+      inheritErrToOut = errFile == null,
       stdErrConsumer = {
         errFile?.appendText("$it\n")
         println("Plugin verifier error: $it")
@@ -89,7 +101,7 @@ class PluginVerifier internal constructor(
       }
     )
 
-    return reportVerifierIssues(
+    reportVerifierIssues(
       plugin,
       reportDir,
       ide

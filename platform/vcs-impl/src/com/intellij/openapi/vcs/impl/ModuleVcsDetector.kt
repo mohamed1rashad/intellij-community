@@ -7,7 +7,11 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.extensions.ExtensionNotApplicableException
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vcs.*
+import com.intellij.openapi.vcs.AbstractVcs
+import com.intellij.openapi.vcs.ProjectLevelVcsManager
+import com.intellij.openapi.vcs.VcsDirectoryMapping
+import com.intellij.openapi.vcs.VcsException
+import com.intellij.openapi.vcs.VcsRootChecker
 import com.intellij.openapi.vcs.ex.ProjectLevelVcsManagerEx.Companion.MAPPING_DETECTION_LOG
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.Alarm
@@ -76,7 +80,7 @@ class ModuleVcsDetector(private val project: Project, private val coroutineScope
         override fun run() = throw UnsupportedOperationException("Sync execution is not supported")
 
         override suspend fun execute() {
-          val contentRoots = project.serviceAsync<DefaultVcsRootPolicy>().defaultVcsRoots
+          val contentRoots = project.serviceAsync<DefaultVcsRootPolicy>().getDefaultVcsRoots()
           MAPPING_DETECTION_LOG.debug("ModuleVcsDetector.autoDetectDefaultRoots - contentRoots", contentRoots)
           val rootCheckers = if (props.getBoolean(INITIAL_DETECTION_KEY)) {
             VcsRootChecker.EXTENSION_POINT_NAME.extensionList.filter { it.shouldAlwaysRunInitialDetection() }

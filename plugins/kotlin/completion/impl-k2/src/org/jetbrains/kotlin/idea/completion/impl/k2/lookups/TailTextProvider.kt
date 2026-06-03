@@ -1,6 +1,6 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
-package org.jetbrains.kotlin.idea.completion.lookups
+package org.jetbrains.kotlin.idea.completion.impl.k2.lookups
 
 
 import org.jetbrains.annotations.ApiStatus
@@ -15,7 +15,7 @@ import org.jetbrains.kotlin.analysis.api.symbols.typeParameters
 import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.completion.impl.k2.KotlinCompletionImplK2Bundle
-import org.jetbrains.kotlin.idea.completion.lookups.CompletionShortNamesRenderer.renderFunctionalTypeParameters
+import org.jetbrains.kotlin.idea.completion.impl.k2.lookups.CompletionShortNamesRenderer.renderFunctionalTypeParameters
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.renderer.render
 
@@ -70,8 +70,8 @@ object TailTextProvider {
         signature.symbol.getContainerOrAliasPresentation(useFqName = useFqName, isFunctionalVariableCall = true)?.let { append(it) }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     fun getTailText(
         symbol: KaClassLikeSymbol,
         usePackageFqName: Boolean = false,
@@ -98,8 +98,8 @@ object TailTextProvider {
         }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun StringBuilder.renderReceiverType(receiverType: KaType) {
         val renderedType = receiverType.renderVerbose()
         append(KotlinCompletionImplK2Bundle.message("presentation.tail.for.0", renderedType))

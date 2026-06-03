@@ -8,7 +8,13 @@ import org.intellij.lang.regexp.DefaultRegExpPropertiesProvider;
 import org.intellij.lang.regexp.RegExpLanguageHost;
 import org.intellij.lang.regexp.RegExpTT;
 import org.intellij.lang.regexp.UnicodeCharacterNames;
-import org.intellij.lang.regexp.psi.*;
+import org.intellij.lang.regexp.psi.RegExpAtom;
+import org.intellij.lang.regexp.psi.RegExpChar;
+import org.intellij.lang.regexp.psi.RegExpElement;
+import org.intellij.lang.regexp.psi.RegExpGroup;
+import org.intellij.lang.regexp.psi.RegExpNamedCharacter;
+import org.intellij.lang.regexp.psi.RegExpNamedGroupRef;
+import org.intellij.lang.regexp.psi.RegExpNumber;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -32,8 +38,9 @@ public final class PythonRegExpHost implements RegExpLanguageHost {
   }
 
   @Override
-  public boolean supportsPossessiveQuantifiers() {
-    return false;
+  public boolean supportsPossessiveQuantifiers(RegExpElement context) {
+    PsiLanguageInjectionHost host = InjectedLanguageManager.getInstance(context.getProject()).getInjectionHost(context);
+    return host != null && LanguageLevel.forElement(host).isAtLeast(LanguageLevel.PYTHON311);
   }
 
   @Override
@@ -115,5 +122,31 @@ public final class PythonRegExpHost implements RegExpLanguageHost {
   @Override
   public boolean isValidNamedCharacter(RegExpNamedCharacter namedCharacter) {
     return UnicodeCharacterNames.getCodePoint(namedCharacter.getName()) >= 0;
+  }
+
+  @Override
+  public boolean isValidGroupName(String name, @NotNull RegExpGroup group) {
+    // non-ascii characters are allowed as group names in Python 3
+    // the specification is `<XID_Start> <XID_Continue>*`
+    int offset = 0;
+    int codePoint = name.codePointAt(offset);
+    
+    // First character must be XID_Start
+    if (!Character.isUnicodeIdentifierStart(codePoint)) {
+      return false;
+    }
+    
+    offset += Character.charCount(codePoint);
+    
+    // Remaining characters must be XID_Continue
+    while (offset < name.length()) {
+      codePoint = name.codePointAt(offset);
+      if (!Character.isUnicodeIdentifierPart(codePoint)) {
+        return false;
+      }
+      offset += Character.charCount(codePoint);
+    }
+    
+    return true;
   }
 }

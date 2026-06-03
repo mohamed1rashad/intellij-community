@@ -5,7 +5,6 @@ import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.roots.ExternalProjectSystemRegistry
 import com.intellij.openapi.roots.ProjectModelExternalSource
-import com.intellij.platform.workspace.jps.entities.ModuleEntity
 import com.intellij.platform.workspace.jps.entities.modifyModuleEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.workspaceModel.ide.impl.legacyBridge.facet.FacetBridge
@@ -18,8 +17,8 @@ class KotlinFacetBridge(
     name: String,
     configuration: KotlinFacetConfiguration
 ) : KotlinFacet(module, name, configuration),
-    FacetBridge<KotlinSettingsEntity, ModifiableKotlinSettingsEntity> {
-    override val config: FacetConfigurationBridge<KotlinSettingsEntity, ModifiableKotlinSettingsEntity>
+    FacetBridge<KotlinSettingsEntity, KotlinSettingsEntityBuilder> {
+    override val config: FacetConfigurationBridge<KotlinSettingsEntity, KotlinSettingsEntityBuilder>
         get() = configuration as KotlinFacetConfigurationBridge
 
     override fun updateExistingEntityInStorage(existingFacetEntity: KotlinSettingsEntity, mutableStorage: MutableEntityStorage) {

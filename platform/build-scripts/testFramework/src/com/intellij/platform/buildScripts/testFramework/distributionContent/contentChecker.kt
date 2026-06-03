@@ -1,21 +1,261 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:Suppress("UseOptimizedEelFunctions", "GrazieInspection")
+
 package com.intellij.platform.buildScripts.testFramework.distributionContent
 
 import com.intellij.platform.distributionContent.testFramework.FileEntry
 import com.intellij.platform.distributionContent.testFramework.ModuleEntry
+import com.intellij.platform.distributionContent.testFramework.PluginContentReport
 import com.intellij.platform.distributionContent.testFramework.deserializeContentData
+import com.intellij.platform.distributionContent.testFramework.deserializePluginData
 import com.intellij.platform.distributionContent.testFramework.serializeContentEntries
 import com.intellij.platform.testFramework.core.FileComparisonFailedError
+import com.intellij.util.lang.HashMapZipFile
 import kotlinx.serialization.SerializationException
 import org.assertj.core.util.diff.DiffUtils
-import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.ApiStatus.Internal
+import org.jetbrains.jps.model.JpsProject
+import org.jetbrains.jps.util.JpsPathUtil
+import org.opentest4j.MultipleFailuresError
 import java.nio.file.Files
 import java.nio.file.NoSuchFileException
 import java.nio.file.Path
-import kotlin.io.path.createParentDirectories
-import kotlin.math.exp
 
-@ApiStatus.Internal
+private const val ADDITIONAL_INSTRUCTIONS = """
+Snapshots for other products may require update, please run 'All Packaging Tests' run configuration to run all packaging tests.
+
+When the patches is applied, please also run PatronusConfigYamlConsistencyTest to ensure the Patronus configuration is up to date.
+"""
+
+@Internal
+fun buildUnifiedDiffText(fileName: String, originalLines: List<String>, revisedLines: List<String>): String {
+  val patch = DiffUtils.diff(originalLines, revisedLines)
+  return DiffUtils.generateUnifiedDiff(fileName, fileName, originalLines, patch, 3).joinToString(separator = "\n")
+}
+
+@Internal
+data class ParsedContentReport(
+  @JvmField val platform: List<FileEntry>,
+  @JvmField val productModules: List<PluginContentReport>,
+  @JvmField val bundled: List<PluginContentReport>,
+  @JvmField val nonBundled: List<PluginContentReport>,
+)
+
+@Internal
+fun readContentReportZip(reportFile: Path): ParsedContentReport {
+  HashMapZipFile.load(reportFile).use { zip ->
+    fun readEntry(name: String): String {
+      return Charsets.UTF_8.decode(requireNotNull(zip.getByteBuffer(name)) { "Cannot find $name in $reportFile" }).toString()
+    }
+
+    fun readPlatformEntries(name: String): List<FileEntry> {
+      val data = readEntry(name)
+      try {
+        return deserializeContentData(data)
+      }
+      catch (e: SerializationException) {
+        throw RuntimeException("Cannot parse $name in $reportFile\ndata:$data", e)
+      }
+    }
+
+    fun readPluginEntries(name: String): List<PluginContentReport> {
+      val data = readEntry(name)
+      try {
+        return deserializePluginData(data)
+      }
+      catch (e: SerializationException) {
+        throw RuntimeException("Cannot parse $name in $reportFile\ndata:$data", e)
+      }
+    }
+
+    return ParsedContentReport(
+      platform = readPlatformEntries("platform.yaml"),
+      productModules = readPluginEntries("product-modules.yaml"),
+      bundled = readPluginEntries("bundled-plugins.yaml"),
+      nonBundled = readPluginEntries("non-bundled-plugins.yaml"),
+    )
+  }
+}
+
+@Internal
+data class PackagingCheckFailure(
+  @JvmField val name: String,
+  @JvmField val error: Throwable,
+)
+
+@Internal
+fun collectPluginContentFailures(
+  content: ParsedContentReport,
+  project: JpsProject,
+  projectHome: Path,
+  checkPlugins: Boolean = true,
+  suggestedReviewer: String? = null,
+  testName: (category: String, key: String) -> String,
+): List<PackagingCheckFailure> {
+  return buildList {
+    addAll(
+      collectPluginContentCategoryFailures(
+        fileEntries = toPluginContentMap(content.productModules).values.asSequence(),
+        project = project,
+        projectHome = projectHome,
+        nonBundled = null,
+        suggestedReviewer = suggestedReviewer,
+        contentFileName = "module-content.yaml",
+        testName = { key -> testName("product-module", key) },
+      )
+    )
+
+    if (!checkPlugins) {
+      return@buildList
+    }
+
+    val bundled = toPluginContentMap(content.bundled)
+    val nonBundled = toPluginContentMap(content.nonBundled)
+    addAll(
+      collectPluginContentCategoryFailures(
+        fileEntries = bundled.values.asSequence(),
+        project = project,
+        projectHome = projectHome,
+        nonBundled = nonBundled,
+        suggestedReviewer = suggestedReviewer,
+        contentFileName = "plugin-content.yaml",
+        testName = { key -> testName("bundled-plugin", key) },
+      )
+    )
+    addAll(
+      collectPluginContentCategoryFailures(
+        fileEntries = nonBundled.values.asSequence().filter { !bundled.containsKey(getPluginContentKey(it)) },
+        project = project,
+        projectHome = projectHome,
+        nonBundled = null,
+        suggestedReviewer = suggestedReviewer,
+        contentFileName = "plugin-content.yaml",
+        testName = { key -> testName("non-bundled-plugin", key) },
+      )
+    )
+  }
+}
+
+@Internal
+fun assertNoPackagingCheckFailures(problemMessage: String, failures: List<PackagingCheckFailure>) {
+  when (failures.size) {
+    0 -> return
+    1 -> throw failures.single().error
+    else -> throw MultipleFailuresError(problemMessage, failures.map { wrapFailureWithName(it) })
+  }
+}
+
+private fun collectPluginContentCategoryFailures(
+  fileEntries: Sequence<PluginContentReport>,
+  project: JpsProject,
+  projectHome: Path,
+  nonBundled: Map<String, PluginContentReport>?,
+  suggestedReviewer: String?,
+  contentFileName: String,
+  testName: (key: String) -> String,
+): List<PackagingCheckFailure> {
+  val failures = ArrayList<PackagingCheckFailure>()
+  val groupedAllOs = fileEntries.groupBy { it.mainModule }
+
+  for ((mainModule, items) in groupedAllOs) {
+    val module = project.findModuleByName(mainModule) ?: continue
+    val contentRoot = Path.of(JpsPathUtil.urlToPath(module.contentRootsList.urls.first()))
+    val expectedFile = contentRoot.resolve(contentFileName)
+    val key = getPluginContentKey(items.first())
+    try {
+      val itemFileEntries = if (items.size == 1) {
+        items.first().content
+      }
+      else { // superset for report, android plugin excludes module libraries depending on OS/arch
+        items
+          .flatMap { item -> normalizeContentReport(item.content, short = false) }
+          .distinct()
+          .toList()
+      }
+
+      checkThatContentIsNotChanged(
+        actualFileEntries = itemFileEntries,
+        expectedFile = expectedFile,
+        projectHome = projectHome,
+        isBundled = nonBundled != null,
+        suggestedReviewer = suggestedReviewer,
+      )
+
+      if (nonBundled == null) {
+        continue
+      }
+
+      val nonBundledVersion = nonBundled[key] ?: continue
+      val bundledContent = normalizeContentReport(fileEntries = itemFileEntries, short = true)
+      val nonBundledContent = normalizeContentReport(fileEntries = nonBundledVersion.content, short = true)
+      if (bundledContent != nonBundledContent) {
+        throw AssertionError(
+          "Bundled plugin content must be equal to non-bundled one." +
+          "\nbundled:\n$bundledContent" +
+          "\nnon-bundled:\n$nonBundledContent"
+        )
+      }
+    }
+    catch (t: Throwable) {
+      failures.add(PackagingCheckFailure(name = testName(key), error = t))
+    }
+  }
+  return failures
+}
+
+private fun wrapFailureWithName(failure: PackagingCheckFailure): Throwable {
+  return AssertionError(failure.name, failure.error)
+}
+
+private fun toPluginContentMap(contentList: List<PluginContentReport>): Map<String, PluginContentReport> {
+  val result = LinkedHashMap<String, PluginContentReport>(contentList.size)
+  for (item in contentList) {
+    val key = getPluginContentKey(item)
+    check(result.put(key, item) == null) { "Duplicate plugin content entries: $key" }
+  }
+  return result
+}
+
+private fun getPluginContentKey(item: PluginContentReport): String {
+  return item.mainModule +
+         (if (item.os == null) "" else " (os=${item.os})") +
+         (if (item.arch == null) "" else " (arch=${item.arch})")
+}
+
+private fun buildDistributionChangedMessage(
+  fileName: String,
+  expectedLines: List<String>,
+  actualLines: List<String>,
+  suggestedReviewer: String?,
+  requiresApproval: Boolean,
+): String {
+  val patchText = buildUnifiedDiffText(fileName, expectedLines, actualLines)
+
+  return if (requiresApproval && suggestedReviewer != null) {
+    """Distribution content has changed.
+If you are sure that the difference is as expected, ask $suggestedReviewer to approve changes.
+
+Please do not push changes without approval.
+For more details, please visit https://youtrack.jetbrains.com/articles/IDEA-A-80/Distribution-Content-Approving.
+
+$ADDITIONAL_INSTRUCTIONS
+Patch:
+$patchText"""
+  }
+  else {
+    """Distribution content has changed.
+If you are sure that the difference is as expected, please apply and commit a new snapshot.
+Approval is not required. For more details, please visit https://youtrack.jetbrains.com/articles/IDEA-A-80/Distribution-Content-Approving.
+
+Please copy the patch below and apply it, or open the Diff Viewer to accept the proposed changes.
+
+$ADDITIONAL_INSTRUCTIONS
+Patch:
+$patchText"""
+  }
+}
+
+@Internal
 fun checkThatContentIsNotChanged(
   actualFileEntries: List<FileEntry>,
   expectedFile: Path,
@@ -53,73 +293,17 @@ fun checkThatContentIsNotChanged(
   val expectedString = serializeContentEntries(expected)
   val actualString = serializeContentEntries(actual)
 
-  val expectedLines = expectedString.lines()
-  val patch = DiffUtils.diff(expectedLines, actualString.lines())
-
   val fileName = projectHome.relativize(expectedFile).toString()
 
-  val resultMessage = if (isReviewRequired) {
-    "Distribution content has changed.\n" +
-    "If you are sure that the difference is as expected, ask $suggestedReviewer to approve changes.\n\n" +
-    "Please do not push changes without approval.\n" +
-    "For more details, please visit https://youtrack.jetbrains.com/articles/IDEA-A-80/Distribution-Content-Approving.\n\n" +
-    "Snapshots for other products may require update, please run 'All Packaging Tests' run configuration to run all packaging tests.\n\n" +
-    "When the patches is applied, please also run PatronusConfigYamlConsistencyTest to ensure the Patronus configuration is up to date.\n\n" +
-    "Patch:\n${DiffUtils.generateUnifiedDiff(fileName, fileName, expectedLines, patch, 3).joinToString(separator = "\n")}"
-  }
-  else {
-    "Distribution content has changed.\n" +
-    "If you are sure that the difference is as expected, please apply and commit a new snapshot.\n" +
-    "Approval is not required. For more details, please visit https://youtrack.jetbrains.com/articles/IDEA-A-80/Distribution-Content-Approving.\n\n" +
-    "Please copy the patch below and apply it, or open the Diff Viewer to accept the proposed changes.\n\n" +
-    "Snapshots for other products may require update, please run 'All Packaging Tests' run configuration to run all packaging tests.\n\n" +
-    "When the patches is applied, please also run PatronusConfigYamlConsistencyTest to ensure the Patronus configuration is up to date.\n\n" +
-    "Patch:\n${DiffUtils.generateUnifiedDiff(fileName, fileName, expectedLines, patch, 3).joinToString(separator = "\n")}"
-  }
+  val resultMessage = buildDistributionChangedMessage(
+    fileName = fileName,
+    expectedLines = expectedString.lines(),
+    actualLines = actualString.lines(),
+    suggestedReviewer = suggestedReviewer,
+    requiresApproval = isReviewRequired,
+  )
 
-  throw FileComparisonFailedError(resultMessage, expectedString, actualString, expectedFile.toString())
-}
-
-
-@ApiStatus.Internal
-fun checkThatModuleListIsNotChanged(
-  actual: List<String>,
-  expectedFile: Path,
-  projectHome: Path,
-  suggestedReviewer: String? = null,
-) {
-  val expected = try {
-    Files.readAllLines(expectedFile)
-  }
-  catch (_: SerializationException) {
-    emptyList()
-  }
-  catch (_: NoSuchFileException) {
-    expectedFile.createParentDirectories()
-    Files.createFile(expectedFile)
-    emptyList()
-  }
-
-  if (actual == expected) {
-    return
-  }
-
-  val expectedString = expected.joinToString(separator = "\n")
-  val actualString = actual.joinToString(separator = "\n")
-
-  val patch = DiffUtils.diff(expected, actual)
-
-  val fileName = projectHome.relativize(expectedFile).toString()
-
-  val resultMessage = "Distribution content has changed.\n" +
-                      "If you are sure that the difference is as expected, ask $suggestedReviewer to approve changes.\n\n" +
-                      "Please do not push changes without approval.\n" +
-                      "For more details, please visit https://youtrack.jetbrains.com/articles/IDEA-A-80/Distribution-Content-Approving.\n\n" +
-                      "Snapshots for other products may require update, please run 'All Packaging Tests' run configuration to run all packaging tests.\n\n" +
-                      "When the patches is applied, please also run PatronusConfigYamlConsistencyTest to ensure the Patronus configuration is up to date.\n\n" +
-                      "Patch:\n${DiffUtils.generateUnifiedDiff(fileName, fileName, expected, patch, 3).joinToString(separator = "\n")}"
-
-  throw FileComparisonFailedError(resultMessage, expectedString, actualString, expectedFile.toString())
+  throw FileComparisonFailedError(message = resultMessage, expected = expectedString, actual = actualString, expectedFilePath = expectedFile.toString())
 }
 
 internal fun normalizeContentReport(fileEntries: List<FileEntry>, short: Boolean): List<FileEntry> {

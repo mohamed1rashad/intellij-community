@@ -3,7 +3,11 @@ package org.jetbrains.plugins.groovy.findUsages;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
 import com.intellij.psi.impl.search.AnnotatedElementsSearcher;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.LocalSearchScope;
@@ -39,7 +43,7 @@ public final class AnnotatedMembersSearcher implements QueryExecutor<PsiModifier
 
     final List<PsiModifierListOwner> result = new ArrayList<>();
     for (final PsiElement element : members) {
-      ApplicationManager.getApplication().runReadAction(() -> {
+      ReadAction.runBlocking(() -> {
         PsiElement e =
           element instanceof GroovyFile ?
           ((GroovyFile)element).getPackageDefinition() : element;
@@ -69,7 +73,7 @@ public final class AnnotatedMembersSearcher implements QueryExecutor<PsiModifier
     else {
       candidates = new ArrayList<>();
       for (final PsiElement element : ((LocalSearchScope)scope).getScope()) {
-        ApplicationManager.getApplication().runReadAction(() -> {
+        ReadAction.runBlocking(() -> {
           if (element instanceof GroovyPsiElement) {
             ((GroovyPsiElement)element).accept(new GroovyRecursiveElementVisitor() {
               @Override

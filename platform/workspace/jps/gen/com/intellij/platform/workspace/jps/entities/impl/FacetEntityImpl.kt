@@ -1,37 +1,35 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.jps.entities.impl
 
 import com.intellij.platform.workspace.jps.entities.FacetEntity
+import com.intellij.platform.workspace.jps.entities.FacetEntityBuilder
 import com.intellij.platform.workspace.jps.entities.FacetEntityTypeId
 import com.intellij.platform.workspace.jps.entities.FacetId
-import com.intellij.platform.workspace.jps.entities.ModifiableFacetEntity
-import com.intellij.platform.workspace.jps.entities.ModifiableModuleEntity
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
 import com.intellij.platform.workspace.jps.entities.ModuleId
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.SymbolicEntityId
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Parent
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.SoftLinkable
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.extractOneToManyParent
 import com.intellij.platform.workspace.storage.impl.indices.WorkspaceMutableIndex
-import com.intellij.platform.workspace.storage.impl.updateOneToManyParentOfChild
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import org.jetbrains.annotations.NonNls
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
@@ -39,15 +37,11 @@ import org.jetbrains.annotations.NonNls
 internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetEntity, WorkspaceEntityBase(dataSource) {
 
   private companion object {
-    internal val MODULE_CONNECTION_ID: ConnectionId = ConnectionId.create(ModuleEntity::class.java, FacetEntity::class.java,
-                                                                          ConnectionId.ConnectionType.ONE_TO_MANY, false)
-    internal val UNDERLYINGFACET_CONNECTION_ID: ConnectionId = ConnectionId.create(FacetEntity::class.java, FacetEntity::class.java,
-                                                                                   ConnectionId.ConnectionType.ONE_TO_MANY, true)
-
-    private val connections = listOf<ConnectionId>(
-      MODULE_CONNECTION_ID,
-      UNDERLYINGFACET_CONNECTION_ID,
-    )
+    internal val MODULE_CONNECTION_ID: ConnectionId =
+      ConnectionId.create(ModuleEntity::class.java, FacetEntity::class.java, ConnectionId.ConnectionType.ONE_TO_MANY, false)
+    internal val UNDERLYINGFACET_CONNECTION_ID: ConnectionId =
+      ConnectionId.create(FacetEntity::class.java, FacetEntity::class.java, ConnectionId.ConnectionType.ONE_TO_MANY, true)
+    private val connections = listOf<ConnectionId>(MODULE_CONNECTION_ID, UNDERLYINGFACET_CONNECTION_ID)
 
   }
 
@@ -58,30 +52,26 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
       readField("moduleId")
       return dataSource.moduleId
     }
-
   override val name: String
     get() {
       readField("name")
       return dataSource.name
     }
-
   override val typeId: FacetEntityTypeId
     get() {
       readField("typeId")
       return dataSource.typeId
     }
-
   override val configurationXmlTag: String?
     get() {
       readField("configurationXmlTag")
       return dataSource.configurationXmlTag
     }
-
   override val module: ModuleEntity
-    get() = snapshot.extractOneToManyParent(MODULE_CONNECTION_ID, this)!!
-
+    get() = snapshot.instrumentation.getParent(MODULE_CONNECTION_ID, this) as? ModuleEntity
+            ?: error("Parent module not found for FacetEntity")
   override val underlyingFacet: FacetEntity?
-    get() = snapshot.extractOneToManyParent(UNDERLYINGFACET_CONNECTION_ID, this)
+    get() = snapshot.instrumentation.getParent(UNDERLYINGFACET_CONNECTION_ID, this) as? FacetEntity
 
   override val entitySource: EntitySource
     get() {
@@ -94,8 +84,8 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
   }
 
 
-  internal class Builder(result: FacetEntityData?) : ModifiableWorkspaceEntityBase<FacetEntity, FacetEntityData>(
-    result), FacetEntity.Builder {
+  internal class Builder(result: FacetEntityData?) : ModifiableWorkspaceEntityBase<FacetEntity, FacetEntityData>(result),
+                                                     FacetEntity.Builder {
     internal constructor() : this(FacetEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -108,15 +98,13 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
           error("Entity FacetEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -136,7 +124,7 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
         error("Field FacetEntity#typeId should be initialized")
       }
       if (_diff != null) {
-        if (_diff.extractOneToManyParent<WorkspaceEntityBase>(MODULE_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(MODULE_CONNECTION_ID, this) == null) {
           error("Field FacetEntity#module should be initialized")
         }
       }
@@ -171,7 +159,6 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
         changedProperty.add("entitySource")
 
       }
-
     override var moduleId: ModuleId
       get() = getEntityData().moduleId
       set(value) {
@@ -180,7 +167,6 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
         changedProperty.add("moduleId")
 
       }
-
     override var name: String
       get() = getEntityData().name
       set(value) {
@@ -188,7 +174,6 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
         getEntityData(true).name = value
         changedProperty.add("name")
       }
-
     override var typeId: FacetEntityTypeId
       get() = getEntityData().typeId
       set(value) {
@@ -197,7 +182,6 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
         changedProperty.add("typeId")
 
       }
-
     override var configurationXmlTag: String?
       get() = getEntityData().configurationXmlTag
       set(value) {
@@ -205,82 +189,77 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
         getEntityData(true).configurationXmlTag = value
         changedProperty.add("configurationXmlTag")
       }
-
-    override var module: ModifiableModuleEntity
+    override var module: ModuleEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(MODULE_CONNECTION_ID, this) as? ModifiableModuleEntity)
-          ?: (this.entityLinks[EntityLink(false, MODULE_CONNECTION_ID)]!! as ModifiableModuleEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(MODULE_CONNECTION_ID, this) as? ModuleEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, MODULE_CONNECTION_ID)] as? ModuleEntityBuilder) ?: error("module is null for FacetEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, MODULE_CONNECTION_ID)]!! as ModifiableModuleEntity
+          (this.entityLinks[EntityLink(false, MODULE_CONNECTION_ID)] as? ModuleEntityBuilder) ?: error("module is null for FacetEntity")
         }
       }
       set(value) {
         checkModificationAllowed()
         val _diff = diff
         if (_diff != null && value is ModifiableWorkspaceEntityBase<*, *> && value.diff == null) {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, MODULE_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, MODULE_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToManyParentOfChild(MODULE_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(MODULE_CONNECTION_ID, value, this)
         }
         else {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, MODULE_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, MODULE_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, MODULE_CONNECTION_ID)] = value
         }
         changedProperty.add("module")
       }
 
-    override var underlyingFacet: ModifiableFacetEntity?
+    override var underlyingFacet: FacetEntityBuilder?
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(UNDERLYINGFACET_CONNECTION_ID, this) as? ModifiableFacetEntity)
-          ?: (this.entityLinks[EntityLink(false, UNDERLYINGFACET_CONNECTION_ID)] as? ModifiableFacetEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(UNDERLYINGFACET_CONNECTION_ID, this) as? FacetEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, UNDERLYINGFACET_CONNECTION_ID)] as? FacetEntityBuilder)
         }
         else {
-          this.entityLinks[EntityLink(false, UNDERLYINGFACET_CONNECTION_ID)] as? ModifiableFacetEntity
+          (this.entityLinks[EntityLink(false, UNDERLYINGFACET_CONNECTION_ID)] as? FacetEntityBuilder)
         }
       }
       set(value) {
         checkModificationAllowed()
         val _diff = diff
         if (_diff != null && value is ModifiableWorkspaceEntityBase<*, *> && value.diff == null) {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, UNDERLYINGFACET_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, UNDERLYINGFACET_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToManyParentOfChild(UNDERLYINGFACET_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(UNDERLYINGFACET_CONNECTION_ID, value, this)
         }
         else {
-          // Setting backref of the list
+// Setting backref of the list
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             val data = (value.entityLinks[EntityLink(true, UNDERLYINGFACET_CONNECTION_ID)] as? List<Any> ?: emptyList()) + this
             value.entityLinks[EntityLink(true, UNDERLYINGFACET_CONNECTION_ID)] = data
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, UNDERLYINGFACET_CONNECTION_ID)] = value
         }
         changedProperty.add("underlyingFacet")
@@ -288,6 +267,7 @@ internal class FacetEntityImpl(private val dataSource: FacetEntityData) : FacetE
 
     override fun getEntityClass(): Class<FacetEntity> = FacetEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -312,7 +292,7 @@ internal class FacetEntityData : WorkspaceEntityData<FacetEntity>(), SoftLinkabl
   }
 
   override fun updateLinksIndex(prev: Set<SymbolicEntityId<*>>, index: WorkspaceMutableIndex<SymbolicEntityId<*>>) {
-    // TODO verify logic
+// TODO verify logic
     val mutablePreviousSet = HashSet(prev)
     val removedItem_moduleId = mutablePreviousSet.remove(moduleId)
     if (!removedItem_moduleId) {
@@ -338,14 +318,13 @@ internal class FacetEntityData : WorkspaceEntityData<FacetEntity>(), SoftLinkabl
     return changed
   }
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<FacetEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<FacetEntity> {
     val modifiable = FacetEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): FacetEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -364,11 +343,11 @@ internal class FacetEntityData : WorkspaceEntityData<FacetEntity>(), SoftLinkabl
     return FacetEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return FacetEntity(moduleId, name, typeId, entitySource) {
       this.configurationXmlTag = this@FacetEntityData.configurationXmlTag
-      parents.filterIsInstance<ModifiableModuleEntity>().singleOrNull()?.let { this.module = it }
-      this.underlyingFacet = parents.filterIsInstance<ModifiableFacetEntity>().singleOrNull()
+      parents.filterIsInstance<ModuleEntityBuilder>().singleOrNull()?.let { this.module = it }
+      this.underlyingFacet = parents.filterIsInstance<FacetEntityBuilder>().singleOrNull()
     }
   }
 
@@ -381,9 +360,7 @@ internal class FacetEntityData : WorkspaceEntityData<FacetEntity>(), SoftLinkabl
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as FacetEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.moduleId != other.moduleId) return false
     if (this.name != other.name) return false
@@ -395,9 +372,7 @@ internal class FacetEntityData : WorkspaceEntityData<FacetEntity>(), SoftLinkabl
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as FacetEntityData
-
     if (this.moduleId != other.moduleId) return false
     if (this.name != other.name) return false
     if (this.typeId != other.typeId) return false

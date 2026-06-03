@@ -20,7 +20,16 @@ import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.breakpoints.SuspendPolicy;
 import com.intellij.xdebugger.frame.XValueChildrenList;
 import com.jetbrains.python.console.pydev.PydevCompletionVariant;
-import com.jetbrains.python.debugger.*;
+import com.jetbrains.python.debugger.ArrayChunk;
+import com.jetbrains.python.debugger.IPyDebugProcess;
+import com.jetbrains.python.debugger.PyDebugValue;
+import com.jetbrains.python.debugger.PyDebuggerException;
+import com.jetbrains.python.debugger.PyFrameAccessor;
+import com.jetbrains.python.debugger.PyIo;
+import com.jetbrains.python.debugger.PyReferringObjectsValue;
+import com.jetbrains.python.debugger.PySignature;
+import com.jetbrains.python.debugger.PyThreadInfo;
+import com.jetbrains.python.debugger.PyUserTypeRenderer;
 import com.jetbrains.python.debugger.pydev.dataviewer.DataViewerCommand;
 import com.jetbrains.python.debugger.pydev.dataviewer.DataViewerCommandBuilder;
 import com.jetbrains.python.debugger.pydev.dataviewer.DataViewerCommandResult;
@@ -35,7 +44,14 @@ import org.jetbrains.annotations.Nullable;
 import java.net.ServerSocket;
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -579,9 +595,6 @@ public class RemoteDebugger implements ProcessDebugger {
       else if (AbstractCommand.isCallSignatureTrace(frame.getCommand())) {
         recordCallSignature(ProtocolParser.parseCallSignature(frame.getPayload()));
       }
-      else if (AbstractCommand.isConcurrencyEvent(frame.getCommand())) {
-        recordConcurrencyEvent(ProtocolParser.parseConcurrencyEvent(frame.getPayload(), myDebugProcess.getPositionConverter()));
-      }
       else if (AbstractCommand.isInputRequested(frame.getCommand())) {
         myDebugProcess.consoleInputRequested(ProtocolParser.parseInputCommand(frame.getPayload()));
       }
@@ -604,10 +617,6 @@ public class RemoteDebugger implements ProcessDebugger {
 
   private void recordCallSignature(PySignature signature) {
     myDebugProcess.recordSignature(signature);
-  }
-
-  private void recordConcurrencyEvent(PyConcurrencyEvent event) {
-    myDebugProcess.recordLogEvent(event);
   }
 
   // todo: extract response processing

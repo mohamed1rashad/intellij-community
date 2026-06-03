@@ -21,7 +21,18 @@ import com.intellij.psi.tree.IFileElementType;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.concurrency.SynchronizedClearableLazy;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.indexing.*;
+import com.intellij.util.indexing.DataIndexer;
+import com.intellij.util.indexing.DocumentContent;
+import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.util.indexing.FileBasedIndexExtension;
+import com.intellij.util.indexing.FileBasedIndexImpl;
+import com.intellij.util.indexing.FileBasedIndexInfrastructureExtensionUpdatableIndex;
+import com.intellij.util.indexing.FileContent;
+import com.intellij.util.indexing.FileContentImpl;
+import com.intellij.util.indexing.IndexedFile;
+import com.intellij.util.indexing.IndexedFileImpl;
+import com.intellij.util.indexing.StorageException;
+import com.intellij.util.indexing.UpdatableIndex;
 import com.intellij.util.messages.SimpleMessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -30,7 +41,15 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.file.NoSuchFileException;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -99,7 +118,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
 
   private void registerModificationFor(@NotNull IFileElementType fileElementType) {
     myModificationsInCurrentBatch.add(fileElementType);
-    myModCounts.compute(fileElementType, (__, value) -> {
+    myModCounts.compute(fileElementType, (_, value) -> {
       if (value == null) return 1L;
       return value + 1;
     });
@@ -111,7 +130,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
 
   // TODO optimization: if nobody asked for a modification tracker of fileElementType, we don't have to count stub changes for it then.
   //    Hence precise check for such fileElementTypes can be omitted.
-  public Long getModificationStamp(@NotNull IFileElementType fileElementType) {
+  public long getModificationStamp(@NotNull IFileElementType fileElementType) {
     return myModCounts.getOrDefault(fileElementType, 0L);
   }
 
@@ -123,7 +142,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
   @Override
   public synchronized void endUpdatesBatch() {
     myModificationsInCurrentBatch.clear();
-    ReadAction.run(() -> {
+    ReadAction.runBlocking(() -> {
       if (disposeTrace.get() != null) {
         throw new IllegalStateException("Cannot end updates batch because the tracker is disposed! Disposal trace is in the cause", disposeTrace.get());
       }
@@ -227,7 +246,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
         }
         final Stub stub = StubTreeBuilder.buildStubTree(fileContent);
         Map<Integer, SerializedStubTree> serializedStub = stub == null ? Collections.emptyMap() : stubIndexer.map(fileContent);
-        if (diffBuilder.differentiate(serializedStub, (__, ___, ____, _____) -> { }, true)) {
+        if (diffBuilder.differentiate(serializedStub, (_, _, _, _) -> { }, true)) {
           registerModificationFor(info.type);
         }
       }
@@ -291,7 +310,7 @@ final class PerFileElementTypeStubModificationTracker implements StubIndexImpl.F
   private @NotNull List<IFileElementType> determinePreviousFileElementType(int fileId, @NotNull StubUpdatingIndexStorage index) {
     String storedVersion = index.getStoredSubIndexerVersion(fileId);
     if (storedVersion == null) return Collections.emptyList();
-    return myFileElementTypesCache.compute(storedVersion, (__, value) -> {
+    return myFileElementTypesCache.compute(storedVersion, (_, value) -> {
       if (value != null) return value;
       List<IFileElementType> types = StubBuilderType.getStubFileElementTypeFromVersion(storedVersion);
       if (types.size() > 1) {

@@ -4,7 +4,12 @@ package com.intellij.refactoring.suggested
 import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.util.Key
-import com.intellij.psi.*
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiNamedElementWithCustomPresentation
+import com.intellij.psi.SmartPsiElementPointer
 import com.intellij.psi.createSmartPointer
 import com.intellij.refactoring.RefactoringBundle
 import com.intellij.refactoring.suggested.SuggestedRefactoringSupport.Signature
@@ -128,7 +133,10 @@ class SuggestedRefactoringState(
       throw ProcessCanceledException()
     }
     val psiFile = anchor.containingFile
-    val signatureRange = refactoringSupport.signatureRange(anchor)!!
+    val signatureRange = refactoringSupport.signatureRange(anchor)
+    if (signatureRange == null) {
+      throw ProcessCanceledException()
+    }
     val importsRange = refactoringSupport.importsRange(psiFile)
     if (importsRange != null && importsRange.length != 0) {
       require(importsRange.endOffset < signatureRange.startOffset)

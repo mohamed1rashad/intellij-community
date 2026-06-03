@@ -3,11 +3,20 @@ package com.intellij.driver.sdk
 import com.intellij.driver.client.Driver
 import com.intellij.driver.client.Remote
 import com.intellij.driver.client.service
+import com.intellij.driver.client.utility
 import com.intellij.driver.model.RdTarget
 
 @Remote("com.intellij.ide.GeneralSettings")
 interface GeneralSettingsRef {
   fun setConfirmOpenNewProject(mode: Int)
+  fun setConfirmExit(value: Boolean)
+  fun setProcessCloseConfirmation(value: ProcessCloseConfirmationRef)
+  fun setSupportScreenReaders(value: Boolean)
+}
+
+@Remote("com.intellij.ide.ProcessCloseConfirmation")
+interface ProcessCloseConfirmationRef {
+  fun valueOf(name: String): ProcessCloseConfirmationRef
 }
 
 @Remote("com.intellij.openapi.options.advanced.AdvancedSettings")
@@ -23,11 +32,11 @@ interface UpdateSettings {
 }
 
 fun Driver.setOpenNewProjectsInSameWindow() {
-  service<GeneralSettingsRef>(RdTarget.BACKEND).setConfirmOpenNewProject(1)
+  updateGeneralSettings(RdTarget.BACKEND) { setConfirmOpenNewProject(1) }
 }
 
 fun Driver.setOpenNewProjectsInNewWindow() {
-  service<GeneralSettingsRef>(RdTarget.BACKEND).setConfirmOpenNewProject(0)
+  updateGeneralSettings(RdTarget.BACKEND) { setConfirmOpenNewProject(0) }
 }
 
 fun Driver.advancedSettings(rdTarget: RdTarget = RdTarget.DEFAULT): AdvancedSettingsRef {
@@ -40,4 +49,15 @@ fun Driver.setAdvancedSetting(id: String, value: Boolean, rdTarget: RdTarget = R
 
 fun Driver.setThirdPartyPluginsAllowed(allowed: Boolean) {
   service<UpdateSettings>().setThirdPartyPluginsAllowed(allowed)
+}
+
+fun Driver.turnOffConfirmExit() {
+  updateGeneralSettings {
+    setConfirmExit(false)
+    setProcessCloseConfirmation(utility<ProcessCloseConfirmationRef>(RdTarget.BACKEND).valueOf("TERMINATE"))
+  }
+}
+
+fun Driver.updateGeneralSettings(rdTarget: RdTarget = RdTarget.DEFAULT, settingToChange: GeneralSettingsRef.() -> Unit) {
+  service(GeneralSettingsRef::class, rdTarget).apply { settingToChange() }
 }

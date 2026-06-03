@@ -1,5 +1,21 @@
-<!-- todo: register this as a content module (IJPL-210868); currently it's included via 'xi:include' tag -->
-<idea-plugin>
+<idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.libraries.kotlinx.datetime"/>
+    <module name="intellij.libraries.kotlinx.serialization.core"/>
+    <module name="intellij.libraries.kotlinx.serialization.json"/>
+    <module name="intellij.platform.core"/>
+    <module name="intellij.platform.core.impl"/>
+    <module name="intellij.platform.core.ui"/>
+    <module name="intellij.platform.editor.ui"/>
+    <module name="intellij.platform.ide.core"/>
+    <module name="intellij.platform.ide.impl"/>
+    <module name="intellij.platform.lang"/>
+    <module name="intellij.platform.projectModel"/>
+    <module name="intellij.platform.statistics"/>
+    <module name="intellij.platform.util.ui"/>
+  </dependencies>
+  <!-- endregion -->
   <extensionPoints>
     <extensionPoint qualifiedName="com.intellij.feedback.idleFeedbackSurvey" interface="com.intellij.platform.feedback.FeedbackSurvey"
                     dynamic="true"/>
@@ -13,7 +29,7 @@
                         overrides="true"/>
 
     <applicationService serviceImplementation="com.intellij.platform.feedback.impl.state.DontShowAgainFeedbackService"/>
-    <applicationService serviceImplementation="com.intellij.platform.feedback.eap.EAPFeedbackUrlProvider"/>
+    <applicationService serviceImplementation="com.intellij.platform.feedback.eap.EAPFeedbackUrlProvider" open="true"/>
 
     <notificationGroup displayType="BALLOON" id="Feedback In IDE" bundle="messages.CommonFeedbackMessagesBundle"
                        key="notification.group.feedback"/>
@@ -46,10 +62,22 @@
     <feedback.idleFeedbackSurvey implementation="com.intellij.platform.feedback.csat.CsatFeedbackSurvey"/>
     <backgroundPostStartupActivity implementation="com.intellij.platform.feedback.csat.CsatNewUserTracker"/>
 
+    <feedback.idleFeedbackSurvey implementation="com.intellij.platform.feedback.editor.smoothcaret.SmoothCaretFeedbackSurvey"/>
+    <backgroundPostStartupActivity implementation="com.intellij.platform.feedback.editor.smoothcaret.SmoothCaretFirstRunActivity"/>
+    <applicationService serviceImplementation="com.intellij.platform.feedback.editor.smoothcaret.SmoothCaretUsageLocalStorage"/>
+
+    <feedback.idleFeedbackSurvey implementation="com.intellij.platform.feedback.editor.ux.EditorUxFeedbackSurvey"/>
+    <registryKey key="editor.ux.survey.enabled" defaultValue="false" description="Enables Editor UX survey for 10% users"/>
+
     <registryKey key="csat.survey.enabled" defaultValue="true" description="Enables periodic CSAT survey"/>
     <registryKey key="csat.survey.today" defaultValue="" description="ISO Formatted today date such as 2011-12-03"/>
     <registryKey key="csat.survey.user.created.date" defaultValue="" description="ISO Formatted date when user created such as 2011-12-03"/>
     <registryKey key="csat.survey.show.probability" defaultValue="" description="Override probability of survey, double value from 0 to 1"/>
+    <registryKey key="smooth.caret.survey.first.run.date" defaultValue="" description="ISO Formatted first EAP run date such as 2026-02-10 (for testing)"/>
+    <applicationSettings service="com.intellij.platform.feedback.editor.smoothcaret.SmoothCaretUsageLocalStorage"/>
+    <applicationSettings service="com.intellij.platform.feedback.localization.LocalizationFeedbackService"/>
+    <applicationSettings service="com.intellij.platform.feedback.impl.state.DontShowAgainFeedbackService"/>
+    <applicationSettings service="com.intellij.platform.feedback.impl.state.CommonFeedbackSurveyService"/>
   </extensions>
 
   <actions>
@@ -61,6 +89,12 @@
               class="com.intellij.platform.feedback.demo.ShowDemoFeedbackDialogWithEmailAction" internal="true"/>
       <action id="com.intellij.platform.feedback.localization.dialog.ShowLocalizationFeedbackDialog"
               class="com.intellij.platform.feedback.localization.ShowLocalizationFeedbackDialog"
+              internal="true"/>
+      <action id="Editor.ShowSmoothCaretFeedbackNotification"
+              class="com.intellij.platform.feedback.editor.smoothcaret.ShowSmoothCaretFeedbackNotificationAction"
+              internal="true"/>
+      <action id="Editor.ShowEditorUxFeedbackNotification"
+              class="com.intellij.platform.feedback.editor.ux.ShowEditorUxFeedbackNotificationAction"
               internal="true"/>
       <add-to-group group-id="Internal.UI" anchor="last"/>
     </group>

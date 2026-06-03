@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.codeinsight.utils
 
 import com.intellij.lang.jvm.JvmModifier
@@ -12,11 +12,13 @@ import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.analysis.api.KaContextParameterApi
 import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.isUsedAsExpression
 import org.jetbrains.kotlin.analysis.api.components.resolveToCall
 import org.jetbrains.kotlin.analysis.api.components.resolveToSymbol
 import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolOrigin
 import org.jetbrains.kotlin.idea.base.psi.copied
 import org.jetbrains.kotlin.idea.base.psi.deleteBody
@@ -29,9 +31,57 @@ import org.jetbrains.kotlin.lexer.KtSingleValueToken
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.*
-import org.jetbrains.kotlin.psi.stubs.elements.KtStubElementTypes
+import org.jetbrains.kotlin.psi.KtAnnotationEntry
+import org.jetbrains.kotlin.psi.KtBackingField
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtCollectionLiteralExpression
+import org.jetbrains.kotlin.psi.KtConstantExpression
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtContainerNode
+import org.jetbrains.kotlin.psi.KtDoWhileExpression
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtForExpression
+import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtIsExpression
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtParenthesizedExpression
+import org.jetbrains.kotlin.psi.KtPrefixExpression
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtReturnExpression
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.KtTypeArgumentList
+import org.jetbrains.kotlin.psi.KtTypeReference
+import org.jetbrains.kotlin.psi.KtValueArgument
+import org.jetbrains.kotlin.psi.KtWhileExpression
+import org.jetbrains.kotlin.psi.createExpressionByPattern
+import org.jetbrains.kotlin.psi.psiUtil.allChildren
+import org.jetbrains.kotlin.psi.psiUtil.anyDescendantOfType
+import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
+import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
+import org.jetbrains.kotlin.psi.psiUtil.getLastParentOfTypeInRow
+import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypes
+import org.jetbrains.kotlin.psi.psiUtil.getPossiblyQualifiedCallExpression
+import org.jetbrains.kotlin.psi.psiUtil.getQualifiedElementSelector
+import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.isAbstract
+import org.jetbrains.kotlin.psi.psiUtil.isAncestor
+import org.jetbrains.kotlin.psi.psiUtil.startOffset
+import org.jetbrains.kotlin.psi.psiUtil.visibilityModifierTypeOrDefault
 
 fun KtContainerNode.getControlFlowElementDescription(): String? {
     when (node.elementType) {
@@ -47,6 +97,21 @@ fun KtContainerNode.getControlFlowElementDescription(): String? {
     }
     return null
 }
+
+/**
+ * Returns this expression or the topmost directly enclosing parenthesized expression.
+ *
+ * For `foo()` as the receiver expression:
+ * ```
+ * foo() + bar      -> foo()
+ * (foo()) + bar    -> (foo())
+ * ((foo())) + bar  -> ((foo()))
+ * (1 + foo())      -> foo()
+ * (1 + (foo()))    -> (foo())
+ * ```
+ */
+fun KtExpression.getTopmostParenthesizedExpressionOrSelf(): KtExpression =
+    generateSequence(this) { it.parent as? KtParenthesizedExpression }.last()
 
 /**
  * Returns whether the property accessor is a redundant getter or not.
@@ -91,17 +156,6 @@ fun removeRedundantGetter(getter: KtPropertyAccessor) {
     }
 }
 
-fun removeProperty(ktProperty: KtProperty) {
-    val initializer = ktProperty.initializer
-    if (initializer != null && initializer !is KtConstantExpression) {
-        val commentSaver = CommentSaver(ktProperty)
-        val replaced = ktProperty.replace(initializer)
-        commentSaver.restore(replaced)
-    } else {
-        ktProperty.delete()
-    }
-}
-
 fun renameToUnderscore(declaration: KtCallableDeclaration) {
     declaration.nameIdentifier?.replace(KtPsiFactory(declaration.project).createIdentifier("_"))
 }
@@ -116,10 +170,10 @@ fun renameToUnderscore(declaration: KtCallableDeclaration) {
 val KtParameter.isSetterParameter: Boolean
     get() = (parent.parent as? KtPropertyAccessor)?.isSetter == true
 
-fun KtPropertyAccessor.isRedundantSetter(respectComments: Boolean = true): Boolean {
+fun KtPropertyAccessor.isRedundantSetter(respectComments: Boolean = true, canBeCompletelyDeleted: Boolean = canBeCompletelyDeleted()): Boolean {
     if (!isSetter) return false
     if (respectComments && anyDescendantOfType<PsiComment>()) return false
-    val expression = bodyExpression ?: return canBeCompletelyDeleted()
+    val expression = bodyExpression ?: return canBeCompletelyDeleted
     if (expression is KtBlockExpression) {
         val statement = expression.statements.singleOrNull() ?: return false
         val parameter = valueParameters.singleOrNull() ?: return false
@@ -131,8 +185,8 @@ fun KtPropertyAccessor.isRedundantSetter(respectComments: Boolean = true): Boole
     return false
 }
 
-fun removeRedundantSetter(setter: KtPropertyAccessor) {
-    if (setter.canBeCompletelyDeleted()) {
+fun removeRedundantSetter(setter: KtPropertyAccessor, canBeCompletelyDeleted: Boolean = setter.canBeCompletelyDeleted()) {
+    if (canBeCompletelyDeleted) {
         setter.delete()
     } else {
         setter.deleteBody()
@@ -282,7 +336,7 @@ private fun KtExpression.isIntegerConstantOfValue(value: Int): Boolean {
     val deparenthesized = KtPsiUtil.deparenthesize(this) as? KtConstantExpression
         ?: return false
 
-    return deparenthesized.elementType == KtStubElementTypes.INTEGER_CONSTANT
+    return deparenthesized.iElementType == KtNodeTypes.INTEGER_CONSTANT
             && deparenthesized.text.toIntOrNull() == value
 }
 
@@ -390,11 +444,15 @@ operator fun FqName.plus(name: Name): FqName = child(name)
 @ApiStatus.Internal
 operator fun FqName.plus(name: String): FqName = this + Name.identifier(name)
 
-private val KOTLIN_BUILTIN_ENUM_FUNCTION_FQ_NAMES = arrayOf(
-    StandardKotlinNames.Enum.enumEntries,
-    StandardKotlinNames.Enum.enumValues,
-    StandardKotlinNames.Enum.enumValueOf
-)
+private val KOTLIN_BUILTIN_ENUM_FUNCTION_FQ_NAMES: Array<FqName>
+    /* An initialization cycle between KotlinPsiUtils.kt and StandardKotlinNames.kt causes this property to be initialized with
+    an array of nulls. To prevent this, use a getter to guarantee that a non-null value is returned upon calling it.
+    */
+    get() = arrayOf(
+        StandardKotlinNames.Enum.enumEntries,
+        StandardKotlinNames.Enum.enumValues,
+        StandardKotlinNames.Enum.enumValueOf
+    )
 
 @OptIn(KaContextParameterApi::class)
 context(_: KaSession)
@@ -466,3 +524,24 @@ fun KtParenthesizedExpression.removeUnnecessaryParentheses() {
 
     commentSaver.restore(replaced)
 }
+
+fun KtProperty.hasExplicitBackingField(): Boolean = this.allChildren.find { it is KtBackingField } != null
+
+fun KtProperty.getOverriddenProperty(): KtProperty? {
+    analyze(this) {
+        val propertySymbol = symbol as? KaPropertySymbol ?: return null
+        val directlyOverriddenSymbol = propertySymbol.directlyOverriddenSymbols.firstOrNull() as? KaPropertySymbol ?: return null
+
+        val overriddenProperty = directlyOverriddenSymbol.psi as? KtProperty
+        return overriddenProperty
+    }
+}
+
+@ApiStatus.Internal
+fun KtProperty.isInitializedByLazy(): Boolean = analyze(this) {
+    return initializer?.expressionType?.isSubtypeOf(StandardKotlinNames.Lazy.lazyClassId) == true
+}
+
+@ApiStatus.Internal
+fun KtProperty.collectReferencesInFile(): List<KtNameReferenceExpression> =
+    containingKtFile.collectDescendantsOfType<KtNameReferenceExpression> { name == it.getReferencedName() && it.mainReference.resolve() == this }

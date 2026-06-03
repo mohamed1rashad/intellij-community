@@ -47,8 +47,11 @@ f:org.jetbrains.jewel.ui.component.ListComboBoxKt
 - a:getStyle():org.jetbrains.jewel.ui.component.styling.SearchMatchStyle
 f:org.jetbrains.jewel.ui.component.SpeedSearchAreaKt
 - *sf:ProvideSearchMatchState(org.jetbrains.jewel.ui.component.SpeedSearchState,java.lang.String,org.jetbrains.jewel.ui.component.styling.SearchMatchStyle,kotlin.jvm.functions.Function2,androidx.compose.runtime.Composer,I):V
-- *sf:SpeedSearchArea(androidx.compose.ui.Modifier,kotlin.jvm.functions.Function1,org.jetbrains.jewel.ui.component.styling.SpeedSearchStyle,org.jetbrains.jewel.ui.component.styling.TextFieldStyle,androidx.compose.ui.text.TextStyle,org.jetbrains.jewel.ui.component.styling.SearchMatchStyle,androidx.compose.foundation.interaction.MutableInteractionSource,kotlin.jvm.functions.Function3,androidx.compose.runtime.Composer,I,I):V
+- *bsf:SpeedSearchArea(androidx.compose.ui.Modifier,kotlin.jvm.functions.Function1,org.jetbrains.jewel.ui.component.styling.SpeedSearchStyle,org.jetbrains.jewel.ui.component.styling.TextFieldStyle,androidx.compose.ui.text.TextStyle,org.jetbrains.jewel.ui.component.styling.SearchMatchStyle,androidx.compose.foundation.interaction.MutableInteractionSource,kotlin.jvm.functions.Function3,androidx.compose.runtime.Composer,I,I):V
+- *sf:SpeedSearchArea(androidx.compose.ui.Modifier,kotlin.jvm.functions.Function1,org.jetbrains.jewel.ui.component.styling.SpeedSearchStyle,org.jetbrains.jewel.ui.component.styling.TextFieldStyle,androidx.compose.ui.text.TextStyle,org.jetbrains.jewel.ui.component.styling.SearchMatchStyle,androidx.compose.foundation.interaction.MutableInteractionSource,Z,kotlin.jvm.functions.Function3,androidx.compose.runtime.Composer,I,I):V
+- *sf:SpeedSearchArea(org.jetbrains.jewel.ui.component.SpeedSearchState,androidx.compose.ui.Modifier,org.jetbrains.jewel.ui.component.styling.SpeedSearchStyle,org.jetbrains.jewel.ui.component.styling.TextFieldStyle,androidx.compose.ui.text.TextStyle,org.jetbrains.jewel.ui.component.styling.SearchMatchStyle,androidx.compose.foundation.interaction.MutableInteractionSource,Z,kotlin.jvm.functions.Function3,androidx.compose.runtime.Composer,I,I):V
 - *sf:getLocalNodeSearchMatchState():androidx.compose.runtime.ProvidableCompositionLocal
+- *sf:rememberSpeedSearchState(kotlin.jvm.functions.Function1,androidx.compose.runtime.Composer,I,I):org.jetbrains.jewel.ui.component.SpeedSearchState
 *:org.jetbrains.jewel.ui.component.SpeedSearchScope
 - androidx.compose.foundation.layout.BoxScope
 - a:getInteractionSource():androidx.compose.foundation.interaction.MutableInteractionSource
@@ -59,6 +62,7 @@ f:org.jetbrains.jewel.ui.component.SpeedSearchAreaKt
 - a:attach(kotlinx.coroutines.flow.StateFlow,kotlinx.coroutines.CoroutineDispatcher,kotlin.coroutines.Continuation):java.lang.Object
 - bs:attach$default(org.jetbrains.jewel.ui.component.SpeedSearchState,kotlinx.coroutines.flow.StateFlow,kotlinx.coroutines.CoroutineDispatcher,kotlin.coroutines.Continuation,I,java.lang.Object):java.lang.Object
 - a:clearSearch():Z
+- a:getCurrentMatcher():org.jetbrains.jewel.foundation.search.SpeedSearchMatcher
 - a:getHasMatches():Z
 - a:getMatchingIndexes():java.util.List
 - a:getPosition():androidx.compose.ui.Alignment$Vertical
@@ -67,6 +71,7 @@ f:org.jetbrains.jewel.ui.component.SpeedSearchAreaKt
 - a:isVisible():Z
 - a:matchResultForText(java.lang.String):org.jetbrains.jewel.foundation.search.SpeedSearchMatcher$MatchResult
 - a:setPosition(androidx.compose.ui.Alignment$Vertical):V
+- a:setVisible(Z):V
 f:org.jetbrains.jewel.ui.component.TabStripKt
 - *bsf:TabStrip(java.util.List,org.jetbrains.jewel.ui.component.styling.TabStyle,androidx.compose.ui.Modifier,Z,androidx.compose.runtime.Composer,I,I):V
 f:org.jetbrains.jewel.ui.component.TextAreaKt
@@ -96,5 +101,26 @@ f:org.jetbrains.jewel.ui.component.search.SpeedSearchableTreeKt
 - *sf:SpeedSearchableTree(org.jetbrains.jewel.ui.component.SpeedSearchScope,org.jetbrains.jewel.foundation.lazy.tree.Tree,kotlin.jvm.functions.Function1,androidx.compose.ui.Modifier,org.jetbrains.jewel.foundation.lazy.tree.TreeState,kotlin.jvm.functions.Function1,kotlin.jvm.functions.Function1,kotlin.jvm.functions.Function1,org.jetbrains.jewel.foundation.lazy.tree.KeyActions,org.jetbrains.jewel.ui.component.styling.LazyTreeStyle,kotlinx.coroutines.CoroutineDispatcher,kotlin.jvm.functions.Function4,androidx.compose.runtime.Composer,I,I,I):V
 f:org.jetbrains.jewel.ui.component.styling.IconButtonStylingKt
 - *sf:getLocalTransparentIconButtonStyle():androidx.compose.runtime.ProvidableCompositionLocal
+f:org.jetbrains.jewel.ui.icon.IconUtilsKt
+- *sf:badge-3IgeMak(com.intellij.platform.icons.design.IconDesigner,J,com.intellij.platform.icons.design.Shape,com.intellij.platform.icons.design.IconAlign,com.intellij.platform.icons.design.IconUnit,com.intellij.platform.icons.modifiers.IconModifier):V
+- *bs:badge-3IgeMak$default(com.intellij.platform.icons.design.IconDesigner,J,com.intellij.platform.icons.design.Shape,com.intellij.platform.icons.design.IconAlign,com.intellij.platform.icons.design.IconUnit,com.intellij.platform.icons.modifiers.IconModifier,I,java.lang.Object):V
+- *sf:circle-0680j_4(F):com.intellij.platform.icons.design.Circle
+- *sf:fillArea-YgX7TsA(F,F):com.intellij.platform.icons.scale.FillAreaScale
+- *sf:fitArea-YgX7TsA(F,F):com.intellij.platform.icons.scale.FitAreaScale
+- *sf:rectangle-YgX7TsA(F,F):com.intellij.platform.icons.design.Rectangle
+- *sf:stroke-4WTKRHQ(com.intellij.platform.icons.modifiers.IconModifier,J):com.intellij.platform.icons.modifiers.IconModifier
+- *sf:tintColor-4MyTwCo(com.intellij.platform.icons.modifiers.IconModifier,J,I):com.intellij.platform.icons.modifiers.IconModifier
+- *bs:tintColor-4MyTwCo$default(com.intellij.platform.icons.modifiers.IconModifier,J,I,I,java.lang.Object):com.intellij.platform.icons.modifiers.IconModifier
+- *sf:toCompose(com.intellij.platform.icons.design.BlendMode):I
+- *sf:toCompose(com.intellij.platform.icons.design.Color):J
+- *sf:toCompose(com.intellij.platform.icons.filters.ColorFilter):androidx.compose.ui.graphics.ColorFilter
+- *sf:toIconsBlendMode-s9anfk8(I):com.intellij.platform.icons.design.BlendMode
+- *sf:toIconsColor-8_81llA(J):com.intellij.platform.icons.design.Color
+- *sf:toIconsDp-0680j_4(F):com.intellij.platform.icons.design.DisplayPoint
+*f:org.jetbrains.jewel.ui.painter.hints.EmbeddedToInlineCssStyleSvgPatchHint
+- org.jetbrains.jewel.ui.painter.PainterSvgPatchHint
+- sf:$stable:I
+- sf:INSTANCE:org.jetbrains.jewel.ui.painter.hints.EmbeddedToInlineCssStyleSvgPatchHint
+- patch(org.jetbrains.jewel.ui.painter.PainterProviderScope,org.w3c.dom.Element):V
 f:org.jetbrains.jewel.ui.theme.JewelThemeKt
 - *sf:getTransparentIconButtonStyle(org.jetbrains.jewel.foundation.theme.JewelTheme$Companion,androidx.compose.runtime.Composer,I):org.jetbrains.jewel.ui.component.styling.IconButtonStyle

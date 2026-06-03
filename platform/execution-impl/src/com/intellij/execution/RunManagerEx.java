@@ -5,9 +5,8 @@ import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -15,14 +14,6 @@ import java.util.List;
 public abstract class RunManagerEx extends RunManager {
   public static @NotNull RunManagerEx getInstanceEx(@NotNull Project project) {
     return (RunManagerEx)RunManager.getInstance(project);
-  }
-
-  /**
-   * @deprecated Use {@link #setSelectedConfiguration(RunnerAndConfigurationSettings)} instead
-   */
-  @Deprecated(forRemoval = true)
-  public final void setActiveConfiguration(@Nullable RunnerAndConfigurationSettings configuration) {
-    setSelectedConfiguration(configuration);
   }
 
   /**

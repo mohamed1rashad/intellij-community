@@ -7,20 +7,29 @@ import com.intellij.openapi.util.ThreadLocalCachedValue;
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.*;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.ArrayUtilRt;
+import com.intellij.util.IncorrectOperationException;
+import com.intellij.util.Processor;
+import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.LimitedPool;
 import com.intellij.util.containers.SLRUCache;
 import com.intellij.util.io.PersistentHashMapValueStorage.CreationTimeOptions;
 import com.intellij.util.io.stats.PersistentHashMapStatistics;
 import com.intellij.util.io.stats.StorageStatsRegistrar;
 import org.jetbrains.annotations.ApiStatus.Internal;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -80,6 +89,7 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   private final @NotNull CreationTimeOptions myOptions;
 
   private final Path myStorageFile;
+  private final @NotNull StorageLockContext myStorageLockContext;
   private final boolean myIsReadOnly;
   private final KeyDescriptor<Key> myKeyDescriptor;
 
@@ -102,7 +112,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   private final PersistentEnumeratorBase<Key> myEnumerator;
   private final boolean myCompactOnClose;
   private final ReentrantReadWriteLock myLock = new ReentrantReadWriteLock();
-  private final PersistentMapWal<Key, Value> myWal;
 
   @TestOnly
   public boolean isCorrupted() {
@@ -150,7 +159,7 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
 
     int initialSize = myBuilder.getInitialSize(DEFAULT_INDEX_INITIAL_SIZE);
     int version = myBuilder.getVersion(/*default: */0);
-    @Nullable StorageLockContext lockContext = myBuilder.getLockContext();
+    StorageLockContext lockContext = PagedFileStorage.lookupStorageContext(myBuilder.getLockContext());
     myCompactOnClose = myBuilder.getCompactOnClose(/*default: */false);
 
     // it's important to initialize it as early as possible
@@ -164,11 +173,12 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
     this.myOptions = options;
 
     myStorageFile = file;
+    myStorageLockContext = lockContext;
     myKeyDescriptor = keyDescriptor;
     myValueExternalizer = valueExternalizer;
 
     myEnumerator = PersistentEnumerator.createDefaultEnumerator(
-      checkDataFiles(file),
+      checkDataFiles(file, lockContext),
       keyDescriptor,
       initialSize,
       lockContext,
@@ -178,15 +188,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
 
 
     try {
-      if (myBuilder.isEnableWal()) {
-        Path walFile = myStorageFile.resolveSibling(myStorageFile.getFileName().toString() + ".wal");
-        myWal = new PersistentMapWal<>(keyDescriptor, valueExternalizer, options.useCompression(), walFile,
-                                       myBuilder.getWalExecutor(), true);
-      }
-      else {
-        myWal = null;
-      }
-
       PersistentEnumeratorBase.RecordBufferHandler<PersistentEnumeratorBase<?>> recordHandler = myEnumerator.getRecordHandler();
       myParentValueRefOffset = recordHandler.getRecordBuffer(myEnumerator).length;
 
@@ -205,7 +206,7 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
       StorageStatsRegistrar.INSTANCE.registerMap(myStorageFile, this);
 
 
-      myValueStorage = myIntMapping ? null : new PersistentHashMapValueStorage(getDataFile(myStorageFile), options);
+      myValueStorage = myIntMapping ? null : new PersistentHashMapValueStorage(getDataFile(myStorageFile), options, myStorageLockContext);
       myAppendCache = myIntMapping ? null : createAppendCache(keyDescriptor);
       myAppendCacheFlusher = myIntMapping ? null : LowMemoryWatcher.register(() -> {
         try {
@@ -368,14 +369,13 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
     }
     catch (IOException ignored) {
     }
-    IOUtil.deleteAllFilesStartingWith(baseFile);
     try {
-      if (myWal != null) {
-        myWal.closeAndDelete();
-      }
+      assertNoOpenChannelsForFilesStartingWith(baseFile, myStorageLockContext);
     }
-    catch (IOException ignored) {
+    catch (IOException e) {
+      LOG.warn("Failed to list storage files before deleting " + baseFile, e);
     }
+    IOUtil.deleteAllFilesStartingWith(baseFile);
   }
 
   @Override
@@ -409,11 +409,29 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
     return false;
   }
 
-  private static @NotNull Path checkDataFiles(@NotNull Path file) {
+  private static @NotNull Path checkDataFiles(@NotNull Path file, @NotNull StorageLockContext storageLockContext) throws IOException {
     if (!Files.exists(file)) {
+      assertNoOpenChannelsForFilesStartingWith(getDataFile(file), storageLockContext);
       IOUtil.deleteAllFilesStartingWith(getDataFile(file));
     }
     return file;
+  }
+
+  private static void assertNoOpenChannelsForFilesStartingWith(@NotNull Path file,
+                                                               @NotNull StorageLockContext storageLockContext) throws IOException {
+    Path parentFile = file.getParent();
+    if (parentFile == null) {
+      return;
+    }
+
+    Path fileName = file.getFileName();
+    try (Stream<Path> children = Files.list(parentFile)) {
+      children
+        .filter(path -> path.getFileName().toString().startsWith(fileName.toString()))
+        .forEach(storageLockContext::assertNoOpenChannels);
+    }
+    catch (NoSuchFileException ignore) {
+    }
   }
 
   @VisibleForTesting
@@ -424,9 +442,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   @Override
   public void put(Key key, Value value) throws IOException {
     if (myIsReadOnly) throw new IncorrectOperationException();
-    if (myWal != null) {
-      myWal.put(key, value);
-    }
 
     getWriteLock().lock();
     try {
@@ -516,9 +531,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   @Override
   public void appendData(Key key, @NotNull AppendablePersistentMap.ValueDataAppender appender) throws IOException {
     if (myIsReadOnly) throw new IncorrectOperationException();
-    if (myWal != null) {
-      myWal.appendData(key, appender);
-    }
 
     getWriteLock().lock();
     try {
@@ -749,9 +761,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   @Override
   public void remove(Key key) throws IOException {
     if (myIsReadOnly) throw new IncorrectOperationException();
-    if (myWal != null) {
-      myWal.remove(key);
-    }
 
     getWriteLock().lock();
     try {
@@ -799,9 +808,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   public void force() throws IOException {
     if (myIsReadOnly) return;
     if (myDoTrace) LOG.info("Forcing " + myStorageFile);
-    if (myWal != null) {
-      myWal.flush();
-    }
     getWriteLock().lock();
     try {
       doForce();
@@ -829,7 +835,7 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
   private void clearAppenderCaches() {
     if (myIntMapping) return;
     flushAppendCache();
-    myValueStorage.force();
+    myValueStorage.flush();
   }
 
   @Override
@@ -847,10 +853,6 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
     try {
       if (isClosed()) return;
 
-      if (myWal != null) {
-        myWal.close();
-      }
-
       try {
         if (!skipCompaction && myCompactOnClose && isCompactionSupported()) {
           compact();
@@ -858,6 +860,7 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
       }
       finally {
         doClose();
+        assertNoOpenChannels();
       }
     }
     finally {
@@ -898,6 +901,15 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
     }
   }
 
+  /** Checks map-owned files against both mode-bound cache views after owned channels are closed. */
+  private void assertNoOpenChannels() {
+    myStorageLockContext.assertNoOpenChannels(myStorageFile);
+    PersistentHashMapValueStorage valueStorage = myValueStorage;
+    if (valueStorage != null) {
+      valueStorage.assertNoOpenChannels();
+    }
+  }
+
   static final class CompactionRecordInfo {
     final int key;
     final int address;
@@ -931,7 +943,7 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
 
       final Path newPath = oldDataFile.resolveSibling(oldDataFile.getFileName() + ".new");
       CreationTimeOptions options = myValueStorage.getOptions();
-      final PersistentHashMapValueStorage newStorage = new PersistentHashMapValueStorage(newPath, options);
+      final PersistentHashMapValueStorage newStorage = new PersistentHashMapValueStorage(newPath, options, myStorageLockContext);
       myValueStorage.switchToCompactionMode();
       myEnumerator.markDirty(true);
       long sizeBefore = myValueStorage.getSize();
@@ -965,6 +977,9 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
 
       myValueStorage.dispose();
 
+      for (File file : oldFiles) {
+        myStorageLockContext.assertNoOpenChannels(file.toPath());
+      }
       for (File f : oldFiles) {
         assert FileUtil.deleteWithRenaming(f);
       }
@@ -977,12 +992,15 @@ public final class PersistentMapImpl<Key, Value> implements PersistentMapBase<Ke
       File parentFile = newPath.getParent().toFile();
       final String newBaseName = newPath.getFileName().toString();
       final String oldDataFileBaseName = oldDataFile.getFileName().toString();
+      for (File file : newFiles) {
+        myStorageLockContext.assertNoOpenChannels(file.toPath());
+      }
       for (File f : newFiles) {
         String nameAfterRename = StringUtil.replace(f.getName(), newBaseName, oldDataFileBaseName);
         FileUtil.rename(f, new File(parentFile, nameAfterRename));
       }
 
-      myValueStorage = new PersistentHashMapValueStorage(oldDataFile, options);
+      myValueStorage = new PersistentHashMapValueStorage(oldDataFile, options, myStorageLockContext);
       LOG.info("Compacted " + myEnumerator.myFile + ":" + sizeBefore + " bytes into " +
                newSize + " bytes in " + (System.currentTimeMillis() - now) + "ms.");
       myEnumerator.putMetaData(myLiveAndGarbageKeysCounter);

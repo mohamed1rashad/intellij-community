@@ -1,28 +1,64 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.tools.build.bazel.jvmIncBuilder.impl;
 
-import com.intellij.tools.build.bazel.jvmIncBuilder.*;
+import com.dynatrace.hash4j.hashing.Hashing;
+import com.intellij.tools.build.bazel.jvmIncBuilder.BuildContext;
+import com.intellij.tools.build.bazel.jvmIncBuilder.BuildProcessLogger;
+import com.intellij.tools.build.bazel.jvmIncBuilder.BuilderOptions;
+import com.intellij.tools.build.bazel.jvmIncBuilder.CLFlags;
+import com.intellij.tools.build.bazel.jvmIncBuilder.DataPaths;
+import com.intellij.tools.build.bazel.jvmIncBuilder.Message;
+import com.intellij.tools.build.bazel.jvmIncBuilder.NodeSourceSnapshot;
+import com.intellij.tools.build.bazel.jvmIncBuilder.ResourceGroup;
+import com.intellij.tools.build.bazel.jvmIncBuilder.VMFlags;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.bazel.jvm.Input;
 import org.jetbrains.jps.dependency.NodeSource;
 import org.jetbrains.jps.dependency.NodeSourcePathMapper;
 import org.jetbrains.jps.dependency.impl.PathSourceMapper;
+import org.jetbrains.jps.util.Pair;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
+import static org.jetbrains.jps.util.Iterators.asIterable;
+import static org.jetbrains.jps.util.Iterators.find;
+import static org.jetbrains.jps.util.Iterators.flat;
 import static org.jetbrains.jps.util.Iterators.map;
+import static org.jetbrains.jps.util.Iterators.unique;
 
 /** @noinspection IO_FILE_USAGE*/
 public class BuildContextImpl implements BuildContext {
   private static final Logger LOG = Logger.getLogger("com.intellij.tools.build.bazel.jvmIncBuilder.impl.BuildContextImpl");
+  private static final List<String> ourExpectedUntrackedInputSuffixes = List.of(
+    "/jvm-inc-builder/jvm-inc-builder_deploy.jar",
+    "/rules/impl/MemoryLauncher.java"
+  );
   private final String myTargetName;
   private final Map<CLFlags, List<String>> myFlags;
+  private final long myUntrackedInputsDigest;
+  private final List<String> myUnexpectedInputs = new ArrayList<>();
+  
   private final boolean myAllowWarnings;
   private final Path myBaseDir;
   private final PathSourceMapper myPathMapper;
@@ -38,7 +74,8 @@ public class BuildContextImpl implements BuildContext {
   private final boolean myIsRebuild;
   private final BuilderOptions myBuilderOptions;
 
-  private volatile boolean myHasErrors;
+  private final List<Message> myErrors = new ArrayList<>();
+  private BuildProcessLogger myBuildProcessLogger;
 
   public BuildContextImpl(Path baseDir, Iterable<Input> inputs, Map<CLFlags, List<String>> flags, Appendable messageSink) {
     myFlags = Map.copyOf(flags);
@@ -61,31 +98,55 @@ public class BuildContextImpl implements BuildContext {
     String abiPath = CLFlags.ABI_OUT.getOptionalScalarValue(flags);
     myAbiJar = abiPath != null? baseDir.resolve(abiPath).normalize() : null;
 
-    myKotlinCriStoragePath = myOutJar.resolveSibling(truncateExtension(myOutJar.getFileName().toString()) + DataPaths.KOTLIN_CRI_STORAGE_SUFFIX);
+    String kotlinCriStoragePath = CLFlags.KOTLIN_CRI_OUT.getOptionalScalarValue(flags);
+    myKotlinCriStoragePath = kotlinCriStoragePath != null ? baseDir.resolve(kotlinCriStoragePath).normalize() : null;
 
     myDataDir = myOutJar.resolveSibling(truncateExtension(myOutJar.getFileName().toString()) + DataPaths.DATA_DIR_NAME_SUFFIX);
-    
+
     myIsRebuild = CLFlags.NON_INCREMENTAL.isFlagSet(flags);
 
-    Map<String, String> digestsMap = new HashMap<>();
-    Base64.Encoder base64 = Base64.getEncoder().withoutPadding();
+    Map<String, byte[]> digestsMap = new HashMap<>();
     for (Input input : inputs) {
-      String inputDigest = base64.encodeToString(input.digest);
-      digestsMap.put(input.path, inputDigest);
+      digestsMap.put(input.path, input.digest);
     }
+
+    List<Pair<String, byte[]>> untrackedInputs = new ArrayList<>();
+    for (String path : unique(flat(map(CLFlags.PLUGIN_CLASSPATH.getValue(flags), cp -> cp.isBlank()? List.of() : asIterable(cp.split(":")))))) {
+      byte[] digest = digestsMap.get(path);
+      if (digest != null) {
+        untrackedInputs.add(Pair.create(path, digest));
+      }
+      else {
+        myUnexpectedInputs.add("!no-digest!: " + path);
+      }
+    }
+
+    Base64.Encoder base64 = Base64.getEncoder().withoutPadding();
+    Function<String, String> getDigest = path -> base64.encodeToString(Objects.requireNonNull(digestsMap.remove(path)));
 
     Map<NodeSource, String> sourcesMap = new HashMap<>();
     for (String src : CLFlags.SRCS.getValue(flags)) {
       Path inputPath = baseDir.resolve(src).normalize();
       assert isSourceDependency(inputPath);
-      sourcesMap.put(myPathMapper.toNodeSource(inputPath), Objects.requireNonNull(digestsMap.get(src)));
+      sourcesMap.put(myPathMapper.toNodeSource(inputPath), getDigest.apply(src));
+    }
+    // Per-target srcjar extraction dir, sibling to the output jar. Not under myDataDir so it survives
+    // cleanBuildState() on full rebuild; still per-target because each target's output jar name is unique,
+    // which is required because the multiplex worker may compile several targets concurrently.
+    Path srcJarsExtractDir = DataPaths.getSrcJarsExtractDir(myOutJar);
+    for (String srcJar : CLFlags.SRC_JARS.getValue(flags)) {
+      // consume the jar-level digest per the convention used by getDigest above;
+      // per-entry digests computed below become the source-of-truth for incremental invalidation
+      Objects.requireNonNull(digestsMap.remove(srcJar));
+      Path srcJarPath = baseDir.resolve(srcJar).normalize();
+      extractSrcJarSources(srcJarPath, srcJarsExtractDir, sourcesMap, myPathMapper);
     }
     mySources = new SourceSnapshotImpl(sourcesMap);
 
     Map<NodeSource, String> libsMap = new LinkedHashMap<>(); // for the classpath order is important
     for (String cpEntry : CLFlags.CP.getValue(flags)) {
       Path path = baseDir.resolve(cpEntry).normalize();
-      libsMap.put(myPathMapper.toNodeSource(path), Objects.requireNonNull(digestsMap.get(cpEntry)));
+      libsMap.put(myPathMapper.toNodeSource(path), getDigest.apply(cpEntry));
     }
     myLibraries = new SourceSnapshotImpl(libsMap);
 
@@ -95,9 +156,13 @@ public class BuildContextImpl implements BuildContext {
       String stripPrefix = parts[0];
       String addPrefix = parts[1];
       Map<NodeSource, String> resourcesMap = new HashMap<>();
+      if (parts.length == 2) {
+        // no resource files after strip_prefix:add_prefix, ignore empty tree artifacts from fleet_plugin_services_resources rule
+        continue;
+      }
       for (String file : parts[2].split(":")) {
         Path path = baseDir.resolve(file).normalize();
-        String digest = Objects.requireNonNull(digestsMap.get(file));
+        String digest = getDigest.apply(file);
         resourcesMap.put(myPathMapper.toNodeSource(path), digest);
       }
       if (!resourcesMap.isEmpty()) {
@@ -106,7 +171,29 @@ public class BuildContextImpl implements BuildContext {
     }
     myResources = resources;
 
+    for (Iterator<Map.Entry<String, byte[]>> it = digestsMap.entrySet().iterator(); it.hasNext(); ) {
+      Map.Entry<String, byte[]> entry = it.next();
+      String input = entry.getKey();
+      if (input.endsWith(DataPaths.PARAMS_FILE_NAME_SUFFIX)) {
+        it.remove(); // params are tracked selectively by flags digest
+      }
+      else if (find(ourExpectedUntrackedInputSuffixes, input::endsWith) != null) {
+        untrackedInputs.add(Pair.create(input, entry.getValue()));
+      }
+    }
+
+    Collections.sort(untrackedInputs, Comparator.comparing(p -> p.first)); // ensure same order over invocations;
+    myUntrackedInputsDigest = Utils.digestContent(map(untrackedInputs, p -> {
+      digestsMap.remove(p.first);
+      return p.second;
+    }));
+
+    for (Map.Entry<String, byte[]> entry : digestsMap.entrySet()) {
+      myUnexpectedInputs.add(base64.encodeToString(entry.getValue()) + ": " + entry.getKey());
+    }
+
     myBuilderOptions = BuilderOptions.create(buildJavaOptions(flags), buildKotlinOptions(flags, map(myLibraries.getElements(), myPathMapper::toPath)));
+    myBuildProcessLogger = VMFlags.isBuildProcessLoggerEnabled()? new BatchBuildProcessLogger(new BuildProcessLoggerImpl(baseDir)) : BuildProcessLogger.EMPTY;
   }
 
   private static @NotNull List<String> buildKotlinOptions(Map<CLFlags, List<String>> flags, @NotNull Iterable<@NotNull Path> classpath) {
@@ -170,7 +257,7 @@ public class BuildContextImpl implements BuildContext {
     if (CLFlags.X_WASM_ATTACH_JS_EXCEPTION.isFlagSet(flags)) {
       options.add("-Xwasm-attach-js-exception");
     }
-    for (String flag : CLFlags.X_X_LANGUAGE.getValue(flags)) {
+    for (String flag : CLFlags.X_XLANGUAGE.getValue(flags)) {
       options.add("-XXLanguage:" + flag);
     }
 
@@ -283,6 +370,62 @@ public class BuildContextImpl implements BuildContext {
     return path != null && RunnerRegistry.isCompilableSource(path);
   }
 
+  private static boolean isCompilableSrcJarEntry(String name) {
+    return name.endsWith(".kt") || name.endsWith(".java") || name.endsWith(".form");
+  }
+
+  /**
+   * Extracts Kotlin/Java/form sources from a srcjar into {@code extractDir}, following rules_kotlin's
+   * SourceJarExtractor pattern: a flat shared destination (see {@link DataPaths#SOURCE_JARS_DIR_NAME_SUFFIX})
+   * where entries from all srcjars coexist and later jars overwrite earlier ones on path collisions. Per-entry
+   * content digests are computed locally (Bazel only provides a jar-level digest for a srcjar) so the JPS
+   * incremental compiler can track per-source invalidation; these digests are persisted via ConfigurationState
+   * across builds.
+   */
+  private static void extractSrcJarSources(Path jarPath, Path extractDir, Map<NodeSource, String> sourcesMap, NodeSourcePathMapper pathMapper) {
+    try {
+      try (ZipFile zip = new ZipFile(jarPath.toFile())) {
+        for (ZipElement element : ZipElement.fromZipFile(zip)) {
+          ZipEntry entry = element.getEntry();
+          if (entry.isDirectory()) {
+            continue;
+          }
+          String name = entry.getName();
+          if (!isCompilableSrcJarEntry(name)) {
+            continue;
+          }
+          Path outFile = extractDir.resolve(name).normalize();
+          if (!outFile.startsWith(extractDir)) {
+            throw new IOException("Zip slip in " + jarPath + ": " + name);
+          }
+          byte[] bytes = element.getContent();
+          storeBytes(outFile, bytes);
+          sourcesMap.put(pathMapper.toNodeSource(outFile), Long.toHexString(Hashing.xxh3_64().hashBytesToLong(bytes)));
+        }
+      }
+    }
+    catch (IOException e) {
+      throw new RuntimeException("Failed to extract srcjar " + jarPath, e);
+    }
+  }
+
+  private static void storeBytes(Path outFile, byte[] bytes) throws IOException {
+    OutputStream out;
+    try {
+      out = Files.newOutputStream(outFile);
+    }
+    catch (NoSuchFileException e) {
+      Files.createDirectories(outFile.getParent());
+      out = Files.newOutputStream(outFile);
+    }
+    try {
+      out.write(bytes);
+    }
+    finally {
+      out.close();
+    }
+  }
+  
   @Override
   public String getTargetName() {
     return myTargetName;
@@ -301,6 +444,11 @@ public class BuildContextImpl implements BuildContext {
   @Override
   public Map<CLFlags, List<String>> getFlags() {
     return myFlags;
+  }
+
+  @Override
+  public long getUntrackedInputsDigest() {
+    return myUntrackedInputsDigest;
   }
 
   @Override
@@ -344,6 +492,11 @@ public class BuildContextImpl implements BuildContext {
   }
 
   @Override
+  public Iterable<String> getUnexpectedInputs() {
+    return myUnexpectedInputs;
+  }
+
+  @Override
   public BuilderOptions getBuilderOptions() {
     return myBuilderOptions;
   }
@@ -355,16 +508,22 @@ public class BuildContextImpl implements BuildContext {
 
   @Override
   public BuildProcessLogger getBuildLogger() {
-    return BuildProcessLogger.EMPTY; // used for tests
+    return myBuildProcessLogger; // used for tests
   }
 
   @Override
   public void report(Message msg) {
     try {
-      if (!myAllowWarnings && msg.getKind() == Message.Kind.WARNING) {
-        return;
+      if (msg.getKind() == Message.Kind.ERROR) {
+        myErrors.add(msg);
       }
+      
       if (!myAllowWarnings) {
+
+        if (msg.getKind() == Message.Kind.WARNING) {
+          return;
+        }
+
         // Some warnings in javac are impossible to disable
         // They're also reported as notes, not warnings
         // It greatly pollutes compilation output
@@ -379,11 +538,11 @@ public class BuildContextImpl implements BuildContext {
           return;
         }
       }
+
       if (msg.getSource() != null) {
         myMessageSink.append(msg.getSource().getName()).append(": ");
       }
       if (msg.getKind() == Message.Kind.ERROR) {
-        myHasErrors = true;
         myMessageSink.append("Error: ");
       }
       myMessageSink.append(msg.getText()).append("\n");
@@ -395,11 +554,15 @@ public class BuildContextImpl implements BuildContext {
 
   @Override
   public boolean hasErrors() {
-    return myHasErrors;
+    return !myErrors.isEmpty();
+  }
+
+  @Override
+  public Iterable<Message> getErrors() {
+    return myErrors;
   }
 
   private static String truncateExtension(String filename) {
-    int idx = filename.lastIndexOf('.');
-    return idx >= 0? filename.substring(0, idx) : filename;
+    return DataPaths.truncateExtension(filename);  // todo: inline the method
   }
 }

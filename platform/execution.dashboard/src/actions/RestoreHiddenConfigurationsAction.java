@@ -8,6 +8,7 @@ import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.dashboard.RunDashboardNode;
 import com.intellij.execution.dashboard.RunDashboardRunConfigurationNode;
 import com.intellij.execution.services.ServiceViewActionUtils;
+import com.intellij.execution.services.ServiceViewAddActionContributor;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.ActionUpdateThread;
@@ -31,7 +32,12 @@ import java.util.Set;
 
 final class RestoreHiddenConfigurationsAction
   extends DumbAwareAction
-  implements ActionRemoteBehaviorSpecification.Frontend {
+  implements ActionRemoteBehaviorSpecification.Frontend, ServiceViewAddActionContributor {
+
+  @Override
+  public @NotNull Class<?> getContributorClass() {
+    return RunDashboardServiceViewContributor.class;
+  }
 
   @Override
   public @NotNull ActionUpdateThread getActionUpdateThread() {
@@ -46,6 +52,7 @@ final class RestoreHiddenConfigurationsAction
       presentation.setEnabledAndVisible(false);
       return;
     }
+
     if (ActionPlaces.getActionGroupPopupPlace(ActionPlaces.SERVICES_TOOLBAR).equals(e.getPlace())) {
       presentation.setEnabledAndVisible(hasHiddenConfiguration(project));
       presentation.setText(ExecutionBundle.message("run.dashboard.restore.hidden.configurations.toolbar.action.name"));

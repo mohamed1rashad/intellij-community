@@ -14,8 +14,26 @@ jvm_library(
   name = "api",
   module_name = "fleet.modules.api",
   visibility = ["//visibility:public"],
-  srcs = glob(["srcCommonMain/**/*.kt", "srcCommonMain/**/*.java", "srcCommonMain/**/*.form"], allow_empty = True, exclude = ["**/module-info.java"]),
+  srcs = glob(["srcCommonMain/**/*.kt", "srcCommonMain/**/*.java", "srcCommonMain/**/*.form"], allow_empty = True),
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_api",
   deps = ["@lib//:kotlin-stdlib"]
 )
+
+jvm_library(
+  name = "api_test_lib",
+  testonly = True,
+  module_name = "fleet.modules.api",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_api",
+  runtime_deps = [":api"]
+)
 ### auto-generated section `build fleet.modules.api` end
+
+### auto-generated section `iml fleet.modules.api` start
+exports_files([
+  "fleet.modules.api.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml fleet.modules.api` end

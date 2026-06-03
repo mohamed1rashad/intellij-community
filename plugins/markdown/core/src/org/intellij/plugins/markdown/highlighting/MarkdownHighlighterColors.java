@@ -4,7 +4,11 @@ package org.intellij.plugins.markdown.highlighting;
 import com.intellij.openapi.editor.HighlighterColors;
 import com.intellij.openapi.editor.colors.TextAttributesKey;
 
-import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.*;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.CONSTANT;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.KEYWORD;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.LINE_COMMENT;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.STATIC_METHOD;
+import static com.intellij.openapi.editor.DefaultLanguageHighlighterColors.STRING;
 import static com.intellij.openapi.editor.colors.CodeInsightColors.DEPRECATED_ATTRIBUTES;
 import static com.intellij.openapi.editor.colors.CodeInsightColors.HYPERLINK_ATTRIBUTES;
 import static com.intellij.openapi.editor.colors.EditorColors.INJECTED_LANGUAGE_FRAGMENT;
@@ -62,4 +66,6 @@ public final class MarkdownHighlighterColors {
   public static final TextAttributesKey DEFINITION_LIST_MARKER = createTextAttributesKey("MARKDOWN_DEFINITION_LIST_MARKER", LIST_MARKER);
 
   public static final TextAttributesKey FRONT_MATTER_HEADER_DELIMITER = createTextAttributesKey("MARKDOWN_FRONT_MATTER_HEADER_DELIMITER", LIST_MARKER);
+
+  public static final TextAttributesKey FOOTNOTE_DEFINITION = createTextAttributesKey("MARKDOWN_FOOTNOTE_DEFINITION", CODE_BLOCK);
 }

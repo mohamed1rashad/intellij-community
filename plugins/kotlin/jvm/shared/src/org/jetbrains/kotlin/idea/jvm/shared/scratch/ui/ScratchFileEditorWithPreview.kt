@@ -23,7 +23,14 @@ import org.jetbrains.kotlin.idea.jvm.shared.KotlinJvmBundle
 import org.jetbrains.kotlin.idea.jvm.shared.scratch.ScratchExpression
 import org.jetbrains.kotlin.idea.jvm.shared.scratch.ScratchFile
 import org.jetbrains.kotlin.idea.jvm.shared.scratch.ScratchFileAutoRunner
-import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.*
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.ExplainInfo
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.InlayScratchOutputHandler
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.PreviewEditorScratchOutputHandler
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.PreviewOutputBlocksManager
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.ScratchOutput
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.ScratchOutputHandler
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.ScratchOutputHandlerAdapter
+import org.jetbrains.kotlin.idea.jvm.shared.scratch.output.ScratchToolWindowHandlerKeeper
 import org.jetbrains.kotlin.psi.UserDataProperty
 
 abstract class ScratchFileEditorWithPreview(
@@ -36,11 +43,14 @@ abstract class ScratchFileEditorWithPreview(
     private val _previewEditor = previewTextEditor.editor as EditorEx
     private val previewOutputManager: PreviewOutputBlocksManager = PreviewOutputBlocksManager(_previewEditor)
 
-    protected val toolWindowHandler: ScratchOutputHandler = requestToolWindowHandler()
+    protected val toolWindowHandler: ScratchOutputHandler = requestOutputHandler()
     private val inlayScratchOutputHandler = InlayScratchOutputHandler(sourceTextEditor, toolWindowHandler)
     protected val previewEditorScratchOutputHandler: PreviewEditorScratchOutputHandler = PreviewEditorScratchOutputHandler(
         previewOutputManager, toolWindowHandler, previewTextEditor as Disposable
     )
+
+    protected abstract fun requestOutputHandler(): ScratchOutputHandler
+
     protected val commonPreviewOutputHandler: LayoutDependantOutputHandler = LayoutDependantOutputHandler(
         noPreviewOutputHandler = inlayScratchOutputHandler,
         previewOutputHandler = previewEditorScratchOutputHandler,
@@ -95,11 +105,6 @@ abstract class ScratchFileEditorWithPreview(
 
         sourceEditor.scrollingModel.addVisibleAreaListener(listener)
         _previewEditor.scrollingModel.addVisibleAreaListener(listener)
-    }
-
-    override fun dispose() {
-        releaseToolWindowHandler(toolWindowHandler)
-        super.dispose()
     }
 
     override fun navigateTo(navigatable: Navigatable) {
@@ -159,6 +164,9 @@ abstract class ScratchFileEditorWithPreview(
     fun setPreviewEnabled(isPreviewEnabled: Boolean) {
         setLayout(if (isPreviewEnabled) Layout.SHOW_EDITOR_AND_PREVIEW else Layout.SHOW_EDITOR)
     }
+
+    @TestOnly
+    fun dumpExplainContent(): String = previewOutputManager.dumpContent()
 }
 
 fun TextEditor.findScratchFileEditorWithPreview(): ScratchFileEditorWithPreview? =

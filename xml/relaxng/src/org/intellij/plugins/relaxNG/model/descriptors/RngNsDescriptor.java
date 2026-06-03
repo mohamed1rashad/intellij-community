@@ -39,6 +39,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xml.XmlElementDescriptor;
 import com.intellij.xml.XmlNSDescriptorEx;
 import com.intellij.xml.impl.schema.AnyXmlElementDescriptor;
+import com.intellij.xml.util.BasicHtmlUtil;
 import org.intellij.plugins.relaxNG.RelaxNgMetaDataContributor;
 import org.intellij.plugins.relaxNG.model.resolve.RelaxIncludeIndex;
 import org.intellij.plugins.relaxNG.validation.RngParser;
@@ -51,7 +52,13 @@ import org.kohsuke.rngom.digested.DPattern;
 import org.kohsuke.rngom.nc.NameClass;
 
 import javax.xml.namespace.QName;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 public class RngNsDescriptor implements XmlNSDescriptorEx, Validator {
   private final Map<QName, CachedValue<XmlElementDescriptor>> myDescriptorsMap =
@@ -260,7 +267,10 @@ public class RngNsDescriptor implements XmlNSDescriptorEx, Validator {
       return;
     }
     // RNG XML itself is validated by parsing it with Jing, so we don't want to schema-validate it
-    if (!RelaxNgMetaDataContributor.RNG_NAMESPACE.equals(rootTag.getNamespace())) {
+    // SVG namespace requires special data type factories, which are not available, so it doesn't load anyway
+    var namespace = rootTag.getNamespace();
+    if (!RelaxNgMetaDataContributor.RNG_NAMESPACE.equals(namespace)
+        && !BasicHtmlUtil.SVG_NAMESPACE.equals(namespace)) {
       XmlInstanceValidator.doValidation(doc, host, getDescriptorFile());
     }
   }

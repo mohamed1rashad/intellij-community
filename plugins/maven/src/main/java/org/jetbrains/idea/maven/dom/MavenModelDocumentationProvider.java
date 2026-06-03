@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.dom;
 
 import com.intellij.lang.documentation.DocumentationProvider;
@@ -18,6 +18,7 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.maven.dom.references.MavenPsiElementWrapper;
+import org.jetbrains.idea.maven.server.MavenDistributionsCache;
 import org.jetbrains.idea.maven.utils.MavenLog;
 
 import java.util.ArrayList;
@@ -54,7 +55,8 @@ public final class MavenModelDocumentationProvider implements DocumentationProvi
   @Override
   public @Nls String getElementDescription(@NotNull PsiElement element, @NotNull ElementDescriptionLocation location) {
     return ReadAction.compute(() ->
-      getMavenElementDescription(element, location instanceof UsageViewTypeLocation ? DescKind.TYPE : DescKind.NAME, false)
+                                getMavenElementDescription(element,
+                                                           location instanceof UsageViewTypeLocation ? DescKind.TYPE : DescKind.NAME, false)
     );
   }
 
@@ -81,11 +83,24 @@ public final class MavenModelDocumentationProvider implements DocumentationProvi
       if (e instanceof XmlTag) {
         valueSuffix = ": " + bold[0] + ((XmlTag)e).getValue().getTrimmedText() + bold[1];
       }
-      return type + br + name + valueSuffix;
+      var tip = getTip(name, kind, valueSuffix, e);
+      if (tip == null) {
+        return type + br + name + valueSuffix;
+      }
+      return type + br + name + valueSuffix + br + tip;
     }
 
     MavenLog.LOG.error("unexpected desc kind: " + kind);
     return null;
+  }
+
+  private static @Nullable @Nls String getTip(String name, DescKind kind, String suffix, PsiElement e) {
+    if (!"project.modelVersion".equals(name)) return null;
+    var project = e.getProject();
+    if (project.isDefault()) return null;
+    var mavenVersion = MavenDistributionsCache.getInstance(project)
+      .getMavenVersion(e.getContainingFile().getVirtualFile());
+    return MavenDomBundle.message("maven.version.tip", mavenVersion);
   }
 
   private static @NlsContexts.DetailedDescription String buildPropertyName(PsiElement e, boolean property) {

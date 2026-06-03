@@ -3,10 +3,15 @@ package git4idea.test
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
 import git4idea.branch.GitRebaseParams
-import git4idea.commands.*
+import git4idea.commands.GitCommandResult
+import git4idea.commands.GitImpl
+import git4idea.commands.GitLineHandler
+import git4idea.commands.GitLineHandlerListener
+import git4idea.commands.GitRebaseCommandResult
 import git4idea.push.GitPushParams
 import git4idea.rebase.GitInteractiveRebaseEditorHandler
 import git4idea.rebase.GitRebaseEditorHandler
@@ -21,6 +26,12 @@ const val UNKNOWN_ERROR_TEXT: String = "unknown error"
 class TestGitImpl : GitImpl() {
   private val LOG = Logger.getInstance(TestGitImpl::class.java)
 
+  /**
+   * Called after each handler has been fully prepared and executed - not at the moment the handler
+   * is first passed into [runCommand]
+   */
+  @Volatile
+  var runCommandListener: ((GitLineHandler) -> Unit)? = null
   @Volatile
   var stashListener: ((GitRepository) -> Unit)? = null
   @Volatile
@@ -41,6 +52,21 @@ class TestGitImpl : GitImpl() {
 
   class InteractiveRebaseEditor(val entriesEditor: ((String) -> String)?,
                                 val plainTextEditor: ((String) -> String)?)
+
+  override fun runCommand(handler: GitLineHandler): GitCommandResult {
+    val result = super.runCommand(handler)
+    runCommandListener?.invoke(handler)
+    return result
+  }
+
+  override fun runCommand(handlerConstructor: Computable<out GitLineHandler>): GitCommandResult {
+    val handlers = mutableListOf<GitLineHandler>()
+    val result = super.runCommand {
+      handlerConstructor.compute().also { handlers.add(it) }
+    }
+    handlers.forEach { runCommandListener?.invoke(it) }
+    return result
+  }
 
   override fun push(repository: GitRepository,
                     pushParams: GitPushParams,
@@ -148,6 +174,7 @@ class TestGitImpl : GitImpl() {
     checkoutNewBranchHandler = { null }
     branchDeleteHandler = { null }
     interactiveRebaseEditor = null
+    runCommandListener = null
     pushListener = null
     stashListener = null
     mergeListener = null

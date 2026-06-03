@@ -1,7 +1,13 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.coverage.analysis;
 
-import com.intellij.coverage.*;
+import com.intellij.coverage.BaseCoverageAnnotator;
+import com.intellij.coverage.CoverageBundle;
+import com.intellij.coverage.CoverageDataManager;
+import com.intellij.coverage.CoverageLogger;
+import com.intellij.coverage.CoverageSuitesBundle;
+import com.intellij.coverage.JavaCoverageEngineExtension;
+import com.intellij.coverage.JavaCoverageSuite;
 import com.intellij.coverage.view.CoverageClassStructure;
 import com.intellij.java.coverage.JavaCoverageBundle;
 import com.intellij.openapi.Disposable;
@@ -10,11 +16,17 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.TestSourcesFilter;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDirectoryService;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.PsiPackage;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.rt.coverage.data.ProjectData;
 import com.intellij.util.TimeoutUtil;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -23,9 +35,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+
 /**
  * @author Roman.Chernyatchik
  */
+@ApiStatus.Internal
 public class JavaCoverageAnnotator extends BaseCoverageAnnotator implements Disposable.Default {
   private final Map<String, PackageAnnotator.PackageCoverageInfo> myPackageCoverageInfos = new HashMap<>();
   private final Map<String, PackageAnnotator.PackageCoverageInfo> myFlattenPackageCoverageInfos = new HashMap<>();
@@ -269,7 +283,7 @@ public class JavaCoverageAnnotator extends BaseCoverageAnnotator implements Disp
     return myClassCoverageInfos;
   }
 
-  private void collectSummaryInfo(@NotNull CoverageSuitesBundle suite, Project project) {
+  protected void collectSummaryInfo(@NotNull CoverageSuitesBundle suite, Project project) {
     var collector = new JavaCoverageInfoCollector(this);
     if (shouldSkipUnloadedClassesAnalysis(suite)) {
       JavaCoverageReportEnumerator.collectSummaryInReport(suite, project, collector);

@@ -43,9 +43,9 @@ import org.jetbrains.idea.maven.model.MavenId
 import org.jetbrains.idea.maven.project.MavenProject
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import org.jetbrains.idea.maven.utils.MavenActivityKey
-import org.jetbrains.idea.reposearch.DependencySearchService
+import org.jetbrains.idea.maven.completion.MavenDependencySearchService
 import org.jetbrains.jps.model.java.JpsJavaSdkType
-import java.util.*
+import java.util.Collections
 
 class MavenProjectModelModifier(private val myProject: Project) : JavaProjectModelModifier() {
   private val myProjectsManager = MavenProjectsManager.getInstance(myProject)
@@ -175,7 +175,7 @@ class MavenProjectModelModifier(private val myProject: Project) : JavaProjectMod
   ): String {
     val versions = if (mavenId.groupId == null || mavenId.artifactId == null) mutableSetOf<String?>()
     else
-      DependencySearchService.getInstance(myProject).getVersionsAsync(mavenId.groupId!!, mavenId.artifactId!!)
+      MavenDependencySearchService.getInstance(myProject).getVersions(mavenId.groupId!!, mavenId.artifactId!!)
     if (preferredVersion != null && versions.contains(preferredVersion)) {
       return preferredVersion
     }
@@ -235,7 +235,8 @@ class MavenProjectModelModifier(private val myProject: Project) : JavaProjectMod
         })
       val filesToUpdate = listOf(mavenProject.file)
       filesToUpdate.forEach { it.refresh(false, false) }
-      myProjectsManager.updateMavenProjects(MavenSyncSpec.incremental("MavenProjectModelModifier.changeLanguageLevel", false), filesToUpdate, emptyList())
+      // even if there are no changes in pom.xml, we may need to update IDEA module with the new language level (if it was changed manually)
+      myProjectsManager.updateMavenProjects(MavenSyncSpec.full("MavenProjectModelModifier.changeLanguageLevel", false), filesToUpdate, emptyList())
     }
   }
 

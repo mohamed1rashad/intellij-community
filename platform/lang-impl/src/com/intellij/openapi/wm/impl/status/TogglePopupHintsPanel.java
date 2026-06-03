@@ -33,8 +33,8 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import java.awt.Point;
 import java.awt.event.MouseEvent;
 
 @ApiStatus.Internal
@@ -116,7 +116,7 @@ public final class TogglePopupHintsPanel extends EditorBasedWidget implements St
       }
     });
 
-    connection.subscribe(FileHighlightingSettingListener.SETTING_CHANGE, (__, ___) -> updateStatus());
+    connection.subscribe(FileHighlightingSettingListener.SETTING_CHANGE, (_, _) -> updateStatus());
   }
 
   @Override

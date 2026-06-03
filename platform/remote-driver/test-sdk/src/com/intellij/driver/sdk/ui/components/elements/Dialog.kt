@@ -12,10 +12,10 @@ import org.intellij.lang.annotations.Language
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-fun Finder.dialog(@Language("xpath") xpath: String? = null, title: String? = null, action: DialogUiComponent.() -> Unit = {}): DialogUiComponent {
+fun Finder.dialog(@Language("xpath") xpath: String? = null, title: String? = null, titleContains: Boolean = false, action: DialogUiComponent.() -> Unit = {}): DialogUiComponent {
   val dialogXpath = when {
     xpath != null -> xpath
-    title != null -> "//div[@title='$title']"
+    title != null -> if(titleContains) "//div[contains(@title,'$title')]" else "//div[@title='$title']"
     else -> "//div[@class='MyDialog']"
   }
   return x(dialogXpath, DialogUiComponent::class.java).apply(action)
@@ -52,8 +52,13 @@ class AboutDialogUi(data: ComponentData) : DialogUiComponent(data) {
 }
 
 open class DialogUiComponent(data: ComponentData) : WindowUiComponent(data) {
-  val okButton = x { byAccessibleName("OK") }
-  val cancelButton = x { byAccessibleName("Cancel") }
+  protected open val primaryButtonText: String = "OK"
+  protected open val cancelButtonText: String = "Cancel"
+
+  val okButton: UiComponent
+    get() = x { byAccessibleName(primaryButtonText) }
+  val cancelButton: UiComponent
+    get() = x { byAccessibleName(cancelButtonText) }
 
   fun pressButton(text: String) = x("//div[@class='JButton' and @visible_text='$text']").click()
 

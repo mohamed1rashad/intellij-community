@@ -2,22 +2,23 @@
 package com.intellij.workspaceModel.ide
 
 import com.intellij.openapi.components.service
+import com.intellij.platform.eel.EelMachine
 import com.intellij.platform.workspace.storage.InternalEnvironmentName
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.VersionedEntityStorage
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
-import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import kotlinx.coroutines.Job
 import org.jetbrains.annotations.ApiStatus
 
 @ApiStatus.Internal
 interface JpsGlobalModelSynchronizer {
   fun loadInitialState(
+    eelMachine: EelMachine,
     environmentName: InternalEnvironmentName,
     mutableStorage: MutableEntityStorage,
     initialEntityStorage: VersionedEntityStorage,
     loadedFromCache: Boolean,
-  ): () -> Unit
+  ): () -> Job
 
   /**
    * Adds a job that must complete before the delayed global workspace model loading can proceed.
@@ -40,8 +41,9 @@ interface JpsGlobalModelSynchronizer {
   suspend fun saveGlobalEntities() {
   }
 
+  fun dropCaches()
+
   companion object {
-    @RequiresBlockingContext
     fun getInstance(): JpsGlobalModelSynchronizer = service()
   }
 }

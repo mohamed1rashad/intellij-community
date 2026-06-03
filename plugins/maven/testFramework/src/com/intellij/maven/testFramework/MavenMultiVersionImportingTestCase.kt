@@ -15,7 +15,6 @@ import com.intellij.pom.java.LanguageLevel
 import com.intellij.testFramework.RunAll
 import com.intellij.util.ArrayUtil
 import com.intellij.util.Function
-import com.intellij.util.ThrowableRunnable
 import com.intellij.util.text.VersionComparatorUtil
 import com.intellij.workspaceModel.ide.legacyBridge.SourceRootTypeRegistry
 import junit.framework.TestCase
@@ -33,7 +32,7 @@ import org.junit.runners.Parameterized
 import java.nio.file.Path
 import kotlin.math.min
 
-private const val MAVEN_4_VERSION = "4.0.0-rc-4"
+private const val MAVEN_4_VERSION = "4.0.0-rc-5"
 private val MAVEN_VERSIONS: Array<String> = arrayOf<String>(
   "bundled",
   "4/4.0.0",
@@ -140,12 +139,12 @@ abstract class MavenMultiVersionImportingTestCase : MavenImportingTestCase() {
 
   override fun tearDown() {
     RunAll(
-      ThrowableRunnable {
+      {
         if (myWrapperTestFixture != null) {
           myWrapperTestFixture!!.tearDown()
         }
       },
-      ThrowableRunnable { super.tearDown() }).run()
+      { super.tearDown() }).run()
   }
 
   protected val defaultLanguageLevel: LanguageLevel
@@ -468,7 +467,8 @@ abstract class MavenMultiVersionImportingTestCase : MavenImportingTestCase() {
       }.toList()
     }
 
-    internal fun getActualVersion(version: String): String {
+    @JvmStatic
+    protected fun getActualVersion(version: String): String {
       if (version == "bundled") {
         return MavenDistributionsCache.resolveEmbeddedMavenHome().version!!
       }

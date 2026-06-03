@@ -5,6 +5,7 @@ f:org.jetbrains.jewel.samples.showcase.ShowcaseIcons
 - f:getGitHub():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getJewelLogo():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getMarkdown():org.jetbrains.jewel.ui.icon.PathIconKey
+- f:getSunny():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getThemeDark():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getThemeLight():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getThemeLightWithLightHeader():org.jetbrains.jewel.ui.icon.PathIconKey
@@ -13,6 +14,7 @@ f:org.jetbrains.jewel.samples.showcase.ShowcaseIcons
 f:org.jetbrains.jewel.samples.showcase.ShowcaseIcons$Components
 - sf:$stable:I
 - sf:INSTANCE:org.jetbrains.jewel.samples.showcase.ShowcaseIcons$Components
+- f:getBadge():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getBanners():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getBorders():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getBrush():org.jetbrains.jewel.ui.icon.PathIconKey
@@ -20,11 +22,13 @@ f:org.jetbrains.jewel.samples.showcase.ShowcaseIcons$Components
 - f:getCheckbox():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getComboBox():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getLinks():org.jetbrains.jewel.ui.icon.PathIconKey
+- f:getMenu():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getProgressBar():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getRadioButton():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getScrollbar():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getSegmentedControls():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getSlider():org.jetbrains.jewel.ui.icon.PathIconKey
+- f:getSpeedSearch():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getSplitlayout():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getTabs():org.jetbrains.jewel.ui.icon.PathIconKey
 - f:getTextArea():org.jetbrains.jewel.ui.icon.PathIconKey
@@ -37,6 +41,8 @@ f:org.jetbrains.jewel.samples.showcase.ShowcaseIcons$ProgrammingLanguages
 - sf:$stable:I
 - sf:INSTANCE:org.jetbrains.jewel.samples.showcase.ShowcaseIcons$ProgrammingLanguages
 - f:getKotlin():org.jetbrains.jewel.ui.icon.PathIconKey
+f:org.jetbrains.jewel.samples.showcase.components.BadgesKt
+- sf:Badges(androidx.compose.ui.Modifier,androidx.compose.runtime.Composer,I,I):V
 f:org.jetbrains.jewel.samples.showcase.components.BannersKt
 - sf:Banners(androidx.compose.ui.Modifier,androidx.compose.runtime.Composer,I,I):V
 f:org.jetbrains.jewel.samples.showcase.components.BordersKt
@@ -56,6 +62,8 @@ f:org.jetbrains.jewel.samples.showcase.components.IconsKt
 - sf:Icons(androidx.compose.ui.Modifier,androidx.compose.runtime.Composer,I,I):V
 f:org.jetbrains.jewel.samples.showcase.components.LinksKt
 - sf:Links(androidx.compose.ui.Modifier,androidx.compose.runtime.Composer,I,I):V
+f:org.jetbrains.jewel.samples.showcase.components.MenusKt
+- sf:Menus(androidx.compose.ui.Modifier,androidx.compose.runtime.Composer,I,I):V
 f:org.jetbrains.jewel.samples.showcase.components.ProgressBarKt
 - sf:ProgressBar(androidx.compose.ui.Modifier,androidx.compose.runtime.Composer,I,I):V
 f:org.jetbrains.jewel.samples.showcase.components.RadioButtonsKt

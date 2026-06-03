@@ -12,7 +12,8 @@ import com.intellij.openapi.progress.ProcessCanceledException
 
 internal class MLCompletionWeigher : CompletionWeigher() {
   override fun weigh(element: LookupElement, location: CompletionLocation): Comparable<*> {
-    val storage = LookupStorage.get(location.completionParameters) ?: return DummyComparable.EMPTY
+    val parameters = location.baseCompletionParameters
+    val storage = LookupStorage.get(parameters) ?: return DummyComparable.EMPTY
     if (!storage.shouldComputeFeatures()) {
       return DummyComparable.EMPTY
     }

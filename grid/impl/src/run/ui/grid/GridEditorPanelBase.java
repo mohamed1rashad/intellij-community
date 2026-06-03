@@ -3,12 +3,30 @@ package com.intellij.database.run.ui.grid;
 import com.intellij.codeInsight.lookup.LookupManager;
 import com.intellij.database.DataGridBundle;
 import com.intellij.database.connection.throwable.info.ErrorInfo;
-import com.intellij.database.datagrid.*;
+import com.intellij.database.datagrid.DataGrid;
+import com.intellij.database.datagrid.GridColumn;
+import com.intellij.database.datagrid.GridEditorPanel;
+import com.intellij.database.datagrid.GridFilteringModel;
+import com.intellij.database.datagrid.GridHelper;
+import com.intellij.database.datagrid.GridRequestSource;
+import com.intellij.database.datagrid.GridRow;
+import com.intellij.database.datagrid.GridUtil;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.HelpTooltip;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CustomShortcutSet;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.UiDataProvider;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.DefaultLanguageHighlighterColors;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.colors.EditorColorsListener;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.event.DocumentEvent;
@@ -34,6 +52,7 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.ui.EditorTextField;
+import com.intellij.ui.RemoteTransferUIManager;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBList;
@@ -44,8 +63,15 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.KeyStroke;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Graphics;
+import java.awt.Point;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
@@ -111,6 +137,7 @@ public abstract class GridEditorPanelBase extends JPanel
     }, myGrid);
 
     add(clearFieldLabel, BorderLayout.EAST);
+    RemoteTransferUIManager.forbidBeControlizationInLux(myEditor, null);
     add(myEditor.getComponent(), BorderLayout.CENTER);
   }
 
@@ -256,8 +283,11 @@ public abstract class GridEditorPanelBase extends JPanel
   @Override
   public void apply() {
     GridFilteringModel model = myGrid.getDataHookup().getFilteringModel();
+    boolean shouldClearPendingChanges = myGrid.getDataHookup().getMutator() != null && myGrid.getDataHookup().getMutator().hasPendingChanges();
     if (model != null && myGrid.isSafeToReload()) {
-      myGrid.getDataHookup().getLoader().applyFilterAndSorting(new GridRequestSource(new GridEditorPanelRequestPlace(this, myGrid)));
+      GridRequestSource source = GridRequestSource.create(new GridEditorPanelRequestPlace(this, myGrid));
+      source.setMutatedDataLocally(shouldClearPendingChanges);
+      myGrid.getDataHookup().getLoader().applyFilterAndSorting(source);
     }
   }
 

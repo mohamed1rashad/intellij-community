@@ -5,13 +5,21 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.ThrowableComputable;
-import com.intellij.openapi.util.io.*;
+import com.intellij.openapi.util.io.ByteArraySequence;
+import com.intellij.openapi.util.io.ContentTooBigException;
+import com.intellij.openapi.util.io.FileAttributes;
+import com.intellij.openapi.util.io.FileTooBigException;
+import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileSystem;
+import com.intellij.openapi.vfs.impl.SymlinksCapableFileSystem;
 import com.intellij.openapi.vfs.impl.ZipHandlerBase;
-import com.intellij.openapi.vfs.impl.local.LocalFileSystemImpl;
-import com.intellij.openapi.vfs.newvfs.*;
+import com.intellij.openapi.vfs.newvfs.AttributeInputStream;
+import com.intellij.openapi.vfs.newvfs.AttributeOutputStream;
+import com.intellij.openapi.vfs.newvfs.ChildInfoImpl;
+import com.intellij.openapi.vfs.newvfs.FileAttribute;
+import com.intellij.openapi.vfs.newvfs.NewVirtualFileSystem;
 import com.intellij.openapi.vfs.newvfs.events.ChildInfo;
 import com.intellij.openapi.vfs.newvfs.persistent.IPersistentFSRecordsStorage.RecordReader;
 import com.intellij.openapi.vfs.newvfs.persistent.IPersistentFSRecordsStorage.RecordUpdater;
@@ -19,11 +27,17 @@ import com.intellij.openapi.vfs.newvfs.persistent.namecache.FileNameCache;
 import com.intellij.openapi.vfs.newvfs.persistent.namecache.MRUFileNameCache;
 import com.intellij.openapi.vfs.newvfs.persistent.namecache.SLRUFileNameCache;
 import com.intellij.openapi.vfs.newvfs.persistent.recovery.VFSInitializationResult;
+import com.intellij.platform.util.io.storages.appendonlylog.InvalidRecordIdException;
 import com.intellij.serviceContainer.AlreadyDisposedException;
-import com.intellij.util.*;
+import com.intellij.util.BitUtil;
+import com.intellij.util.ExceptionUtil;
+import com.intellij.util.Processor;
+import com.intellij.util.SlowOperations;
+import com.intellij.util.SystemProperties;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.ClosedStorageException;
+import com.intellij.util.io.CorruptedException;
 import com.intellij.util.io.DataEnumeratorEx;
 import com.intellij.util.io.DataOutputStream;
 import com.intellij.util.io.IOUtil;
@@ -31,9 +45,20 @@ import com.intellij.util.io.blobstorage.ByteBufferReader;
 import com.intellij.util.io.blobstorage.ByteBufferWriter;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashSet;
@@ -53,6 +78,7 @@ import java.util.zip.ZipException;
 import static com.intellij.openapi.vfs.newvfs.persistent.InvertedNameIndex.NULL_NAME_ID;
 import static com.intellij.openapi.vfs.newvfs.persistent.PersistentFSRecordAccessor.hasDeletedFlag;
 import static com.intellij.util.SystemProperties.getBooleanProperty;
+import static com.intellij.util.SystemProperties.getLongProperty;
 import static com.intellij.util.io.DataEnumerator.NULL_ID;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
@@ -93,13 +119,6 @@ public final class FSRecordsImpl implements Closeable {
   private static final boolean USE_MRU_FILE_NAME_CACHE = "mru".equals(NAME_CACHE_IMPL);
 
 
-  private static final String CONTENT_STORAGE_IMPL = System.getProperty("vfs.content-storage.impl", "over-mmapped-file");
-  public static final boolean USE_CONTENT_STORAGE_OVER_NEW_FILE_PAGE_CACHE = "over-lock-free-page-cache".equals(CONTENT_STORAGE_IMPL);
-  public static final boolean USE_CONTENT_STORAGE_OVER_MMAPPED_FILE = "over-mmapped-file".equals(CONTENT_STORAGE_IMPL);
-
-  private static final String CONTENT_HASH_IMPL = System.getProperty("vfs.content-hash-storage.impl", "over-mmapped-file");
-  public static final boolean USE_CONTENT_HASH_STORAGE_OVER_MMAPPED_FILE = "over-mmapped-file".equals(CONTENT_HASH_IMPL);
-
   /**
    * Cutoff for VFSContentStorage: file content larger than this threshold store with compression.
    * Range 4k-8k seems to be optimal, gauged by experiments on IntelliJ source tree:  with such thresholds only
@@ -116,6 +135,11 @@ public final class FSRecordsImpl implements Closeable {
    */
   public static final boolean REUSE_DELETED_FILE_IDS = getBooleanProperty("vfs.reuse-deleted-file-ids", false);
 
+  /**
+   * Fail VFS operation(s) starting at X ms from VFS startup. Negative value means 'no failures'.
+   * Intended to use during QA of VFS error processing, especially during startup.
+   */
+  private static final long EMULATE_FAILURES_WITH_DELAY_MS = getLongProperty("vfs.debug.emulate-failures-starting-with-ms", -1);
   //@formatter:on
 
   private static final FileAttribute SYMLINK_TARGET_ATTRIBUTE = new FileAttribute("FsRecords.SYMLINK_TARGET");
@@ -138,7 +162,7 @@ public final class FSRecordsImpl implements Closeable {
     ExceptionUtil.rethrow(error);
   };
 
-  public static final ErrorHandler ON_ERROR_RETHROW = (__, error) -> {
+  public static final ErrorHandler ON_ERROR_RETHROW = (_, error) -> {
     ExceptionUtil.rethrow(error);
   };
 
@@ -159,22 +183,14 @@ public final class FSRecordsImpl implements Closeable {
   }
 
   public static int currentImplementationVersion() {
-    //bumped main version (63 -> 64) because AppendOnlyLog ids assignment algo changed
-    int mainVFSFormatVersion = 64;
+    //bumped main version (64 -> 65) because 'names.dat.mmap' -> 'names.dat' renaming
+    int mainVFSFormatVersion = 65;
     //@formatter:off (nextMask better be aligned)
     return nextMask(mainVFSFormatVersion + (PersistentFSRecordsStorageFactory.storageImplementation().getId()), /* acceptable range is [0..255] */ 8,
-           nextMask(!USE_CONTENT_STORAGE_OVER_MMAPPED_FILE,  //former USE_CONTENT_HASHES=true, this is why negation
-           nextMask(IOUtil.useNativeByteOrderForByteBuffers(), // TODO RC: memory-mapped storages ignore that property
-           nextMask(false, // former USE_ATTRIBUTES_OVER_NEW_FILE_PAGE_CACHE, free to re-use
-           nextMask(true,  // former 'inline attributes', feel free to re-use
            nextMask(getBooleanProperty(FSRecords.IDE_USE_FS_ROOTS_DATA_LOADER, false),
-           nextMask(true,  // former USE_ATTRIBUTES_OVER_MMAPPED_FILE, free to re-use
-           nextMask(true,  // former USE_SMALL_ATTR_TABLE, feel free to re-use
-           nextMask(true,  // former PersistentHashMapValueStorage.COMPRESSION_ENABLED, feel free to re-use
-           nextMask(false, // former FileSystemUtil.DO_NOT_RESOLVE_SYMLINKS, feel free to re-use
-           nextMask(ZipHandlerBase.getUseCrcInsteadOfTimestampPropertyValue(),
-           nextMask(true,  // former USE_FAST_NAMES_IMPLEMENTATION, free to reuse
-           nextMask(true   /* former USE_STREAMLINED_ATTRIBUTES_IMPLEMENTATION, free to reuse */, 0)))))))))))));
+           nextMask(ZipHandlerBase.getUseCrcInsteadOfTimestampPropertyValue(), 0
+           //22 bits are free to use for any configurable VFS property of which VFS binary format/file layout depends
+           )));
     //@formatter:on
   }
 
@@ -911,9 +927,9 @@ public final class FSRecordsImpl implements Closeable {
       fileRecordLock.lockForHierarchyUpdate(maxId);
       try {
         try {
-          ListResult firstParentChildren = loadChildrenUnderRecordLock(fromParentId);
-          ListResult fromParentChildrenWithoutChildMoved = firstParentChildren.remove(childToMoveId);
-          if (fromParentChildrenWithoutChildMoved == firstParentChildren) {
+          ListResult fromParentChildren = loadChildrenUnderRecordLock(fromParentId);
+          ListResult fromParentChildrenWithoutChildMoved = fromParentChildren.remove(childToMoveId);
+          if (fromParentChildrenWithoutChildMoved == fromParentChildren) {
             //RC: this means childToMove doesn't present among fromParent's children. It seems natural to fail move
             //    procedure in this case by throwing IllegalArgumentException, because there is definitely something
             //    wrong with arguments supplied. But the legacy version of this code didn't fail -- it proceeds
@@ -936,9 +952,12 @@ public final class FSRecordsImpl implements Closeable {
             //    is an error in params supplied, and it should be resolved
             String childToMoveName = getNameByNameId(childToMoveNameId);
             throw new IllegalArgumentException(
-              "Can't move child(#" + childToMoveId + ", name='" + childToMoveName + "') " +
-              "from parent(" + fromParentId + ") to (" + toParentId + "): " +
-              "toParent already has a child with same name -- " + alreadyExistingChild);
+              "Can't move child(#" + childToMoveId + ", name='" + childToMoveName + "', nameId=" + childToMoveNameId + "), " +
+              "parent (" + fromParentId + " -> " + toParentId + "): " +
+              "new parent already has a child with same name (=" + alreadyExistingChild + ")\n" +
+              "fromParent.children=" + fromParentChildren + "\n" +
+              "toParent.children=" + toParentChildren
+            );
           }
 
           ListResult toParentChildrenUpdated = toParentChildren.insert(
@@ -971,6 +990,13 @@ public final class FSRecordsImpl implements Closeable {
 
   /** Reads children of parentId, under record-level read lock (not a hierarchy lock!) */
   private @NotNull ListResult loadChildrenUnderRecordLock(int parentId) throws IOException {
+    if (EMULATE_FAILURES_WITH_DELAY_MS >= 0) {
+      long elapsedMs = System.currentTimeMillis() - getCreationTimestamp();
+      if (elapsedMs > EMULATE_FAILURES_WITH_DELAY_MS) {
+        throw new CorruptedException("Emulated VFS failure at time " + elapsedMs);
+      }
+    }
+
     StampedLock recordLock = fileRecordLock.lockFor(parentId);
     long stamp = recordLock.readLock();
     try {
@@ -1072,9 +1098,9 @@ public final class FSRecordsImpl implements Closeable {
 
       CharSequence name = info.getName();
       VirtualFileSystem fs = parent.getFileSystem();
-      if (fs instanceof LocalFileSystemImpl) {
+      if (fs instanceof SymlinksCapableFileSystem scfs && scfs.isSymlinksSupported()) {
         String linkPath = parent.getPath() + '/' + name;
-        ((LocalFileSystemImpl)fs).symlinkUpdated(id, parent, name, linkPath, symlinkTarget);
+        scfs.symlinkUpdated(id, parent, name, linkPath, symlinkTarget);
       }
     }
   }
@@ -1519,41 +1545,49 @@ public final class FSRecordsImpl implements Closeable {
   @VisibleForTesting
   public @NotNull AttributeOutputStream writeAttribute(int fileId, @NotNull FileAttribute attribute) {
     StampedLock lock = fileRecordLock.lockFor(fileId);
-    long lockStamp = lock.writeLock();
-    try {
-      AttributeOutputStream stream = attributeAccessor.writeAttribute(fileId, attribute);
-      //AttributeOutputStream is byte[]-backed stream that commits the changes in .close() method
-      // Create a delegating stream: overwrite .close() and protect it with a write lock:
-      return new AttributeOutputStream(stream) {
-        @Override
-        public void writeEnumeratedString(String str) throws IOException {
-          stream.writeEnumeratedString(str);
-        }
 
-        @Override
-        public void close() throws IOException {
-          long lockStamp = lock.writeLock();
-          try {
-            super.close();
-          }
-          catch (FileTooBigException e) {
-            LOG.warn("Error storing " + attribute + " of file(" + fileId + ")", e);
-            //don't mark VFS as corrupted, error is due to data supplied from outside
-            throw e;
-          }
-          catch (Throwable t) {
-            LOG.warn("Error storing " + attribute + " of file(" + fileId + ")", t);
-            throw handleError(t);
-          }
-          finally {
-            lock.unlockWrite(lockStamp);
-          }
-        }
-      };
+    long lockStamp = lock.writeLock();
+    AttributeOutputStream stream;
+    try {
+      stream = attributeAccessor.writeAttribute(fileId, attribute);
     }
     finally {
       lock.unlockWrite(lockStamp);
     }
+
+    //AttributeOutputStream is byte[]-backed stream that commits the changes in .close() method
+    // Return a delegating stream: with overridden .close() protected with the write lock, and
+    // additional error-processing:
+    return new AttributeOutputStream(stream) {
+      @Override
+      public void writeEnumeratedString(String str) throws IOException {
+        stream.writeEnumeratedString(str);
+      }
+
+      @Override
+      public void close() throws IOException {
+        long lockStamp = lock.writeLock();
+        try {
+          super.close();
+        }
+        catch (FileTooBigException e) {
+          LOG.warn("Error storing " + attribute + " of file(#" + fileId + ", name: " + getName(fileId) + "): " +
+                   "attribute.size=" + getWrittenBytesCount() + " is too big", e);
+          //don't mark VFS as corrupted: this error is due to data supplied from outside (add few bits of diagnostic
+          // data)
+          throw new FileTooBigException("Error storing " + attribute + " of file(#" + fileId + ", name: " + getName(fileId) + "): " +
+                                        "attribute.size=" + getWrittenBytesCount() + " is too big", e);
+        }
+        catch (Throwable t) {
+          LOG.warn("Error storing " + attribute + " of file(#" + fileId + ", name: " + getName(fileId) + "): " +
+                   "attribute.size=" + getWrittenBytesCount(), t);
+          throw handleError(t);
+        }
+        finally {
+          lock.unlockWrite(lockStamp);
+        }
+      }
+    };
   }
 
   //'raw' (lambda + ByteBuffer instead of Input/OutputStream) attributes access: experimental
@@ -1602,8 +1636,13 @@ public final class FSRecordsImpl implements Closeable {
     try {
       return contentAccessor.readContent(fileId);
     }
+    catch (InvalidRecordIdException e) {
+      //MAYBE RC: should we call handleError() to mark VFS corrupted here?
+      throw new RuntimeException(e.getMessage() + " {" + connection.describeConsistencyStatus() + "}", e);
+    }
     catch (InterruptedIOException ie) {
-      //RC: goal is to just bypass handleError(), which likely marks VFS corrupted,
+      //TODO RC: do we still need these branch? Current VFSContentStorage impl never throws InterruptedIOException!
+      //RC: goal is to avoid handleError(): handleError() likely marks VFS corrupted,
       //    but thread interruption during _read_ doesn't corrupt anything
       throw new RuntimeException(ie);
     }
@@ -1611,6 +1650,8 @@ public final class FSRecordsImpl implements Closeable {
       throw oom;
     }
     catch (ZipException e) {
+      //TODO RC: do we still need these branch? Currently VFSContentStorage impl uses LZ4 instead of java.util.zip
+
       // we use zip to compress content
       String fileName = getName(fileId);
       long length = getLength(fileId);
@@ -1628,8 +1669,13 @@ public final class FSRecordsImpl implements Closeable {
     try {
       return contentAccessor.readContentByContentId(contentId);
     }
+    catch (InvalidRecordIdException e) {
+      //MAYBE RC: should we call handleError() to mark VFS corrupted here?
+      throw new RuntimeException(e.getMessage() + " {" + connection.describeConsistencyStatus() + "}", e);
+    }
     catch (InterruptedIOException ie) {
-      //RC: goal is to just not go into handleError(), which likely marks VFS corrupted,
+      //TODO RC: do we still need these branch? Current VFSContentStorage impl never throws InterruptedIOException!
+      //RC: goal is to avoid handleError(): handleError() likely marks VFS corrupted,
       //    but thread interruption during _read_ doesn't corrupt anything
       throw new RuntimeException(ie);
     }

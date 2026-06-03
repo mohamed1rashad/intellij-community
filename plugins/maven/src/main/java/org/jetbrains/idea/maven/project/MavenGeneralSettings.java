@@ -7,6 +7,7 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.annotations.Property;
 import com.intellij.util.xmlb.annotations.Transient;
@@ -19,11 +20,16 @@ import org.jetbrains.idea.maven.config.MavenConfigParser;
 import org.jetbrains.idea.maven.execution.MavenExecutionOptions;
 import org.jetbrains.idea.maven.utils.MavenUtil;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
 
 import static java.util.Objects.requireNonNullElse;
-import static org.jetbrains.idea.maven.config.MavenConfigSettings.*;
+import static org.jetbrains.idea.maven.config.MavenConfigSettings.ERRORS;
+import static org.jetbrains.idea.maven.config.MavenConfigSettings.NON_RECURSIVE;
+import static org.jetbrains.idea.maven.config.MavenConfigSettings.OFFLINE;
+import static org.jetbrains.idea.maven.config.MavenConfigSettings.THREADS;
+import static org.jetbrains.idea.maven.config.MavenConfigSettings.UPDATE_SNAPSHOTS;
 import static org.jetbrains.idea.maven.project.MavenHomeKt.resolveMavenHomeType;
 
 public class MavenGeneralSettings implements Cloneable {
@@ -41,6 +47,7 @@ public class MavenGeneralSettings implements Cloneable {
   private boolean useMavenConfig = true;
   private String threads;
   private boolean emulateTerminal = false;
+  private String overridenToolchainsPathString="";
 
   private MavenExecutionOptions.LoggingLevel outputLevel = MavenExecutionOptions.LoggingLevel.INFO;
   MavenExecutionOptions.ChecksumPolicy checksumPolicy = MavenExecutionOptions.ChecksumPolicy.NOT_SET;
@@ -218,6 +225,28 @@ public class MavenGeneralSettings implements Cloneable {
   @ApiStatus.Internal
   public @NotNull String getLocalRepository() {
     return overriddenLocalRepository;
+  }
+
+
+  /**
+   * Do not use this variable.
+   * Use MavenSettingsCache.getEffectiveToolchains instead
+   * @return local repository string. This string should not be used to create a file directly
+   */
+  @ApiStatus.Internal
+  public @NotNull String getToolchainsPathString() {
+    return overridenToolchainsPathString;
+  }
+
+  public void setToolchainsPathString(final @Nullable String overridenToolchainsPathString) {
+
+    if (!Objects.equals(this.overridenToolchainsPathString, overridenToolchainsPathString)) {
+      this.overridenToolchainsPathString = overridenToolchainsPathString;
+      if (myProject != null) {
+        MavenUtil.shutdownMavenConnectors(myProject);
+      }
+      changed();
+    }
   }
 
   public void setLocalRepository(final @Nullable String overriddenLocalRepository) {
@@ -442,10 +471,13 @@ public class MavenGeneralSettings implements Cloneable {
 
     MavenProjectsManager instance = myProject != null ? MavenProjectsManager.getInstance(myProject) : null;
     if (instance == null) return null;
+    if (!instance.isInitialized()) return null;
 
     var files = MavenUtil.collectFiles(instance.getRootProjects());
     if (files.isEmpty()) {
-      files = instance.getProjectsTree().getExistingManagedFiles();
+      files = instance.getState().getOriginalFiles().stream()
+        .map(f -> VirtualFileManager.getInstance().findFileByNioPath(Path.of(f)))
+        .filter(f -> f != null).toList();
     }
 
     updateFromMavenConfig(files);

@@ -8,15 +8,15 @@ import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.classic.inspections.AbstractKotlinInspection
 import org.jetbrains.kotlin.idea.codeinsight.utils.isEqualsMethodSymbol
 import org.jetbrains.kotlin.idea.codeinsight.utils.isNullableAnyType
-import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtVisitorVoid
 import org.jetbrains.kotlin.psi.namedFunctionVisitor
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.util.OperatorNameConventions
 
 class KotlinCovariantEqualsInspection : AbstractKotlinInspection() {
-    override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean) = namedFunctionVisitor(fun(function) {
+    override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean): KtVisitorVoid = namedFunctionVisitor(fun(function) {
         if (function.isTopLevel || function.isLocal) return
         if (function.nameAsName != OperatorNameConventions.EQUALS) return
         val nameIdentifier = function.nameIdentifier ?: return
@@ -31,7 +31,7 @@ class KotlinCovariantEqualsInspection : AbstractKotlinInspection() {
             if (parameterType.isNullableAnyType()) return
 
             val hasOverrideEquals = classOrObject.declarations.any { declaration ->
-                declaration is KtNamedFunction && 
+                declaration is KtNamedFunction &&
                 (declaration.symbol as? KaNamedFunctionSymbol)?.isEqualsMethodSymbol() == true
             }
             if (hasOverrideEquals) return

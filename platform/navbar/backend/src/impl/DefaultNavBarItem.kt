@@ -3,7 +3,6 @@ package com.intellij.platform.navbar.backend.impl
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.navigationToolbar.NavBarModelExtension
-import com.intellij.ide.projectView.ProjectView
 import com.intellij.ide.projectView.impl.ProjectRootsUtil
 import com.intellij.model.Pointer
 import com.intellij.model.Pointer.hardPointer
@@ -30,9 +29,19 @@ import com.intellij.platform.navbar.NavBarItemPresentationData
 import com.intellij.platform.navbar.backend.NavBarItem
 import com.intellij.pom.Navigatable
 import com.intellij.problems.WolfTheProblemSolver
-import com.intellij.psi.*
+import com.intellij.psi.PsiDirectory
+import com.intellij.psi.PsiDirectoryContainer
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.createSmartPointer
 import com.intellij.ui.SimpleTextAttributes
-import com.intellij.ui.SimpleTextAttributes.*
+import com.intellij.ui.SimpleTextAttributes.REGULAR_ATTRIBUTES
+import com.intellij.ui.SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
+import com.intellij.ui.SimpleTextAttributes.STYLE_PLAIN
+import com.intellij.ui.SimpleTextAttributes.STYLE_USE_EFFECT_COLOR
+import com.intellij.ui.SimpleTextAttributes.merge
 import com.intellij.util.IconUtil
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresReadLock
@@ -101,10 +110,10 @@ internal class ModuleNavBarItem(data: Module) : DefaultNavBarItem<Module>(data),
   override fun navigationRequest(): NavigationRequest? {
     return NavigationRequests.getInstance().rawNavigationRequest(object : Navigatable {
       override fun navigate(requestFocus: Boolean) {
-        val projectView = ProjectView.getInstance(data.project)
-        val projectViewPane = projectView.getProjectViewPaneById(projectView.currentViewId)
-        projectViewPane?.selectModule(data, true)
-
+        // Is currently a no-op because AbstractProjectViewPane doesn't support navigating to modules.
+        // In the vast majority of cases, it's a non-issue because a module is normally represented by its content root,
+        // and that is supported (and this class isn't even used then).
+        // Previously, this function would just throw an exception, but it's better to just do nothing.
       }
 
       override fun canNavigate(): Boolean = true

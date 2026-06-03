@@ -6,9 +6,18 @@ import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
 import com.intellij.icons.AllIcons;
 import com.intellij.lang.properties.psi.PropertiesFile;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementResolveResult;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiPolyVariantReference;
+import com.intellij.psi.PsiReferenceBase;
+import com.intellij.psi.ResolveResult;
+import com.intellij.psi.ResolvingHint;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.Function;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ReflectionUtil;
@@ -56,8 +65,16 @@ public class ResourceBundleReference extends PsiReferenceBase<PsiElement>
   @Override
   public ResolveResult @NotNull [] multiResolve(final boolean incompleteCode) {
     PropertiesReferenceManager referenceManager = PropertiesReferenceManager.getInstance(myElement.getProject());
-    List<PropertiesFile> propertiesFiles = referenceManager.findPropertiesFiles(myElement.getResolveScope(), myBundleName, this);
+    List<PropertiesFile> propertiesFiles = referenceManager.findPropertiesFiles(getKeyResolveScope(), myBundleName, this);
     return PsiElementResolveResult.createResults(ContainerUtil.map(propertiesFiles, PROPERTIES_FILE_PSI_ELEMENT_FUNCTION));
+  }
+
+  protected @NotNull GlobalSearchScope getKeyResolveScope() {
+    Module module = ModuleUtilCore.findModuleForPsiElement(myElement);
+    GlobalSearchScope scope = module != null
+      ? GlobalSearchScope.moduleRuntimeScope(module, true)
+      : myElement.getResolveScope();
+    return scope;
   }
 
   @Override

@@ -16,15 +16,18 @@ interface DaemonCodeAnalyzer {
 
   fun isAllAnalysisFinished(psiFile: PsiFile): Boolean
   fun getHighlights(document: Document, severity: HighlightSeverity?, project: Project): List<HighlightInfo>
+  fun getLineMarkers(document: Document, project: Project): List<LineMarkerInfo>
+  fun restart(reason: String)
 }
 
 @Remote("com.intellij.codeInsight.daemon.impl.HighlightInfo")
 interface HighlightInfo {
-  fun getDescription(): String
+  fun getDescription(): String?
   fun getSeverity(): HighlightSeverity
   fun getText(): String
   fun getHighlighter(): RangeHighlighterEx?
   fun fromRangeHighlighter(rangeHighlighter: RangeHighlighter): HighlightInfo?
+  fun getType(): HighlightInfoType
 }
 
 @Remote("com.intellij.lang.annotation.HighlightSeverity")
@@ -35,6 +38,8 @@ interface HighlightSeverity {
 @Remote("com.intellij.openapi.editor.ex.RangeHighlighterEx")
 interface RangeHighlighterEx {
   fun getTextAttributesKey(): TextAttributesKey
+  fun getStartOffset(): Int
+  fun getEndOffset(): Int
 }
 
 @Remote("com.intellij.codeInsight.daemon.impl.HighlightInfoType")
@@ -46,6 +51,12 @@ interface HighlightInfoType {
 @Remote("com.intellij.openapi.editor.colors.TextAttributesKey")
 interface TextAttributesKey {
   fun compareTo(key: TextAttributesKey): Int
+  fun getExternalName(): String
+}
+
+@Remote("com.intellij.codeInsight.daemon.LineMarkerInfo")
+interface LineMarkerInfo {
+  fun getElement(): PsiElement
 }
 
 fun Driver.isCodeAnalysisRunning(project: Project? = null): Boolean {
@@ -74,5 +85,11 @@ fun Driver.getHighlights(document: Document, project: Project? = null): List<Hig
   val project = project ?: singleProject()
   return withReadAction {
     service<DaemonCodeAnalyzer>(project).getHighlights(document, null, project)
+  }
+}
+
+fun Driver.restartDaemonCodeAnalyzer(reason: String, project: Project? = null) {
+  withContext(OnDispatcher.EDT) {
+    service<DaemonCodeAnalyzer>(project ?: singleProject()).restart(reason)
   }
 }

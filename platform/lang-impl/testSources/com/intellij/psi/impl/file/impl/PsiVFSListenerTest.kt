@@ -2,7 +2,7 @@
 package com.intellij.psi.impl.file.impl
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.project.RootsChangeRescanningInfo
 import com.intellij.openapi.roots.ModuleRootListener
 import com.intellij.openapi.roots.ex.ProjectRootManagerEx
@@ -19,9 +19,6 @@ import com.intellij.testFramework.junit5.fixture.projectFixture
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-
-
-private object TestEntitySource : EntitySource
 
 @TestApplication
 class PsiVFSListenerTest {
@@ -40,7 +37,7 @@ class PsiVFSListenerTest {
     PsiManagerEx.getInstanceEx(project).addPsiTreeChangeListener(psiListener, testDisposable)
 
     val wsm = WorkspaceModel.getInstance(project)
-    val module = ModuleEntity("Test", emptyList(), TestEntitySource)
+    val module = ModuleEntity("Test", emptyList(), object : EntitySource {})
     wsm.update("add module in test") {
       it.addEntity(module)
     }
@@ -50,7 +47,7 @@ class PsiVFSListenerTest {
 
     IndexingTestUtil.suspendUntilIndexesAreReady(project) // index just added module (dumb mode may generate psi events)
 
-    val imlData = ModuleCustomImlDataEntity(emptyMap(), TestEntitySource) {
+    val imlData = ModuleCustomImlDataEntity(emptyMap(), object : EntitySource {}) {
       this.module = module
     }
     rootListener.reset()
@@ -85,7 +82,7 @@ class PsiVFSListenerTest {
     project.messageBus.connect(testDisposable).subscribe(ModuleRootListener.TOPIC, rootListener)
     PsiManagerEx.getInstanceEx(project).addPsiTreeChangeListener(psiListener, testDisposable)
 
-    writeAction {
+    edtWriteAction {
       ProjectRootManagerEx.getInstanceEx(project).makeRootsChange(EmptyRunnable.getInstance(), changes)
     }
 

@@ -3,11 +3,13 @@ package com.intellij.codeHighlighting;
 
 import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx;
 import com.intellij.codeInsight.daemon.impl.DaemonProgressIndicator;
+import com.intellij.codeInsight.daemon.impl.FileStatusMap;
 import com.intellij.codeInsight.daemon.impl.HighlightInfo;
 import com.intellij.codeInsight.multiverse.CodeInsightContext;
 import com.intellij.codeInsight.multiverse.CodeInsightContexts;
 import com.intellij.codeInspection.ex.GlobalInspectionContextBase;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.progress.ProgressIndicator;
@@ -20,6 +22,9 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.concurrency.ThreadingAssertions;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
+import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -30,14 +35,16 @@ import java.util.List;
 
 /**
  * The highlighting pass which is associated with {@link Document} and its markup model.
- * The instantiation of this class must happen in the background thread, under {@link com.intellij.codeInsight.daemon.impl.DaemonProgressIndicator}
+ * The instantiation of this class must happen in the background thread, under {@link DaemonProgressIndicator}
  * which has corresponding {@link com.intellij.codeInsight.daemon.impl.HighlightingSession}.
- * It's discouraged to do all that manually, please register your {@link TextEditorHighlightingPassFactory} in plugin.xml instead, e.g. like this:
+ * It's discouraged to do all that manually, please register your {@link TextEditorHighlightingPassFactory} in plugin.xml instead, e.g., like this:
  * <pre>
  *   {@code <highlightingPassFactory implementation="com.a.b.MyPassFactory"/>}
  * </pre>
  */
 public abstract class TextEditorHighlightingPass implements HighlightingPass {
+  private static final Logger LOG = Logger.getInstance(TextEditorHighlightingPass.class);
+
   public static final TextEditorHighlightingPass[] EMPTY_ARRAY = new TextEditorHighlightingPass[0];
   protected final @NotNull Document myDocument;
   protected final @NotNull Project myProject;
@@ -51,14 +58,17 @@ public abstract class TextEditorHighlightingPass implements HighlightingPass {
   private EditorColorsScheme myColorsScheme;
   private volatile CodeInsightContext myContext;
 
+  @RequiresBackgroundThread
   protected TextEditorHighlightingPass(@NotNull Project project, @NotNull Document document, boolean runIntentionPassAfter) {
+    ThreadingAssertions.assertBackgroundThread();
     myDocument = document;
     myProject = project;
     myRunIntentionPassAfter = runIntentionPassAfter;
     myInitialDocStamp = document.getModificationStamp();
     myInitialPsiStamp = PsiModificationTracker.getInstance(project).getModificationCount();
-    ThreadingAssertions.assertBackgroundThread();
   }
+
+  @RequiresBackgroundThread
   protected TextEditorHighlightingPass(@NotNull Project project, @NotNull Document document) {
     this(project, document, true);
   }
@@ -85,7 +95,7 @@ public abstract class TextEditorHighlightingPass implements HighlightingPass {
 
   @Override
   public @NotNull Condition<?> getExpiredCondition() {
-    return (Condition<Object>)o -> ReadAction.compute(() -> !isValid());
+    return (Condition<Object>)o -> ReadAction.computeBlocking(() -> !isValid());
   }
 
   /**
@@ -104,12 +114,11 @@ public abstract class TextEditorHighlightingPass implements HighlightingPass {
     }
 
     if (myDocument.getModificationStamp() != myInitialDocStamp) return false;
-    CodeInsightContext codeInsightContext = getContext();
-    PsiFile file = PsiDocumentManager.getInstance(myProject).getPsiFile(myDocument, codeInsightContext);
+    PsiFile psiFile = PsiDocumentManager.getInstance(myProject).getPsiFile(myDocument, getContext());
     PsiElement context;
-    return file != null
-           && file.isValid()
-           && ((context = file.getContext()) == null || context == file || context.isValid());
+    return psiFile != null
+           && psiFile.isValid()
+           && ((context = psiFile.getContext()) == null || context == psiFile || context.isValid());
   }
 
   @Override
@@ -126,11 +135,16 @@ public abstract class TextEditorHighlightingPass implements HighlightingPass {
   public void markUpToDateIfStillValid(@NotNull DaemonProgressIndicator updateProgress) {
     ThreadingAssertions.assertEventDispatchThread();
     if (isValid()) {
-      DaemonCodeAnalyzerEx.getInstanceEx(myProject).getFileStatusMap().markFileUpToDate(getDocument(), getContext(), getId(), updateProgress);
+      FileStatusMap statusMap = DaemonCodeAnalyzerEx.getInstanceEx(myProject).getFileStatusMap();
+      statusMap.markFileUpToDate(getDocument(), getContext(), getId(), updateProgress);
     }
   }
 
+  @RequiresBackgroundThread
+  @RequiresReadLock
   public abstract void doCollectInformation(@NotNull ProgressIndicator progress);
+
+  @RequiresEdt
   public abstract void doApplyInformationToEditor();
 
   public final int getId() {
@@ -141,6 +155,7 @@ public abstract class TextEditorHighlightingPass implements HighlightingPass {
     myId = id;
   }
 
+  @RequiresBackgroundThread
   public @NotNull List<HighlightInfo> getInfos() {
     return Collections.emptyList();
   }
@@ -159,16 +174,16 @@ public abstract class TextEditorHighlightingPass implements HighlightingPass {
 
   @ApiStatus.Internal
   public void setContext(@NotNull CodeInsightContext context) {
-    assert myContext == null : "context is already assigned";
+    LOG.assertTrue(myContext == null || myContext == CodeInsightContexts.anyContext(),
+                   "context is already assigned for highlighting pass " + this);
     myContext = context;
   }
 
   @ApiStatus.Experimental
-  protected @NotNull CodeInsightContext getContext() {
+  public @NotNull CodeInsightContext getContext() {
     if (myContext == null) {
-      // todo IJPL-339 report an error here once all the highlighting passes are ready
-      //      LOG.error("context was not set");
-      return CodeInsightContexts.anyContext();
+      LOG.error("context was not set to highlighting pass " + this);
+      myContext = CodeInsightContexts.anyContext();
     }
     return myContext;
   }

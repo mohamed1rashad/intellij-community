@@ -3,7 +3,12 @@ package com.intellij.execution.junit;
 
 import com.intellij.ide.fileTemplates.FileTemplateDescriptor;
 import com.intellij.openapi.roots.ExternalLibraryDescriptor;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
 import org.jetbrains.annotations.NotNull;
@@ -13,6 +18,8 @@ public class JUnit3Framework extends JUnitTestFramework {
 
   @Override
   public boolean isDumbAware() {
+    // Only Java is available in dumb mode, other language implementation might not support it.
+    // For example, Kotlin, because it relies on light classes which require resolve.
     return this.getClass().isAssignableFrom(JUnit3Framework.class);
   }
 

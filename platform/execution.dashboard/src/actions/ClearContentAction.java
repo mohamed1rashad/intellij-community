@@ -2,8 +2,12 @@
 package com.intellij.platform.execution.dashboard.actions;
 
 import com.intellij.execution.Executor;
+import com.intellij.execution.ExecutorRegistry;
+import com.intellij.execution.RunContentDescriptorId;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.dashboard.RunDashboardRunConfigurationNode;
+import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManager;
 import com.intellij.execution.ui.RunContentManagerImpl;
@@ -13,12 +17,13 @@ import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.platform.execution.dashboard.RunDashboardManagerImpl;
+import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.ui.content.Content;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import org.jetbrains.annotations.NotNull;
 
-import static com.intellij.execution.dashboard.actions.RunDashboardActionUtils.getLeafTargets;
+import static com.intellij.platform.execution.dashboard.actions.RunDashboardActionSelection.getLeafTargets;
 
 final class ClearContentAction extends DumbAwareAction
   implements ActionRemoteBehaviorSpecification.FrontendOtherwiseBackend {
@@ -29,6 +34,7 @@ final class ClearContentAction extends DumbAwareAction
   }
 
   @Override
+  @SuppressWarnings("removal")
   public void update(@NotNull AnActionEvent e) {
     Project project = e.getProject();
     Presentation presentation = e.getPresentation();
@@ -39,40 +45,57 @@ final class ClearContentAction extends DumbAwareAction
 
     JBIterable<RunDashboardRunConfigurationNode> targetNodes = getLeafTargets(e);
     boolean enabled = targetNodes.filter(node -> {
-      Content content = node.getContent();
-      if (content == null) {
-        return RunDashboardManagerImpl.getInstance(project).getPersistedStatus(
-          node.getConfigurationSettings().getConfiguration()) != null;
+      RunContentDescriptor descriptor = node.getDescriptor();
+      if (descriptor == null) {
+        RunnerAndConfigurationSettings settings = node.getConfigurationSettings();
+        return settings != null && RunDashboardManager.getInstance(project).hasPersistedStatus(
+          settings.getConfiguration());
       }
-      return RunContentManagerImpl.isTerminated(content);
+      ProcessHandler processHandler = descriptor.getProcessHandler();
+      return processHandler == null || processHandler.isProcessTerminated();
     }).isNotEmpty();
     presentation.setEnabled(enabled);
     presentation.setVisible(enabled || !e.isFromContextMenu());
   }
 
   @Override
+  @SuppressWarnings("removal")
   public void actionPerformed(@NotNull AnActionEvent e) {
     Project project = e.getProject();
     if (project == null) return;
 
     for (RunDashboardRunConfigurationNode node : getLeafTargets(e)) {
-      Content content = node.getContent();
-      if (content == null) {
-        RunDashboardManager.getInstance(project).clearConfigurationStatus(
-          node.getConfigurationSettings().getConfiguration());
+      RunnerAndConfigurationSettings settings = node.getConfigurationSettings();
+      RunContentDescriptor descriptor = node.getDescriptor();
+      if (descriptor == null) {
+        if (settings == null) continue;
+        RunDashboardManager.getInstance(project).clearConfigurationStatus(settings.getConfiguration());
         continue;
       }
-      if (!RunContentManagerImpl.isTerminated(content)) continue;
+      ProcessHandler processHandler = descriptor.getProcessHandler();
+      if (processHandler != null && !processHandler.isProcessTerminated()) continue;
 
-      RunContentDescriptor descriptor = node.getDescriptor();
-      if (descriptor == null) continue;
-
-      Executor executor = RunContentManagerImpl.getExecutorByContent(content);
+      Content content = descriptor.getAttachedContent();
+      Executor executor = content == null ?
+                          ExecutorRegistry.getInstance().getExecutorById(ToolWindowId.DEBUG) :
+                          RunContentManagerImpl.getExecutorByContent(content);
       if (executor == null) continue;
 
-      RunContentManager.getInstance(project).removeRunContent(executor, descriptor);
-      RunDashboardManager.getInstance(project).clearConfigurationStatus(
-        node.getConfigurationSettings().getConfiguration());
+      RunContentDescriptor managedDescriptor = getManagedDescriptor(descriptor, project);
+      RunContentManager.getInstance(project).removeRunContent(executor, managedDescriptor);
+      if (settings != null) {
+        RunDashboardManager.getInstance(project).clearConfigurationStatus(settings.getConfiguration());
+      }
     }
+  }
+
+  private static RunContentDescriptor getManagedDescriptor(RunContentDescriptor descriptor, Project project) {
+    RunContentDescriptorId descriptorId = descriptor.getId();
+    if (descriptorId == null) return descriptor;
+
+    RunContentDescriptor updatedDescriptor =
+      ContainerUtil.find(RunContentManager.getInstance(project).getRunContentDescriptors(),
+                         managedDescriptor -> descriptorId.equals(managedDescriptor.getId()));
+    return updatedDescriptor == null ? descriptor : updatedDescriptor;
   }
 }

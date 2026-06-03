@@ -33,7 +33,7 @@ import kotlinx.serialization.encoding.Encoder
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Experimental
 import org.jetbrains.annotations.ApiStatus.Internal
-import java.util.*
+import java.util.BitSet
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.io.encoding.Base64
@@ -1255,11 +1255,13 @@ sealed class RangeExclusionState {
   abstract val hasExcluded: Boolean
   abstract val hasIncluded: Boolean
 
+  @Serializable
   object Included : RangeExclusionState() {
     override val hasExcluded: Boolean = false
     override val hasIncluded: Boolean = true
   }
 
+  @Serializable
   object Excluded : RangeExclusionState() {
     override val hasExcluded: Boolean = true
     override val hasIncluded: Boolean = false
@@ -1366,7 +1368,7 @@ sealed class RangeExclusionState {
       override val descriptor: SerialDescriptor = String.serializer().descriptor
 
       override fun serialize(encoder: Encoder, value: BitSet) {
-        base64.encode(value.toByteArray())
+        encoder.encodeString(base64.encode(value.toByteArray()))
       }
 
       override fun deserialize(decoder: Decoder): BitSet =

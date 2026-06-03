@@ -11,52 +11,58 @@ import com.intellij.internal.statistic.eventLog.events.EventPair
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.searchEverywhereMl.SearchEverywhereTab
+import com.intellij.searchEverywhereMl.ranking.core.SearchEverywhereMLSearchSession
 import com.intellij.usages.impl.ScopeRuleValidator
 
-internal class SearchEverywhereStateFeaturesProvider {
-  companion object {
-    internal val QUERY_LENGTH_DATA_KEY = EventFields.Int("queryLength")
-    internal val IS_EMPTY_QUERY_DATA_KEY = EventFields.Boolean("isEmptyQuery")
-    internal val QUERY_CONTAINS_PATH_DATA_KEY = EventFields.Boolean("queryContainsPath")
-    internal val QUERY_CONTAINS_COMMAND_CHAR_DATA_KEY = EventFields.Boolean("queryContainsCommandChar")
-    internal val QUERY_CONTAINS_SPACES_DATA_KEY = EventFields.Boolean("queryContainsSpaces")
-    internal val QUERY_IS_CAMEL_CASE_DATA_KEY = EventFields.Boolean("queryIsCamelCase")
-    internal val QUERY_CONTAINS_ABBREVIATIONS_DATA_KEY = EventFields.Boolean("queryContainsAbbreviations")
-    internal val QUERY_IS_ALL_UPPERCASE_DATA_KEY = EventFields.Boolean("queryIsAllUppercase")
-    internal val IS_DUMB_MODE = EventFields.Boolean("isDumbMode")
-    private val SEARCH_SCOPE_DATA_KEY = EventFields.StringValidatedByCustomRule("searchScope", ScopeRuleValidator::class.java)
-    private val IS_SEARCH_EVERYWHERE_DATA_KEY = EventFields.Boolean("isSearchEverywhere")
+internal object SearchEverywhereStateFeaturesProvider {
+  val QUERY_LENGTH_DATA_KEY = EventFields.Int("query_length")
+  val IS_EMPTY_QUERY_DATA_KEY = EventFields.Boolean("is_empty_query")
+  val QUERY_CONTAINS_PATH_DATA_KEY = EventFields.Boolean("query_contains_path")
+  val QUERY_CONTAINS_COMMAND_CHAR_DATA_KEY = EventFields.Boolean("query_contains_command_char")
+  val QUERY_CONTAINS_SPACES_DATA_KEY = EventFields.Boolean("query_contains_spaces")
+  val QUERY_IS_CAMEL_CASE_DATA_KEY = EventFields.Boolean("query_is_camel_case")
+  val QUERY_CONTAINS_ABBREVIATIONS_DATA_KEY = EventFields.Boolean("query_contains_abbreviations")
+  val QUERY_IS_ALL_UPPERCASE_DATA_KEY = EventFields.Boolean("query_is_all_uppercase")
+  val IS_DUMB_MODE = EventFields.Boolean("is_dumb_mode")
+  val SEARCH_SCOPE_DATA_KEY = EventFields.StringValidatedByCustomRule("search_scope", ScopeRuleValidator::class.java)
+  val IS_SEARCH_EVERYWHERE_DATA_KEY = EventFields.Boolean("is_search_everywhere")
 
-    private val IS_CASE_SENSITIVE = EventFields.Boolean("isCaseSensitive")
-    private val IS_WHOLE_WORDS_ONLY = EventFields.Boolean("isWholeWordsOnly")
-    private val IS_REGULAR_EXPRESSIONS = EventFields.Boolean("isRegularExpressions")
+  val IS_CASE_SENSITIVE = EventFields.Boolean("is_case_sensitive")
+  val IS_WHOLE_WORDS_ONLY = EventFields.Boolean("is_whole_words_only")
+  val IS_REGULAR_EXPRESSIONS = EventFields.Boolean("is_regular_expressions")
 
-    fun getFeaturesDefinition(): List<EventField<*>> {
-      return listOf(
-        QUERY_LENGTH_DATA_KEY, IS_EMPTY_QUERY_DATA_KEY,
-        QUERY_CONTAINS_PATH_DATA_KEY, QUERY_CONTAINS_COMMAND_CHAR_DATA_KEY,
-        QUERY_CONTAINS_SPACES_DATA_KEY, QUERY_IS_CAMEL_CASE_DATA_KEY,
-        QUERY_CONTAINS_ABBREVIATIONS_DATA_KEY, QUERY_IS_ALL_UPPERCASE_DATA_KEY,
-        IS_DUMB_MODE, SEARCH_SCOPE_DATA_KEY, IS_SEARCH_EVERYWHERE_DATA_KEY,
-        IS_CASE_SENSITIVE, IS_WHOLE_WORDS_ONLY, IS_REGULAR_EXPRESSIONS,
-      )
-    }
+  val allFields: List<EventField<*>> = listOf(
+    QUERY_LENGTH_DATA_KEY, IS_EMPTY_QUERY_DATA_KEY,
+    QUERY_CONTAINS_PATH_DATA_KEY, QUERY_CONTAINS_COMMAND_CHAR_DATA_KEY,
+    QUERY_CONTAINS_SPACES_DATA_KEY, QUERY_IS_CAMEL_CASE_DATA_KEY,
+    QUERY_CONTAINS_ABBREVIATIONS_DATA_KEY, QUERY_IS_ALL_UPPERCASE_DATA_KEY,
+    IS_DUMB_MODE, SEARCH_SCOPE_DATA_KEY, IS_SEARCH_EVERYWHERE_DATA_KEY,
+    IS_CASE_SENSITIVE, IS_WHOLE_WORDS_ONLY, IS_REGULAR_EXPRESSIONS,
+  )
+
+  fun getFeatures(searchState: SearchEverywhereMLSearchSession.SearchState): List<EventPair<*>> {
+    return getFeatures(searchState.project, searchState.tab, searchState.query,
+                       searchState.searchScope, searchState.isSearchEverywhere)
   }
 
-  fun getSearchStateFeatures(project: Project?, tab: SearchEverywhereTab, query: String,
-                             searchScope: ScopeDescriptor?, isSearchEverywhere: Boolean): List<EventPair<*>> {
+  fun getFeatures(project: Project?, tab: SearchEverywhereTab, query: String,
+                  searchScope: ScopeDescriptor?, isSearchEverywhere: Boolean): List<EventPair<*>> {
     return buildList {
       add(QUERY_LENGTH_DATA_KEY.with(query.length))
       add(IS_EMPTY_QUERY_DATA_KEY.with(query.isEmpty()))
       add(QUERY_CONTAINS_SPACES_DATA_KEY.with(query.contains(" ")))
-      add(QUERY_IS_CAMEL_CASE_DATA_KEY.with(query.isCamelCase()))
+      add(QUERY_IS_CAMEL_CASE_DATA_KEY.with(query.isCamelCase()), )
       add(QUERY_CONTAINS_ABBREVIATIONS_DATA_KEY.with(query.containsAbbreviations()))
       add(QUERY_IS_ALL_UPPERCASE_DATA_KEY.with(query.all { it.isUpperCase() }))
       add(IS_SEARCH_EVERYWHERE_DATA_KEY.with(isSearchEverywhere))
 
-      project?.let {
+      if (project != null) {
         val isDumb = DumbService.isDumb(project)
         add(IS_DUMB_MODE.with(isDumb))
+
+        if (isTabWithTextContributor(tab)) {
+          addAll(getTextContributorFeatures(project))
+        }
       }
 
       if (hasSuitableContributor(tab, SearchEverywhereTab.Files)) {
@@ -69,10 +75,6 @@ internal class SearchEverywhereStateFeaturesProvider {
       searchScope?.displayName?.let { searchScopeDisplayName ->
         val scopeId = ScopeIdMapper.instance.getScopeSerializationId(searchScopeDisplayName)
         add(SEARCH_SCOPE_DATA_KEY.with(scopeId))
-      }
-
-      if (project != null && isTabWithTextContributor(tab)) {
-        addAll(getTextContributorFeatures(project))
       }
     }
   }

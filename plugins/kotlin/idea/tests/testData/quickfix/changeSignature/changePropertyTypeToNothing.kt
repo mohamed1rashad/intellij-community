@@ -1,4 +1,5 @@
-// "Change type of enclosing property 'Test.bar' to 'Nothing'" "true"
+// "Specify 'Nothing' type for enclosing property 'Test.bar'" "true"
+// K2_ERROR: Property type 'Nothing' needs to be specified explicitly.
 
 class Test {
     val ba<caret>r = TODO()

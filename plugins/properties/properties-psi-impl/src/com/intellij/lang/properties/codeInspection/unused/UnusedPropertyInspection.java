@@ -2,7 +2,6 @@
 package com.intellij.lang.properties.codeInspection.unused;
 
 import com.intellij.codeInspection.LocalInspectionToolSession;
-import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.codeInspection.ex.InspectionProfileWrapper;
 import com.intellij.codeInspection.options.OptPane;
@@ -10,7 +9,12 @@ import com.intellij.codeInspection.options.OptionController;
 import com.intellij.codeInspection.options.RegexValidator;
 import com.intellij.lang.ASTNode;
 import com.intellij.lang.injection.InjectedLanguageManager;
-import com.intellij.lang.properties.*;
+import com.intellij.lang.properties.IProperty;
+import com.intellij.lang.properties.PropertiesBundle;
+import com.intellij.lang.properties.PropertiesFileType;
+import com.intellij.lang.properties.PropertiesImplUtil;
+import com.intellij.lang.properties.PropertiesInspectionBase;
+import com.intellij.lang.properties.PropertiesQuickFixFactory;
 import com.intellij.lang.properties.psi.Property;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
@@ -132,10 +136,19 @@ public final class UnusedPropertyInspection extends PropertiesInspectionBase {
 
         ASTNode[] nodes = propertyNode.getChildren(null);
         PsiElement key = nodes.length == 0 ? property : nodes[0].getPsi();
-        LocalQuickFix fix = PropertiesQuickFixFactory.getInstance().createRemovePropertyLocalFix(property);
-        holder.registerProblem(key, isOnTheFly ? PropertiesBundle.message("unused.property.problem.descriptor.name")
-                                               : PropertiesBundle
-                                      .message("unused.property.problem.descriptor.name.offline", property.getUnescapedKey()), fix);
+        String unescapedKey = property.getUnescapedKey();
+        if (isOnTheFly) {
+          String message = PropertiesBundle.message("unused.property.problem.descriptor.name");
+          if (unescapedKey != null && property.getPropertiesFile().findPropertiesByKey(unescapedKey).size() > 1) {
+            // PropertiesAnnotator already registers RemovePropertyFix for duplicate keys on the fly
+            holder.registerProblem(key, message);
+          } else {
+            holder.registerProblem(key, message, PropertiesQuickFixFactory.getInstance().createRemovePropertyFromBundleLocalFix(property));
+          }
+        } else {
+          String message = PropertiesBundle.message("unused.property.problem.descriptor.name.offline", unescapedKey);
+          holder.registerProblem(key, message, PropertiesQuickFixFactory.getInstance().createRemovePropertyFromBundleLocalFix(property));
+        }
       }
     };
   }

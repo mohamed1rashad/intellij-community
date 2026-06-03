@@ -3,6 +3,7 @@
  */
 package com.jetbrains.python.inspections;
 
+import com.intellij.idea.TestFor;
 import com.jetbrains.python.fixtures.PyInspectionTestCase;
 import org.jetbrains.annotations.NotNull;
 
@@ -410,12 +411,39 @@ public class PyDataclassInspectionTest extends PyInspectionTestCase {
     doTest();
   }
 
-  @Override
-  protected void doTest() {
-    myFixture.copyDirectoryToProject("packages/attr", "attr");
-    myFixture.copyDirectoryToProject("packages/attrs", "attrs");
-    super.doTest();
-    assertProjectFilesNotParsed(myFixture.getFile());
+  // PY-76911
+  public void testFrozenInheritanceDataclassTransformMetaclassNoDefault() {
+    doTest();
+  }
+
+  // PY-49946
+  public void testTypingNTFieldsOrderKWOnlyInherited() {
+    doTest();
+  }
+
+  // PY-60352
+  public void testDataclassMultipleInheritanceAttributeWithDefault() {
+    doTestByText("""
+                   from dataclasses import dataclass
+                   
+                   
+                   @dataclass
+                   class Parent1:
+                       number: int
+                       default: int = 0
+                   
+                   
+                   @dataclass
+                   class Parent2:
+                       number: float
+                   
+                   
+                   @dataclass
+                   class Child(Parent2, Parent1):
+                       pass
+                   
+                   
+                   Child(number=1)""");
   }
 
   public void testFieldOrderInheritanceMultifile() {
@@ -424,6 +452,32 @@ public class PyDataclassInspectionTest extends PyInspectionTestCase {
 
   public void testDataclassMissingHandlingMultifile() {
     doMultiFileTest();
+  }
+
+  @TestFor(issues="PY-89180")
+  public void testMutatingFrozenFieldPydantic() {
+    myFixture.copyDirectoryToProject("stubs/pydantic", "pydantic");
+    doTestByText(
+      """
+        from pydantic import BaseModel, Field
+
+        class A(BaseModel):
+            a: int = Field(frozen=True)
+            b: int
+        
+        a = A()
+        <error descr="'A' object attribute 'a' is read-only">a.a</error> = 2
+        del <error descr="'A' object attribute 'a' is read-only">a.a</error>
+        a.b = 2
+        """);
+  }
+
+  @Override
+  protected void doTest() {
+    myFixture.copyDirectoryToProject("packages/attr", "attr");
+    myFixture.copyDirectoryToProject("packages/attrs", "attrs");
+    super.doTest();
+    assertProjectFilesNotParsed(myFixture.getFile());
   }
 
   @NotNull

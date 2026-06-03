@@ -4,6 +4,8 @@ package com.jetbrains.python.sdk.add.v2
 import com.intellij.icons.AllIcons
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.diagnostic.thisLogger
+import com.intellij.openapi.observable.properties.AtomicBooleanProperty
 import com.intellij.openapi.observable.properties.ObservableMutableProperty
 import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.observable.properties.PropertyGraph
@@ -24,7 +26,11 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.fields.ExtendableTextComponent
 import com.intellij.ui.components.fields.ExtendableTextField
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.Align
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RowsRange
+import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.util.SystemProperties
 import com.intellij.util.ui.JBUI
 import com.jetbrains.python.PyBundle
@@ -42,14 +48,22 @@ import com.jetbrains.python.sdk.flavors.PythonSdkFlavor
 import com.jetbrains.python.sdk.flavors.conda.PyCondaEnv
 import com.jetbrains.python.sdk.flavors.conda.PyCondaEnvIdentity
 import com.jetbrains.python.util.ShowingMessageErrorSync
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.NonNls
 import java.awt.Component
+import java.awt.Dimension
 import java.nio.file.InvalidPathException
-import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JTextField
 import javax.swing.plaf.basic.BasicComboBoxEditor
@@ -113,17 +127,51 @@ class PythonNewEnvironmentDialogNavigator {
   internal fun restoreLastState(allowedInterpreterTypes: Collection<PythonInterpreterSelectionMode>) {
     val properties = PropertiesComponent.getInstance()
 
-    val modeString = properties.getValue(FAV_MODE) ?: return
-    val mode = PythonInterpreterSelectionMode.valueOf(modeString)
-    if (mode !in allowedInterpreterTypes) return
+    val mode = loadSelectionMode(properties, allowedInterpreterTypes) ?: return
     selectionMode?.set(mode)
 
     if (mode == CUSTOM) {
-      val method = PythonInterpreterSelectionMethod.valueOf(properties.getValue(FAV_METHOD) ?: return)
-      selectionMethod.set(method)
+      restoreCustomModeState(properties)
+    }
+  }
 
-      val manager = PythonSupportedEnvironmentManagers.valueOf(properties.getValue(FAV_MANAGER) ?: return)
-      if (method == CREATE_NEW) newEnvManager.set(manager) else existingEnvManager.set(manager)
+  private fun loadSelectionMode(
+    properties: PropertiesComponent,
+    allowedInterpreterTypes: Collection<PythonInterpreterSelectionMode>,
+  ): PythonInterpreterSelectionMode? {
+    val modeString = properties.getValue(FAV_MODE) ?: return null
+    val mode = modeString.toEnumOrNull<PythonInterpreterSelectionMode>() ?: return null
+    return mode.takeIf { it in allowedInterpreterTypes }
+  }
+
+  private fun restoreCustomModeState(properties: PropertiesComponent) {
+    val method = loadSelectionMethod(properties) ?: return
+    selectionMethod.set(method)
+
+    val manager = loadEnvironmentManager(properties) ?: return
+    when (method) {
+      CREATE_NEW -> newEnvManager.set(manager)
+      SELECT_EXISTING -> existingEnvManager.set(manager)
+    }
+  }
+
+  private fun loadSelectionMethod(properties: PropertiesComponent): PythonInterpreterSelectionMethod? {
+    val methodString = properties.getValue(FAV_METHOD) ?: return null
+    return methodString.toEnumOrNull<PythonInterpreterSelectionMethod>()
+  }
+
+  private fun loadEnvironmentManager(properties: PropertiesComponent): PythonSupportedEnvironmentManagers? {
+    val managerString = properties.getValue(FAV_MANAGER) ?: return null
+    return managerString.toEnumOrNull<PythonSupportedEnvironmentManagers>()
+  }
+
+  private inline fun <reified T : Enum<T>> String.toEnumOrNull(): T? {
+    return try {
+      enumValueOf<T>(this)
+    }
+    catch (_: IllegalArgumentException) {
+      thisLogger().debug("Failed to convert '$this' to ${T::class.simpleName}")
+      null
     }
   }
 
@@ -135,14 +183,16 @@ class PythonNewEnvironmentDialogNavigator {
 }
 
 
-internal fun <P : PathHolder> SimpleColoredComponent.customizeForPythonInterpreter(isLoading: Boolean, interpreter: PythonSelectableInterpreter<P>?) {
+internal fun <P : PathHolder> SimpleColoredComponent.customizeForPythonInterpreter(
+  isLoading: Boolean,
+  interpreter: PythonSelectableInterpreter<P>?,
+) {
   when {
     isLoading -> {
       append(message("sdk.create.custom.hatch.environment.loading"), SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES)
       return
     }
     interpreter == null -> {
-      icon = AllIcons.General.ShowWarning
       append(message("sdk.create.custom.existing.error.no.interpreters.to.select"), SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES)
       return
     }
@@ -151,13 +201,18 @@ internal fun <P : PathHolder> SimpleColoredComponent.customizeForPythonInterpret
   when (interpreter) {
     is DetectedSelectableInterpreter, is ManuallyAddedSelectableInterpreter -> {
       icon = IconLoader.getTransparentIcon(interpreter.ui?.icon ?: PythonParserIcons.PythonFile)
-      val title = interpreter.ui?.toolName ?: message("sdk.rendering.detected.grey.text")
+      val title = interpreter.ui?.toolName ?: if (interpreter.isBase) {
+        message("sdk.rendering.detected.grey.text.system")
+      }
+      else {
+        message("sdk.rendering.detected.grey.text.venv")
+      }
       append(String.format("Python %-4s", interpreter.pythonInfo.languageLevel))
       append(" (" + replaceHomePathToTilde(interpreter.homePath.toString()) + ") $title", SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
     }
     is InstallableSelectableInterpreter -> {
       icon = AllIcons.Actions.Download
-      append(interpreter.sdk.name)
+      append(interpreter.installableSdk.name)
       append(" " + message("sdk.rendering.installable.grey.text"), SimpleTextAttributes.GRAYED_SMALL_ATTRIBUTES)
     }
     is ExistingSelectableInterpreter -> {
@@ -181,8 +236,10 @@ private val userHomePath = lazy {
 
 /**
  * Replaces [userHomePath] in  [sdkHomePath] to `~`
+ * Use [com.jetbrains.python.PathShortener] instead
  */
 @ApiStatus.Internal
+@Deprecated("Use PathShorter")
 fun replaceHomePathToTilde(sdkHomePath: @NonNls String): @NlsSafe String {
   try {
     val path = Path(sdkHomePath.trim()).normalize()
@@ -199,13 +256,26 @@ fun replaceHomePathToTilde(sdkHomePath: @NonNls String): @NlsSafe String {
 }
 
 
-class PythonSdkComboBoxListCellRenderer<P : PathHolder>(val isLoading: () -> Boolean) : ColoredListCellRenderer<PythonSelectableInterpreter<P>?>() {
+class PythonSdkComboBoxListCellRenderer<P : PathHolder>(val isLoading: () -> Boolean) :
+  ColoredListCellRenderer<PythonSelectableInterpreter<P>?>() {
 
-  override fun getListCellRendererComponent(list: JList<out PythonSelectableInterpreter<P>?>?, value: PythonSelectableInterpreter<P>?, index: Int, selected: Boolean, hasFocus: Boolean): Component {
+  override fun getListCellRendererComponent(
+    list: JList<out PythonSelectableInterpreter<P>?>?,
+    value: PythonSelectableInterpreter<P>?,
+    index: Int,
+    selected: Boolean,
+    hasFocus: Boolean,
+  ): Component {
     return super.getListCellRendererComponent(list, value, index, selected, hasFocus)
   }
 
-  override fun customizeCellRenderer(list: JList<out PythonSelectableInterpreter<P>?>, value: PythonSelectableInterpreter<P>?, index: Int, selected: Boolean, hasFocus: Boolean) {
+  override fun customizeCellRenderer(
+    list: JList<out PythonSelectableInterpreter<P>?>,
+    value: PythonSelectableInterpreter<P>?,
+    index: Int,
+    selected: Boolean,
+    hasFocus: Boolean,
+  ) {
     customizeForPythonInterpreter(isLoading.invoke(), value)
   }
 }
@@ -256,31 +326,20 @@ internal fun <P : PathHolder> Panel.pythonInterpreterComboBox(
       cell(comboBox)
         .bindItem(selectedSdkProperty)
         .applyToComponent {
-          preferredSize = JBUI.size(preferredSize)
           isEditable = true
         }
-        .validationRequestor(validationRequestor and WHEN_PROPERTY_CHANGED(selectedSdkProperty))
+        .validationRequestor(
+          validationRequestor
+            and WHEN_PROPERTY_CHANGED(selectedSdkProperty)
+            and WHEN_PROPERTY_CHANGED(comboBox.isLoading)
+        )
         .validationInfo {
           when {
-            !comboBox.isVisible -> null
-            selectedSdkProperty.get() == null -> {
-              if (comboBox.isBusy) {
-                ValidationInfo(message("python.add.sdk.panel.wait"))
-              }
-              else {
-                ValidationInfo(message("sdk.create.custom.existing.error.no.interpreters.to.select"))
-              }
-            }
+            !it.isVisible -> null
+            it.isLoading.get() -> ValidationInfo(message("python.add.sdk.panel.wait"))
+            selectedSdkProperty.get() == null -> ValidationInfo("")
             else -> null
           }
-        }
-        .validationOnApply {
-          if (!comboBox.isVisible) return@validationOnApply null
-          // This component must set sdk: clients expect it not to be null (PY-77463)
-          if (comboBox.isBusy || selectedSdkProperty.get() == null) {
-            ValidationInfo(message("python.add.sdk.panel.wait"))
-          }
-          else null
         }
         .align(Align.FILL)
     }
@@ -294,17 +353,20 @@ internal class PythonInterpreterComboBox<P : PathHolder>(
   val fileSystem: FileSystem<P>,
   private val errorSink: ErrorSink,
 ) : ComboBox<PythonSelectableInterpreter<P>?>() {
+  val isLoading: ObservableMutableProperty<Boolean> = AtomicBooleanProperty(true)
 
   init {
-    renderer = PythonSdkComboBoxListCellRenderer { isBusy }
+    renderer = PythonSdkComboBoxListCellRenderer { isLoading.get() }
+    preferredSize = preferredSize.withAdjustedWidth
     val newOnPathSelected: (String) -> Unit = { rawPath ->
       runWithModalProgressBlocking(ModalTaskOwner.guess(), message("python.sdk.validating.environment")) {
         val pathOnFileSystem = fileSystem.parsePath(rawPath).onFailure { error ->
           errorSink.emit(error)
         }.successOrNull
 
-        val interpreter = pathOnFileSystem?.let {
-          onPathSelected(it).onFailure { error -> errorSink.emit(error) }.successOrNull
+        val interpreter = pathOnFileSystem?.let { selectedPath ->
+          val pythonBinaryPath = fileSystem.resolvePythonBinary(selectedPath) ?: selectedPath
+          onPathSelected(pythonBinaryPath).onFailure { error -> errorSink.emit(error) }.successOrNull
         }
 
         interpreter?.let { interpreter ->
@@ -331,16 +393,16 @@ internal class PythonInterpreterComboBox<P : PathHolder>(
       selectedItemReminder?.let { selectedItem = it }
 
       setBusy(false)
+      isLoading.set(false)
     }.launchIn(scope + Dispatchers.EDT)
   }
 
   // Both these methods are abstraction leakage and should be rewritten
 
   fun setBusy(busy: Boolean) {
-    (editor as ComboBoxWithBrowseButtonEditor<*, P>).setBusy(busy)
+    (editor as ComboBoxWithBrowseButtonEditor<*>).setBusy(busy)
   }
 
-  val isBusy: Boolean get() = (editor as ComboBoxWithBrowseButtonEditor<*, P>).isBusy
 }
 
 /**
@@ -376,16 +438,6 @@ internal fun <T, C : ComboBox<T>> Cell<C>.withExtendableTextFieldEditor(): Cell<
     }
   }
 
-internal fun JComponent.displayLoaderWhen(loading: SharedFlow<Boolean>, scope: CoroutineScope) {
-  scope.launch(start = CoroutineStart.UNDISPATCHED) {
-    loading.collectLatest { currentValue ->
-      withContext(Dispatchers.EDT) {
-        if (currentValue) displayLoader() else hideLoader()
-      }
-    }
-  }
-}
-
 private fun ComboBox<*>.displayLoader(makeTemporaryEditable: Boolean) {
   if (makeTemporaryEditable) {
     isEditable = true
@@ -402,14 +454,6 @@ private fun ComboBox<*>.hideLoader(restoreNonEditableState: Boolean) {
   (editor.editorComponent as? ExtendableTextComponent)?.removeLoadingExtension()
 }
 
-private fun JComponent.displayLoader() {
-  isEnabled = false
-}
-
-private fun JComponent.hideLoader() {
-  isEnabled = true
-}
-
 private val loaderExtension = ExtendableTextComponent.Extension.create(AnimatedIcon.Default.INSTANCE, null, null)
 
 private fun ExtendableTextComponent.installLoadingExtension() {
@@ -420,8 +464,10 @@ private fun ExtendableTextComponent.removeLoadingExtension() {
   removeExtension(loaderExtension)
 }
 
-internal fun <P : PathHolder> createInstallCondaFix(model: PythonAddInterpreterModel<P>, errorSink: ErrorSink): ActionLink {
-  return ActionLink(message("sdk.create.custom.venv.install.fix.title", "Miniconda", "")) {
+internal fun <P : PathHolder> createInstallCondaFix(model: PythonAddInterpreterModel<P>): ActionLink? {
+  if (!model.fileSystem.isLocal) return null
+
+  return ActionLink(message("sdk.create.custom.venv.install.fix.title", "Miniconda")) {
     PythonSdkFlavor.clearExecutablesCache()
     CondaInstallManager.installLatest(null)
     runWithModalProgressBlocking(ModalTaskOwner.guess(), message("sdk.create.custom.venv.progress.title.detect.executable")) {
@@ -430,4 +476,10 @@ internal fun <P : PathHolder> createInstallCondaFix(model: PythonAddInterpreterM
   }
 }
 
-
+/**
+ * A dimension with adjusted width that fits the container as calculated by [JBUI.size]. The height remains unchanged, not to affect the
+ * scaling applied by the zoom setting.
+ */
+internal val Dimension.withAdjustedWidth: Dimension
+  get() =
+    Dimension(JBUI.size(this).width, height)

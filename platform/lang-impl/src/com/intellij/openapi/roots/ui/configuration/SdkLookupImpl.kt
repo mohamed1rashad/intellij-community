@@ -1,23 +1,30 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.roots.ui.configuration
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.progress.*
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.runUnderNestedProgressAndRelayMessages
 import com.intellij.openapi.progress.util.ProgressIndicatorBase
+import com.intellij.openapi.progress.withPushPop
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectBundle
 import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.projectRoots.SdkType
+import com.intellij.openapi.projectRoots.belongsToEel
 import com.intellij.openapi.projectRoots.impl.UnknownMissingSdk
 import com.intellij.openapi.projectRoots.impl.UnknownSdkFixAction
 import com.intellij.openapi.roots.ui.configuration.UnknownSdkResolver.UnknownSdkLookup
 import com.intellij.openapi.roots.ui.configuration.projectRoot.SdkDownloadTracker
-import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Disposer
+import com.intellij.platform.eel.EelDescriptor
+import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.util.Consumer
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
@@ -34,7 +41,8 @@ private open class SdkLookupContext(private val params: SdkLookupParameters) {
   val sdkName = params.sdkName
   val sdkType = params.sdkType
   val testSdkSequence = params.testSdkSequence
-  val project = params.project
+  val project: Project? = params.project
+  val eel: EelDescriptor? = params.eelDescriptor ?: project?.getEelDescriptor()
   val progressMessageTitle = params.progressMessageTitle
 
   val sdkHomeFilter = params.sdkHomeFilter
@@ -75,7 +83,12 @@ private open class SdkLookupContext(private val params: SdkLookupParameters) {
   fun checkSdkHomeAndVersion(sdk: Sdk?): Boolean {
     if (sdk == null) return false
 
-    val sdkHome = runCatching { sdk.homePath }.getOrNull() ?: return false
+    val eel = this@SdkLookupContext.eel
+    if (eel != null && !sdk.belongsToEel(eel)) {
+      return false
+    }
+
+    val sdkHome = sdk.homePath ?: return false
     return params.sdkHomeFilter?.invoke(sdkHome) != false && checkSdkVersion(sdk)
   }
 
@@ -174,12 +187,14 @@ private open class SdkLookupContextEx(lookup: SdkLookupParameters) : SdkLookupCo
     val rootProgressIndicator = resolveProgressIndicator()
 
     val namedSdk = sdkName?.let {
-      ApplicationManager.getApplication().runReadAction(Computable {
+      runReadActionBlocking {
+        val jdkTable = project?.let { ProjectJdkTable.getInstance(it) }
+                       ?: ProjectJdkTable.getInstance()
         when (sdkType) {
-          null -> ProjectJdkTable.getInstance().findJdk(sdkName)
-          else -> ProjectJdkTable.getInstance().findJdk(sdkName, sdkType.name)
+          null -> jdkTable.findJdk(sdkName)
+          else -> jdkTable.findJdk(sdkName, sdkType.name)
         }
-      })
+      }
     }
 
     if (trySdk(namedSdk, rootProgressIndicator)) {
@@ -334,6 +349,7 @@ private open class SdkLookupContextEx(lookup: SdkLookupParameters) : SdkLookupCo
         indicator.checkCanceled()
 
         val possibleFix = UnknownMissingSdk.createMissingFixAction(
+          project,
           unknownSdk,
           Supplier { resolveLocalFix(resolvers, unknownSdk, indicator) },
           Supplier { resolveDownloadFix(resolvers, unknownSdk, indicator) }
@@ -346,7 +362,11 @@ private open class SdkLookupContextEx(lookup: SdkLookupParameters) : SdkLookupCo
         //it could be that the suggested SDK is already registered, so we could simply return it
         //NOTE: something similar has to be done with downloading SDKs, e.g. we should replace download task with an already running one
         val sdkPrototype = possibleFix.registeredSdkPrototype
-        if (sdkPrototype != null && sdkPrototype in runReadAction { ProjectJdkTable.getInstance().allJdks }) {
+        if (sdkPrototype != null && sdkPrototype in runReadActionBlocking {
+            val jdkTable = project?.let { ProjectJdkTable.getInstance(it) }
+                           ?: ProjectJdkTable.getInstance()
+            jdkTable.allJdks
+          }) {
           if (testLoadSdkAndWaitIfNeeded(sdkPrototype, indicator)) {
             return@runSdkResolutionUnderProgress
           }

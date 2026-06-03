@@ -3,7 +3,11 @@ package com.intellij.execution.scratch;
 
 import com.intellij.application.options.ModuleDescriptionsComboBox;
 import com.intellij.execution.ExecutionBundle;
-import com.intellij.execution.ui.*;
+import com.intellij.execution.ui.CommonJavaParametersPanel;
+import com.intellij.execution.ui.ConfigurationModuleSelector;
+import com.intellij.execution.ui.DefaultJreSelector;
+import com.intellij.execution.ui.JrePathEditor;
+import com.intellij.execution.ui.ShortenCommandLineModeCombo;
 import com.intellij.ide.scratch.ScratchFileService;
 import com.intellij.ide.scratch.ScratchRootType;
 import com.intellij.openapi.fileChooser.FileChooser;
@@ -25,12 +29,19 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
+import java.awt.BorderLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
-import static java.awt.GridBagConstraints.*;
+import static java.awt.GridBagConstraints.BOTH;
+import static java.awt.GridBagConstraints.HORIZONTAL;
+import static java.awt.GridBagConstraints.NORTHWEST;
+import static java.awt.GridBagConstraints.RELATIVE;
 
 /**
  * @author Eugene Zhuravlev
@@ -80,7 +91,7 @@ public class JavaScratchConfigurable extends SettingsEditor<JavaScratchConfigura
     myModule.setText(ExecutionBundle.message("use.classpath.of.module"));
     myModuleSelector = new ConfigurationModuleSelector(project, myModule.getComponent());
 
-    myCommonProgramParameters = new CommonJavaParametersPanel();
+    myCommonProgramParameters = new CommonJavaParametersPanel(project);
     myCommonProgramParameters.setModuleContext(myModuleSelector.getModule());
     myModule.getComponent().addActionListener(new ActionListener() {
       @Override
@@ -88,7 +99,7 @@ public class JavaScratchConfigurable extends SettingsEditor<JavaScratchConfigura
         myCommonProgramParameters.setModuleContext(myModuleSelector.getModule());
       }
     });
-    myJrePathEditor = new JrePathEditor(DefaultJreSelector.projectSdk(project));
+    myJrePathEditor = new JrePathEditor(DefaultJreSelector.projectSdk(project), project);
 
     myIncludeProvidedDeps = new LabeledComponent<>();
     myIncludeProvidedDeps.setLabelLocation(BorderLayout.WEST);

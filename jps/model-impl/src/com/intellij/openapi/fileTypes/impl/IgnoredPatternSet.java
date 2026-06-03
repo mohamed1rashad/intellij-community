@@ -1,13 +1,15 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.fileTypes.impl;
 
-import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.util.text.StringUtilRt;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.model.fileTypes.FileNameMatcherFactory;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.StringTokenizer;
 
 @ApiStatus.Internal
 public final class IgnoredPatternSet {
@@ -51,13 +53,7 @@ public final class IgnoredPatternSet {
   }
 
   public boolean isIgnored(@NotNull CharSequence fileName) {
-    if (ignorePatterns.findAssociatedFileType(fileName) == Boolean.TRUE) {
-      return true;
-    }
-
-    //Quite a hack, but still we need to have some name, which
-    //won't be caught by VFS for sure.
-    return StringUtilRt.endsWith(fileName, FileUtil.ASYNC_DELETE_EXTENSION);
+    return ignorePatterns.findAssociatedFileType(fileName) == Boolean.TRUE;
   }
 
   @ApiStatus.Internal

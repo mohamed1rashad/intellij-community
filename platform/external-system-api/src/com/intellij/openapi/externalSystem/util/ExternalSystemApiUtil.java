@@ -14,7 +14,12 @@ import com.intellij.openapi.externalSystem.ExternalSystemAutoImportAware;
 import com.intellij.openapi.externalSystem.ExternalSystemManager;
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager;
 import com.intellij.openapi.externalSystem.ExternalSystemUiAware;
-import com.intellij.openapi.externalSystem.model.*;
+import com.intellij.openapi.externalSystem.model.DataNode;
+import com.intellij.openapi.externalSystem.model.ExternalProjectInfo;
+import com.intellij.openapi.externalSystem.model.ExternalSystemException;
+import com.intellij.openapi.externalSystem.model.Key;
+import com.intellij.openapi.externalSystem.model.ProjectKeys;
+import com.intellij.openapi.externalSystem.model.ProjectSystemId;
 import com.intellij.openapi.externalSystem.model.project.ExternalSystemSourceType;
 import com.intellij.openapi.externalSystem.model.project.LibraryData;
 import com.intellij.openapi.externalSystem.model.project.ModuleData;
@@ -50,12 +55,23 @@ import com.intellij.util.concurrency.EdtExecutorService;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -350,14 +366,6 @@ public final class ExternalSystemApiUtil {
     executeProjectChangeAction(true, componentManager, task);
   }
 
-  /**
-   * @deprecated Use executeProjectChangeAction(ComponentManager, Runnable) instead.
-   */
-  @Deprecated(forRemoval = true)
-  public static void executeProjectChangeAction(final @NotNull DisposeAwareProjectChange task) {
-    executeProjectChangeAction(true, task);
-  }
-
   public static void executeProjectChangeAction(boolean synchronous, @NotNull ComponentManager componentManager, @NotNull Runnable task) {
     if (!ApplicationManager.getApplication().isDispatchThread()) {
       TransactionGuard.getInstance().assertWriteSafeContext(ModalityState.defaultModalityState());
@@ -367,17 +375,6 @@ public final class ExternalSystemApiUtil {
         task.run();
       }
     }));
-  }
-
-  /**
-   * @deprecated Use executeProjectChangeAction(boolean, ComponentManager, Runnable) instead.
-   */
-  @Deprecated(forRemoval = true)
-  public static void executeProjectChangeAction(boolean synchronous, final @NotNull DisposeAwareProjectChange task) {
-    if (!ApplicationManager.getApplication().isDispatchThread()) {
-      TransactionGuard.getInstance().assertWriteSafeContext(ModalityState.defaultModalityState());
-    }
-    executeOnEdt(synchronous, () -> ApplicationManager.getApplication().runWriteAction(task));
   }
 
   public static void executeOnEdt(boolean synchronous, @NotNull Runnable task) {

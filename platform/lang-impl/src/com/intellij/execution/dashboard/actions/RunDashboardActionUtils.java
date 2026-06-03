@@ -1,24 +1,29 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.dashboard.actions;
 
-import com.intellij.execution.dashboard.RunDashboardManager;
+import com.intellij.execution.dashboard.LegacyRunDashboardServiceSubstitutor;
 import com.intellij.execution.dashboard.RunDashboardRunConfigurationNode;
-import com.intellij.execution.dashboard.RunDashboardService;
 import com.intellij.execution.services.ServiceViewActionUtils;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.project.Project;
+import com.intellij.platform.ide.productMode.IdeProductMode;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
-import static com.intellij.execution.dashboard.RunDashboardServiceIdKt.SELECTED_DASHBOARD_SERVICE_ID;
-import static com.intellij.execution.dashboard.RunDashboardServiceIdKt.findValue;
-
+/**
+ * @deprecated kept for compatibility with legacy run dashboard actions.
+ */
 @Internal
 @Deprecated(forRemoval = true)
 public final class RunDashboardActionUtils {
@@ -38,26 +43,21 @@ public final class RunDashboardActionUtils {
     if (project == null) return JBIterable.empty();
 
     Set<RunDashboardRunConfigurationNode> result = new LinkedHashSet<>();
+    var uiSelection = e.getData(PlatformCoreDataKeys.SELECTED_ITEMS);
+    if (uiSelection != null) {
+      JBIterable<Object> roots = JBIterable.of(uiSelection);
+      if (!getLeaves(project, e, roots.toList(), Collections.emptyList(), result)) return JBIterable.empty();
 
-    RunDashboardService selectedService = null;
-
-    var currentContentDescriptor = e.getData(LangDataKeys.RUN_CONTENT_DESCRIPTOR);
-    var currentContentDescriptorId = currentContentDescriptor == null ? null : currentContentDescriptor.getId();
-    if (currentContentDescriptorId != null) {
-      // backend case with run toolwindow that is not split in any way and does not properly receive a serialized data context from frontend
-      // because of obscure content manager-related wrapping mechanism
-      var maybeService = RunDashboardManager.getInstance(project).findService(currentContentDescriptorId);
-      selectedService = maybeService instanceof RunDashboardService ? (RunDashboardService)maybeService : null;
+      if (IdeProductMode.isMonolith()) {
+        var substitutor = ContainerUtil.getFirstItem(LegacyRunDashboardServiceSubstitutor.EP_NAME.getExtensionList());
+        if (substitutor == null) return JBIterable.from(result);
+        return JBIterable.from(ContainerUtil.map(result, it -> substitutor.substituteWithBackendService(it, project)));
+      }
+      else {
+        return JBIterable.from(result);
+      }
     }
-    if (selectedService == null) {
-      var selectedServiceId = e.getData(SELECTED_DASHBOARD_SERVICE_ID);
-      selectedService = selectedServiceId == null ? null : findValue(selectedServiceId);
-    }
-
-    JBIterable<Object> roots = JBIterable.of(selectedService);
-    if (!getLeaves(project, e, roots.toList(), Collections.emptyList(), result)) return JBIterable.empty();
-
-    return JBIterable.from(result);
+    return JBIterable.empty();
   }
 
   private static boolean getLeaves(Project project, AnActionEvent e, List<Object> items, List<Object> valueSubPath,

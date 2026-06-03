@@ -5,6 +5,7 @@ import com.google.common.base.Ascii;
 import com.intellij.execution.Executor;
 import com.intellij.execution.ExecutorRegistry;
 import com.intellij.execution.executors.DefaultRunExecutor;
+import com.intellij.ide.actions.ShowSettingsUtilImpl;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -18,7 +19,6 @@ import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.keymap.KeymapUtil;
-import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.util.Disposer;
@@ -41,8 +41,9 @@ import org.jetbrains.plugins.terminal.arrangement.TerminalWorkingDirectoryManage
 import org.jetbrains.plugins.terminal.fus.TerminalUsageTriggerCollector;
 import org.jetbrains.plugins.terminal.util.TerminalUtilKt;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.KeyStroke;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.io.IOException;
 import java.util.Arrays;
@@ -156,7 +157,7 @@ public final class TerminalShellCommandHandlerHelper {
     GotItTooltip tooltip = new GotItTooltip("terminal.smart_command_execution", content, notificationDisposable)
       .withHeader(TerminalBundle.message("smart_command_execution.notification.title"))
       .withLink(TerminalBundle.message("smart_command_execution.notification.configure_link.text"), () -> {
-        ShowSettingsUtil.getInstance().showSettingsDialog(myWidget.getProject(), TerminalOptionsConfigurable.class);
+        ShowSettingsUtilImpl.showSettingsDialog(myWidget.getProject(), TerminalUtil.TERMINAL_CONFIGURABLE_ID, null);
       })
       .withPosition(Balloon.Position.below);
     if (!tooltip.canShow()) {

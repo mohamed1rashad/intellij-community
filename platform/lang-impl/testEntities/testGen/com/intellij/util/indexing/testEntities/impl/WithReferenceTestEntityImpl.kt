@@ -1,18 +1,17 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.util.indexing.testEntities.impl
 
-import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.SymbolicEntityId
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.WorkspaceEntityWithSymbolicId
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.SoftLinkable
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -23,24 +22,21 @@ import com.intellij.platform.workspace.storage.impl.indices.WorkspaceMutableInde
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.util.indexing.testEntities.DependencyItem
-import com.intellij.util.indexing.testEntities.ModifiableWithReferenceTestEntity
 import com.intellij.util.indexing.testEntities.ReferredTestEntityId
 import com.intellij.util.indexing.testEntities.WithReferenceTestEntity
+import com.intellij.util.indexing.testEntities.WithReferenceTestEntityBuilder
 import com.intellij.util.indexing.testEntities.WithReferenceTestEntityId
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class WithReferenceTestEntityImpl(private val dataSource: WithReferenceTestEntityData) : WithReferenceTestEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class WithReferenceTestEntityImpl(private val dataSource: WithReferenceTestEntityData) : WithReferenceTestEntity,
+                                                                                                  WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -51,7 +47,6 @@ internal class WithReferenceTestEntityImpl(private val dataSource: WithReference
       readField("name")
       return dataSource.name
     }
-
   override val references: List<DependencyItem>
     get() {
       readField("references")
@@ -69,8 +64,8 @@ internal class WithReferenceTestEntityImpl(private val dataSource: WithReference
   }
 
 
-  internal class Builder(result: WithReferenceTestEntityData?) : ModifiableWorkspaceEntityBase<WithReferenceTestEntity, WithReferenceTestEntityData>(
-    result), ModifiableWithReferenceTestEntity {
+  internal class Builder(result: WithReferenceTestEntityData?) :
+    ModifiableWorkspaceEntityBase<WithReferenceTestEntity, WithReferenceTestEntityData>(result), WithReferenceTestEntityBuilder {
     internal constructor() : this(WithReferenceTestEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -83,15 +78,13 @@ internal class WithReferenceTestEntityImpl(private val dataSource: WithReference
           error("Entity WithReferenceTestEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -138,7 +131,6 @@ internal class WithReferenceTestEntityImpl(private val dataSource: WithReference
         changedProperty.add("entitySource")
 
       }
-
     override var name: String
       get() = getEntityData().name
       set(value) {
@@ -146,7 +138,6 @@ internal class WithReferenceTestEntityImpl(private val dataSource: WithReference
         getEntityData(true).name = value
         changedProperty.add("name")
       }
-
     private val referencesUpdater: (value: List<DependencyItem>) -> Unit = { value ->
 
       changedProperty.add("references")
@@ -171,6 +162,7 @@ internal class WithReferenceTestEntityImpl(private val dataSource: WithReference
 
     override fun getEntityClass(): Class<WithReferenceTestEntity> = WithReferenceTestEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -196,7 +188,7 @@ internal class WithReferenceTestEntityData : WorkspaceEntityData<WithReferenceTe
   }
 
   override fun updateLinksIndex(prev: Set<SymbolicEntityId<*>>, index: WorkspaceMutableIndex<SymbolicEntityId<*>>) {
-    // TODO verify logic
+// TODO verify logic
     val mutablePreviousSet = HashSet(prev)
     for (item in references) {
       val removedItem_item_reference = mutablePreviousSet.remove(item.reference)
@@ -236,14 +228,13 @@ internal class WithReferenceTestEntityData : WorkspaceEntityData<WithReferenceTe
     return changed
   }
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<WithReferenceTestEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<WithReferenceTestEntity> {
     val modifiable = WithReferenceTestEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): WithReferenceTestEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -269,9 +260,8 @@ internal class WithReferenceTestEntityData : WorkspaceEntityData<WithReferenceTe
     return WithReferenceTestEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return WithReferenceTestEntity(name, references, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return WithReferenceTestEntity(name, references, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -282,9 +272,7 @@ internal class WithReferenceTestEntityData : WorkspaceEntityData<WithReferenceTe
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as WithReferenceTestEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.name != other.name) return false
     if (this.references != other.references) return false
@@ -294,9 +282,7 @@ internal class WithReferenceTestEntityData : WorkspaceEntityData<WithReferenceTe
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as WithReferenceTestEntityData
-
     if (this.name != other.name) return false
     if (this.references != other.references) return false
     return true

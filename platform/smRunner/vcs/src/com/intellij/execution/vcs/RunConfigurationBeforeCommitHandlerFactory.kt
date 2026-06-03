@@ -2,7 +2,12 @@
 package com.intellij.execution.vcs
 
 import com.intellij.build.BuildView
-import com.intellij.execution.*
+import com.intellij.execution.ExecutionTargetManager
+import com.intellij.execution.Executor
+import com.intellij.execution.ProgramRunnerUtil
+import com.intellij.execution.RunManager
+import com.intellij.execution.RunnerAndConfigurationSettings
+import com.intellij.execution.TestStateStorage
 import com.intellij.execution.compound.CompoundRunConfiguration
 import com.intellij.execution.configurations.ConfigurationTypeUtil
 import com.intellij.execution.configurations.RunConfiguration
@@ -23,13 +28,18 @@ import com.intellij.execution.testframework.sm.runner.ui.TestResultsViewer
 import com.intellij.execution.ui.ConsoleViewWithDelegate
 import com.intellij.execution.ui.ExecutionConsole
 import com.intellij.execution.ui.RunContentDescriptor
+import com.intellij.execution.ui.unwrapDelegate
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
@@ -41,7 +51,11 @@ import com.intellij.openapi.vcs.CheckinProjectPanel
 import com.intellij.openapi.vcs.VcsBundle
 import com.intellij.openapi.vcs.changes.CommitContext
 import com.intellij.openapi.vcs.changes.ui.BooleanCommitOption
-import com.intellij.openapi.vcs.checkin.*
+import com.intellij.openapi.vcs.checkin.CheckinHandler
+import com.intellij.openapi.vcs.checkin.CheckinHandlerFactory
+import com.intellij.openapi.vcs.checkin.CommitCheck
+import com.intellij.openapi.vcs.checkin.CommitInfo
+import com.intellij.openapi.vcs.checkin.CommitProblem
 import com.intellij.openapi.vcs.ui.RefreshableOnComponent
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -53,7 +67,12 @@ import com.intellij.ui.components.labels.LinkLabel
 import com.intellij.util.containers.addIfNotNull
 import com.intellij.vcs.commit.NullCommitWorkflowHandler
 import com.intellij.vcs.commit.isNonModalCommit
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 
 private val LOG = logger<RunConfigurationBeforeCommitHandlerFactory>()
@@ -74,7 +93,7 @@ private class VcsRunConfigurationBeforeCommitConfig : PersistentStateComponent<V
   }
 }
 
-private class RunConfigurationBeforeCommitHandlerFactory : CheckinHandlerFactory() {
+internal class RunConfigurationBeforeCommitHandlerFactory : CheckinHandlerFactory() {
   override fun createHandler(panel: CheckinProjectPanel, commitContext: CommitContext): CheckinHandler {
     if (panel.isNonModalCommit || panel.commitWorkflowHandler is NullCommitWorkflowHandler) {
       return RunConfigurationBeforeCommitHandler(panel.project)
@@ -181,8 +200,7 @@ private class RunConfigurationBeforeCommitHandler(private val project: Project) 
     val handler = descriptor.processHandler
     if (handler != null) {
       val executionConsole = descriptor.console
-      val testResultForm = getTestRunnerResultsForm(executionConsole)
-                           ?: getTestRunnerResultsForm((executionConsole as? ConsoleViewWithDelegate)?.delegate)
+      val testResultForm = getTestRunnerResultsForm(executionConsole?.unwrapDelegate())
       val processListener = object : ProcessListener {
         override fun processTerminated(event: ProcessEvent) {
           val result = RunConfigurationResult(

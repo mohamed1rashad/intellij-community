@@ -1,4 +1,4 @@
-<idea-plugin package="com.jetbrains.performancePlugin" allow-bundled-update="true">
+<idea-plugin allow-bundled-update="true">
   <id>com.jetbrains.performancePlugin</id>
   <name>Performance Testing</name>
   <vendor>JetBrains</vendor>
@@ -13,28 +13,32 @@
     Read More</a></p>
   ]]></description>
 
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+  <dependencies>
+    <module name="intellij.platform.structureView.impl"/>
+  </dependencies>
+  <!-- endregion -->
   <content namespace="jetbrains">
     <module name="intellij.performanceTesting.remoteDriver"/>
     <module name="intellij.performanceTesting.remoteDriver.compose"/>
     <module name="intellij.performanceTesting.vcs"/>
     <module name="intellij.performanceTesting.frontend"/>
+    <module name="intellij.performanceTesting.backend"/>
+    <module name="intellij.performanceTesting.frontend.split"/>
     <module name="intellij.tools.ide.starter.bus" loading="embedded"/>
     <module name="intellij.driver.model" loading="embedded"/>
     <module name="intellij.driver.impl" loading="embedded"/>
     <module name="intellij.driver.client" loading="embedded"/>
+    <module name="intellij.driver.frontend.split"/>
+    <module name="intellij.performanceTesting.async.core"/>
   </content>
-
-  <dependencies>
-    <plugin id="com.intellij.modules.lang"/>
-  </dependencies>
+  <content>
+    <module name="intellij.libraries.assertj.core" loading="embedded"/>
+  </content>
 
   <actions>
     <group id="StartProfileGroup">
       <add-to-group group-id="HelpDiagnosticTools" anchor="last"/>
-    </group>
-    <group id="IndexingDiagnosticGroup">
-      <action class="com.jetbrains.performancePlugin.actions.OpenIndexingDiagnosticsAction" id="performancePlugin.OpenIndexingDiagnosticsAction"/>
-      <add-to-group group-id="HelpDiagnosticTools" anchor="after" relative-to-action="CollectTroubleshootingInformation"/>
     </group>
     <group id="DiagnosticGroup">
       <separator/>
@@ -43,14 +47,18 @@
       <add-to-group group-id="HelpDiagnosticTools" anchor="last"/>
     </group>
 
-    <action id="SimulateFreeze" internal="true" class="com.jetbrains.performancePlugin.actions.SimulateFreeze"
-            text="Simulate a Freeze"/>
+    <action id="SimulateFreeze" internal="true" class="com.jetbrains.performancePlugin.actions.SimulateFreeze"/>
+    <action id="SimulateRWFreeze" internal="true" class="com.jetbrains.performancePlugin.actions.SimulateRWFreeze"/>
+
+    <reference ref="CaptureMemorySnapShot">
+      <add-to-group group-id="HelpMenu" relative-to-action="CollectZippedLogs" anchor="after"/>
+    </reference>
   </actions>
 
   <extensionPoints>
     <extensionPoint interface="com.jetbrains.performancePlugin.CommandProvider" name="commandProvider" dynamic="true"/>
     <extensionPoint interface="com.jetbrains.performancePlugin.PerformancePlaybackRunner" name="playbackRunnerProvider" dynamic="true"/>
-    <extensionPoint interface="com.jetbrains.performancePlugin.RunCallbackHandler" name="runCallbackHandler"/>
+    <extensionPoint interface="com.jetbrains.performancePlugin.RunCallbackHandler" name="runCallbackHandler" dynamic="false"/>
     <extensionPoint interface="com.jetbrains.performancePlugin.profilers.SnapshotOpener" name="snapshotOpener" dynamic="true"/>
     <extensionPoint interface="com.jetbrains.performancePlugin.profilers.Profiler" name="profiler" dynamic="true"/>
   </extensionPoints>
@@ -63,8 +71,12 @@
     <postStartupActivity implementation="com.jetbrains.performancePlugin.PerformanceTestTotalTimeTimer" />
     <applicationInitializedListener implementation="com.jetbrains.performancePlugin.ProjectLoaded"/>
 
-    <notificationGroup id="PerformancePlugin" displayType="BALLOON" bundle="messages.PerformanceTestingBundle" key="notification.group.performance.plugin"/>
-    <registryKey key="performance.plugin.playback.runner.useDirectActionCall" description="Setup PlaybackRunner to use direct action calls over key strokes for actions in Playback framework" defaultValue="false" restartRequired="false"/>
+    <notificationGroup id="PerformancePlugin" displayType="STICKY_BALLOON"
+                       bundle="messages.PerformanceTestingBundle" key="notification.group.performance.plugin"
+                       notificationIds="promo.notification.automatic.error.report"/>
+    <registryKey key="performance.plugin.playback.runner.useDirectActionCall" defaultValue="false"
+                 description="Setup PlaybackRunner to use direct action calls over key strokes for actions in Playback framework"
+                 restartRequired="false"/>
 
     <projectService overrides="true"
                     serviceInterface="com.intellij.internal.performanceTests.ProjectInitializationDiagnosticService"
@@ -73,7 +85,13 @@
     <ide.dynamicPluginVetoer implementation="com.jetbrains.performancePlugin.PlaybackRunnerExtended$PlaybackRunnerExtendedPluginUnloadVetoer"/>
     <ApplicationLoadListener implementation="com.jetbrains.performancePlugin.IntegrationTestApplicationLoadListener" id="testApplicationLoadListener"/>
 
-    <appStarter id="stopTelemetry" implementation="com.jetbrains.performancePlugin.StopTelemetryStarter"/>
+    <appStarter id="stopTelemetry" implementation="com.jetbrains.performancePlugin.StopTelemetryStarter" internal="true"/>
+
+    <backgroundPostStartupActivity implementation="com.jetbrains.performancePlugin.promo.ErrorReportPromoterActivity"/>
+    <diagnostic.freezeNotifier implementation="com.jetbrains.performancePlugin.promo.FreezeCounterListener"/>
+
+    <toolWindow id="EventQueue Watcher" anchor="bottom" canCloseContents="false" doNotActivateOnStart="true"
+                factoryClass="com.jetbrains.performancePlugin.ui.EventWatcherToolWindowFactory"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.jetbrains">
@@ -92,6 +110,12 @@
 
     <listener class="com.jetbrains.performancePlugin.commands.WaitForFinishedCodeAnalysisListener"
               topic="com.intellij.codeInsight.daemon.DaemonCodeAnalyzer$DaemonListener"/>
+
+    <listener class="com.jetbrains.performancePlugin.commands.BeforeFileOpenLoggerListener"
+              topic="com.intellij.openapi.fileEditor.FileEditorManagerListener$Before"/>
+
+    <listener class="com.jetbrains.performancePlugin.commands.FileOpenLoggerListener"
+              topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
   </projectListeners>
 
   <extensions defaultExtensionNs="com.jetbrains.performancePlugin">

@@ -2,18 +2,19 @@
 package com.intellij.uiDesigner.propertyInspector.editors;
 
 import com.intellij.openapi.util.NlsSafe;
-import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.uiDesigner.propertyInspector.InplaceContext;
 import com.intellij.uiDesigner.radComponents.RadComponent;
 import com.intellij.uiDesigner.shared.BorderType;
 
-import javax.swing.*;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.JComponent;
 
 public final class BorderTypeEditor extends ComboBoxPropertyEditor<BorderType> {
   public BorderTypeEditor(){
     myCbx.setModel(new DefaultComboBoxModel<>(BorderType.getAllTypes()));
     @NlsSafe String name = BorderType.NONE.getName();
-    myCbx.setRenderer(SimpleListCellRenderer.create(name, BorderType::getName));
+    myCbx.setRenderer(BuilderKt.textListCellRenderer(name, BorderType::getName));
   }
 
   @Override

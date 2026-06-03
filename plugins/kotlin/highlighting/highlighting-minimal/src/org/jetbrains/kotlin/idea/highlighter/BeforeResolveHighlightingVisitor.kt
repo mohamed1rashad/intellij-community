@@ -7,7 +7,6 @@ import com.intellij.codeInsight.daemon.impl.analysis.HighlightInfoHolder
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.project.DumbAware
-import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.base.highlighting.BeforeResolveHighlightingExtension
@@ -16,9 +15,12 @@ import org.jetbrains.kotlin.kdoc.parser.KDocKnownTag
 import org.jetbrains.kotlin.kdoc.psi.impl.KDocLink
 import org.jetbrains.kotlin.kdoc.psi.impl.KDocTag
 import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.endOffset
-import org.jetbrains.kotlin.psi.psiUtil.startOffset
+import org.jetbrains.kotlin.psi.KtExpressionWithLabel
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtSuperTypeCallEntry
+import org.jetbrains.kotlin.psi.KtTypeParameter
+import org.jetbrains.kotlin.psi.KtUserType
 
 class BeforeResolveHighlightingVisitor(holder: HighlightInfoHolder) : AbstractHighlightingVisitor(holder), DumbAware {
     override fun visitElement(element: PsiElement) {
@@ -64,20 +66,6 @@ class BeforeResolveHighlightingVisitor(holder: HighlightInfoHolder) : AbstractHi
         if (arrow != null) {
             highlightName(arrow, KotlinHighlightInfoTypeSemanticNames.FUNCTION_LITERAL_BRACES_AND_ARROW)
         }
-    }
-
-    override fun visitArgument(argument: KtValueArgument) {
-        val argumentName = argument.getArgumentName() ?: return
-        val eq = argument.equalsToken ?: return
-        val parent = argument.parent
-        highlightName(argument.project,
-                      argument,
-            TextRange(argumentName.startOffset, eq.endOffset),
-            if (parent is KtValueArgumentList && parent.parent is KtAnnotationEntry)
-                KotlinHighlightInfoTypeSemanticNames.ANNOTATION_ATTRIBUTE_NAME_ATTRIBUTES
-            else
-                KotlinHighlightInfoTypeSemanticNames.NAMED_ARGUMENT
-        )
     }
 
     override fun visitExpressionWithLabel(expression: KtExpressionWithLabel) {

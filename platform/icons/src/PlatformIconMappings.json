@@ -3,6 +3,8 @@
     "actions": {
       "addFile.svg": "actions/addFile.svg",
       "addToDictionary.svg": "actions/addToDictionary.svg",
+      "addExcludedRoot.svg": "modules/addExcludedRoot.svg",
+      "addLink.svg": "toolbarDecorator/addLink.svg",
       "buildLoadChanges.svg": "actions/buildLoadChanges.svg",
       "buildAutoReloadChanges.svg": "actions/buildAutoReloadChanges.svg",
       "checked.svg": ["actions/checked.svg", "actions/setDefault.svg"],
@@ -282,6 +284,7 @@
       "jsonSchema.svg": "fileTypes/jsonSchema.svg",
       "jsp.svg": "fileTypes/jsp.svg",
       "jspx.svg": "fileTypes/jspx.svg",
+      "hprof.svg": "fileTypes/hprof.svg",
       "manifest.svg": "fileTypes/manifest.svg",
       "microsoftWindows.svg": "fileTypes/microsoftWindows.svg",
       "modified.svg": "general/modified.svg",
@@ -541,6 +544,7 @@
       "feedbackRatingFocused.svg": "ide/feedbackRatingFocused.svg",
       "feedbackRatingFocusedOn.svg": "ide/feedbackRatingFocusedOn.svg",
       "feedbackRatingOn.svg": "ide/feedbackRatingOn.svg",
+      "gift.svg": "ide/gift.svg",
       "localScope.svg": [
         "ide/localScope.svg",
         "ide/localScopeAction.svg"
@@ -699,6 +703,7 @@
       "ideaProject.svg": ["nodes/ideaProject.svg", "nodes/enterpriseProject.svg"],
       "include.svg": "nodes/include.svg",
       "interface.svg": "nodes/interface.svg",
+      "javaDocFolder.svg": "nodes/javaDocFolder.svg",
       "jdk.svg": "nodes/ppJdk.svg",
       "lambda.svg": "nodes/lambda.svg",
       "library.svg": "nodes/ppLib.svg",
@@ -1002,7 +1007,8 @@
     "webReferences": {
       "server.svg": "webreferences/server.svg",
       "openApi.svg": "webreferences/openapi.svg",
-      "messageQueue.svg": "webreferences/messageQueue.svg"
+      "messageQueue.svg": "webreferences/messageQueue.svg",
+      "webSocket.svg": "webreferences/webSocket.svg"
     },
     "welcome": {
       "createNewProjectTab.svg": "welcome/createNewProjectTab.svg",

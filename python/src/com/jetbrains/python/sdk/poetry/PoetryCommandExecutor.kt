@@ -2,33 +2,37 @@
 package com.jetbrains.python.sdk.poetry
 
 import com.intellij.execution.Platform
-import com.intellij.ide.util.PropertiesComponent
-import com.intellij.openapi.module.Module
 import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.platform.eel.EelApi
-import com.intellij.platform.eel.provider.asNioPath
-import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.platform.eel.provider.localEel
-import com.intellij.platform.eel.provider.systemOs
-import com.intellij.python.community.execService.Args
-import com.intellij.python.community.execService.BinOnEel
-import com.intellij.python.community.execService.ExecService
-import com.intellij.python.community.execService.execGetStdout
+import com.intellij.python.community.execService.python.validatePythonAndGetInfo
 import com.intellij.python.community.impl.poetry.common.poetryPath
-import com.intellij.python.pyproject.PY_PROJECT_TOML
-import com.jetbrains.python.*
+import com.jetbrains.python.PyBundle
+import com.jetbrains.python.PythonBinary
+import com.jetbrains.python.PythonHomePath
+import com.jetbrains.python.errorProcessing.ErrorSink
 import com.jetbrains.python.errorProcessing.PyResult
+import com.jetbrains.python.errorProcessing.emit
+import com.jetbrains.python.getOrNull
+import com.jetbrains.python.isSuccess
+import com.jetbrains.python.onFailure
 import com.jetbrains.python.packaging.PyPackage
+import com.jetbrains.python.packaging.PyPackageName
 import com.jetbrains.python.packaging.PyRequirement
 import com.jetbrains.python.packaging.PyRequirementParser
 import com.jetbrains.python.packaging.common.PythonOutdatedPackage
 import com.jetbrains.python.packaging.common.PythonPackage
-import com.jetbrains.python.sdk.PyDetectedSdk
+import com.jetbrains.python.sdk.ToolCommandExecutor
+import com.jetbrains.python.sdk.ToolSearchPath
+import com.jetbrains.python.sdk.add.v2.EelFileSystem
+import com.jetbrains.python.sdk.add.v2.FileSystem
+import com.jetbrains.python.sdk.add.v2.PathHolder
+import com.jetbrains.python.sdk.add.v2.toEelFileSystem
 import com.jetbrains.python.sdk.associatedModulePath
-import com.jetbrains.python.sdk.basePath
-import com.jetbrains.python.sdk.runExecutableWithProgress
+import com.jetbrains.python.sdk.impl.PySdkBundle
+import com.jetbrains.python.sdk.pyRichSdkAsync
+import com.jetbrains.python.sdk.runTool
 import com.jetbrains.python.venvReader.VirtualEnvReader
 import io.github.z4kn4fein.semver.Version
 import io.github.z4kn4fein.semver.toVersion
@@ -36,57 +40,59 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.Nls
-import org.jetbrains.annotations.NonNls
-import org.jetbrains.annotations.SystemIndependent
 import java.nio.file.Path
-import kotlin.io.path.exists
+import kotlin.io.path.name
 import kotlin.io.path.pathString
-import kotlin.time.Duration.Companion.minutes
 
 /**
  *  This source code is edited by @koxudaxi Koudai Aono <koxudaxi@gmail.com>
  */
-private const val REPLACE_PYTHON_VERSION = """import re,sys;f=open("$PY_PROJECT_TOML", "r+");orig=f.read();f.seek(0);f.write(re.sub(r"(python = \"\^)[^\"]+(\")", "\g<1>"+'.'.join(str(v) for v in sys.version_info[:2])+"\g<2>", orig))"""
 private val poetryNotFoundException: @Nls String = PyBundle.message("python.sdk.poetry.execution.exception.no.poetry.message")
 private val VERSION_2 = "2.0.0".toVersion()
 
+
+private val POETRY_TOOL: ToolCommandExecutor = ToolCommandExecutor(
+  "poetry",
+  // TODO: Poetry from store isn't detected because local eel doesn't obey appx binaries. We need to fix it on eel side
+  additionalSearchPaths = listOf(ToolSearchPath.RelativePathFromHome(listOf(".poetry", ".bin"), Platform.WINDOWS)),
+  getToolPathFromSettings = { poetryPath }
+)
+
+private val POETRY_EXCLUDE_NON_DIGITS_REGEX = Regex("""\D+$""")
+
 @Internal
-suspend fun runPoetry(projectPath: Path?, vararg args: String): PyResult<String> {
-  val eel = withContext(Dispatchers.IO) { projectPath?.getEelDescriptor()?.toEelApi() }
-  val executable = getPoetryExecutable(eel ?: localEel).getOr { return it }
-  return runExecutableWithProgress(executable, projectPath, 10.minutes, args = args)
+suspend fun runPoetry(
+  projectPath: Path?,
+  vararg args: String,
+  inProjectEnv: Boolean? = null,
+  baseEnv: Map<String, String> = emptyMap(),
+): PyResult<String> {
+  val env = baseEnv.toMutableMap().apply {
+    if (inProjectEnv != null) put("POETRY_VIRTUALENVS_IN_PROJECT", inProjectEnv.toString())
+  }
+  return POETRY_TOOL.runTool(
+    fileSystem = projectPath.toEelFileSystem(),
+    pathFromSdk = null,
+    dirPath = projectPath,
+    args = args,
+    env = env,
+  )
 }
 
 
 /**
- * Detects the poetry executable in `$PATH`.
+ * Returns the configured poetry executable or detects it automatically on the given [fileSystem].
  */
-internal suspend fun detectPoetryExecutable(eel: EelApi = localEel): PyResult<Path> {
-  val windows = eel.systemOs().platform == Platform.WINDOWS
-  val poetryBinNames = if (windows) {
-    setOf("poetry.exe", "poetry.bat")
-  }
-  else {
-    setOf("poetry")
-  }
-
-  // TODO: Poetry from store isn't detected because local eel doesn't obey appx binaries. We need to fix it on eel side
-  val userHomePoetry = eel.userInfo.home.resolve(".poetry").resolve(".bin")
-  val executablePath = withContext(Dispatchers.IO) {
-    poetryBinNames.flatMap { eel.exec.findExeFilesInPath(it) }.firstOrNull()?.asNioPath()
-    ?: poetryBinNames.map { userHomePoetry.resolve(it).asNioPath() }.firstOrNull { it.exists() }
-  }
-
-  return executablePath?.let { PyResult.success(it) } ?: PyResult.localizedError(poetryNotFoundException)
-}
+@Internal
+suspend fun <P : PathHolder> getPoetryExecutable(fileSystem: FileSystem<P>): P? =
+  POETRY_TOOL.getToolExecutable(fileSystem, pathFromSdk = null)
 
 /**
  * Returns the configured poetry executable or detects it automatically.
  */
 @Internal
-suspend fun getPoetryExecutable(eel: EelApi = localEel): PyResult<Path> = withContext(Dispatchers.IO) {
-  PropertiesComponent.getInstance().poetryPath?.let { Path.of(it) }?.takeIf { it.exists() && it.getEelDescriptor() == eel.descriptor }
-}?.let { PyResult.success(it) } ?: detectPoetryExecutable(eel)
+suspend fun getPoetryExecutable(eel: EelApi = localEel): Path? =
+  getPoetryExecutable(EelFileSystem(eel))?.path
 
 /**
  * Runs poetry command for the specified Poetry SDK.
@@ -98,8 +104,14 @@ suspend fun getPoetryExecutable(eel: EelApi = localEel): PyResult<Path> = withCo
 suspend fun runPoetryWithSdk(sdk: Sdk, vararg args: String): PyResult<String> {
   val projectPath = sdk.associatedModulePath?.let { Path.of(it) }
                     ?: return PyResult.localizedError(poetryNotFoundException) // Choose a correct sdk
-  runPoetry(projectPath, "env", "use", sdk.homePath!!)
-  return runPoetry(projectPath, *args)
+  val pythonHomePath = sdk.pyRichSdkAsync().pythonHomePath
+                       ?: return PyResult.localizedError(PySdkBundle.message("python.sdk.broken.configuration", sdk.name))
+  val env = buildMap {
+    put("POETRY_VIRTUALENVS_IN_PROJECT", "false")
+    put("POETRY_VIRTUALENVS_PREFER_ACTIVE_PYTHON", "true")
+    put("VIRTUAL_ENV", pythonHomePath.toAbsolutePath().toString())
+  }
+  return runPoetry(projectPath, *args, baseEnv = env)
 }
 
 
@@ -109,47 +121,56 @@ suspend fun runPoetryWithSdk(sdk: Sdk, vararg args: String): PyResult<String> {
  * @return the path to the poetry environment.
  */
 @Internal
-suspend fun setupPoetry(projectPath: Path, basePythonBinaryPath: PythonBinary?, installPackages: Boolean, init: Boolean): PyResult<PythonHomePath> {
+suspend fun setupPoetry(
+  projectPath: Path,
+  basePythonBinaryPath: PythonBinary,
+  installPackages: Boolean,
+  init: Boolean,
+  errorSink: ErrorSink,
+  inProjectEnv: Boolean = false,
+): PyResult<PythonHomePath> {
   if (init) {
-    runPoetry(projectPath, *listOf("init", "-n").toTypedArray()).getOr { return it }
+    // Build poetry init command with Python version constraint if available
+    val initArgs = mutableListOf("init", "-n")
 
-    if (basePythonBinaryPath != null) { // Replace a python version in toml
-      ExecService().execGetStdout(
-        binary = BinOnEel(path = basePythonBinaryPath, workDir = projectPath),
-        args = Args("-c", REPLACE_PYTHON_VERSION)
-      ).getOr { return it }
+    val projectName = PyPackageName.normalizeProjectName(projectPath.name)
+    if (projectName.isNotBlank()) {
+      initArgs.add("--name")
+      initArgs.add(projectName)
     }
+
+    // Validate Python and get version info
+    val pythonInfo = basePythonBinaryPath.validatePythonAndGetInfo().getOr { return it }
+    val major = pythonInfo.languageLevel.majorVersion
+    val minor = pythonInfo.languageLevel.minorVersion
+    // Add --python flag with caret constraint (e.g., "^3.10")
+    initArgs.add("--python")
+    initArgs.add("^$major.$minor")
+
+    runPoetry(projectPath, *initArgs.toTypedArray(), inProjectEnv = inProjectEnv).getOr { return it }
   }
 
-  if (basePythonBinaryPath != null) {
-    runPoetry(projectPath, "env", "use", basePythonBinaryPath.pathString).getOr { return it }
-  }
-  else {
-    runPoetry(projectPath, "run", "python", "-V").getOr { return it }
-  }
+  runPoetry(projectPath, "env", "use", basePythonBinaryPath.pathString, inProjectEnv = inProjectEnv).getOr { return it }
 
   if (installPackages) {
-    runPoetry(projectPath, "install").getOr { return it }
+    runPoetry(projectPath, "install", "--no-root", inProjectEnv = inProjectEnv).onFailure { errorSink.emit(it) }
   }
 
-  return runPoetry(projectPath, "env", "info", "-p").mapSuccess { Path.of(it) }
+  return runPoetry(projectPath, "env", "info", "-p", inProjectEnv = inProjectEnv).mapSuccess { Path.of(it) }
 }
 
-internal suspend fun detectPoetryEnvs(module: Module?, existingSdkPaths: Set<String>?, projectPath: @SystemIndependent @NonNls String?): List<PyDetectedSdk> {
-  val path = module?.basePath?.let { Path.of(it) } ?: projectPath?.let { Path.of(it) } ?: return emptyList()
-  return getPoetryEnvs(path).filter { existingSdkPaths?.contains(getPythonExecutable(it)) != false }.map { PyDetectedSdk(getPythonExecutable(it)) }
-}
+internal suspend fun detectPoetryEnvs(searchPath: Path): List<PythonBinary> =
+  getPoetryEnvs(searchPath).mapNotNull { getPythonExecutable(it) }
 
 internal suspend fun getPoetryVersion(): String? =
   runPoetry(null, "--version")
     .getOrNull()
     ?.split(' ')
     ?.lastOrNull()
-    ?.replace(Regex("""\D+$"""), "") // strip all non-numeric characters after the version
+    ?.replace(POETRY_EXCLUDE_NON_DIGITS_REGEX, "") // strip all non-numeric characters after the version
 
-@Internal
-suspend fun getPythonExecutable(homePath: String): String = withContext(Dispatchers.IO) {
-  VirtualEnvReader.Instance.findPythonInPythonRoot(Path.of(homePath))?.toString() ?: FileUtil.join(homePath, "bin", "python")
+private suspend fun getPythonExecutable(homePathString: String): PythonBinary? = withContext(Dispatchers.IO) {
+  VirtualEnvReader().findPythonInPythonRoot(Path.of(homePathString))
 }
 
 /**
@@ -201,7 +222,7 @@ fun parsePoetryShow(input: String): List<PythonPackage> {
 
 @Internal
 suspend fun poetryShowOutdated(sdk: Sdk): PyResult<Map<String, PythonOutdatedPackage>> {
-  val output = runPoetryWithSdk(sdk, "show", "--outdated").getOr { return it }
+  val output = runPoetryWithSdk(sdk, "show", "--all", "--outdated").getOr { return it }
 
   return parsePoetryShowOutdated(output).let { PyResult.success(it) }
 }

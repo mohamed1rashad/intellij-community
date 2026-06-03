@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes;
 
@@ -331,6 +331,11 @@ public abstract class HighLevelQuickFixMultiModuleTestGenerated extends Abstract
             runTest("../../../idea/tests/testData/multiModuleQuickFix/addMissingActualMembers/membersWithIncorrectType/");
         }
 
+        @TestMetadata("nestedTypeAlias")
+        public void testNestedTypeAlias() throws Exception {
+            runTest("../../../idea/tests/testData/multiModuleQuickFix/addMissingActualMembers/nestedTypeAlias/");
+        }
+
         @TestMetadata("primaryConstructorAbsence")
         public void testPrimaryConstructorAbsence() throws Exception {
             runTest("../../../idea/tests/testData/multiModuleQuickFix/addMissingActualMembers/primaryConstructorAbsence/");
@@ -490,6 +495,11 @@ public abstract class HighLevelQuickFixMultiModuleTestGenerated extends Abstract
         @TestMetadata("override6")
         public void testOverride6() throws Exception {
             runTest("../../../idea/tests/testData/multiModuleQuickFix/changeSignature/override6/");
+        }
+
+        @TestMetadata("override7")
+        public void testOverride7() throws Exception {
+            runTest("../../../idea/tests/testData/multiModuleQuickFix/changeSignature/override7/");
         }
     }
 
@@ -966,6 +976,11 @@ public abstract class HighLevelQuickFixMultiModuleTestGenerated extends Abstract
         @TestMetadata("nestedClass")
         public void testNestedClass() throws Exception {
             runTest("../../../idea/tests/testData/multiModuleQuickFix/createExpect/nestedClass/");
+        }
+
+        @TestMetadata("nestedTypeAlias")
+        public void testNestedTypeAlias() throws Exception {
+            runTest("../../../idea/tests/testData/multiModuleQuickFix/createExpect/nestedTypeAlias/");
         }
 
         @TestMetadata("noAccessOnMember")

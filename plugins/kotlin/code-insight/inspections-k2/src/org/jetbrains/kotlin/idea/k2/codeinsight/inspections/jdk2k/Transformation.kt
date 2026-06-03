@@ -16,7 +16,12 @@ import org.jetbrains.kotlin.idea.base.psi.imports.addImport
 import org.jetbrains.kotlin.idea.base.psi.replaced
 import org.jetbrains.kotlin.idea.util.CommentSaver
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtParenthesizedExpression
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelectorOrThis
 import org.jetbrains.kotlin.psi.psiUtil.getReceiverExpression
 
@@ -88,7 +93,7 @@ object ToExtensionFunctionWithNonNullableReceiver : Transformation {
 }
 
 object ToExtensionFunctionWithNullableReceiver : Transformation {
-    override fun invoke(callExpression: KtCallExpression, replacement: Replacement) =
+    override fun invoke(callExpression: KtCallExpression, replacement: Replacement): Unit =
         ToExtensionFunctionWithNonNullableReceiver(callExpression, replacement)
 
     override fun isApplicableByPsi(callExpression: KtCallExpression): Boolean =
@@ -96,7 +101,7 @@ object ToExtensionFunctionWithNullableReceiver : Transformation {
 }
 
 object ToExtensionFunctionWithNullableReceiverForMutableCollection : Transformation {
-    override fun invoke(callExpression: KtCallExpression, replacement: Replacement) =
+    override fun invoke(callExpression: KtCallExpression, replacement: Replacement): Unit =
         ToExtensionFunctionWithNonNullableReceiver(callExpression, replacement)
 
     override fun isApplicableByPsi(callExpression: KtCallExpression): Boolean =

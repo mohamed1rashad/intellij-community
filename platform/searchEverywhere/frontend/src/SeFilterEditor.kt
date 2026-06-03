@@ -12,16 +12,19 @@ import org.jetbrains.annotations.ApiStatus
  * @param resultFlow a flow of filter state changes.
  * @function getPresentation returns a presentation of the filter editor.
  */
-@ApiStatus.Internal
+@ApiStatus.Experimental
 interface SeFilterEditor {
   val resultFlow: StateFlow<SeFilterState>
 
   fun getHeaderActions(): List<AnAction>
 
   fun getSearchFieldActions(): List<AnAction> = emptyList()
+
+  @ApiStatus.Internal
+  fun closeFilterPopup() {}
 }
 
-@ApiStatus.Internal
+@ApiStatus.Experimental
 interface AutoToggleAction {
   /**
    * Automatically toggles the search scope between the everywhere scope

@@ -1,18 +1,18 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.gdpr;
 
-import com.intellij.ide.gdpr.ui.consents.ConsentGroup;
-import com.intellij.ide.gdpr.ui.consents.DataCollectionConsentGroupUI;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.testFramework.junit5.TestApplication;
-import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.*;
 import kotlin.Pair;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * @author Eugene Zhuravlev
@@ -23,19 +23,8 @@ public class ConsentsTest {
   private static final String JSON_MINOR_UPGRADE_CONSENTS_DATA = "[{\"consentId\":\"rsch.test.consent.option.for.intellij\",\"version\":\"1.5\",\"text\":\"This is an upgraded text of test consent option.\",\"printableName\":\"Test consent option\",\"accepted\":true,\"deleted\":false,\"acceptanceTime\":0}]";
   private static final String JSON_MAJOR_UPGRADE_CONSENTS_DATA = "[{\"consentId\":\"rsch.send.usage.stat\",\"version\":\"2.0\",\"text\":\"This is an major-upgraded text of usage stats option.\",\"printableName\":\"Test consent option\",\"accepted\":true,\"deleted\":false,\"acceptanceTime\":0}]";
 
-  private static final String JSON_DATA_COLLECTION_GROUP_COM_CONSENTS_DATA = "[" +
-                                                                             "{\"consentId\":\"rsch.send.usage.stat\",\"version\":\"1.1\",\"text\":\"This information includes, but is not limited to, anonymous data about your feature and plugin usage, hardware and software configuration, file type statistics, and the number of files per project. No personal data or sensitive information, such as source code or file names, is shared with us.\",\"printableName\":\"Send anonymous usage statistics\",\"accepted\":false}," +
-                                                                             "{\"consentId\":\"ai.trace.data.collection.and.use.com.policy\",\"version\":\"1.0\",\"text\":\"This includes an expanded range of IDE data with associated code snippets, such as AI feature usage, run configurations, and terminal commands. This data will be used for product improvement and model training purposes.\",\"printableName\":\"Send detailed code-related data\",\"accepted\":false}]";
-
-  private static final String JSON_DATA_COLLECTION_GROUP_NON_COM_CONSENTS_DATA = "[" +
-                                                                                 "{\"consentId\":\"rsch.send.usage.stat\",\"version\":\"1.1\",\"text\":\"This information includes, but is not limited to, anonymous data about your feature and plugin usage, hardware and software configuration, file type statistics, and the number of files per project. No personal data or sensitive information, such as source code or file names, is shared with us.\",\"printableName\":\"Send anonymous usage statistics\",\"accepted\":false}," +
-                                                                                 "{\"consentId\":\"ai.trace.data.collection.and.use.noncom.policy\",\"version\":\"1.0\",\"text\":\"This includes an expanded range of IDE data with associated code snippets, such as AI feature usage, run configurations, and terminal commands. This data will be used for product improvement and model training purposes.\",\"printableName\":\"Send detailed code-related data\",\"accepted\":false}]";
-
   private static final String CONSENT_ID_1 = "rsch.test.consent.option.for.intellij";
   private static final String CONSENT_ID_USAGE_STATS = "rsch.send.usage.stat";
-  private static final String CONSENT_ID_TRACE_DATA_COLLECTION_COM = "ai.trace.data.collection.and.use.com.policy";
-  private static final String CONSENT_ID_TRACE_DATA_COLLECTION_NON_COM = "ai.trace.data.collection.and.use.noncom.policy";
-  private static final String GROUP_CONSENT_ID_DATA_COLLECTION = "data.collection";
 
   // Compatibility helpers to keep a legacy assertion call style while using JUnit 5
   private static void assertTrue(String message, boolean condition) { org.junit.jupiter.api.Assertions.assertTrue(condition, message); }
@@ -261,43 +250,12 @@ public class ConsentsTest {
   }
 
   @Test
-  public void testDataCollectionComConsentGroup() {
-    final Pair<ConsentOptions, MemoryIOBackend> data = createConsentOptions("", JSON_DATA_COLLECTION_GROUP_COM_CONSENTS_DATA);
-    final ConsentOptions options = data.getFirst();
+  public void testReadMissingDefaultConsent() {
+    // IJPL-228578 NPE appeared in Android Studio where default set of bundled consents is different
+    Pair<ConsentOptions, MemoryIOBackend> data = createConsentOptions(JSON_CONSENTS_DATA, JSON_CONSENTS_DATA);
 
-    final Pair<List<Consent>, Boolean> beforeConfirm = options.getConsents();
-    assertTrue("Consents should require confirmation", beforeConfirm.getSecond());
-    assertEquals(2, beforeConfirm.getFirst().size());
-
-    final Consent fusConsent = lookupConsent(CONSENT_ID_USAGE_STATS, beforeConfirm.getFirst());
-    final Consent traceConsent = lookupConsent(CONSENT_ID_TRACE_DATA_COLLECTION_COM, beforeConfirm.getFirst());
-    assertNotNull(fusConsent);
-    assertNotNull(traceConsent);
-    assertTrue(ConsentOptions.condUsageStatsConsent().test(fusConsent));
-    assertTrue(ConsentOptions.condTraceDataCollectionComConsent().test(traceConsent));
-
-    ConsentGroup group = new ConsentGroup(GROUP_CONSENT_ID_DATA_COLLECTION, beforeConfirm.getFirst());
-    assertSame(DataCollectionConsentGroupUI.class, ConsentSettingsUi.getConsentGroupUi(group).getClass());
-  }
-
-  @Test
-  public void testDataCollectionNonComConsentGroup() {
-    final Pair<ConsentOptions, MemoryIOBackend> data = createConsentOptions("", JSON_DATA_COLLECTION_GROUP_NON_COM_CONSENTS_DATA);
-    final ConsentOptions options = data.getFirst();
-
-    final Pair<List<Consent>, Boolean> beforeConfirm = options.getConsents();
-    assertTrue("Consents should require confirmation", beforeConfirm.getSecond());
-    assertEquals(2, beforeConfirm.getFirst().size());
-
-    final Consent fusConsent = lookupConsent(CONSENT_ID_USAGE_STATS, beforeConfirm.getFirst());
-    final Consent traceConsent = lookupConsent(CONSENT_ID_TRACE_DATA_COLLECTION_NON_COM, beforeConfirm.getFirst());
-    assertNotNull(fusConsent);
-    assertNotNull(traceConsent);
-    assertTrue(ConsentOptions.condUsageStatsConsent().test(fusConsent));
-    assertTrue(ConsentOptions.condTraceDataCollectionNonComConsent().test(traceConsent));
-
-    ConsentGroup group = new ConsentGroup(GROUP_CONSENT_ID_DATA_COLLECTION, beforeConfirm.getFirst());
-    assertSame(DataCollectionConsentGroupUI.class, ConsentSettingsUi.getConsentGroupUi(group).getClass());
+    var permission = data.getFirst().getAiDataCollectionPermission();
+    assertEquals(ConsentOptions.Permission.UNDEFINED, permission, "There must be no permission for missing default consent");
   }
 
   private static Consent lookupConsent(@NotNull String consentId, @NotNull List<Consent> container) {

@@ -11,7 +11,11 @@ import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.VcsConfiguration;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ThreeState;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
 import java.util.Collection;
@@ -199,12 +203,6 @@ public abstract class ChangeListManager implements ChangeListModification {
 
   public abstract void removeChangeListListener(@NotNull ChangeListListener listener);
 
-
-  /**
-   * @deprecated use {@link CommitExecutor#LOCAL_COMMIT_EXECUTOR} extension point
-   */
-  @Deprecated(forRemoval = true)
-  public abstract void registerCommitExecutor(@NotNull CommitExecutor executor);
 
   public abstract @NotNull @Unmodifiable List<CommitExecutor> getRegisteredExecutors();
 

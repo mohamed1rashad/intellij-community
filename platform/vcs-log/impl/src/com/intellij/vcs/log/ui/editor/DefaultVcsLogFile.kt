@@ -2,7 +2,13 @@
 package com.intellij.vcs.log.ui.editor
 
 import com.intellij.ide.ui.UISettings
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.BaseState
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.SimplePersistentStateComponent
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerKeys
@@ -10,6 +16,7 @@ import com.intellij.openapi.fileEditor.impl.EditorTabTitleProvider
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFilePathWrapper
 import com.intellij.openapi.vfs.VirtualFileSystem
@@ -95,9 +102,9 @@ internal class DefaultVcsLogFile(private val pathId: VcsLogVirtualFileSystem.Vcs
 
 internal class DefaultVcsLogFileTabTitleProvider : EditorTabTitleProvider, DumbAware {
 
-  override fun getEditorTabTooltipText(project: Project, file: VirtualFile): String? {
-    if (file !is DefaultVcsLogFile) return null
-    return getEditorTabTitle(project, file)
+  override fun getEditorTabTooltipHtml(project: Project, virtualFile: VirtualFile): HtmlChunk? {
+    if (virtualFile !is DefaultVcsLogFile) return null
+    return getEditorTabTitle(project, virtualFile)?.let { HtmlChunk.text(it) }
   }
 
   override fun getEditorTabTitle(project: Project, file: VirtualFile): String? {

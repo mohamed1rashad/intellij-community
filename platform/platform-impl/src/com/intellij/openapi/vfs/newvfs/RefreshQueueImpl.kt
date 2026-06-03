@@ -1,15 +1,21 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs
 
 import com.intellij.ide.IdeCoreBundle
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.AppUIExecutor
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.TransactionGuard
+import com.intellij.openapi.application.TransactionGuardImpl
+import com.intellij.openapi.application.readAndBackgroundWriteAction
+import com.intellij.openapi.application.useBackgroundWriteAction
 import com.intellij.openapi.diagnostic.FrequentEventDetector
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.openapi.vfs.AsyncFileListener
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
@@ -23,14 +29,21 @@ import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.concurrency.annotations.RequiresWriteLock
 import com.intellij.util.io.storage.HeavyProcessLatch
 import com.intellij.util.ui.EDT
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.annotations.VisibleForTesting
-import java.lang.Runnable
-import java.util.*
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentMap
 import java.util.concurrent.TimeUnit
@@ -51,6 +64,13 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
    */
   private val eventScanSemaphore: Semaphore = Semaphore(1)
 
+  /**
+   * Although high-priority refreshes can run regardless of low-priority ones,
+   * we still want to be careful and limit concurrency
+   * The number 2 is chosen arbitrarily.
+   */
+  private val highPriorityEventScanSemaphore: Semaphore = Semaphore(2)
+
   private val eventProcessingScope: CoroutineScope = coroutineScope.childScope("RefreshQueue pool", Dispatchers.Default.limitedParallelism(1))
 
   private val myRefreshIndicator = RefreshProgress.create()
@@ -61,17 +81,10 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
 
   internal fun execute(session: RefreshSessionImpl) {
     if (session.isAsynchronous) {
-      if (isVfsRefreshInBackgroundWriteActionAllowed() && session.modality == ModalityState.nonModal()) {
-        queueAsyncSessionWithCoroutines(session)
-      }
-      else {
-        // An asynchronous refresh launched under old modal progress (`runProcessWithProgressSynchronously`) can outlive its modality state
-        // This violates the structured concurrency principles that are behind coroutine-based refresh, hence we fall back to old NBRA-based refresh.
-        queueSession(session, session.modality)
-      }
+      doQueueSession(session)
     }
-    else if (EDT.isCurrentThreadEdt()) {
-      (TransactionGuard.getInstance() as TransactionGuardImpl).assertWriteActionAllowed()
+    else if (EDT.isCurrentThreadEdt() || ApplicationManager.getApplication().isWriteAccessAllowed) {
+      (TransactionGuard.getInstance() as TransactionGuardImpl).assertWriteSafeEnvironment()
       val events = runRefreshSession(session, -1L)
       fireEvents(events, session)
     }
@@ -79,8 +92,19 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
       LOG.error("Do not perform a synchronous refresh under read lock (causes deadlocks if there are events to fire)")
     }
     else {
-      queueSession(session, session.modality)
+      doQueueSession(session)
       session.waitFor()
+    }
+  }
+
+  private fun doQueueSession(session: RefreshSessionImpl) {
+    if (isVfsRefreshInBackgroundWriteActionAllowed() && session.modality == ModalityState.nonModal()) {
+      queueSessionWithCoroutines(session)
+    }
+    else {
+      // An asynchronous refresh launched under old modal progress (`runProcessWithProgressSynchronously`) can outlive its modality state
+      // This violates the structured concurrency principles that are behind coroutine-based refresh, hence we fall back to old NBRA-based refresh.
+      queueSession(session, session.modality)
     }
   }
 
@@ -99,9 +123,8 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
    * With synchronous refresh, there is a limitation on parallelism of the refresh thread.
    * With coroutines, we rather need to limit the concurrency of parallel refreshes, hence we are using semaphores.
    */
-  private suspend fun <T> executeWithParallelizationGuard(session: RefreshSessionImpl, action: suspend () -> T): T {
-    return executeWithParallelizationGuard(session.modality, parallelizationCache, action)
-  }
+  private suspend fun <T> executeWithParallelizationGuard(session: RefreshSessionImpl, action: suspend () -> T): T =
+    executeWithParallelizationGuard(session.modality, parallelizationCache, action)
 
   /**
    * Executes session with legacy non-blocking read action and write action on EDT
@@ -131,12 +154,20 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
     myEventCounter.eventHappened(session)
   }
 
-  internal suspend fun executeSuspending(session: RefreshSessionImpl) {
+  internal suspend fun executeSuspending(session: RefreshSessionImpl, highPriority: Boolean) {
     // suspending vfs refresh works in the context of the caller
-    // however, we must maintain an invariant that no more than one scanning part of refresh is running
+    // however, we must maintain an invariant that no more than one scanning part of low-priority refresh is running
     // hence we limit ourselves with a semaphore
-    val events = eventScanSemaphore.withPermit {
-      collectEventsSuspending(session, -1L)
+    val events = if (session.isEventSession) {
+      session.events
+    } else if (highPriority) {
+      highPriorityEventScanSemaphore.withPermit {
+        collectEventsSuspending(session, -1L)
+      }
+    } else {
+      eventScanSemaphore.withPermit {
+        collectEventsSuspending(session, -1L)
+      }
     }
     executeWithParallelizationGuard(session) {
       processEventsSuspending(session, events)
@@ -152,10 +183,7 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
   /**
    * This session is queued asynchronously with suspending read action and background write action
    */
-  private fun queueAsyncSessionWithCoroutines(session: RefreshSessionImpl) {
-    check(session.isAsynchronous) {
-      "Only asynchronous sessions can be queued with coroutines"
-    }
+  private fun queueSessionWithCoroutines(session: RefreshSessionImpl) {
     check(session.modality == ModalityState.nonModal()) {
       "Only sessions in non-modal context can be queued with coroutines. " +
       "If you need to run your sessions with non-trivial modality, consider using `launchOnShow` for the component and `launch` for the session."
@@ -183,6 +211,10 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
         myRefreshIndicator.checkCanceled()
         val (events, changeAppliers) = collectChangeAppliersInReadAction(session, events, evQueuedAt, evTimeInQueue, evRetries, evListenerTime)
         if (events.isEmpty() && session.myFinishRunnable == null) {
+          // someone may be waiting for this refresh synchronously on session's semaphore
+          // at the same time, we'd like to avoid issuing a write action if nothing was changed
+          // so we close a semaphore here instead of running a pointless write action.
+          session.terminate()
           return@readAndBackgroundWriteAction value(Unit)
         }
         writeAction {
@@ -210,13 +242,13 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
     evTimeInQueue: AtomicLong,
     evRetries: AtomicLong,
     evListenerTime: AtomicLong,
-  ): Pair<List<CompoundVFileEvent>, List<AsyncFileListener.ChangeApplier>> {
+  ): Pair<List<CompoundVFileEvent>, AsyncEventSupport.ChangeAppliers> {
     if (LOG.isDebugEnabled()) LOG.debug("Start non-blocking action for session with id=" + session.hashCode())
     evTimeInQueue.compareAndSet(-1, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - evQueuedAt))
     evRetries.incrementAndGet()
     val t = System.nanoTime()
     try {
-      val result: Pair<List<CompoundVFileEvent>, List<AsyncFileListener.ChangeApplier>> = runAsyncListeners(events)
+      val result: Pair<List<CompoundVFileEvent>, AsyncEventSupport.ChangeAppliers> = runAsyncListeners(events)
       if (LOG.isDebugEnabled()) LOG.debug("Successful finish of non-blocking read action for session with id=" + session.hashCode())
       return result
     }
@@ -233,20 +265,20 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
     evListenerTime: AtomicLong,
     evRetries: AtomicLong,
     events: List<CompoundVFileEvent>,
-    changeAppliers: List<AsyncFileListener.ChangeApplier>,
+    changeAppliers: AsyncEventSupport.ChangeAppliers,
     backgroundWriteAction: Boolean,
   ) {
     var t = System.nanoTime()
     if (backgroundWriteAction) {
-      session.fireEventsInBackgroundWriteAction(events, changeAppliers)
+      session.fireEventsInBackgroundWriteAction(events, changeAppliers, excludeAsyncListeners = true)
     }
     else {
-      session.fireEvents(events, changeAppliers, true)
+      session.fireEvents(events, changeAppliers, excludeAsyncListeners = true)
     }
     t = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t)
     VfsUsageCollector.logEventProcessing(evTimeInQueue.toLong(), TimeUnit.NANOSECONDS.toMillis(evListenerTime.toLong()), evRetries.toInt(), t, events.size)
   }
-
+  
   private fun processEvents(session: RefreshSessionImpl, modality: ModalityState, events: Collection<VFileEvent>) {
     if (Registry.`is`("vfs.async.event.processing", true) && !events.isEmpty()) {
       val evQueuedAt = System.nanoTime()
@@ -255,12 +287,12 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
       val evRetries = AtomicLong(0)
       startIndicator(IdeCoreBundle.message("async.events.progress"))
       ReadAction
-        .nonBlocking<Pair<List<CompoundVFileEvent>, List<AsyncFileListener.ChangeApplier>>> {
+        .nonBlocking<Pair<List<CompoundVFileEvent>, AsyncEventSupport.ChangeAppliers>> {
           collectChangeAppliersInReadAction(session, events, evQueuedAt, evTimeInQueue, evRetries, evListenerTime)
         }
         .expireWith(this)
         .wrapProgress(myRefreshIndicator)
-        .finishOnUiThread(modality) { data: Pair<List<CompoundVFileEvent>, List<AsyncFileListener.ChangeApplier>> ->
+        .finishOnUiThread(modality) { data: Pair<List<CompoundVFileEvent>, AsyncEventSupport.ChangeAppliers> ->
           doFireEvents(session, evTimeInQueue, evListenerTime, evRetries, data.first, data.second, false)
         }
         .submit {
@@ -272,12 +304,13 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
         }
         .onProcessed { stopIndicator() }
         .onError(Consumer { t: Throwable ->
-          if (!myRefreshIndicator.isCanceled()) {
+          if (!myRefreshIndicator.isCanceled() && t !is CancellationException) {
             LOG.error(t)
           }
         })
     }
     else {
+      @Suppress("DEPRECATION")
       AppUIExecutor.onWriteThread(modality).later().submit(Runnable { fireEvents(events, session) })
     }
   }
@@ -307,9 +340,8 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
     }
   }
 
-  override fun createSession(async: Boolean, recursive: Boolean, finishRunnable: Runnable?, state: ModalityState): RefreshSession {
-    return RefreshSessionImpl(async, recursive, false, finishRunnable, state)
-  }
+  override fun createSession(async: Boolean, recursive: Boolean, finishRunnable: Runnable?, state: ModalityState): RefreshSession =
+    RefreshSessionImpl(async, recursive, false, finishRunnable, state)
 
   override fun processEvents(async: Boolean, events: List<VFileEvent>) {
     RefreshSessionImpl(async, events).launch()
@@ -328,19 +360,22 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
   companion object {
     private val LOG = Logger.getInstance(RefreshQueue::class.java)
 
-    private fun CoroutineScope.children(): List<Job> {
-      return coroutineContext.job.children.toList()
-    }
+    private fun CoroutineScope.children(): List<Job> = coroutineContext.job.children.toList()
 
     private fun fireEvents(events: Collection<VFileEvent>, session: RefreshSessionImpl) {
       var t = System.nanoTime()
       val compoundEvents = events.map { event: VFileEvent -> CompoundVFileEvent(event) }
-      session.fireEvents(compoundEvents, listOf(), false)
+      if (EDT.isCurrentThreadEdt()) {
+        session.fireEvents(compoundEvents, AsyncEventSupport.ChangeAppliers.EMPTY, excludeAsyncListeners = false)
+      }
+      else {
+        session.fireEventsInBackgroundWriteAction(compoundEvents, AsyncEventSupport.ChangeAppliers.EMPTY, excludeAsyncListeners = false)
+      }
       t = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t)
       VfsUsageCollector.logEventProcessing(-1L, -1L, -1, t, compoundEvents.size)
     }
 
-    private fun runAsyncListeners(events: Collection<VFileEvent>): Pair<List<CompoundVFileEvent>, List<AsyncFileListener.ChangeApplier>> {
+    private fun runAsyncListeners(events: Collection<VFileEvent>): Pair<List<CompoundVFileEvent>, AsyncEventSupport.ChangeAppliers> {
       val compoundEvents = events.mapNotNull { e: VFileEvent? ->
         val file = if (e is VFileCreateEvent) e.parent else e!!.getFile()
         if (file == null || file.isValid()) CompoundVFileEvent(
@@ -395,7 +430,8 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
         return semaphore.withPermit {
           action()
         }
-      } finally {
+      }
+      finally {
         do {
           currentValue = requireNotNull(map[key])
           val newValue = currentValue.copy(second = currentValue.second - 1)
@@ -407,12 +443,21 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
   }
 
   override suspend fun refresh(recursive: Boolean, files: List<VirtualFile>) {
+    doRunRefresh(recursive, files, false)
+  }
+
+  override suspend fun refreshWithHighPriority(recursive: Boolean, files: List<VirtualFile>) {
+    doRunRefresh(recursive, files, true)
+  }
+
+  private suspend fun doRunRefresh(recursive: Boolean, files: List<VirtualFile>, highPriority: Boolean) {
     @Suppress("ForbiddenInSuspectContextMethod")
     val session = createSession(false, recursive, null, ModalityState.defaultModalityState())
     session.addAllFiles(files)
     if (isVfsRefreshInBackgroundWriteActionAllowed()) {
-      session.executeInBackgroundWriteAction()
-    } else {
+      session.executeInBackgroundWriteAction(highPriority)
+    }
+    else {
       currentCoroutineContext().job.invokeOnCompletion {
         session.cancel()
       }
@@ -427,8 +472,9 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
     val session = createSession(false, false, null, ModalityState.defaultModalityState())
     session.addEvents(events)
     if (isVfsRefreshInBackgroundWriteActionAllowed()) {
-      session.executeInBackgroundWriteAction()
-    } else {
+      session.executeInBackgroundWriteAction(false)
+    }
+    else {
       currentCoroutineContext().job.invokeOnCompletion {
         session.cancel()
       }
@@ -441,7 +487,6 @@ class RefreshQueueImpl(coroutineScope: CoroutineScope) : RefreshQueue(), Disposa
   /**
    * @return true if VFS refresh is allowed to run in background write action
    */
-  private fun isVfsRefreshInBackgroundWriteActionAllowed(): Boolean {
-    return useBackgroundWriteAction && Registry.`is`("vfs.refresh.use.background.write.action")
-  }
+  private fun isVfsRefreshInBackgroundWriteActionAllowed(): Boolean =
+    useBackgroundWriteAction && Registry.`is`("vfs.refresh.use.background.write.action", true)
 }

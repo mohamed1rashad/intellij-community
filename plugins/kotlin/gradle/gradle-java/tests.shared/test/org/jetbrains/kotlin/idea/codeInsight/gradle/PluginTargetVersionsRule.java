@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.codeInsight.gradle;
 
 import org.gradle.util.GradleVersion;
@@ -17,8 +17,6 @@ import org.junit.runners.model.Statement;
 import java.lang.annotation.Annotation;
 import java.util.Arrays;
 
-import static com.intellij.testFramework.UsefulTestCase.IS_UNDER_TEAMCITY;
-
 
 public class PluginTargetVersionsRule implements MethodRule {
     @SuppressWarnings("ClassExplicitlyAnnotation")
@@ -32,6 +30,11 @@ public class PluginTargetVersionsRule implements MethodRule {
         @Override
         public String[] value() {
             return value;
+        }
+
+        @Override
+        public String reason() {
+            return "";
         }
 
         @Override
@@ -57,51 +60,43 @@ public class PluginTargetVersionsRule implements MethodRule {
 
         TestWithKotlinPluginAndGradleVersions testCase = (TestWithKotlinPluginAndGradleVersions) target;
         if (targetVersions != null && !shouldRun(targetVersions, testCase)) {
-            String mark = IS_UNDER_TEAMCITY ? "passed" : "ignored";
-            String message = "Test is marked " + mark + " due to unmet requirements\n" +
-                             "Gradle version: " +
-                             testCase.getGradleVersion() +
-                             " | Requirement: " +
-                             targetVersions.gradleVersion() +
-                             "\n" +
-                             "Plugin version: " +
-                             testCase.getKotlinPluginVersion() +
-                             " | Requirement: " +
-                             targetVersions.pluginVersion();
+            String message = buildErrorMessage(testCase, targetVersions);
 
-            /*
-             Tests are marked as successful on CI instead of Ignored, because this makes overall project maintainance easier
-             (managing legitimately ignored tests).
-             Running tests locally will still mark them as 'Ignored'
-             */
-            if (IS_UNDER_TEAMCITY) {
-                return new Statement() {
-                    @Override
-                    public void evaluate() {
-                        System.out.println(message);
-                    }
-                };
-            } else {
-                throw new AssumptionViolatedException(message);
-            }
+            throw new AssumptionViolatedException(message);
         }
 
         return base;
     }
 
-    private static boolean shouldRun(PluginTargetVersions targetVersions, TestWithKotlinPluginAndGradleVersions testCase) {
-        var gradleVersion = testCase.getGradleVersion();
-        var pluginVersion = testCase.getKotlinPluginVersion();
+    private static @NotNull String buildErrorMessage(TestWithKotlinPluginAndGradleVersions testCase, PluginTargetVersions targetVersions) {
+        String mark = "ignored";
+        String message = "Test is marked " + mark + " due to unmet requirements\n" +
+                         "Gradle version: " +
+                         testCase.getTestGradleVersion().getVersion() +
+                         " | Requirement: " +
+                         targetVersions.gradleVersion() +
+                         "\n" +
+                         "Plugin version: " +
+                         testCase.getKotlinPluginVersion() +
+                         " | Requirement: " +
+                         targetVersions.pluginVersion();
+        return message;
+    }
 
-        var gradleVersionMatcher = createMatcher("Gradle", targetVersions.gradleVersion());
+    private static boolean shouldRun(PluginTargetVersions targetVersions, TestWithKotlinPluginAndGradleVersions testCase) {
+        var gradleVersion = testCase.getTestGradleVersion().getVersion();
+        var pluginVersion = testCase.getKotlinPluginVersion().getVersion();
+
+        var gradleVersionMatcher = createMatcher(targetVersions.gradleVersion());
         var kotlinVersionRequirement = KotlinVersionUtils.parseKotlinVersionRequirement(targetVersions.pluginVersion());
 
-        boolean matchGradleVersion = gradleVersionMatcher == null || gradleVersionMatcher.matches(gradleVersion);
+        boolean matchGradleVersion = gradleVersionMatcher == null || gradleVersionMatcher.matches(gradleVersion.getVersion());
         return matchGradleVersion && KotlinVersionUtils.matches(kotlinVersionRequirement, pluginVersion);
     }
 
     @Nullable
-    private static CustomMatcher<String> createMatcher(@NotNull String caption, @NotNull String version) {
+    private static CustomMatcher<String> createMatcher(@NotNull String version) {
+        String caption = "Gradle";
         if (version.isEmpty()) {
             return null;
         }

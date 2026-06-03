@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.fir.search.refIndex;
 
@@ -490,6 +490,44 @@ public abstract class FindUsagesWithCompilerReferenceIndexFirTestGenerated exten
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions/components")
+                public static class TestNameBasedDestructuringFull extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                    @java.lang.Override
+                    @org.jetbrains.annotations.NotNull
+                    public final KotlinPluginMode getPluginMode() {
+                        return KotlinPluginMode.K2;
+                    }
+
+                    private void runTest(String testDataFilePath) throws Exception {
+                        KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                    }
+
+                    @TestMetadata("nameBasedDestructuringFull.0.kt")
+                    public void testNameBasedDestructuringFull() throws Exception {
+                        runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/nameBasedDestructuringFull.0.kt");
+                    }
+                }
+
+                @RunWith(JUnit3RunnerWithInners.class)
+                @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions/components")
+                public static class TestNameBasedDestructuringShort extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                    @java.lang.Override
+                    @org.jetbrains.annotations.NotNull
+                    public final KotlinPluginMode getPluginMode() {
+                        return KotlinPluginMode.K2;
+                    }
+
+                    private void runTest(String testDataFilePath) throws Exception {
+                        KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                    }
+
+                    @TestMetadata("nameBasedDestructuringShort.0.kt")
+                    public void testNameBasedDestructuringShort() throws Exception {
+                        runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/nameBasedDestructuringShort.0.kt");
+                    }
+                }
+
+                @RunWith(JUnit3RunnerWithInners.class)
+                @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions/components")
                 public static class TestOperators extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
@@ -504,6 +542,44 @@ public abstract class FindUsagesWithCompilerReferenceIndexFirTestGenerated exten
                     @TestMetadata("operators.0.kt")
                     public void testOperators() throws Exception {
                         runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/operators.0.kt");
+                    }
+                }
+
+                @RunWith(JUnit3RunnerWithInners.class)
+                @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions/components")
+                public static class TestPositionBasedDestructuring extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                    @java.lang.Override
+                    @org.jetbrains.annotations.NotNull
+                    public final KotlinPluginMode getPluginMode() {
+                        return KotlinPluginMode.K2;
+                    }
+
+                    private void runTest(String testDataFilePath) throws Exception {
+                        KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                    }
+
+                    @TestMetadata("positionBasedDestructuring.0.kt")
+                    public void testPositionBasedDestructuring() throws Exception {
+                        runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/positionBasedDestructuring.0.kt");
+                    }
+                }
+
+                @RunWith(JUnit3RunnerWithInners.class)
+                @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions/components")
+                public static class TestPositionBasedDestructuringNew extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                    @java.lang.Override
+                    @org.jetbrains.annotations.NotNull
+                    public final KotlinPluginMode getPluginMode() {
+                        return KotlinPluginMode.K2;
+                    }
+
+                    private void runTest(String testDataFilePath) throws Exception {
+                        KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                    }
+
+                    @TestMetadata("positionBasedDestructuringNew.0.kt")
+                    public void testPositionBasedDestructuringNew() throws Exception {
+                        runTest("../../idea/tests/testData/findUsages/kotlin/conventions/components/positionBasedDestructuringNew.0.kt");
                     }
                 }
 
@@ -832,6 +908,82 @@ public abstract class FindUsagesWithCompilerReferenceIndexFirTestGenerated exten
                 @TestMetadata("getInObject.0.kt")
                 public void testGetInObject() throws Exception {
                     runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getInObject.0.kt");
+                }
+            }
+
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions")
+            public static class TestGetOperatorNonNullableImplicitType extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("getOperatorNonNullableImplicitType.0.kt")
+                public void testGetOperatorNonNullableImplicitType() throws Exception {
+                    runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNonNullableImplicitType.0.kt");
+                }
+            }
+
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions")
+            public static class TestGetOperatorNullableExplicitType extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("getOperatorNullableExplicitType.0.kt")
+                public void testGetOperatorNullableExplicitType() throws Exception {
+                    runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNullableExplicitType.0.kt");
+                }
+            }
+
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions")
+            public static class TestGetOperatorNullableFunctionCall extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("getOperatorNullableFunctionCall.0.kt")
+                public void testGetOperatorNullableFunctionCall() throws Exception {
+                    runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNullableFunctionCall.0.kt");
+                }
+            }
+
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../idea/tests/testData/findUsages/kotlin/conventions")
+            public static class TestGetOperatorNullableImplicitType extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("getOperatorNullableImplicitType.0.kt")
+                public void testGetOperatorNullableImplicitType() throws Exception {
+                    runTest("../../idea/tests/testData/findUsages/kotlin/conventions/getOperatorNullableImplicitType.0.kt");
                 }
             }
 
@@ -5540,6 +5692,25 @@ public abstract class FindUsagesWithCompilerReferenceIndexFirTestGenerated exten
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("../../idea/tests/testData/findUsages/kotlin/variable")
         public abstract static class Variable extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("../../idea/tests/testData/findUsages/kotlin/variable")
+            public static class TestDestructuringEntry extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K2;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+                }
+
+                @TestMetadata("destructuringEntry.0.kt")
+                public void testDestructuringEntry() throws Exception {
+                    runTest("../../idea/tests/testData/findUsages/kotlin/variable/destructuringEntry.0.kt");
+                }
+            }
+
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("../../idea/tests/testData/findUsages/kotlin/variable")
             public static class TestPlusAssignFun extends AbstractFindUsagesWithCompilerReferenceIndexFirTest {

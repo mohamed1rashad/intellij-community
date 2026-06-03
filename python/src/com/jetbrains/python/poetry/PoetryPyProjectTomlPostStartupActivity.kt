@@ -10,7 +10,7 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.findDocument
 import com.intellij.python.pyproject.PY_PROJECT_TOML
 import com.jetbrains.python.packaging.utils.PyPackageCoroutine
-import com.jetbrains.python.sdk.PythonSdkUpdater
+import com.jetbrains.python.sdk.getModuleRoots
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -18,16 +18,16 @@ import kotlinx.coroutines.withContext
  * This class represents a post-startup activity for PyProjectToml files in a project.
  * It finds valid python versions in PyProjectToml files and saves them in PyProjectTomlPythonVersionsService.
  */
-private class PoetryPyProjectTomlPostStartupActivity : ProjectActivity {
+internal class PoetryPyProjectTomlPostStartupActivity : ProjectActivity {
   override suspend fun execute(project: Project) {
-    val modulesRoots = PythonSdkUpdater.getModuleRoots(project)
+    val modulesRoots = project.getModuleRoots()
     for (module in modulesRoots) {
       val tomlFile = withContext(Dispatchers.IO) {
         module.findChild(PY_PROJECT_TOML)?.let { getPyProjectTomlForPoetry(it) }
       } ?: continue
       val versionString = poetryFindPythonVersionFromToml(tomlFile, project) ?: continue
 
-      PoetryPyProjectTomlPythonVersionsService.instance.setVersion(module, versionString)
+      PoetryPyProjectTomlPythonVersionsService.getInstance(project).setVersion(module, versionString)
       addDocumentListener(tomlFile, project, module)
     }
   }
@@ -42,18 +42,19 @@ private class PoetryPyProjectTomlPostStartupActivity : ProjectActivity {
    * @param module The VirtualFile representing the module.
    */
   private suspend fun addDocumentListener(tomlFile: VirtualFile, project: Project, module: VirtualFile) {
+    val service = PoetryPyProjectTomlPythonVersionsService.getInstance(project)
     readAction {
       tomlFile.findDocument()?.addDocumentListener(object : DocumentListener {
         override fun documentChanged(event: DocumentEvent) {
           PyPackageCoroutine.launch(project) {
             val newVersion = poetryFindPythonVersionFromToml(tomlFile, project) ?: return@launch
-            val oldVersion = PoetryPyProjectTomlPythonVersionsService.instance.getVersionString(module)
+            val oldVersion = service.getVersionString(module)
             if (oldVersion != newVersion) {
-              PoetryPyProjectTomlPythonVersionsService.instance.setVersion(module, newVersion)
+              service.setVersion(module, newVersion)
             }
           }
         }
-      }, PoetryPyProjectTomlPythonVersionsService.instance)
+      }, service)
     }
   }
 }

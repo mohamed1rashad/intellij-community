@@ -4,7 +4,6 @@
 
 package org.jetbrains.intellij.build.impl.compilation
 
-import com.intellij.devkit.runtimeModuleRepository.generator.RuntimeModuleRepositoryGenerator
 import com.intellij.util.lang.EmptyZipFile
 import com.intellij.util.lang.ImmutableZipFile
 import io.opentelemetry.api.common.AttributeKey
@@ -24,6 +23,7 @@ import org.jetbrains.intellij.build.CompilationContext
 import org.jetbrains.intellij.build.dependencies.TeamCityHelper
 import org.jetbrains.intellij.build.forEachConcurrent
 import org.jetbrains.intellij.build.http2Client.withHttp2ClientConnectionFactory
+import org.jetbrains.intellij.build.impl.moduleRepository.RuntimeModuleRepositoryGenerator
 import org.jetbrains.intellij.build.io.AddDirEntriesMode
 import org.jetbrains.intellij.build.io.zip
 import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
@@ -53,10 +53,10 @@ import kotlin.io.path.name
 
 private val nettyMax = Runtime.getRuntime().availableProcessors() * 2
 internal val uploadParallelism = nettyMax.coerceIn(4, 32)
+
 // max not 32 as for upload because we write to disk (not read as upload)
 internal val downloadParallelism = nettyMax.coerceIn(4, 24)
 
-private const val BRANCH_PROPERTY_NAME = "intellij.build.compiled.classes.branch"
 private const val SERVER_URL_PROPERTY = "intellij.build.compiled.classes.server.url"
 private const val UPLOAD_PREFIX = "intellij.build.compiled.classes.upload.prefix"
 
@@ -65,7 +65,6 @@ class CompilationCacheUploadConfiguration(
   val checkFiles: Boolean = true,
   val uploadOnly: Boolean = false,
   val saveMetadata: Boolean = true,
-  branch: String? = null,
   uploadPredix: String? = null,
 ) {
   val serverUrl: String by lazy(LazyThreadSafetyMode.NONE) { serverUrl ?: getAndNormalizeServerUrlBySystemProperty() }
@@ -83,14 +82,6 @@ class CompilationCacheUploadConfiguration(
     uploadPredix ?: System.getProperty(UPLOAD_PREFIX, "intellij-compile/v2").also {
       check(!it.isNullOrBlank()) {
         "$UPLOAD_PREFIX system property should not be blank."
-      }
-    }
-  }
-
-  val branch: String by lazy {
-    branch ?: System.getProperty(BRANCH_PROPERTY_NAME).also {
-      check(!it.isNullOrBlank()) {
-        "Git branch is not defined. Please set $BRANCH_PROPERTY_NAME system property."
       }
     }
   }
@@ -118,15 +109,15 @@ suspend fun packAndUploadToServer(context: CompilationContext, zipDir: Path, con
   val items = if (config.uploadOnly && config.saveMetadata) {  // no metadata.json
     context.project.modules.flatMap { module ->
       listOf(
-        "production/${module.name}" to context.getModuleOutputRoots(module, forTests = false).singleOrNull(),
-        "test/${module.name}" to context.getModuleOutputRoots(module, forTests = true).singleOrNull(),
+        "production/${module.name}" to context.outputProvider.getModuleOutputRoots(module, forTests = false).singleOrNull(),
+        "test/${module.name}" to context.outputProvider.getModuleOutputRoots(module, forTests = true).singleOrNull(),
       )
     }.filter { (_, output) ->
       output != null && ImmutableZipFile.load(output) !is EmptyZipFile  // ignore empty
     }.map { (name, output) ->
       PackAndUploadItem(output = Path.of(""), name = name, archive = output!!)
     }.apply {
-      forEachConcurrent { item ->
+      forEachConcurrent(workerDispatcher = Dispatchers.IO) { item ->
         spanBuilder("compute hash").setAttribute("name", item.name).blockingUse {
           item.hash = computeHash(item.archive)
         }
@@ -187,7 +178,7 @@ private suspend fun packCompilationResult(zipDir: Path, context: CompilationCont
             continue
           }
 
-          if (context.findModule(fileName) == null) {
+          if (context.outputProvider.findModule(fileName) == null) {
             span.addEvent("skip module output from missing in project module", Attributes.of(AttributeKey.stringKey("module"), fileName))
           }
           else {
@@ -262,7 +253,6 @@ private suspend fun upload(
   val metadataJson = Json.encodeToString(
     CompilationPartsMetadata(
       serverUrl = config.serverUrl,
-      branch = config.branch,
       prefix = config.uploadUrlPathPrefix,
       files = items.associateTo(TreeMap()) { item ->
         item.name to item.hash!!
@@ -352,7 +342,10 @@ suspend fun fetchAndUnpackCompiledClasses(
       }
       true
     }
-      .forEachConcurrent(Runtime.getRuntime().availableProcessors().coerceAtLeast(4)) { item ->
+      .forEachConcurrent(
+        concurrency = Runtime.getRuntime().availableProcessors().coerceAtLeast(4),
+        workerDispatcher = Dispatchers.IO,
+      ) { item ->
         val file = item.file
         when {
           Files.notExists(file) -> toDownload.add(item)
@@ -470,7 +463,7 @@ private suspend fun checkPreviouslyUnpackedDirectories(
       }
     }
 
-    items.forEachConcurrent { item ->
+    items.forEachConcurrent(workerDispatcher = Dispatchers.IO) { item ->
       val out = item.output
       if (Files.notExists(out)) {
         span.addEvent("output directory doesn't exist", Attributes.of(AttributeKey.stringKey("name"), item.name, AttributeKey.stringKey("outDir"), out.toString()))
@@ -558,7 +551,8 @@ internal data class PackAndUploadItem(
   @JvmField val name: String,
   @JvmField val archive: Path,
 ) {
-  @JvmField var hash: String? = null
+  @JvmField
+  var hash: String? = null
 }
 
 internal data class FetchAndUnpackItem(
@@ -576,7 +570,6 @@ internal data class FetchAndUnpackItem(
 @Serializable
 internal data class CompilationPartsMetadata(
   @JvmField @SerialName("server-url") val serverUrl: String,
-  @JvmField val branch: String,
   @JvmField val prefix: String,
   /**
    * Map compilation part path to a hash, for now SHA-256 is used.

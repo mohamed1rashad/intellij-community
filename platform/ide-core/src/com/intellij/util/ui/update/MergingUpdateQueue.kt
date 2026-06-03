@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplacePutWithAssignment")
 
 package com.intellij.util.ui.update
@@ -38,8 +38,6 @@ import java.util.concurrent.TimeoutException
 import javax.swing.JComponent
 import kotlin.coroutines.coroutineContext
 
-private val priorityComparator = Comparator.comparingInt<Update> { it.priority }
-
 /**
  * Use this class to postpone task execution and optionally merge identical tasks. This is needed, e.g., to reflect in UI status of some
  * background activity: it doesn't make sense and would be inefficient to update UI 1000 times per second, so it's better to postpone 'update UI'
@@ -47,11 +45,27 @@ private val priorityComparator = Comparator.comparingInt<Update> { it.priority }
  *
  * Create an instance of this class and use [.queue] method to add new tasks.
  *
- * Sometimes [MergingUpdateQueue] can be used for control flow operations. **This kind of usage is discouraged**, in favor of
- * [kotlinx.coroutines.flow.Flow] and [kotlinx.coroutines.flow.FlowKt.debounce].
- * If you are still using [MergingUpdateQueue], you can consider queuing via [MergingQueueUtil.queueTracked]
+ * ## Alternatives to MergingUpdateQueue
+ *
+ * **For new code, prefer [DebouncedUpdates] instead.** It provides a simpler, coroutine-based API with better lifecycle management.
+ *
+ * **Use [DebouncedUpdates] for:**
+ * - Queuing single updates that don't need identity-based merging (use [DebouncedUpdates.Builder.runLatest])
+ * - Collecting updates over time for batch processing (use [DebouncedUpdates.Builder.runBatched] or [DebouncedUpdates.Builder.runBatchedDistinct]; you can handle priorities and other merging logic in the batch handler)
+ * - Component lifecycle integration (use [DebouncedUpdates.forComponent])
+ * - Almost all debouncing/throttling use cases
+ *
+ * **Note:** You can also use [kotlinx.coroutines.flow.Flow] with [kotlinx.coroutines.flow.debounce].
+ *
+ * **Only keep using [MergingUpdateQueue] if you have a rare, specific need for:**
+ * - Manual activation/suspension control via [activate]/[suspend]/[resume]
+ * - Flushing updates immediately with [sendFlush] (think twice: can you use a shorter delay or trigger the update directly? For tests, use [UpdateQueue.waitForAllExecuted] instead)
+ *
+ * If you are still using [MergingUpdateQueue], you can consider queuing via [queueTracked]
  * in order to notify the platform about scheduled updates.
-
+ *
+ * **Note:** consider to use [setRestartTimerOnAdd] to avoid updates stuck in the queue.
+ *
  * @param name                   name of this queue, used only for debugging purposes
  * @param mergingTimeSpan        time (in milliseconds) for which execution of tasks will be postponed
  * @param isActive               if `true` the queue will execute tasks otherwise it'll just collect them and execute only after [.activate] is called
@@ -121,12 +135,12 @@ open class MergingUpdateQueue @JvmOverloads constructor(
     activationComponent: JComponent? = null,
     executeInDispatchThread: Boolean = true,
   ) : this(
-    name = name,
-    mergingTimeSpan = mergingTimeSpan,
-    isActive = isActive,
-    modalityStateComponent = modalityStateComponent,
-    parent = parent,
-    activationComponent = activationComponent,
+    name,
+    mergingTimeSpan,
+    isActive,
+    modalityStateComponent,
+    parent,
+    activationComponent,
     thread = if (executeInDispatchThread) ThreadToUse.SWING_THREAD else ThreadToUse.POOLED_THREAD,
     coroutineScope = null,
   )
@@ -136,29 +150,17 @@ open class MergingUpdateQueue @JvmOverloads constructor(
       @Suppress("LeakingThis")
       Disposer.register(parent, this)
     }
-
-    waiterForMerge = if (coroutineScope == null) {
+    waiterForMerge =
       @Suppress("LeakingThis")
       SingleAlarm(
         task = getFlushTask(),
         delay = mergingTimeSpan,
         // due to historical reasons, we don't pass parent disposable if EDT
-        parentDisposable = if (thread == ThreadToUse.SWING_THREAD) null else this,
+        parentDisposable = if (thread == ThreadToUse.SWING_THREAD || coroutineScope != null) null else this,
         threadToUse = thread,
-        modalityState = null,
-        coroutineScope = null,
+        modalityState = if (thread == ThreadToUse.SWING_THREAD && coroutineScope != null) ModalityState.nonModal() else null,
+        coroutineScope,
       )
-    }
-    else {
-      @Suppress("LeakingThis")
-      SingleAlarm(
-        task = getFlushTask(),
-        delay = mergingTimeSpan,
-        parentDisposable = null,
-        threadToUse = thread,
-        coroutineScope = coroutineScope,
-      )
-    }
 
     if (coroutineScope != null) {
       coroutineScope.coroutineContext[Job]?.invokeOnCompletion {
@@ -238,6 +240,8 @@ open class MergingUpdateQueue @JvmOverloads constructor(
         }
       }
     }
+    private val priorityComparator: Comparator<Update> = Comparator.comparingInt { it.priority }
+    private fun isExpired(update: Update): Boolean = update.isDisposed || update.isExpired
   }
 
   fun setMergingTimeSpan(timeSpan: Int) {
@@ -248,17 +252,13 @@ open class MergingUpdateQueue @JvmOverloads constructor(
   }
 
   fun cancelAllUpdates() {
-    synchronized(scheduledUpdates) {
-      for (each in getAllScheduledUpdates()) {
-        try {
-          each.setRejected()
-        }
-        catch (_: CancellationException) {
-        }
-      }
+    val allScheduledUpdates = synchronized(scheduledUpdates) {
+      val updates = getAllScheduledUpdates()
       scheduledUpdates.clear()
-      finishActivity()
+      updates
     }
+    allScheduledUpdates.forEachGuaranteed(Update::setRejected)
+    finishActivity()
   }
 
   private fun getAllScheduledUpdates(): List<Update> = scheduledUpdates.values().flatMap { it.keys }
@@ -380,9 +380,11 @@ open class MergingUpdateQueue @JvmOverloads constructor(
         }
         else {
           // caused by forced restart
+          val updatesToReject = ArrayList<Update>()
           synchronized(scheduledUpdates) {
-            remainingUpdates.forEachGuaranteed(this::put)
+            remainingUpdates.forEachGuaranteed { put(it, updatesToReject) }
           }
+          updatesToReject.forEachGuaranteed(Update::setRejected)
         }
         throw e
       }
@@ -516,30 +518,35 @@ open class MergingUpdateQueue @JvmOverloads constructor(
     }
 
     val active = isActive
-    synchronized(scheduledUpdates) {
-      try {
-        if (eatThisOrOthers(update)) {
-          return
-        }
+    val updatesToReject = ArrayList<Update>()
+    try {
+      synchronized(scheduledUpdates) {
+        try {
+          if (eatThisOrOthers(update, updatesToReject)) {
+            return@synchronized
+          }
 
-        if (active && scheduledUpdates.isEmpty) {
-          restartTimer()
-        }
-        put(update)
+          if (active && scheduledUpdates.isEmpty) {
+            restartTimer()
+          }
+          put(update, updatesToReject)
 
-        if (restartOnAdd) {
-          restartTimer()
+          if (restartOnAdd) {
+            restartTimer()
+          }
+        }
+        finally {
+          if (isEmpty) {
+            finishActivity()
+          }
         }
       }
-      finally {
-        if (isEmpty) {
-          finishActivity()
-        }
-      }
+    } finally {
+      updatesToReject.forEachGuaranteed(Update::setRejected)
     }
   }
 
-  private fun eatThisOrOthers(update: Update): Boolean {
+  private fun eatThisOrOthers(update: Update, updatesToReject: MutableList<Update>): Boolean {
     val updates = scheduledUpdates.get(update.priority)
     if (updates != null && updates.containsKey(update)) {
       return false
@@ -547,13 +554,13 @@ open class MergingUpdateQueue @JvmOverloads constructor(
 
     for (eachInQueue in getAllScheduledUpdates()) {
       if (eachInQueue.canEat(update)) {
-        update.setRejected()
+        updatesToReject.add(update)
         return true
       }
 
       if (update.canEat(eachInQueue)) {
         scheduledUpdates.get(eachInQueue.priority).remove(eachInQueue)
-        eachInQueue.setRejected()
+        updatesToReject.add(eachInQueue)
       }
     }
     return false
@@ -564,14 +571,14 @@ open class MergingUpdateQueue @JvmOverloads constructor(
     execute(listOf(update))
   }
 
-  private fun put(update: Update) {
+  private fun put(update: Update, updatesToReject: MutableList<Update>) {
     val updates: MutableMap<Update, Update> = scheduledUpdates.cacheOrGet(update.priority, LinkedHashMap())
     val existing = updates.remove(update)
+    updates.put(update, update)
     if (existing != null && existing !== update) {
       existing.setProcessed()
-      existing.setRejected()
+      updatesToReject.add(existing)
     }
-    updates.put(update, update)
   }
 
   override fun dispose() {
@@ -653,4 +660,3 @@ open class MergingUpdateQueue @JvmOverloads constructor(
   }
 }
 
-private fun isExpired(update: Update): Boolean = update.isDisposed || update.isExpired

@@ -1,9 +1,17 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package git4idea.test
 
 import com.intellij.ide.errorTreeView.HotfixData
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vcs.*
+import com.intellij.openapi.vcs.AbstractVcs
+import com.intellij.openapi.vcs.AbstractVcsHelper
+import com.intellij.openapi.vcs.CommittedChangesProvider
+import com.intellij.openapi.vcs.FilePath
+import com.intellij.openapi.vcs.RepositoryLocation
+import com.intellij.openapi.vcs.TransactionRunnable
+import com.intellij.openapi.vcs.VcsException
+import com.intellij.openapi.vcs.VcsKey
+import com.intellij.openapi.vcs.VcsShowConfirmationOption
 import com.intellij.openapi.vcs.annotate.AnnotationProvider
 import com.intellij.openapi.vcs.annotate.FileAnnotation
 import com.intellij.openapi.vcs.changes.Change
@@ -84,10 +92,17 @@ class MockVcsHelper(project: Project) : AbstractVcsHelper(project) {
     throw UnsupportedOperationException()
   }
 
-  override fun showMergeDialog(files: List<VirtualFile>, provider: MergeProvider, mergeDialogCustomizer: MergeDialogCustomizer): List<VirtualFile> {
+  override fun showMergeDialogWithResult(
+    files: List<VirtualFile>,
+    provider: MergeProvider,
+    mergeDialogCustomizer: MergeDialogCustomizer,
+  ): MergeDialogResult {
     myMergeDialogShown = true
     myMergeDelegate()
-    return emptyList()
+    return object : MergeDialogResult {
+      override fun getProcessedFiles(): List<VirtualFile> = emptyList()
+      override fun shouldFinishMerge(): Boolean = true
+    }
   }
 
   override fun commitChanges(changes: Collection<Change>, initialChangeList: LocalChangeList, commitMessage: String, customResultHandler: CommitResultHandler?): Boolean {

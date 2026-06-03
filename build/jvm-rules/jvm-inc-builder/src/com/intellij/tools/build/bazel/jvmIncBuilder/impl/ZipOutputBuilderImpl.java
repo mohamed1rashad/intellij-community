@@ -6,14 +6,16 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.intellij.build.io.*;
 
-import java.io.BufferedOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
 import java.lang.ref.SoftReference;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.*;
-import java.time.*;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.*;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
@@ -45,7 +47,7 @@ public class ZipOutputBuilderImpl implements ZipOutputBuilder {
   private final @Nullable ZipFile myReadZipFile;
   private final boolean myCreateIndex;
 
-  private final Map<String, byte[]> mySwap;
+  private final @Nullable Map<String, byte[]> mySwap;
   private final Map<String, Set<String>> myDirIndex = new HashMap<>();
   private boolean myHasChanges;
 
@@ -54,10 +56,10 @@ public class ZipOutputBuilderImpl implements ZipOutputBuilder {
   }
   
   public ZipOutputBuilderImpl(@NotNull Path readZipPath, @NotNull Path writeZipPath) throws IOException {
-    this(new HashMap<>(), readZipPath, writeZipPath, false);
+    this(null, readZipPath, writeZipPath, false);
   }
   
-  public ZipOutputBuilderImpl(Map<String, byte[]> dataSwap, @NotNull Path readZipPath, @NotNull Path writeZipPath, boolean createIndex) throws IOException {
+  public ZipOutputBuilderImpl(@Nullable Map<String, byte[]> dataSwap, @NotNull Path readZipPath, @NotNull Path writeZipPath, boolean createIndex) throws IOException {
     myReadZipPath = readZipPath;
     myWriteZipPath = writeZipPath;
     mySwap = dataSwap;
@@ -124,13 +126,23 @@ public class ZipOutputBuilderImpl implements ZipOutputBuilder {
       throw new RuntimeException("Unexpected name with trailing slash for ZIP entry with content: \"" + entryName + "\"");
     }
     if (content != null) {
-      myEntries.put(entryName, createEntryData(mySwap, entryName, content));
+      myEntries.put(entryName, mySwap == null? createEntryData(entryName, content) : createEntryData(mySwap, entryName, content));
       addToPackageIndex(entryName);
       myHasChanges = true;
     }
     else {
       myHasChanges |= deleteEntry(entryName);
     }
+  }
+
+  @Override
+  public void putEntry(String entryName, @NotNull Path content) {
+    if (isDirectoryName(entryName)) {
+      throw new RuntimeException("Unexpected name with trailing slash for ZIP entry with content: \"" + entryName + "\"");
+    }
+    myEntries.put(entryName, createEntryData(entryName, content));
+    addToPackageIndex(entryName);
+    myHasChanges = true;
   }
 
   @Override
@@ -221,7 +233,9 @@ public class ZipOutputBuilderImpl implements ZipOutputBuilder {
       myExistingDirectories.clear();
       myDirIndex.clear();
       myEntries.clear();
-      mySwap.clear();
+      if (mySwap != null) {
+        mySwap.clear();
+      }
     }
   }
 
@@ -341,7 +355,7 @@ public class ZipOutputBuilderImpl implements ZipOutputBuilder {
     };
   }
 
-  private EntryData createEntryData(Map<String, byte[]> swap, String entryName, byte[] content) {
+  private EntryData createEntryData(@NotNull Map<String, byte[]> swap, String entryName, byte[] content) {
     swap.put(entryName, content);
     return new CachingDataEntry(content) {
       private ZipEntry entry;
@@ -366,6 +380,53 @@ public class ZipOutputBuilderImpl implements ZipOutputBuilder {
         super.cleanup();
         entry = null;
         swap.remove(entryName);
+      }
+    };
+  }
+
+  private EntryData createEntryData(String entryName, Path content) {
+    return new CachingDataEntry(null) {
+      private ZipEntry entry;
+      @Override
+      protected byte[] loadData() {
+        try (InputStream in = Files.newInputStream(content)) {
+          ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+          in.transferTo(bytes);
+          return bytes.toByteArray();
+        }
+        catch (IOException e) {
+          throw new RuntimeException(e);
+        }
+      }
+
+      @Override
+      public ZipEntry getZipEntry() {
+        try {
+          return entry != null? entry : (entry = createZipEntry(entryName, getContent()));
+        }
+        catch (IOException e) {
+          // should not happen, since loadData() in this implementation won't throw anything
+          throw new RuntimeException();
+        }
+      }
+
+      @Override
+      public void transferTo(OutputStream os) throws IOException {
+        byte[] data = getCached();
+        if (data != null) {
+          os.write(data);
+        }
+        else {
+          try (InputStream in = Files.newInputStream(content)) {
+            in.transferTo(os);
+          }
+        }
+      }
+
+      @Override
+      public void cleanup() {
+        super.cleanup();
+        entry = null;
       }
     };
   }

@@ -2,16 +2,29 @@
 package org.jetbrains.idea.eclipse.config
 
 import com.intellij.java.workspace.entities.JavaModuleSettingsEntity
-import com.intellij.java.workspace.entities.JavaResourceRootPropertiesEntity
 import com.intellij.java.workspace.entities.JavaSourceRootPropertiesEntity
-import com.intellij.java.workspace.entities.asJavaResourceRoot
 import com.intellij.java.workspace.entities.asJavaSourceRoot
 import com.intellij.java.workspace.entities.javaSettings
 import com.intellij.openapi.components.ExpandMacroToPathMap
 import com.intellij.openapi.roots.OrderRootType
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.DependencyScope
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntity
+import com.intellij.platform.workspace.jps.entities.InheritedSdkDependency
+import com.intellij.platform.workspace.jps.entities.LibraryDependency
+import com.intellij.platform.workspace.jps.entities.LibraryEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryId
+import com.intellij.platform.workspace.jps.entities.LibraryRoot
+import com.intellij.platform.workspace.jps.entities.LibraryRootTypeId
+import com.intellij.platform.workspace.jps.entities.ModuleDependency
+import com.intellij.platform.workspace.jps.entities.ModuleDependencyItem
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
+import com.intellij.platform.workspace.jps.entities.SdkDependency
+import com.intellij.platform.workspace.jps.entities.SdkId
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
 import com.intellij.workspaceModel.ide.legacyBridge.impl.java.JAVA_SOURCE_ROOT_ENTITY_TYPE_ID
 import com.intellij.workspaceModel.ide.legacyBridge.impl.java.JAVA_TEST_ROOT_ENTITY_TYPE_ID
@@ -27,12 +40,12 @@ import org.jetbrains.jps.util.JpsPathUtil
  * Loads additional module configuration from *.eml file to [ModuleEntity]
  */
 internal class EmlFileLoader(
-  private val module: ModifiableModuleEntity,
+  private val module: ModuleEntityBuilder,
   private val expandMacroToPathMap: ExpandMacroToPathMap,
   private val virtualFileManager: VirtualFileUrlManager,
-  private val moduleLibrariesCollector: MutableMap<LibraryId, ModifiableLibraryEntity>,
+  private val moduleLibrariesCollector: MutableMap<LibraryId, LibraryEntityBuilder>,
 ) {
-  fun loadEml(emlTag: Element, contentRoot: ModifiableContentRootEntity) {
+  fun loadEml(emlTag: Element, contentRoot: ContentRootEntityBuilder) {
     loadCustomJavaSettings(emlTag)
     loadContentEntries(emlTag, contentRoot)
     loadJdkSettings(emlTag)
@@ -81,7 +94,7 @@ internal class EmlFileLoader(
     } ?: DependencyScope.COMPILE
   }
 
-  private fun loadModuleLibrary(libTag: Element, library: ModifiableLibraryEntity) {
+  private fun loadModuleLibrary(libTag: Element, library: LibraryEntityBuilder) {
     val eclipseSrcRoot = library.roots.firstOrNull { it.type.name == OrderRootType.SOURCES.name() }
     val rootsToRemove = HashSet<LibraryRoot>()
     val rootsToAdd = ArrayList<LibraryRoot>()
@@ -171,7 +184,7 @@ internal class EmlFileLoader(
     }
   }
 
-  private fun loadContentEntries(emlTag: Element, contentRoot: ModifiableContentRootEntity) {
+  private fun loadContentEntries(emlTag: Element, contentRoot: ContentRootEntityBuilder) {
     val entryElements = emlTag.getChildren(IdeaXml.CONTENT_ENTRY_TAG)
     if (entryElements.isNotEmpty()) {
       entryElements.forEach { entryTag ->
@@ -188,7 +201,7 @@ internal class EmlFileLoader(
     }
   }
 
-  private fun loadContentEntry(contentEntryTag: Element, entity: ModifiableContentRootEntity) {
+  private fun loadContentEntry(contentEntryTag: Element, entity: ContentRootEntityBuilder) {
     val testSourceFolders = contentEntryTag.getChildren(IdeaXml.TEST_FOLDER_TAG).mapTo(HashSet()) {
       it.getAttributeValue(IdeaXml.URL_ATTR)
     }

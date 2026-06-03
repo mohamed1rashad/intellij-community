@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("SSBasedInspection")
 
 package com.intellij.testFramework.junit5.impl
@@ -6,15 +6,25 @@ package com.intellij.testFramework.junit5.impl
 import com.intellij.ide.AppLifecycleListener
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
-import com.intellij.testFramework.common.*
+import com.intellij.testFramework.common.BazelTestUtil
+import com.intellij.testFramework.common.assertDisposerEmpty
+import com.intellij.testFramework.common.assertNonDefaultProjectsAreNotLeaked
+import com.intellij.testFramework.common.cleanApplicationState
+import com.intellij.testFramework.common.disposeTestApplication
+import com.intellij.testFramework.common.initTestApplication
+import com.intellij.testFramework.common.timeoutRunBlocking
+import com.intellij.testFramework.common.waitForAppLeakingThreads
 import com.intellij.util.ui.EDT
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import org.jetbrains.annotations.TestOnly
 import org.junit.jupiter.api.extension.AfterEachCallback
 import org.junit.jupiter.api.extension.BeforeAllCallback
 import org.junit.jupiter.api.extension.ExtensionContext
-import java.time.Duration
+import java.lang.AutoCloseable
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 @TestOnly
 class TestApplicationExtension : BeforeAllCallback, AfterEachCallback {
@@ -37,30 +47,35 @@ fun ExtensionContext.testApplication(): Result<Unit> {
 }
 
 @TestOnly
-private class TestApplicationResource(val initializationResult: Result<Unit>) : ExtensionContext.Store.CloseableResource {
+private class TestApplicationResource(val initializationResult: Result<Unit>) : AutoCloseable {
   override fun close() {
     check(!EDT.isCurrentThreadEdt())
     if (!initializationResult.isSuccess) {
       return
     }
 
-    runBlocking {
-      withTimeout(Duration.ofSeconds(20).toMillis()) {
-        withContext(Dispatchers.EDT) {
-          val application = ApplicationManager.getApplication()
-          application.messageBus.syncPublisher(AppLifecycleListener.TOPIC).appWillBeClosed(false)
-          yield()
-          withContext(Dispatchers.IO) {
-            runInterruptible {
-              waitForAppLeakingThreads(application, 10, TimeUnit.SECONDS)
-            }
-          }
-          assertNonDefaultProjectsAreNotLeaked() // TODO? ability to disable this check for local (=non-build-server) runs
-          yield()
-          disposeTestApplication()
-        }
-        assertDisposerEmpty()
+    // In Bazel test environment, don't dispose the application.
+    // The JVM will terminate after all tests complete anyway, and
+    // disposing here would break JUnit 4 tests that run after JUnit 5 tests.
+    // See BAZEL-2843 for details.
+    if (BazelTestUtil.isUnderBazelTest || skipTestApplicationDispose()) {
+      return
+    }
+
+    timeoutRunBlocking(20.seconds, "TestApplication.close()") {
+      withContext(Dispatchers.EDT) {
+        val application = ApplicationManager.getApplication()
+        application.messageBus.syncPublisher(AppLifecycleListener.TOPIC).appWillBeClosed(false)
+        yield()
+        waitForAppLeakingThreads(application, 10, TimeUnit.SECONDS)
+        assertNonDefaultProjectsAreNotLeaked() // TODO? ability to disable this check for local (=non-build-server) runs
+        yield()
+        disposeTestApplication()
       }
+      assertDisposerEmpty()
     }
   }
 }
+
+private fun skipTestApplicationDispose(): Boolean =
+  System.getProperty("intellij.testFramework.junit5.skip.test.application.dispose", "false").toBooleanStrict()

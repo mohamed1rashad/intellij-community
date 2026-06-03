@@ -6,10 +6,19 @@ import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.components.KaImplicitReceiverSmartCastKind
+import org.jetbrains.kotlin.analysis.api.components.expectedType
+import org.jetbrains.kotlin.analysis.api.components.implicitReceiverSmartCasts
+import org.jetbrains.kotlin.analysis.api.components.isSubtypeOf
+import org.jetbrains.kotlin.analysis.api.components.render
+import org.jetbrains.kotlin.analysis.api.components.smartCastInfo
 import org.jetbrains.kotlin.idea.base.highlighting.KotlinBaseHighlightingBundle
-import org.jetbrains.kotlin.idea.highlighter.HighlightingFactory
 import org.jetbrains.kotlin.idea.highlighter.KotlinHighlightInfoTypeSemanticNames
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtParenthesizedExpression
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtWhenExpression
 import org.jetbrains.kotlin.types.Variance
 
 internal class KotlinExpressionsSmartcastSemanticAnalyzer(holder: HighlightInfoHolder, session: KaSession) : KotlinSemanticAnalyzer(holder, session) {
@@ -18,14 +27,14 @@ internal class KotlinExpressionsSmartcastSemanticAnalyzer(holder: HighlightInfoH
     }
 
     @OptIn(KaExperimentalApi::class)
-    private fun highlightExpression(expression: KtExpression): Unit = with(session) {
+    private fun highlightExpression(expression: KtExpression): Unit = context(session) {
         expression.implicitReceiverSmartCasts.forEach {
             val receiverName = when (it.kind) {
                 KaImplicitReceiverSmartCastKind.EXTENSION -> KotlinBaseHighlightingBundle.message("extension.implicit.receiver")
                 KaImplicitReceiverSmartCastKind.DISPATCH -> KotlinBaseHighlightingBundle.message("implicit.receiver")
             }
 
-            val builder = HighlightingFactory.highlightName(
+            highlightName(
                 expression,
                 KotlinHighlightInfoTypeSemanticNames.SMART_CAST_RECEIVER,
                 KotlinBaseHighlightingBundle.message(
@@ -34,9 +43,6 @@ internal class KotlinExpressionsSmartcastSemanticAnalyzer(holder: HighlightInfoH
                     it.type.render(position = Variance.INVARIANT)
                 )
             )
-            if (builder != null) {
-                holder.add(builder.create())
-            }
         }
 
         expression.smartCastInfo?.takeIf { it.isStable }?.let { info ->
@@ -47,7 +53,7 @@ internal class KotlinExpressionsSmartcastSemanticAnalyzer(holder: HighlightInfoH
                 }
             }
 
-            val builder = HighlightingFactory.highlightName(
+            highlightName(
                 getSmartCastTarget(expression),
                 KotlinHighlightInfoTypeSemanticNames.SMART_CAST_VALUE,
                 KotlinBaseHighlightingBundle.message(
@@ -55,9 +61,6 @@ internal class KotlinExpressionsSmartcastSemanticAnalyzer(holder: HighlightInfoH
                     info.smartCastType.render(position = Variance.INVARIANT)
                 )
             )
-            if (builder != null) {
-                holder.add(builder.create())
-            }
         }
     }
 }

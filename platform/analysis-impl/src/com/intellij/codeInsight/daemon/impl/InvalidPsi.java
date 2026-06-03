@@ -13,6 +13,6 @@ import org.jetbrains.annotations.NotNull;
 record InvalidPsi(@NotNull PsiElement psiElement, @NotNull HighlightInfo info) {
   @Override
   public @NotNull String toString() {
-    return ReadAction.compute(() -> "InvalidPsi(" + psiElement() + (psiElement().isValid() ? "" : "(invalid)") + "," + info + ")");
+    return ReadAction.computeBlocking(() -> "InvalidPsi(" + HighlightInfoUpdaterImpl.debugPsiInfo(psiElement()) + "," + info + ")");
   }
 }

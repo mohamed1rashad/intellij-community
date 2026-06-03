@@ -22,6 +22,7 @@ import com.intellij.openapi.ui.popup.BalloonBuilder;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NlsContexts.StatusBarText;
 import com.intellij.openapi.util.NlsContexts.Tooltip;
 import com.intellij.openapi.util.NlsSafe;
@@ -39,10 +40,13 @@ import com.intellij.util.Alarm;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.SynchronizedClearableLazy;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.messages.MessageBusConnection;
 import com.jetbrains.jsonSchema.JsonSchemaCatalogProjectConfiguration;
 import com.jetbrains.jsonSchema.JsonSchemaMappingsProjectConfiguration;
-import com.jetbrains.jsonSchema.extension.*;
+import com.jetbrains.jsonSchema.extension.JsonSchemaEnabler;
+import com.jetbrains.jsonSchema.extension.JsonSchemaFileProvider;
+import com.jetbrains.jsonSchema.extension.JsonSchemaInfo;
+import com.jetbrains.jsonSchema.extension.JsonWidgetSuppressor;
+import com.jetbrains.jsonSchema.extension.SchemaType;
 import com.jetbrains.jsonSchema.ide.JsonSchemaService;
 import com.jetbrains.jsonSchema.impl.JsonSchemaServiceImpl;
 import com.jetbrains.jsonSchema.remote.JsonFileResolver;
@@ -52,11 +56,13 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -71,9 +77,10 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
   private final AtomicReference<Pair<VirtualFile, Boolean>> mySuppressInfoRef = new AtomicReference<>();
 
   private volatile Pair<WidgetState, VirtualFile> myLastWidgetStateAndFilePair;
+  private final Map<RemoteFileInfo, FileDownloadingAdapter> myDownloadingListeners = new ConcurrentHashMap<>();
   private ProgressIndicator myCurrentProgress;
 
-  JsonSchemaStatusWidget(@NotNull Project project, @NotNull CoroutineScope scope) {
+  private JsonSchemaStatusWidget(@NotNull Project project, @NotNull CoroutineScope scope) {
     super(project, false, scope);
 
     myServiceLazy = new SynchronizedClearableLazy<>(() -> {
@@ -85,7 +92,28 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
       }
       return null;
     });
-    JsonWidgetSuppressor.EXTENSION_POINT_NAME.addChangeListener(this::update, this);
+  }
+
+  @NotNull
+  public static JsonSchemaStatusWidget create(@NotNull Project project, @NotNull CoroutineScope parentScope) {
+    CoroutineScope childScope = JsonSchemaStatusWidgetKotlin.INSTANCE.childScope(parentScope, "JsonSchemaStatusWidget::childScope");
+
+    JsonSchemaStatusWidget widget = null;
+    try {
+      widget = new JsonSchemaStatusWidget(project, childScope);
+      widget.initialize(childScope);
+      JsonSchemaStatusWidgetKotlin.INSTANCE.cancelOnDispose(childScope, widget);
+    }
+    catch (Exception e) {
+      JsonSchemaStatusWidgetKotlin.INSTANCE.cancel(childScope);
+      if (widget != null) {
+        Disposer.dispose(widget);
+      }
+
+      throw e;
+    }
+
+    return widget;
   }
 
   private @Nullable JsonSchemaService getService() {
@@ -336,22 +364,34 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
   }
 
   private void addDownloadingUpdateListener(@NotNull RemoteFileInfo info) {
-    info.addDownloadingListener(new FileDownloadingAdapter() {
+    FileDownloadingAdapter listener = new FileDownloadingAdapter() {
       @Override
       public void fileDownloaded(@NotNull VirtualFile localFile) {
+        removeDownloadingUpdateListener(info, this);
         update();
       }
 
       @Override
       public void errorOccurred(@NotNull String errorMessage) {
+        removeDownloadingUpdateListener(info, this);
         update();
       }
 
       @Override
       public void downloadingCancelled() {
+        removeDownloadingUpdateListener(info, this);
         update();
       }
-    });
+    };
+    if (myDownloadingListeners.putIfAbsent(info, listener) == null) {
+      info.addDownloadingListener(listener);
+    }
+  }
+
+  private void removeDownloadingUpdateListener(@NotNull RemoteFileInfo info, @NotNull FileDownloadingAdapter listener) {
+    if (myDownloadingListeners.remove(info, listener)) {
+      info.removeDownloadingListener(listener);
+    }
   }
 
   private boolean isValidSchemaFile(@Nullable VirtualFile schemaFile) {
@@ -438,8 +478,7 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
     return null;
   }
 
-  @Override
-  protected void registerCustomListeners(@NotNull MessageBusConnection connection) {
+  private void initialize(CoroutineScope scope) {
     final class Listener implements DumbService.DumbModeListener {
       volatile boolean isDumbMode;
 
@@ -456,7 +495,8 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
       }
     }
 
-    connection.subscribe(DumbService.DUMB_MODE, new Listener());
+    myConnection.subscribe(DumbService.DUMB_MODE, new Listener());
+    JsonWidgetSuppressor.EXTENSION_POINT_NAME.addChangeListener(scope, this::update);
   }
 
   @Override
@@ -466,7 +506,7 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
 
   @Override
   protected @NotNull StatusBarWidget createInstance(@NotNull Project project) {
-    return new JsonSchemaStatusWidget(project, getScope());
+    return create(project, getScope());
   }
 
   @Override
@@ -476,6 +516,11 @@ final class JsonSchemaStatusWidget extends EditorBasedStatusBarPopup {
 
   @Override
   public void dispose() {
+    for (Map.Entry<RemoteFileInfo, FileDownloadingAdapter> entry : myDownloadingListeners.entrySet()) {
+      entry.getKey().removeDownloadingListener(entry.getValue());
+    }
+    myDownloadingListeners.clear();
+
     JsonSchemaService service = myServiceLazy.isInitialized() ? myServiceLazy.getValue() : null;
     if (service != null) {
       service.unregisterRemoteUpdateCallback(myUpdateCallback);

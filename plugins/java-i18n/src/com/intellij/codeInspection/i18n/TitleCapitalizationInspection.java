@@ -2,7 +2,11 @@
 package com.intellij.codeInspection.i18n;
 
 import com.ibm.icu.text.MessagePattern;
-import com.intellij.codeInspection.*;
+import com.intellij.codeInspection.AbstractBaseJavaLocalInspectionTool;
+import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.NlsCapitalizationUtil;
+import com.intellij.codeInspection.ProblemHighlightType;
+import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.codeInspection.restriction.AnnotationContext;
 import com.intellij.codeInspection.restriction.StringFlowUtil;
 import com.intellij.java.i18n.JavaI18nBundle;
@@ -11,7 +15,22 @@ import com.intellij.modcommand.ModPsiUpdater;
 import com.intellij.modcommand.PsiUpdateModCommandQuickFix;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiLiteralExpression;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.util.PropertyUtilBase;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
@@ -21,10 +40,23 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.uast.*;
+import org.jetbrains.uast.UCallExpression;
+import org.jetbrains.uast.UElement;
+import org.jetbrains.uast.UExpression;
+import org.jetbrains.uast.UQualifiedReferenceExpression;
+import org.jetbrains.uast.UReferenceExpression;
+import org.jetbrains.uast.UResolvable;
+import org.jetbrains.uast.UastContextKt;
 import org.jetbrains.uast.expressions.UInjectionHost;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
 public final class TitleCapitalizationInspection extends AbstractBaseJavaLocalInspectionTool {
@@ -148,7 +180,7 @@ public final class TitleCapitalizationInspection extends AbstractBaseJavaLocalIn
   private static @Nullable Property getPropertyArgument(UCallExpression arg) {
     List<UExpression> args = arg.getValueArguments();
     if (!args.isEmpty()) {
-      return JavaI18nUtil.resolveProperty(args.get(0));
+      return JavaI18nUtil.resolveProperty(args.getFirst());
     }
     return null;
   }
@@ -219,12 +251,31 @@ public final class TitleCapitalizationInspection extends AbstractBaseJavaLocalIn
   }
 
   interface Value {
+    Pattern HTML_PATTERN = Pattern.compile("<[^>]*+>", Pattern.MULTILINE);
+    
     @Override
     @NotNull String toString();
     boolean isSatisfied(@NotNull Nls.Capitalization capitalization);
 
     default @NotNull String fixCapitalization(@NotNull Nls.Capitalization capitalization) {
-      return NlsCapitalizationUtil.fixValue(toString(), capitalization);
+      String string = toString();
+      Matcher matcher = HTML_PATTERN.matcher(string);
+      StringBuilder withoutTags = new StringBuilder();
+      record Tag(int pos, String content) {
+      }
+      List<Tag> tags = new ArrayList<>();
+      while (matcher.find()) {
+        tags.add(new Tag(matcher.start(), matcher.group()));
+        matcher.appendReplacement(withoutTags, "");
+      }
+      matcher.appendTail(withoutTags);
+      String result = NlsCapitalizationUtil.fixValue(withoutTags.toString(), capitalization);
+      for (Tag tag: tags) {
+        if (tag.pos <= result.length()) {
+          result = result.substring(0, tag.pos) + tag.content + result.substring(tag.pos);
+        }
+      }
+      return result;
     }
 
     default boolean canFix() { return true; }

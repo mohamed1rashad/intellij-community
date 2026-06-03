@@ -3,10 +3,9 @@
 
 package com.intellij.platform.testFramework.plugins
 
-import com.intellij.ide.plugins.ModuleLoadingRule
-import com.intellij.ide.plugins.ModuleVisibility
+import com.intellij.platform.pluginSystem.parser.impl.elements.ModuleLoadingRuleValue
+import com.intellij.platform.pluginSystem.parser.impl.elements.ModuleVisibilityValue
 import org.intellij.lang.annotations.Language
-
 
 class PluginSpec internal constructor(
   val id: String?,
@@ -27,11 +26,10 @@ class PluginSpec internal constructor(
   val pluginDependencies: List<DependsSpec>,
   val moduleDependencies: List<ModuleDependencySpec>,
   val pluginMainModuleDependencies: List<String>,
-  val moduleVisibility: ModuleVisibility,
+  val moduleVisibility: ModuleVisibilityValue,
 
   val pluginAliases: List<String>,
   val incompatibleWith: List<String>,
-  val namespace: String?,
   val content: List<ContentModuleSpec>,
 
   val resourceBundle: String?,
@@ -48,6 +46,7 @@ class PluginSpec internal constructor(
 
 data class PluginSpecClassReference(val className: String, val classLoader: ClassLoader? = null)
 
+@PluginBuilderDsl
 class PluginSpecBuilder(
   var id: String? = null,
   var name: String? = null,
@@ -68,10 +67,9 @@ class PluginSpecBuilder(
   internal var moduleDependencies: List<ModuleDependencySpec> = emptyList(),
   internal var pluginMainModuleDependencies: List<String> = emptyList(),
 
-  var moduleVisibility: ModuleVisibility = ModuleVisibility.PRIVATE,
+  var moduleVisibility: ModuleVisibilityValue = ModuleVisibilityValue.PRIVATE,
   var pluginAliases: List<String> = emptyList(),
   var incompatibleWith: List<String> = emptyList(),
-  var namespace: String? = null,
   internal var content: List<ContentModuleSpec> = emptyList(),
 
   var resourceBundle: String? = null,
@@ -93,23 +91,27 @@ class PluginSpecBuilder(
     vendor = vendor, description = description, pluginDependencies = pluginDependencies, moduleDependencies = moduleDependencies,
     moduleVisibility = moduleVisibility,
     pluginMainModuleDependencies = pluginMainModuleDependencies, pluginAliases = pluginAliases, incompatibleWith = incompatibleWith,
-    namespace = namespace,
     content = content, resourceBundle = resourceBundle, actions = actions, applicationListeners = applicationListeners,
     extensionPoints = extensionPoints, extensions = extensions, body = body, classFiles = classFiles, packageClassFiles = packageClassFiles
   )
 }
 
+@PluginBuilderDsl
 class ContentModuleSpec internal constructor(
-  val moduleId: String,
-  val loadingRule: ModuleLoadingRule,
+  val moduleName: String,
+  val namespace: String?,
+  val loadingRule: ModuleLoadingRuleValue,
   val requiredIfAvailable: String?,
   val spec: PluginSpec,
 )
 
+@PluginBuilderDsl
 class DependsSpec internal constructor(val pluginId: String, val optional: Boolean, val configFile: String?, val spec: PluginSpec?) {
   init { require((configFile != null) == (spec != null)) }
 }
 
+@PluginBuilderDsl
 class ModuleDependencySpec internal constructor(val name: String, val namespace: String? = null)
 
+@PluginBuilderDsl
 class ExtensionsSpec internal constructor(val ns: String, @Language("XML") val content: String)

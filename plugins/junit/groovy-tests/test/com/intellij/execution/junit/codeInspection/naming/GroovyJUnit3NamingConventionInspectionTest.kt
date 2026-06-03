@@ -1,15 +1,15 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.junit.codeInspection.naming
 
-import com.intellij.junit.testFramework.addJUnit3Library
+import com.intellij.junit.testFramework.JUnitProjectDescriptor
+import com.intellij.junit.testFramework.MavenTestLib
 import com.intellij.jvm.analysis.testFramework.JvmInspectionTestBase
 import com.intellij.jvm.analysis.testFramework.JvmLanguage
-import com.intellij.openapi.module.Module
-import com.intellij.openapi.roots.ContentEntry
-import com.intellij.openapi.roots.ModifiableRootModel
 import com.intellij.pom.java.LanguageLevel
 import com.intellij.testFramework.LightProjectDescriptor
 import org.jetbrains.plugins.groovy.codeInspection.naming.NewGroovyClassNamingConventionInspection
+
+private val descriptor = JUnitProjectDescriptor(LanguageLevel.HIGHEST, MavenTestLib.JUNIT3)
 
 class GroovyJUnit3NamingConventionInspectionTest : JvmInspectionTestBase() {
   override val inspection by lazy {
@@ -19,14 +19,7 @@ class GroovyJUnit3NamingConventionInspectionTest : JvmInspectionTestBase() {
     }
   }
 
-  private class JUnitProjectDescriptor(languageLevel: LanguageLevel) : ProjectDescriptor(languageLevel) {
-    override fun configureModule(module: Module, model: ModifiableRootModel, contentEntry: ContentEntry) {
-      super.configureModule(module, model, contentEntry)
-      model.addJUnit3Library()
-    }
-  }
-
-  override fun getProjectDescriptor(): LightProjectDescriptor = JUnitProjectDescriptor(LanguageLevel.HIGHEST)
+  override fun getProjectDescriptor(): LightProjectDescriptor = descriptor
 
   fun testTestCaseConvention() {
     myFixture.testHighlighting(JvmLanguage.GROOVY, """
@@ -43,5 +36,4 @@ class GroovyJUnit3NamingConventionInspectionTest : JvmInspectionTestBase() {
       abstract class SpecialAbstractTestCase extends TestCase { }
     """.trimIndent())
   }
-
 }

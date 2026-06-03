@@ -1,12 +1,12 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.importing
 
-import com.intellij.compiler.CompilerTestUtil
 import com.intellij.concurrency.IdeaForkJoinWorkerThreadFactory
 import com.intellij.execution.RunManagerEx
 import com.intellij.execution.process.ProcessOutputType
-import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil
+import com.intellij.java.testFramework.backend.CompilerTestUtil
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.externalSystem.importing.ImportSpec
@@ -22,7 +22,11 @@ import com.intellij.openapi.externalSystem.settings.ExternalSystemSettingsListen
 import com.intellij.openapi.externalSystem.test.JavaExternalSystemImportingTestCase
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.externalSystem.util.environment.Environment.Companion.getVariable
-import com.intellij.openapi.projectRoots.*
+import com.intellij.openapi.projectRoots.JavaSdk
+import com.intellij.openapi.projectRoots.ProjectJdkTable
+import com.intellij.openapi.projectRoots.Sdk
+import com.intellij.openapi.projectRoots.SdkType
+import com.intellij.openapi.projectRoots.SimpleJavaSdkType
 import com.intellij.openapi.projectRoots.impl.SdkConfigurationUtil
 import com.intellij.openapi.roots.DependencyScope
 import com.intellij.openapi.roots.ui.configuration.UnknownSdkResolver
@@ -35,19 +39,26 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.text.Strings
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
+import com.intellij.platform.eel.EelDescriptor
 import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.testFramework.eelJava.EelTestJdkProvider
+import com.intellij.platform.testFramework.eelJava.EelTestUtil
 import com.intellij.platform.testFramework.io.ExternalResourcesChecker.reportUnavailability
 import com.intellij.testFramework.ExtensionTestUtil.maskExtensions
 import com.intellij.testFramework.IdeaTestUtil
 import com.intellij.testFramework.RunAll.Companion.runAll
+import com.intellij.testFramework.common.ThreadLeakTracker
 import com.intellij.util.SmartList
 import com.intellij.util.ThrowableRunnable
 import com.intellij.util.currentJavaVersion
 import com.intellij.util.io.copyRecursively
 import com.intellij.util.io.createParentDirectories
 import com.intellij.util.io.delete
+import com.intellij.util.lang.JavaVersion
 import org.gradle.util.GradleVersion
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.jps.model.java.JdkVersionDetector
 import org.jetbrains.plugins.gradle.frameworkSupport.GradleDsl
 import org.jetbrains.plugins.gradle.frameworkSupport.settingsScript.GradleSettingScriptBuilder
 import org.jetbrains.plugins.gradle.frameworkSupport.settingsScript.GradleSettingScriptBuilder.Companion.create
@@ -64,7 +75,11 @@ import org.jetbrains.plugins.gradle.tooling.GradleJvmResolver.Companion.resolveG
 import org.jetbrains.plugins.gradle.tooling.JavaVersionRestriction
 import org.jetbrains.plugins.gradle.tooling.TargetJavaVersionWatcher
 import org.jetbrains.plugins.gradle.tooling.VersionMatcherRule
-import org.jetbrains.plugins.gradle.util.*
+import org.jetbrains.plugins.gradle.util.GradleConstants
+import org.jetbrains.plugins.gradle.util.getGradleDistributionJarPath
+import org.jetbrains.plugins.gradle.util.getGradleDistributionRoot
+import org.jetbrains.plugins.gradle.util.getLocalGradleDistributionRoot
+import org.jetbrains.plugins.gradle.util.validateGradleJar
 import org.junit.Assume
 import org.junit.Rule
 import org.junit.rules.TestName
@@ -104,8 +119,12 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
   var gradleJdkHome: String? = null
     private set
 
+  val gradleJvmInfo: JdkVersionDetector.JdkVersionInfo
+    get() = JdkVersionDetector.getInstance().detectJdkVersionInfo(gradleJdkHome!!)!!
+
   private val removedSdks: MutableList<Sdk> = SmartList<Sdk>()
   private val myTestDisposable by lazy { Disposer.newDisposable() }
+  private val myLongRunningThreadsDisposable by lazy { Disposer.newDisposable() }
   private val deprecationError = Ref.create<Couple<String>?>()
   private val deprecationTextBuilder = StringBuilder()
 
@@ -150,6 +169,12 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
     installGradleJvmConfigurator()
     installExecutionDeprecationChecker()
     originalGradleUserHome = this.gradleUserHome
+    ignoreGradleLongRunningThreads()
+  }
+
+  private fun ignoreGradleLongRunningThreads() {
+    ThreadLeakTracker.longRunningThreadCreated(myLongRunningThreadsDisposable, "File lock request listener")
+    ThreadLeakTracker.longRunningThreadCreated(myLongRunningThreadsDisposable, "File lock release action executor")
   }
 
   @Throws(Exception::class)
@@ -165,7 +190,8 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
       //super.setUpInWriteAction() wasn't called
       runAll(
         { Disposer.dispose(myTestDisposable) },
-        { super.tearDown() }
+        { super.tearDown() },
+        { Disposer.dispose(myLongRunningThreadsDisposable)}
       )
       return
     }
@@ -173,8 +199,9 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
     runAll(
       {
         WriteAction.runAndWait<RuntimeException>(ThrowableRunnable {
-          ProjectJdkTable.getInstance().getAllJdks()
-            .forEach { ProjectJdkTable.getInstance().removeJdk(it) }
+          val jdkTable = ProjectJdkTable.getInstance(myProject)
+          jdkTable.getAllJdks()
+            .forEach { jdkTable.removeJdk(it) }
           for (sdk in removedSdks) {
             SdkConfigurationUtil.addSdk(sdk)
           }
@@ -189,7 +216,8 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
       { tearDownGradleVmOptions() },
       { resetGradleUserHomeIfNeeded() },
       { Disposer.dispose(myTestDisposable) },
-      { super.tearDown() }
+      { super.tearDown() },
+      { Disposer.dispose(myLongRunningThreadsDisposable)}
     )
   }
 
@@ -234,7 +262,7 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
   }
 
   open fun requireJdkHome(): String {
-    return requireJdkHome(this.currentGradleVersion, myTargetJavaVersionWatcher.restriction)
+    return requireJdkHome(myTestDisposable, myProject.getEelDescriptor(), this.currentGradleVersion, myTargetJavaVersionWatcher.restriction)
   }
 
   protected open fun configureGradleVmOptions(options: MutableSet<String>) {
@@ -297,8 +325,9 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
 
   protected fun cleanJdkTable() {
     removedSdks.clear()
-    for (sdk in ProjectJdkTable.getInstance().getAllJdks()) {
-      ProjectJdkTable.getInstance().removeJdk(sdk)
+    val jdkTable = ProjectJdkTable.getInstance(myProject)
+    for (sdk in jdkTable.getAllJdks()) {
+      jdkTable.removeJdk(sdk)
       if (GRADLE_JDK_NAME == sdk.getName()) continue
       removedSdks.add(sdk)
     }
@@ -306,7 +335,7 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
 
   protected fun populateJdkTable(jdks: List<Sdk>) {
     for (jdk in jdks) {
-      ProjectJdkTable.getInstance().addJdk(jdk)
+      ProjectJdkTable.getInstance(myProject).addJdk(jdk)
     }
   }
 
@@ -380,6 +409,11 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
     GradleSettings.getInstance(myProject).setServiceDirectoryPath(gradleUserHome.toString())
   }
 
+  @Deprecated("Inline me. This method is introduced only to avoid pre-push review approvals.")
+  protected fun requireJdkHome(currentGradleVersion: GradleVersion, javaVersionRestriction: JavaVersionRestriction): String {
+    return requireJdkHome(myProject, myProject.getEelDescriptor(), currentGradleVersion, javaVersionRestriction)
+  }
+
   protected fun resetGradleUserHomeIfNeeded() {
     if (originalGradleUserHome != this.gradleUserHome) {
       val normalizedOldGradleUserHome = originalGradleUserHome!!.normalize().toString()
@@ -397,7 +431,7 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
     val gradleDistributionRootPath = gradleJarPath.parent.parent
     validateGradleJar(gradleJarPath)
 
-    if (!gradleJarPath.exists()) {
+    if (EelTestUtil.isLocalRun() && !gradleJarPath.exists()) {
       val localDistributionRoot = getLocalGradleDistributionRoot(currentGradleVersion)
       if (localDistributionRoot != gradleDistributionRootPath && localDistributionRoot.exists()) {
         gradleDistributionRootPath.delete(true)
@@ -409,14 +443,6 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
 
   private fun tearDownGradleVmOptions() {
     GradleSystemSettings.getInstance().gradleVmOptions = ""
-  }
-
-  private fun requireWslJdkHome(distribution: WSLDistribution): String {
-    var jdkPath = System.getProperty("wsl.jdk.path")
-    if (jdkPath == null) {
-      jdkPath = "/usr/lib/jvm/java-11-openjdk-amd64"
-    }
-    return distribution.getWindowsPath(jdkPath)
   }
 
   private fun installExecutionDeprecationChecker() {
@@ -442,9 +468,6 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
   }
 
   private fun requireRealJdkHome(): String {
-    if (myWSLDistribution != null) {
-      return requireWslJdkHome(myWSLDistribution!!)
-    }
     return requireJdkHome()
   }
 
@@ -477,9 +500,26 @@ abstract class GradleImportingTestCase : JavaExternalSystemImportingTestCase() {
 
     @JvmStatic
     fun requireJdkHome(
+      testDisposable: Disposable,
+      eelDescriptor: EelDescriptor,
       gradleVersion: GradleVersion,
       javaVersionRestriction: JavaVersionRestriction,
     ): String {
+      val eelJdkPath = EelTestJdkProvider.getJdkPath(eelDescriptor)
+      VfsRootAccess.allowRootAccess(testDisposable, eelJdkPath.toString())
+      if (eelJdkPath != null) {
+        val eelJdkPathString = eelJdkPath.toString()
+        val eelJdk = JavaSdk.getInstance().createJdk("Gradle Test JDK", eelJdkPathString)
+        val eelJdkVersion = JavaVersion.parse(eelJdk.versionString!!)
+        assertTrue(
+          """
+          Unable to run the test on Java $eelJdkVersion installed at $eelJdk.
+          Please fix the JDK version of the test environment or adjust the Gradle version according to the Gradle compatibility matrix!
+        """.trimIndent(),
+          isSupported(gradleVersion, eelJdkVersion) && !javaVersionRestriction.isRestricted(gradleVersion, eelJdkVersion)
+        )
+        return eelJdkPathString
+      }
       if (isSupported(gradleVersion, currentJavaVersion()) &&
           !javaVersionRestriction.isRestricted(gradleVersion, currentJavaVersion())
       ) {

@@ -696,15 +696,6 @@ c:com.intellij.structuralsearch.impl.matcher.predicates.ScriptLog
 - error(java.lang.Object):V
 - info(java.lang.Object):V
 - warn(java.lang.Object):V
-c:com.intellij.structuralsearch.impl.matcher.predicates.ScriptPredicate
-- com.intellij.structuralsearch.impl.matcher.predicates.MatchPredicate
-- <init>(com.intellij.openapi.project.Project,java.lang.String,groovy.lang.Script,java.util.Set):V
-- match(com.intellij.psi.PsiElement,I,I,com.intellij.structuralsearch.impl.matcher.MatchContext):Z
-c:com.intellij.structuralsearch.impl.matcher.predicates.ScriptSupport
-- sf:UUID:java.lang.String
-- <init>(com.intellij.openapi.project.Project,groovy.lang.Script,java.lang.String,java.util.Collection):V
-- s:buildScript(java.lang.String,java.lang.String,com.intellij.structuralsearch.MatchOptions):groovy.lang.Script
-- evaluate(com.intellij.structuralsearch.MatchResult,com.intellij.psi.PsiElement):java.lang.Object
 c:com.intellij.structuralsearch.impl.matcher.predicates.WithinPredicate
 - com.intellij.structuralsearch.impl.matcher.predicates.MatchPredicate
 - <init>(java.lang.String,com.intellij.openapi.fileTypes.LanguageFileType,com.intellij.openapi.project.Project):V
@@ -718,7 +709,6 @@ c:com.intellij.structuralsearch.impl.matcher.strategies.XmlMatchingStrategy
 - continueMatching(com.intellij.psi.PsiElement):Z
 - shouldSkip(com.intellij.psi.PsiElement,com.intellij.psi.PsiElement):Z
 f:com.intellij.structuralsearch.inspection.InspectionProfileUtil
-- s:fireProfileChanged(com.intellij.codeInspection.ex.InspectionProfileImpl):V
 - s:getGroup():java.lang.String[]
 - s:getInspectionProfile(java.awt.Component):com.intellij.codeInspection.ex.InspectionProfileModifiableModel
 c:com.intellij.structuralsearch.inspection.SSBasedInspection
@@ -1034,7 +1024,6 @@ f:com.intellij.structuralsearch.plugin.ui.StructuralSearchDialog
 - loadConfiguration(com.intellij.structuralsearch.plugin.ui.Configuration):V
 - show():V
 f:com.intellij.structuralsearch.plugin.ui.StructuralSearchDialogKeys
-- sf:AI_SUPPORT_KEY:com.intellij.openapi.util.Key
 - sf:STRUCTURAL_SEARCH_DIALOG:com.intellij.openapi.util.Key
 - sf:STRUCTURAL_SEARCH_ERROR_CALLBACK:com.intellij.openapi.util.Key
 - sf:STRUCTURAL_SEARCH_PATTERN_CONTEXT_ID:com.intellij.openapi.util.Key
@@ -1100,7 +1089,6 @@ f:com.intellij.structuralsearch.plugin.ui.UIUtil
 - s:detectFileType(com.intellij.structuralsearch.plugin.ui.SearchContext):com.intellij.openapi.fileTypes.LanguageFileType
 - s:getOrAddReplacementVariable(java.lang.String,com.intellij.structuralsearch.plugin.ui.Configuration):com.intellij.structuralsearch.ReplacementVariableDefinition
 - s:getOrAddVariableConstraint(java.lang.String,com.intellij.structuralsearch.plugin.ui.Configuration):com.intellij.structuralsearch.MatchVariableConstraint
-- s:getTemplateContextType(com.intellij.structuralsearch.StructuralSearchProfile):com.intellij.codeInsight.template.TemplateContextType
 - s:invokeAction(com.intellij.structuralsearch.plugin.ui.Configuration,com.intellij.structuralsearch.plugin.ui.SearchContext):V
 - s:isTarget(java.lang.String,com.intellij.structuralsearch.MatchOptions):Z
 - s:setContent(com.intellij.openapi.editor.Editor,java.lang.String):V

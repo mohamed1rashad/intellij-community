@@ -1,14 +1,14 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.packaging.conda
 
-import com.intellij.openapi.application.runReadAction
+import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.UsefulTestCase
 import com.intellij.testFramework.UsefulTestCase.refreshRecursively
 import com.intellij.testFramework.junit5.TestApplication
 import com.jetbrains.python.packaging.PyRequirementParser
-import com.jetbrains.python.packaging.conda.environmentYml.format.CondaEnvironmentYmlParser
+import com.intellij.python.community.impl.conda.environmentYml.format.CondaEnvironmentYmlParser
 import com.jetbrains.python.testDataPath
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -18,7 +18,7 @@ class CondaEnvironmentTest {
   @Test
   fun testParse() {
     val virtualFile = getVirtualFileByName("$testDataPath/requirement/environmentYml/environment.yml")!!
-    val actual = runReadAction {
+    val actual = timeoutRunBlocking {
       CondaEnvironmentYmlParser.fromFile(virtualFile)!!
     }
 

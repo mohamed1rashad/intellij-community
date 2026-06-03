@@ -1,20 +1,23 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.accessibility
 
 import com.intellij.ide.GeneralSettings
 import com.intellij.ide.isSupportScreenReadersOverridden
 import com.intellij.ide.ui.laf.setEarlyUiLaF
+import com.intellij.jna.JnaLoader
 import com.intellij.openapi.application.ApplicationBundle
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.ui.MessageDialogBuilder
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.util.SystemInfoRt
+import com.intellij.openapi.wm.impl.LinuxUiUtil.isGnomeScreenReaderSettingEnabled
+import com.intellij.openapi.wm.impl.LinuxUiUtil.isOrcaProcessRunning
 import com.intellij.ui.User32Ex
 import com.intellij.ui.mac.foundation.Foundation
 import com.intellij.ui.mac.foundation.Foundation.NSAutoreleasePool
 import com.intellij.ui.mac.foundation.ID
-import com.intellij.util.SystemProperties.getBooleanProperty
+import com.intellij.util.system.LowLevelLocalMachineAccess
+import com.intellij.util.system.OS
 import com.intellij.util.ui.RawSwingDispatcher
 import com.sun.jna.platform.win32.WinDef
 import kotlinx.coroutines.withContext
@@ -22,9 +25,10 @@ import org.jetbrains.annotations.ApiStatus
 import java.awt.Component
 import javax.accessibility.AccessibleRole
 
+@OptIn(LowLevelLocalMachineAccess::class)
 object AccessibilityUtils {
   @JvmField
-  val GROUPED_ELEMENTS: AccessibleRole = if (SystemInfoRt.isMac) AccessibleRole.AWT_COMPONENT else AccessibleRole.PANEL
+  val GROUPED_ELEMENTS: AccessibleRole = if (OS.CURRENT == OS.macOS) AccessibleRole.AWT_COMPONENT else AccessibleRole.PANEL
 }
 
 @ApiStatus.Internal
@@ -34,17 +38,20 @@ suspend fun enableScreenReaderSupportIfNecessary() {
     return
   }
 
-  if (!isScreenReaderDetected() && !getBooleanProperty("force.screen.reader.detection", false)) {
+  if (!isScreenReaderDetected() && !System.getProperty("force.screen.reader.detection").toBoolean()) {
     return
   }
 
   AccessibilityUsageTrackerCollector.featureTriggered(AccessibilityUsageTrackerCollector.SCREEN_READER_DETECTED)
   val appName = ApplicationInfoImpl.getShadowInstance().versionName
   val answer = withContext(RawSwingDispatcher) {
+    @Suppress("TestOnlyProblems")
     setEarlyUiLaF()
 
-    MessageDialogBuilder.yesNo(title = ApplicationBundle.message("title.screen.reader.support"),
-                               message = ApplicationBundle.message("confirmation.screen.reader.enable", appName))
+    MessageDialogBuilder.yesNo(
+      title = ApplicationBundle.message("title.screen.reader.support"),
+      message = ApplicationBundle.message("confirmation.screen.reader.enable", appName)
+    )
       .yesText(ApplicationBundle.message("button.enable"))
       .noText(Messages.getCancelButton())
       .ask(null as Component?)
@@ -58,12 +65,12 @@ suspend fun enableScreenReaderSupportIfNecessary() {
 @Volatile
 private var enable = false
 
-private fun isScreenReaderDetected(): Boolean {
-  return when {
-    SystemInfoRt.isWindows -> isWindowsScreenReaderEnabled()
-    SystemInfoRt.isMac -> isMacVoiceOverEnabled()
-    else -> false
-  }
+@OptIn(LowLevelLocalMachineAccess::class)
+private fun isScreenReaderDetected(): Boolean = when (OS.CURRENT) {
+  OS.Windows -> JnaLoader.isLoaded() && isWindowsScreenReaderEnabled()
+  OS.macOS -> JnaLoader.isLoaded() && isMacVoiceOverEnabled()
+  OS.Linux -> JnaLoader.isLoaded() && isLinuxScreenReaderEnabled()
+  else -> false
 }
 
 /*
@@ -97,6 +104,10 @@ private fun isWindowsScreenReaderEnabled(): Boolean {
   val isActive = WinDef.BOOLByReference()
   val retValue = User32Ex.INSTANCE.SystemParametersInfo(WinDef.UINT(0x0046), WinDef.UINT(0), isActive, WinDef.UINT(0))
   return retValue && isActive.value.booleanValue()
+}
+
+private fun isLinuxScreenReaderEnabled(): Boolean {
+  return isGnomeScreenReaderSettingEnabled() || isOrcaProcessRunning()
 }
 
 @ApiStatus.Internal

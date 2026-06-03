@@ -32,8 +32,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.imageio.ImageIO;
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.font.GlyphVector;
 import java.awt.image.BufferedImage;
 import java.awt.image.RenderedImage;
@@ -455,12 +460,22 @@ public abstract class EditorPaintingTestCase extends AbstractEditorTest {
   }
 
   protected static class MyInlayRenderer implements EditorCustomElementRenderer {
+    private final Color myColor;
+
+    public MyInlayRenderer() {
+      myColor = JBColor.CYAN;
+    }
+
+    public MyInlayRenderer(Color color) {
+      myColor = color;
+    }
+
     @Override
     public int calcWidthInPixels(@NotNull Inlay inlay) { return 10; }
 
     @Override
     public void paint(@NotNull Inlay inlay, @NotNull Graphics g, @NotNull Rectangle r, @NotNull TextAttributes textAttributes) {
-      g.setColor(JBColor.CYAN);
+      g.setColor(myColor);
       g.drawRect(r.x, r.y, r.width - 1, r.height - 1);
     }
   }

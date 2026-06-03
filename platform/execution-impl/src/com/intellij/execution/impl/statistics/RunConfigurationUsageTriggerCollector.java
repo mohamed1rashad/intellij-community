@@ -6,11 +6,24 @@ import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.ConfigurationFactory;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.executors.ExecutorGroup;
-import com.intellij.execution.target.*;
+import com.intellij.execution.target.ImplicitTargetAwareRunProfile;
+import com.intellij.execution.target.TargetEnvironmentAwareRunProfile;
+import com.intellij.execution.target.TargetEnvironmentConfiguration;
+import com.intellij.execution.target.TargetEnvironmentConfigurations;
+import com.intellij.execution.target.TargetEnvironmentType;
 import com.intellij.internal.statistic.IdeActivityDefinition;
 import com.intellij.internal.statistic.StructuredIdeActivity;
 import com.intellij.internal.statistic.eventLog.EventLogGroup;
-import com.intellij.internal.statistic.eventLog.events.*;
+import com.intellij.internal.statistic.eventLog.events.BooleanEventField;
+import com.intellij.internal.statistic.eventLog.events.EnumEventField;
+import com.intellij.internal.statistic.eventLog.events.EventField;
+import com.intellij.internal.statistic.eventLog.events.EventFields;
+import com.intellij.internal.statistic.eventLog.events.EventPair;
+import com.intellij.internal.statistic.eventLog.events.IntEventField;
+import com.intellij.internal.statistic.eventLog.events.ObjectEventData;
+import com.intellij.internal.statistic.eventLog.events.ObjectEventField;
+import com.intellij.internal.statistic.eventLog.events.StringEventField;
+import com.intellij.internal.statistic.eventLog.events.VarargEventId;
 import com.intellij.internal.statistic.eventLog.validator.ValidationResultType;
 import com.intellij.internal.statistic.eventLog.validator.rules.EventContext;
 import com.intellij.internal.statistic.eventLog.validator.rules.impl.CustomValidationRule;
@@ -34,7 +47,7 @@ import static com.intellij.execution.impl.statistics.RunConfigurationTypeUsagesC
 @ApiStatus.Internal
 public final class RunConfigurationUsageTriggerCollector extends CounterUsagesCollector {
   private static final String GROUP_NAME = RunConfigurationTypeDefs.TRIGGER_USAGES_GROUP_ID;
-  private static final EventLogGroup GROUP = new EventLogGroup(GROUP_NAME, 79);
+  private static final EventLogGroup GROUP = new EventLogGroup(GROUP_NAME, 80);
 
   public static final IntEventField ALTERNATIVE_JRE_VERSION = EventFields.Int("alternative_jre_version");
   private static final ObjectEventField ADDITIONAL_FIELD = EventFields.createAdditionalDataField(GROUP_NAME, "started");

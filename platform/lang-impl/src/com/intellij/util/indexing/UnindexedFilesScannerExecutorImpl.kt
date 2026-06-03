@@ -1,10 +1,10 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.indexing
 
 import com.google.common.util.concurrent.SettableFuture
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.edtWriteAction
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.backgroundWriteAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.ControlFlowException
@@ -19,6 +19,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.ModificationTracker
 import com.intellij.openapi.util.NlsContexts.ProgressText
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.wm.ex.isIndexingActivitiesSuppressed
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.util.application
@@ -29,8 +30,28 @@ import com.intellij.util.indexing.diagnostic.ProjectScanningHistory
 import com.intellij.util.indexing.diagnostic.ProjectScanningHistoryImpl
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.getAndUpdate
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.annotations.VisibleForTesting
@@ -97,7 +118,7 @@ class UnindexedFilesScannerExecutorImpl(private val project: Project, cs: Corout
         while (true) {
           isRunning.combine(nextTaskExecutionAllowed) { running, allowed -> !running && allowed }.first { it }
           // write action is needed, because otherwise we may get "Constraint inSmartMode cannot be satisfied" in NBRA
-          edtWriteAction {
+          backgroundWriteAction {
             // we should only set the flag here (if needed), not clear it,
             // otherwise, isRunning may become false in the middle of scanning task execution
             isRunning.value = isRunning.value || scanningTask.value != null
@@ -262,6 +283,14 @@ class UnindexedFilesScannerExecutorImpl(private val project: Project, cs: Corout
   }
 
   private suspend fun runScanningTask(task: UnindexedFilesScanner, scanningParameters: ScanningIterators): ProjectScanningHistoryImpl {
+    if (isIndexingActivitiesSuppressed(project)) {
+      return ProjectScanningHistoryImpl(project, scanningParameters.indexingReason, scanningParameters.scanningType).apply {
+        scanningStarted()
+        setWasCancelled("Scanning is suppressed by project frame capabilities")
+        scanningFinished()
+      }
+    }
+
     val shouldShowProgress: StateFlow<Boolean> = if (task.shouldHideProgressInSmartMode()) {
       project.service<DumbModeWhileScanningTrigger>().isDumbModeForScanningActive()
     }
@@ -332,7 +361,7 @@ class UnindexedFilesScannerExecutorImpl(private val project: Project, cs: Corout
     else if (DumbService.isDumb(project)) {
       // here we want to immediately "start" executor without EDT in the case when scanning is started under a dumb task.
       // Acquire RA to make sure that dumb mode won't change to smart, otherwise we risk changing smart mode to not-smart outside WA.
-      runReadAction {
+      runReadActionBlocking {
         if (DumbService.isDumb(project)) {
           markAsRunning()
         }

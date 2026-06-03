@@ -34,7 +34,6 @@ f:com.intellij.codeInsight.completion.CompletionUtilCore
 - sf:DUMMY_IDENTIFIER_TRIMMED:java.lang.String
 - <init>():V
 f:com.intellij.codeInsight.documentation.DocumentationManagerUtil
-- s:createHyperlink(java.lang.StringBuilder,com.intellij.psi.PsiElement,java.lang.String,java.lang.String,Z):V
 - s:createHyperlink(java.lang.StringBuilder,com.intellij.psi.PsiElement,java.lang.String,java.lang.String,Z,Z):V
 - s:createHyperlink(java.lang.StringBuilder,java.lang.String,java.lang.String,Z):V
 - s:createHyperlink(java.lang.StringBuilder,java.lang.String,java.lang.String,Z,Z):V
@@ -238,7 +237,6 @@ a:com.intellij.ide.util.PsiNavigationSupport
 - a:getDescriptor(com.intellij.psi.PsiElement):com.intellij.pom.Navigatable
 - s:getInstance():com.intellij.ide.util.PsiNavigationSupport
 - a:navigateToDirectory(com.intellij.psi.PsiDirectory,Z):V
-- a:openDirectoryInSystemFileManager(java.io.File):V
 com.intellij.injected.editor.InjectionEditService
 - a:synchronizeWithFragment(com.intellij.psi.PsiFile,com.intellij.openapi.editor.Document):com.intellij.openapi.Disposable
 com.intellij.injected.editor.VirtualFileDelegate
@@ -409,7 +407,6 @@ a:com.intellij.lang.folding.CustomFoldingBuilder
 - p:isCustomFoldingCandidate(com.intellij.lang.ASTNode):Z
 - f:isCustomFoldingCandidate(com.intellij.psi.PsiElement):Z
 - p:isCustomFoldingRoot(com.intellij.lang.ASTNode):Z
-- ps:isCustomRegionElement(com.intellij.psi.PsiElement):Z
 - pf:isCustomRegionEnd(com.intellij.lang.ASTNode):Z
 - f:isCustomRegionStart(com.intellij.lang.ASTNode):Z
 - isDumbAware():Z
@@ -584,8 +581,6 @@ a:com.intellij.openapi.application.ApplicationInfo
 - getSplashImageUrl():java.lang.String
 - a:getStrictVersion():java.lang.String
 - a:getVersionName():java.lang.String
-- a:hasContextHelp():Z
-- a:hasHelp():Z
 - s:helpAvailable():Z
 - isEAP():Z
 c:com.intellij.openapi.application.ApplicationManager
@@ -662,14 +657,6 @@ a:com.intellij.openapi.application.QueryExecutorBase
 - p:<init>(Z):V
 - f:execute(java.lang.Object,com.intellij.util.Processor):Z
 - a:processQuery(java.lang.Object,com.intellij.util.Processor):V
-a:com.intellij.openapi.application.ReadAction
-- <init>():V
-- s:compute(com.intellij.openapi.util.ThrowableComputable):java.lang.Object
-- execute():com.intellij.openapi.application.RunResult
-- s:nonBlocking(java.lang.Runnable):com.intellij.openapi.application.NonBlockingReadAction
-- s:nonBlocking(java.util.concurrent.Callable):com.intellij.openapi.application.NonBlockingReadAction
-- pa:run(com.intellij.openapi.application.Result):V
-- s:run(com.intellij.util.ThrowableRunnable):V
 f:com.intellij.openapi.application.ReadAction$CannotReadException
 - com.intellij.openapi.progress.ProcessCanceledException
 a:com.intellij.openapi.application.ReadActionProcessor
@@ -685,15 +672,6 @@ c:com.intellij.openapi.application.Result
 - p:myResult:java.lang.Object
 - <init>():V
 - f:setResult(java.lang.Object):V
-f:com.intellij.openapi.application.RunResult
-- com.intellij.openapi.application.Result
-- getResultObject():java.lang.Object
-- getThrowable():java.lang.Throwable
-- hasException():Z
-- logException(com.intellij.openapi.diagnostic.Logger):com.intellij.openapi.application.RunResult
-- run():com.intellij.openapi.application.RunResult
-- setThrowable(java.lang.Exception):V
-- throwException():com.intellij.openapi.application.RunResult
 a:com.intellij.openapi.application.TransactionGuard
 - <init>():V
 - a:assertWriteSafeContext(com.intellij.openapi.application.ModalityState):V
@@ -706,16 +684,6 @@ a:com.intellij.openapi.application.TransactionGuard
 - a:submitTransactionAndWait(java.lang.Runnable):V
 - a:submitTransactionLater(com.intellij.openapi.Disposable,java.lang.Runnable):V
 com.intellij.openapi.application.TransactionId
-a:com.intellij.openapi.application.WriteAction
-- <init>():V
-- s:compute(com.intellij.openapi.util.ThrowableComputable):java.lang.Object
-- s:computeAndWait(com.intellij.openapi.util.ThrowableComputable):java.lang.Object
-- s:computeAndWait(com.intellij.openapi.util.ThrowableComputable,com.intellij.openapi.application.ModalityState):java.lang.Object
-- execute():com.intellij.openapi.application.RunResult
-- pa:run(com.intellij.openapi.application.Result):V
-- s:run(com.intellij.util.ThrowableRunnable):V
-- s:runAndWait(com.intellij.util.ThrowableRunnable):V
-- s:start():com.intellij.openapi.application.AccessToken
 f:com.intellij.openapi.client.ClientSessionsUtil
 - sf:forEachSession(com.intellij.openapi.application.Application,com.intellij.openapi.client.ClientKind,kotlin.jvm.functions.Function1):V
 - sf:forEachSession(com.intellij.openapi.project.Project,com.intellij.openapi.client.ClientKind,kotlin.jvm.functions.Function1):V
@@ -740,7 +708,6 @@ a:com.intellij.openapi.command.CommandProcessor
 - <init>():V
 - a:addAffectedDocuments(com.intellij.openapi.project.Project,com.intellij.openapi.editor.Document[]):V
 - a:addAffectedFiles(com.intellij.openapi.project.Project,com.intellij.openapi.vfs.VirtualFile[]):V
-- a:addCommandListener(com.intellij.openapi.command.CommandListener):V
 - a:executeCommand(com.intellij.openapi.project.Project,java.lang.Runnable,java.lang.String,java.lang.Object):V
 - a:executeCommand(com.intellij.openapi.project.Project,java.lang.Runnable,java.lang.String,java.lang.Object,com.intellij.openapi.command.UndoConfirmationPolicy):V
 - a:executeCommand(com.intellij.openapi.project.Project,java.lang.Runnable,java.lang.String,java.lang.Object,com.intellij.openapi.command.UndoConfirmationPolicy,com.intellij.openapi.editor.Document):V
@@ -764,31 +731,6 @@ e:com.intellij.openapi.command.UndoConfirmationPolicy
 - sf:REQUEST_CONFIRMATION:com.intellij.openapi.command.UndoConfirmationPolicy
 - s:valueOf(java.lang.String):com.intellij.openapi.command.UndoConfirmationPolicy
 - s:values():com.intellij.openapi.command.UndoConfirmationPolicy[]
-a:com.intellij.openapi.command.WriteCommandAction
-- p:<init>(com.intellij.openapi.project.Project,java.lang.String,java.lang.String,com.intellij.psi.PsiFile[]):V
-- p:<init>(com.intellij.openapi.project.Project,java.lang.String,com.intellij.psi.PsiFile[]):V
-- p:<init>(com.intellij.openapi.project.Project,com.intellij.psi.PsiFile[]):V
-- execute():com.intellij.openapi.application.RunResult
-- f:getCommandName():java.lang.String
-- getGroupID():java.lang.String
-- f:getProject():com.intellij.openapi.project.Project
-- p:isGlobalUndoAction():Z
-- s:runWriteCommandAction(com.intellij.openapi.project.Project,com.intellij.openapi.util.Computable):java.lang.Object
-- s:runWriteCommandAction(com.intellij.openapi.project.Project,com.intellij.openapi.util.ThrowableComputable):java.lang.Object
-- s:runWriteCommandAction(com.intellij.openapi.project.Project,java.lang.Runnable):V
-- s:runWriteCommandAction(com.intellij.openapi.project.Project,java.lang.String,java.lang.String,java.lang.Runnable,com.intellij.psi.PsiFile[]):V
-- s:writeCommandAction(com.intellij.openapi.project.Project):com.intellij.openapi.command.WriteCommandAction$Builder
-- s:writeCommandAction(com.intellij.openapi.project.Project,java.util.Collection):com.intellij.openapi.command.WriteCommandAction$Builder
-- s:writeCommandAction(com.intellij.openapi.project.Project,com.intellij.psi.PsiFile[]):com.intellij.openapi.command.WriteCommandAction$Builder
-- s:writeCommandAction(com.intellij.psi.PsiFile,com.intellij.psi.PsiFile[]):com.intellij.openapi.command.WriteCommandAction$Builder
-a:com.intellij.openapi.command.WriteCommandAction$Simple
-- com.intellij.openapi.command.WriteCommandAction
-- p:<init>(com.intellij.openapi.project.Project,java.lang.String,java.lang.String,com.intellij.psi.PsiFile[]):V
-- p:<init>(com.intellij.openapi.project.Project,java.lang.String,com.intellij.psi.PsiFile[]):V
-- p:<init>(com.intellij.openapi.project.Project,com.intellij.psi.PsiFile[]):V
-- pa:run():V
-- p:run(com.intellij.openapi.application.Result):V
-f:com.intellij.openapi.command.undo.UndoConstants$Companion
 f:com.intellij.openapi.command.undo.UndoUtil
 - s:disableUndoFor(com.intellij.openapi.editor.Document):V
 - s:disableUndoFor(com.intellij.openapi.vfs.VirtualFile):V
@@ -837,6 +779,7 @@ f:com.intellij.openapi.components.ServiceBean
 f:com.intellij.openapi.components.ServiceDescriptor
 - f:client:com.intellij.openapi.client.ClientKind
 - f:headlessImplementation:java.lang.String
+- f:open:Z
 - f:overrides:Z
 - f:serviceImplementation:java.lang.String
 - f:serviceInterface:java.lang.String
@@ -1133,14 +1076,6 @@ a:com.intellij.openapi.fileEditor.FileDocumentManager
 - a:saveDocument(com.intellij.openapi.editor.Document):V
 - a:saveDocumentAsIs(com.intellij.openapi.editor.Document):V
 - a:saveDocuments(java.util.function.Predicate):V
-c:com.intellij.openapi.fileEditor.FileDocumentManager$WriteAccessStatus
-- sf:NON_WRITABLE:com.intellij.openapi.fileEditor.FileDocumentManager$WriteAccessStatus
-- sf:WRITABLE:com.intellij.openapi.fileEditor.FileDocumentManager$WriteAccessStatus
-- <init>(java.lang.String):V
-- <init>(java.lang.String,javax.swing.event.HyperlinkListener):V
-- getHyperlinkListener():javax.swing.event.HyperlinkListener
-- getReadOnlyMessage():java.lang.String
-- hasWriteAccess():Z
 f:com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers
 - com.intellij.openapi.fileTypes.FileTypeExtension
 - s:getInstance():com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers
@@ -1322,7 +1257,6 @@ a:com.intellij.openapi.progress.Task
 - com.intellij.openapi.progress.TaskInfo
 - pf:myParentComponent:javax.swing.JComponent
 - pf:myProject:com.intellij.openapi.project.Project
-- p:myTitle:java.lang.String
 - f:asBackgroundable():com.intellij.openapi.progress.Task$Backgroundable
 - f:asModal():com.intellij.openapi.progress.Task$Modal
 - f:getCancelText():java.lang.String
@@ -2526,7 +2460,7 @@ com.intellij.pom.event.PomChangeSet
 - beforeNestedTransaction():V
 - a:getAspect():com.intellij.pom.PomModelAspect
 - a:merge(com.intellij.pom.event.PomChangeSet):V
-c:com.intellij.pom.event.PomModelEvent
+f:com.intellij.pom.event.PomModelEvent
 - java.util.EventObject
 - beforeNestedTransaction():V
 - getChangeSet(com.intellij.pom.PomModelAspect):com.intellij.pom.event.PomChangeSet
@@ -2637,7 +2571,6 @@ a:com.intellij.psi.PsiDocumentManager
 - a:hasUncommitedDocuments():Z
 - a:isCommitted(com.intellij.openapi.editor.Document):Z
 - a:isDocumentBlockedByPsi(com.intellij.openapi.editor.Document):Z
-- a:isUncommited(com.intellij.openapi.editor.Document):Z
 - a:performForCommittedDocument(com.intellij.openapi.editor.Document,java.lang.Runnable):V
 - a:performLaterWhenAllCommitted(com.intellij.openapi.application.ModalityState,java.lang.Runnable):V
 - a:performLaterWhenAllCommitted(java.lang.Runnable):V
@@ -2913,7 +2846,7 @@ c:com.intellij.psi.ResolveState
 - s:initial():com.intellij.psi.ResolveState
 - put(com.intellij.openapi.util.Key,java.lang.Object):com.intellij.psi.ResolveState
 - putAll(com.intellij.psi.ResolveState):com.intellij.psi.ResolveState
-a:com.intellij.psi.SmartPointerManager
+Fa:com.intellij.psi.SmartPointerManager
 - <init>():V
 - createLazyPointer(com.intellij.psi.PsiElement):com.intellij.psi.SmartPsiElementPointer
 - s:createPointer(com.intellij.psi.PsiElement):com.intellij.psi.SmartPsiElementPointer
@@ -3312,8 +3245,6 @@ c:com.intellij.psi.stubs.SerializerNotFoundException
 - java.lang.Exception
 - <init>(java.lang.String):V
 a:com.intellij.psi.stubs.StubBase
-- com.intellij.psi.stubs.ObjectStubBase
-- com.intellij.psi.stubs.StubElement
 - p:<init>(com.intellij.psi.stubs.StubElement,com.intellij.psi.stubs.IStubElementType):V
 - compareByOrderWith(com.intellij.psi.stubs.ObjectStubBase):I
 - findChildStubByType(com.intellij.psi.stubs.IStubElementType):com.intellij.psi.stubs.StubElement
@@ -3440,7 +3371,6 @@ com.intellij.psi.tree.ParentProviderElementType
 a:com.intellij.psi.tree.StubFileElementType
 - com.intellij.psi.tree.IFileElementType
 - com.intellij.psi.stubs.StubSerializer
-- sf:DEFAULT_EXTERNAL_ID:java.lang.String
 - <init>(com.intellij.lang.Language):V
 - <init>(java.lang.String,com.intellij.lang.Language):V
 f:com.intellij.psi.tree.TokenSet
@@ -3631,6 +3561,8 @@ f:com.intellij.psi.util.PsiTreeUtilKt
 - bs:parentOfTypes$default(com.intellij.psi.PsiElement,kotlin.reflect.KClass[],Z,I,java.lang.Object):com.intellij.psi.PsiElement
 - sf:parents(com.intellij.psi.PsiElement):kotlin.sequences.Sequence
 - sf:parents(com.intellij.psi.PsiElement,Z):kotlin.sequences.Sequence
+- sf:parents(com.intellij.psi.PsiElement,Z,Z):kotlin.sequences.Sequence
+- bs:parents$default(com.intellij.psi.PsiElement,Z,Z,I,java.lang.Object):kotlin.sequences.Sequence
 - bsf:parentsOfType(com.intellij.psi.PsiElement,java.lang.Class):kotlin.sequences.Sequence
 - sf:parentsOfType(com.intellij.psi.PsiElement,java.lang.Class,Z):kotlin.sequences.Sequence
 - bs:parentsOfType$default(com.intellij.psi.PsiElement,java.lang.Class,Z,I,java.lang.Object):kotlin.sequences.Sequence

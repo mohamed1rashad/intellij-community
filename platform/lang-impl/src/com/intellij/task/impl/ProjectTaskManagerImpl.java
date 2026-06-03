@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.task.impl;
 
 import com.intellij.execution.ExecutionException;
@@ -21,11 +21,20 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.task.*;
+import com.intellij.task.BuildTask;
+import com.intellij.task.ModuleBuildTask;
+import com.intellij.task.ProjectTask;
+import com.intellij.task.ProjectTaskContext;
+import com.intellij.task.ProjectTaskListener;
+import com.intellij.task.ProjectTaskManager;
+import com.intellij.task.ProjectTaskRunner;
+import com.intellij.task.ProjectTaskState;
+import com.intellij.task.TaskRunnerResults;
 import com.intellij.tracing.Tracer;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.ModalityUiUtil;
 import com.intellij.util.SmartList;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import kotlin.jvm.functions.Function0;
 import org.jetbrains.annotations.ApiStatus;
@@ -35,9 +44,14 @@ import org.jetbrains.concurrency.AsyncPromise;
 import org.jetbrains.concurrency.Promise;
 import org.jetbrains.concurrency.Promises;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,7 +59,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
-import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.*;
+import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.BUILD_ACTIVITY;
+import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.BUILD_ORIGINATOR;
+import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.HAS_ERRORS;
+import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.INCREMENTAL;
+import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.MODULES;
+import static com.intellij.task.impl.ProjectTaskManagerStatisticsCollector.TASK_RUNNER;
 import static com.intellij.util.containers.ContainerUtil.emptyList;
 import static com.intellij.util.containers.ContainerUtil.map;
 import static java.util.Arrays.stream;
@@ -60,7 +79,7 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
 
   private final ProjectTaskRunner myDummyTaskRunner = new DummyTaskRunner();
   private final ProjectTaskListener myEventPublisher;
-  private final List<ProjectTaskManagerListener> myListeners = new CopyOnWriteArrayList<>();
+  private final List<ProjectTaskManagerListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   public ProjectTaskManagerImpl(@NotNull Project project) {
     super(project);
@@ -186,8 +205,17 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
       }
     });
 
+    Class<?> buildOriginatorFromProjectUserData = BUILD_ORIGINATOR_KEY.get(myProject);
+    if (buildOriginatorFromProjectUserData != null) {
+      myProject.putUserData(BUILD_ORIGINATOR_KEY, null);
+    }
 
-    Pair<StructuredIdeActivity, List<EventPair<?>>> activity = reportBuildStart(projectTask, toRun);
+    if (context.getBuildOriginatorClass() == null) {
+      context.setBuildOriginatorClass(buildOriginatorFromProjectUserData);
+    }
+
+    Pair<StructuredIdeActivity, List<EventPair<?>>> activity = reportBuildStart(
+      projectTask, context.getBuildOriginatorClass(), toRun);
     myEventPublisher.started(context);
 
     Runnable runnable = () -> {
@@ -255,6 +283,7 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
   }
 
   private Pair<StructuredIdeActivity, List<EventPair<?>>> reportBuildStart(@NotNull ProjectTask projectTask,
+                                                                           Class<?> buildOriginator,
                                                                            List<? extends Pair<ProjectTaskRunner, Collection<? extends ProjectTask>>> toRun) {
     Ref<Boolean> incremental = new Ref<>(null);
     AtomicInteger modules = new AtomicInteger(0);
@@ -285,9 +314,7 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
     if (modules.get() > 0) {
       fields.add(MODULES.with(modules.get()));
     }
-    Class<?> buildOriginator = BUILD_ORIGINATOR_KEY.get(myProject);
     if (buildOriginator != null) {
-      myProject.putUserData(BUILD_ORIGINATOR_KEY, null);
       fields.add(BUILD_ORIGINATOR.with(buildOriginator));
     }
     return Pair.create(BUILD_ACTIVITY.started(myProject, () -> fields), fields);
@@ -352,7 +379,7 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
   }
 
   private static @NotNull Function0<List<String>> moduleOutputPathsProvider(@NotNull Module module) {
-    return () -> ReadAction.compute(() -> {
+    return () -> ReadAction.computeBlocking(() -> {
       return JBIterable.of(OrderEnumerator.orderEntries(module).withoutSdk().withoutLibraries().getClassesRoots())
         .filterMap(file -> file.isDirectory() && !file.getFileSystem().isReadOnly() ? file.getPath() : null)
         .toList();
@@ -405,7 +432,7 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
     }
 
     @Override
-    public boolean canRun(@NotNull ProjectTask projectTask) {
+    public boolean canRun(@NotNull Project project, @NotNull ProjectTask projectTask, @Nullable ProjectTaskContext context) {
       return true;
     }
   }

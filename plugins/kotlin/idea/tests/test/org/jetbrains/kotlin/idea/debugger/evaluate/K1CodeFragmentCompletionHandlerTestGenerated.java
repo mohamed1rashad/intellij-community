@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.debugger.evaluate;
 
@@ -30,6 +30,11 @@ public class K1CodeFragmentCompletionHandlerTestGenerated extends AbstractK1Code
         KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
     }
 
+    @TestMetadata("CastFunctionWithParams.kt")
+    public void testCastFunctionWithParams() throws Exception {
+        runTest("../../completion/testData/handlers/runtimeCast/CastFunctionWithParams.kt");
+    }
+
     @TestMetadata("CastPrivateFun.kt")
     public void testCastPrivateFun() throws Exception {
         runTest("../../completion/testData/handlers/runtimeCast/CastPrivateFun.kt");
@@ -38,6 +43,16 @@ public class K1CodeFragmentCompletionHandlerTestGenerated extends AbstractK1Code
     @TestMetadata("CastPropertyWithSmartCast.kt")
     public void testCastPropertyWithSmartCast() throws Exception {
         runTest("../../completion/testData/handlers/runtimeCast/CastPropertyWithSmartCast.kt");
+    }
+
+    @TestMetadata("CastRuntimeTypeCompletion.kt")
+    public void testCastRuntimeTypeCompletion() throws Exception {
+        runTest("../../completion/testData/handlers/runtimeCast/CastRuntimeTypeCompletion.kt");
+    }
+
+    @TestMetadata("CastToIntersectionConjunct.kt")
+    public void testCastToIntersectionConjunct() throws Exception {
+        runTest("../../completion/testData/handlers/runtimeCast/CastToIntersectionConjunct.kt");
     }
 
     @TestMetadata("InsertExtFunction.kt")
@@ -55,8 +70,23 @@ public class K1CodeFragmentCompletionHandlerTestGenerated extends AbstractK1Code
         runTest("../../completion/testData/handlers/runtimeCast/InsertImport.kt");
     }
 
+    @TestMetadata("NoRedundantCast.kt")
+    public void testNoRedundantCast() throws Exception {
+        runTest("../../completion/testData/handlers/runtimeCast/NoRedundantCast.kt");
+    }
+
     @TestMetadata("NotImportedExtension.kt")
     public void testNotImportedExtension() throws Exception {
         runTest("../../completion/testData/handlers/runtimeCast/NotImportedExtension.kt");
+    }
+
+    @TestMetadata("NullableClassCast.kt")
+    public void testNullableClassCast() throws Exception {
+        runTest("../../completion/testData/handlers/runtimeCast/NullableClassCast.kt");
+    }
+
+    @TestMetadata("NullableIntClassCast.kt")
+    public void testNullableIntClassCast() throws Exception {
+        runTest("../../completion/testData/handlers/runtimeCast/NullableIntClassCast.kt");
     }
 }

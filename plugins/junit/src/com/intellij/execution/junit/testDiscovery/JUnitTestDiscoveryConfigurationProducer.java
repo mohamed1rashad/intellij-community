@@ -19,7 +19,14 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.psi.PsiMethod;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public final class JUnitTestDiscoveryConfigurationProducer extends TestDiscoveryConfigurationProducer {
@@ -78,9 +85,9 @@ public final class JUnitTestDiscoveryConfigurationProducer extends TestDiscovery
         for (Module usedModule : usedModules) {
           List<Module> rootModules = ModuleUtilCore.getAllDependentModules(usedModule);
           for (Module rootModule : rootModules) {
-            allDeps.computeIfAbsent(rootModule, __ -> new LinkedHashSet<>()).add(usedModule);
+            allDeps.computeIfAbsent(rootModule, _ -> new LinkedHashSet<>()).add(usedModule);
           }
-          allDeps.computeIfAbsent(usedModule, __ -> new LinkedHashSet<>()).add(usedModule);
+          allDeps.computeIfAbsent(usedModule, _ -> new LinkedHashSet<>()).add(usedModule);
         }
 
 

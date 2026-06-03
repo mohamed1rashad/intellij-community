@@ -7,14 +7,27 @@ import jetbrains.buildServer.messages.serviceMessages.ServiceMessage
 import jetbrains.buildServer.messages.serviceMessages.ServiceMessageTypes
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.intellij.build.dependencies.TeamCityHelper
-import org.jetbrains.intellij.build.logging.LogMessage.Kind.*
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.ARTIFACT_BUILT
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BLOCK_FINISHED
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BLOCK_STARTED
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BUILD_CANCEL
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BUILD_NUMBER
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BUILD_PROBLEM
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BUILD_STATUS
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.BUILD_STATUS_CHANGED_TO_SUCCESSFUL
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.COMPILATION_ERRORS
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.DEBUG
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.ERROR
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.IMPORT_DATA
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.INFO
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.PROGRESS
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.SET_PARAMETER
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.STATISTICS
+import org.jetbrains.intellij.build.logging.LogMessage.Kind.WARNING
 import org.jetbrains.intellij.build.telemetry.TraceManager
 
 class TeamCityBuildMessageLogger : BuildMessageLogger() {
   companion object {
-    @JvmField
-    val FACTORY: () -> BuildMessageLogger = ::TeamCityBuildMessageLogger
-
     private fun print(messageId: String, argument: String) {
       println(SpanAwareServiceMessage(span = Span.current(), messageName = messageId, argument = argument))
     }
@@ -66,7 +79,7 @@ class TeamCityBuildMessageLogger : BuildMessageLogger() {
     }
 
     /**
-     * Wraps a [span] into a TeamCity block linked to a parent flow of a parent span.
+     * Wraps a [span] into a TeamCity block linked to a parent flow of a parent span via a new subflow.
      */
     @ApiStatus.Internal
     suspend fun <T> withBlock(span: Span, operation: suspend () -> T): T {
@@ -74,19 +87,25 @@ class TeamCityBuildMessageLogger : BuildMessageLogger() {
         return operation()
       }
 
+      // no parent attribute in [ServiceMessageTypes.BLOCK_OPENED], start a new subflow to link it to the parent flow (if any)
       val parentFlowId = span.parentSpanContext?.takeIf { it.isValid }?.spanId
-      val attributes = if (parentFlowId == null) {
-        java.util.Map.of("name", span.name)
+      if (parentFlowId != null) {
+        val attributes = java.util.Map.of("parent", parentFlowId)
+        println(SpanAwareServiceMessage(span = span, messageName = ServiceMessageTypes.FLOW_STARTED, attributes = attributes))
       }
-      else {
-        java.util.Map.of("name", span.name, "parent", parentFlowId)
-      }
+
+      val attributes = java.util.Map.of("name", span.name)
       println(SpanAwareServiceMessage(span = span, messageName = ServiceMessageTypes.BLOCK_OPENED, attributes = attributes))
       try {
         return operation()
       }
       finally {
         println(SpanAwareServiceMessage(span = span, messageName = ServiceMessageTypes.BLOCK_CLOSED, attributes = attributes))
+
+        if (parentFlowId != null) {
+          println(SpanAwareServiceMessage(span = span, messageName = ServiceMessageTypes.FLOW_FINSIHED, attributes = java.util.Map.of()))
+        }
+
         TraceManager.scheduleExportPendingSpans()
       }
     }

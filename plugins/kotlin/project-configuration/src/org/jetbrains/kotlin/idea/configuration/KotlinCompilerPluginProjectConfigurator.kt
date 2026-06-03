@@ -1,21 +1,36 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.configuration
 
+import com.intellij.modcommand.ModCommand
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.module.Module
-import com.intellij.psi.PsiFile
+import com.intellij.util.concurrency.annotations.RequiresWriteLock
 import org.jetbrains.annotations.ApiStatus
 
 @ApiStatus.Experimental
 interface KotlinCompilerPluginProjectConfigurator {
 
-    val compilerId: String
+    val kotlinCompilerPluginId: String
 
-    fun configureModule(module: Module): PsiFile?
+    fun isApplicable(module: Module): Boolean = true
+
+    @RequiresWriteLock
+    fun configureModule(module: Module, configurationResultBuilder: ConfigurationResultBuilder)
+
+    fun configureModuleModCommand(module: Module): ModCommand =
+        ModCommand.nop()
 
     companion object {
         val EP_NAME: ExtensionPointName<KotlinCompilerPluginProjectConfigurator> =
-            ExtensionPointName.create<KotlinCompilerPluginProjectConfigurator>("org.jetbrains.kotlin.compilerPluginConfigurator")
+            ExtensionPointName.create("org.jetbrains.kotlin.compilerPluginConfigurator")
+
+        @ApiStatus.Internal
+        fun compilerPluginProjectConfigurators(kotlinCompilerPluginId: String): List<KotlinCompilerPluginProjectConfigurator> =
+            EP_NAME.extensionList.filter { it.kotlinCompilerPluginId == kotlinCompilerPluginId }
+
+        @ApiStatus.Internal
+        fun compilerPluginProjectConfigurators(kotlinCompilerPluginId: String, module: Module): List<KotlinCompilerPluginProjectConfigurator> =
+            compilerPluginProjectConfigurators(kotlinCompilerPluginId).filter { it.isApplicable(module) }
     }
 
 }

@@ -10,9 +10,8 @@ import com.intellij.codeInspection.util.InspectionMessage;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsSafe;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiElementVisitor;
-import com.intellij.psi.PsiPolyVariantReference;
-import com.intellij.psi.ResolveResult;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xml.util.XmlStringUtil;
@@ -23,22 +22,44 @@ import com.jetbrains.python.PythonUiService;
 import com.jetbrains.python.codeInsight.PyPsiIndexUtil;
 import com.jetbrains.python.inspections.quickfix.PyRemoveArgumentQuickFix;
 import com.jetbrains.python.inspections.quickfix.PyRenameArgumentQuickFix;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.PyArgumentList;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCallable;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyDecorator;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyKeywordArgument;
+import com.jetbrains.python.psi.PyStarArgument;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.impl.ParamHelper;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyABCUtil;
+import com.jetbrains.python.psi.types.PyCallableParameter;
+import com.jetbrains.python.psi.types.PyCallableType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeChecker;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public final class PyArgumentListInspection extends PyInspection {
-
   @Override
-  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly, @NotNull LocalInspectionToolSession session) {
-    return new Visitor(holder, PyInspectionVisitor.getContext(session));
+  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
+                                                 boolean isOnTheFly,
+                                                 @NotNull LocalInspectionToolSession session) {
+    TypeEvalContext context = PyInspectionVisitor.getContext(session);
+    Visitor visitor = new Visitor(holder, context);
+    visitor.downgradeHighlightForTypeEngine = context.getUsesExternalTypeEngine();
+    return visitor;
   }
 
   private static class Visitor extends PyInspectionVisitor {
@@ -56,7 +77,8 @@ public final class PyArgumentListInspection extends PyInspection {
 
     @Override
     public void visitPyArgumentList(final @NotNull PyArgumentList node) {
-      inspectPyArgumentList(node, getHolder(), getResolveContext());
+      ProblemHighlightType override = downgradeHighlightForTypeEngine ? ProblemHighlightType.INFORMATION : null;
+      inspectPyArgumentList(node, getHolder(), getResolveContext(), override);
     }
 
     @Override
@@ -73,12 +95,13 @@ public final class PyArgumentListInspection extends PyInspection {
         final PyCallableParameter allegedFirstParam = ContainerUtil.getOrElse(params, firstParamOffset - 1, null);
         if (allegedFirstParam == null || allegedFirstParam.isKeywordContainer()) {
           // no parameters left to pass function implicitly, or wrong param type
-          registerProblem(deco, PyPsiBundle.message("INSP.function.lacks.positional.argument", callable.getName())); // TODO: better names for anon lambdas
+          registerProblem(deco, PyPsiBundle.message("INSP.function.lacks.positional.argument",
+                                                    callable.getName())); // TODO: better names for anon lambdas
         }
         else { // possible unfilled params
           for (int i = firstParamOffset; i < params.size(); i++) {
             final PyCallableParameter parameter = params.get(i);
-            if (parameter.getParameter() instanceof PySingleStarParameter || parameter.getParameter() instanceof PySlashParameter) {
+            if (parameter.isKeywordOnlySeparator() || parameter.isPositionOnlySeparator()) {
               continue;
             }
             // param tuples, non-starred or non-default won't do
@@ -95,7 +118,8 @@ public final class PyArgumentListInspection extends PyInspection {
 
   private static void inspectPyArgumentList(@NotNull PyArgumentList node,
                                             @NotNull ProblemsHolder holder,
-                                            @NotNull PyResolveContext resolveContext) {
+                                            @NotNull PyResolveContext resolveContext,
+                                            @Nullable ProblemHighlightType highlightOverride) {
     if (node.getParent() instanceof PyClass) return; // `(object)` in `class Foo(object)` is also an arg list
     final PyCallExpression call = node.getCallExpression();
     if (call == null) return;
@@ -108,13 +132,6 @@ public final class PyArgumentListInspection extends PyInspection {
       if (callableType != null) {
         final PyCallable callable = callableType.getCallable();
         if (callable instanceof PyFunction function) {
-
-          // Decorate functions may have different parameter lists. We don't match arguments with parameters of decorators yet
-          if (PyKnownDecoratorUtil.hasUnknownOrChangingSignatureDecorator(function, context) ||
-              decoratedClassInitCall(call.getCallee(), function, resolveContext)) {
-            return;
-          }
-
           if (objectMethodCallViaSuper(call, function)) return;
         }
       }
@@ -123,37 +140,31 @@ public final class PyArgumentListInspection extends PyInspection {
     if (!mappings.isEmpty()) {
       boolean specificMismatchKindReported = false;
       if (ContainerUtil.all(mappings, mapping -> !mapping.getUnmappedArguments().isEmpty())) {
-        highlightUnexpectedArguments(node, holder, mappings, context);
+        highlightUnexpectedArguments(node, holder, mappings, context, highlightOverride);
         specificMismatchKindReported = true;
       }
       if (ContainerUtil.all(mappings, mapping -> !mapping.getUnmappedParameters().isEmpty())) {
-        highlightUnfilledParameters(node, holder, mappings, context);
+        highlightUnfilledParameters(node, holder, mappings, context, highlightOverride);
         specificMismatchKindReported = true;
       }
       if (!specificMismatchKindReported && ContainerUtil.all(mappings, mapping -> !mapping.isComplete())) {
-        highlightIncorrectArguments(node, holder, mappings, context);
+        highlightIncorrectArguments(node, holder, mappings, context, highlightOverride);
       }
     }
-    highlightStarArgumentTypeMismatch(node, holder, context);
+    highlightStarArgumentTypeMismatch(node, holder, context, null); // NOT covered by Pyrefly
   }
 
-  private static boolean decoratedClassInitCall(@Nullable PyExpression callee,
-                                                @NotNull PyFunction function,
-                                                @NotNull PyResolveContext resolveContext) {
-    if (callee instanceof PyReferenceExpression && PyUtil.isInitMethod(function)) {
-      final PsiPolyVariantReference classReference = ((PyReferenceExpression)callee).getReference(resolveContext);
-
-      return Arrays
-        .stream(classReference.multiResolve(false))
-        .map(ResolveResult::getElement)
-        .anyMatch(
-          element ->
-            element instanceof PyClass &&
-            PyKnownDecoratorUtil.hasUnknownOrChangingReturnTypeDecorator((PyClass)element, resolveContext.getTypeEvalContext())
-        );
+  private static void registerProblem(@NotNull ProblemsHolder holder,
+                                      @NotNull PsiElement element,
+                                      @NotNull @InspectionMessage String message,
+                                      @Nullable ProblemHighlightType highlightOverride,
+                                      @NotNull LocalQuickFix @NotNull ... fixes) {
+    if (highlightOverride != null) {
+      holder.registerProblem(element, message, highlightOverride, fixes);
     }
-
-    return false;
+    else {
+      holder.registerProblem(element, message, fixes);
+    }
   }
 
   private static boolean objectMethodCallViaSuper(@NotNull PyCallExpression call, @NotNull PyFunction function) {
@@ -192,7 +203,8 @@ public final class PyArgumentListInspection extends PyInspection {
     return false;
   }
 
-  private static void highlightStarArgumentTypeMismatch(PyArgumentList node, ProblemsHolder holder, TypeEvalContext context) {
+  private static void highlightStarArgumentTypeMismatch(PyArgumentList node, ProblemsHolder holder, TypeEvalContext context,
+                                                        @Nullable ProblemHighlightType highlightOverride) {
     for (PyExpression arg : node.getArguments()) {
       if (!(arg instanceof PyStarArgument starArgument)) {
         continue;
@@ -206,13 +218,13 @@ public final class PyArgumentListInspection extends PyInspection {
         if (starArgument.isKeyword()) {
           if (!PyABCUtil.isSubtype(argType, PyNames.MAPPING, context)) {
             // TODO: check that the key type is compatible with `str`
-            holder.registerProblem(arg, PyPsiBundle.message("INSP.expected.dict.got.type", argType.getName()));
+            registerProblem(holder, arg, PyPsiBundle.message("INSP.expected.dict.got.type", argType.getName()), highlightOverride);
           }
         }
         else {
           // *
           if (!PyABCUtil.isSubtype(argType, PyNames.ITERABLE, context)) {
-            holder.registerProblem(arg, PyPsiBundle.message("INSP.expected.iterable.got.type", argType.getName()));
+            registerProblem(holder, arg, PyPsiBundle.message("INSP.expected.iterable.got.type", argType.getName()), highlightOverride);
           }
         }
       }
@@ -237,7 +249,8 @@ public final class PyArgumentListInspection extends PyInspection {
   private static void highlightUnexpectedArguments(@NotNull PyArgumentList node,
                                                    @NotNull ProblemsHolder holder,
                                                    @NotNull List<PyCallExpression.PyArgumentsMapping> mappings,
-                                                   @NotNull TypeEvalContext context) {
+                                                   @NotNull TypeEvalContext context,
+                                                   @Nullable ProblemHighlightType highlightOverride) {
     if (mappings.size() == 1) {
       // if there is only one mapping, we could suggest quick fixes
       final Set<String> duplicateKeywords = getDuplicateKeywordArguments(node);
@@ -250,7 +263,9 @@ public final class PyArgumentListInspection extends PyInspection {
           final Project project = node.getProject();
           if (callable instanceof PyFunction && !PyPsiIndexUtil.isNotUnderSourceRoot(project, callable.getContainingFile())) {
             final String message = PyPsiBundle.message("INSP.unexpected.arg(s)");
-            holder.registerProblem(node, message, ProblemHighlightType.INFORMATION, PythonUiService.getInstance().createPyChangeSignatureQuickFixForMismatchedCall(mapping));
+            registerProblem(holder, node, message,
+                            highlightOverride != null ? highlightOverride : ProblemHighlightType.INFORMATION,
+                            PythonUiService.getInstance().createPyChangeSignatureQuickFixForMismatchedCall(mapping));
           }
         }
       }
@@ -264,24 +279,26 @@ public final class PyArgumentListInspection extends PyInspection {
           }
           quickFixes.add(new PyRenameArgumentQuickFix());
         }
-        holder.registerProblem(argument,
-                               PyPsiBundle.message("INSP.unexpected.arg"),
-                               quickFixes.toArray(new LocalQuickFix[quickFixes.size() - 1]));
+        registerProblem(holder, argument,
+                        PyPsiBundle.message("INSP.unexpected.arg"),
+                        highlightOverride,
+                        quickFixes.toArray(new LocalQuickFix[quickFixes.size() - 1]));
       }
     }
     else {
       // all mappings have unmapped arguments so we couldn't determine desired argument list and suggest appropriate quick fixes
-      holder.registerProblem(
-        node,
-        addPossibleCalleesRepresentation(PyPsiBundle.message("INSP.unexpected.arg(s)"), mappings, context, holder.isOnTheFly())
-      );
+      registerProblem(holder, node,
+                      addPossibleCalleesRepresentation(PyPsiBundle.message("INSP.unexpected.arg(s)"), mappings, context,
+                                                       holder.isOnTheFly()),
+                      highlightOverride);
     }
   }
 
   private static void highlightUnfilledParameters(@NotNull PyArgumentList node,
                                                   @NotNull ProblemsHolder holder,
                                                   @NotNull List<PyCallExpression.PyArgumentsMapping> mappings,
-                                                  @NotNull TypeEvalContext context) {
+                                                  @NotNull TypeEvalContext context,
+                                                  @Nullable ProblemHighlightType highlightOverride) {
     Optional
       .ofNullable(node.getNode())
       .map(astNode -> astNode.findChildByType(PyTokenTypes.RPAR))
@@ -290,17 +307,17 @@ public final class PyArgumentListInspection extends PyInspection {
         psi -> {
           if (mappings.size() != 1 ||
               ContainerUtil.exists(mappings.get(0).getUnmappedParameters(), parameter -> parameter.getName() == null)) {
-            holder.registerProblem(
-              psi,
-              addPossibleCalleesRepresentation(PyPsiBundle.message("INSP.parameter(s).unfilled"), mappings, context, holder.isOnTheFly())
-            );
+            registerProblem(holder, psi,
+                            addPossibleCalleesRepresentation(PyPsiBundle.message("INSP.parameter(s).unfilled"), mappings, context,
+                                                             holder.isOnTheFly()),
+                            highlightOverride);
           }
           else {
             StreamEx
               .of(mappings.get(0).getUnmappedParameters())
               .map(PyCallableParameter::getName)
               .filter(Objects::nonNull)
-              .forEach(name -> holder.registerProblem(psi, PyPsiBundle.message("INSP.parameter.unfilled", name)));
+              .forEach(name -> registerProblem(holder, psi, PyPsiBundle.message("INSP.parameter.unfilled", name), highlightOverride));
           }
         }
       );
@@ -309,11 +326,12 @@ public final class PyArgumentListInspection extends PyInspection {
   private static void highlightIncorrectArguments(@NotNull PyArgumentList node,
                                                   @NotNull ProblemsHolder holder,
                                                   @NotNull List<PyCallExpression.PyArgumentsMapping> mappings,
-                                                  @NotNull TypeEvalContext context) {
-    holder.registerProblem(
-      node,
-      addPossibleCalleesRepresentation(PyPsiBundle.message("INSP.incorrect.arguments"), mappings, context, holder.isOnTheFly())
-    );
+                                                  @NotNull TypeEvalContext context,
+                                                  @Nullable ProblemHighlightType highlightOverride) {
+    registerProblem(holder, node,
+                    addPossibleCalleesRepresentation(PyPsiBundle.message("INSP.incorrect.arguments"), mappings, context,
+                                                     holder.isOnTheFly()),
+                    highlightOverride);
   }
 
   private static @NlsSafe @NotNull String addPossibleCalleesRepresentation(@NotNull @InspectionMessage String prefix,

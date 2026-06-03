@@ -7,7 +7,6 @@ import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.util.IntellijInternalApi
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.openapi.util.registry.Registry
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import javax.swing.JComponent
@@ -33,12 +32,23 @@ interface PluginManagerCustomizer {
     modalityState: ModalityState,
   ): OptionsButonCustomizationModel?
 
+  suspend fun getPopupMenuActions(
+    pluginModelFacade: PluginModelFacade,
+    selection: List<PluginPopupMenuActionData>,
+    modalityState: ModalityState,
+  ): List<AnAction> = emptyList()
+
   suspend fun getUpdateButtonCustomizationModel(
     pluginModelFacade: PluginModelFacade,
     pluginModel: PluginUiModel,
     updateModel: PluginUiModel?,
     modalityState: ModalityState,
   ): UpdateButtonCustomizationModel?
+
+  suspend fun getUninstallButtonCustomizationModel(
+    pluginModelFacade: PluginModelFacade,
+    pluginModel: PluginUiModel,
+  ): UninstallButtonCustomizationModel?
 
   fun updateAfterModification(updateUi: () -> Unit)
 
@@ -48,6 +58,8 @@ interface PluginManagerCustomizer {
 
   fun onPluginDeleted(pluginModel: PluginUiModel, pluginSource: PluginSource)
 
+  suspend fun isPluginCompletelyUninstalled(pluginModel: PluginUiModel): Boolean = true
+
   @Nls
   fun getAdditionalTitleText(pluginModel: PluginUiModel): String?
 
@@ -56,7 +68,11 @@ interface PluginManagerCustomizer {
 
   fun ensurePluginStatesLoaded()
 
-  fun updateCustomRepositories(repoUrls: List<String>, updateUi: () -> Unit)
+  fun updateCustomRepositories(
+    addedRepoUrls: List<String>,
+    removedRepoUrls: List<String>,
+    updateUi: () -> Unit,
+  )
 
   fun requestRestart(pluginModelFacade: PluginModelFacade, parentComponent: JComponent? = null)
 
@@ -85,6 +101,18 @@ data class OptionsButonCustomizationModel(
 )
 
 @ApiStatus.Internal
+data class PluginPopupMenuActionData(
+  val pluginModel: PluginUiModel,
+  val installedDescriptorForMarketplace: PluginUiModel?,
+  val descriptorForActions: PluginUiModel,
+)
+
+@ApiStatus.Internal
 data class UpdateButtonCustomizationModel(
+  val action: () -> Unit,
+)
+
+@ApiStatus.Internal
+data class UninstallButtonCustomizationModel(
   val action: () -> Unit,
 )

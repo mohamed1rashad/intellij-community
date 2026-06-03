@@ -4,19 +4,28 @@ package org.jetbrains.jps.dependency.impl;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.jps.dependency.*;
+import org.jetbrains.jps.dependency.BackDependencyIndex;
+import org.jetbrains.jps.dependency.ComparableTypeExternalizer;
+import org.jetbrains.jps.dependency.Graph;
+import org.jetbrains.jps.dependency.MapletFactory;
+import org.jetbrains.jps.dependency.MultiMaplet;
+import org.jetbrains.jps.dependency.Node;
+import org.jetbrains.jps.dependency.NodeSource;
+import org.jetbrains.jps.dependency.ReferenceID;
 import org.jetbrains.jps.dependency.java.JvmNodeReferenceID;
 import org.jetbrains.jps.dependency.java.SubclassesIndex;
 import org.jetbrains.jps.dependency.kotlin.TypealiasesIndex;
-import org.jetbrains.jps.util.Iterators;
 
 import java.io.Closeable;
 import java.io.Flushable;
 import java.io.IOException;
-import java.util.*;
-import java.util.function.Function;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
-import static org.jetbrains.jps.util.Iterators.*;
+import static org.jetbrains.jps.util.Iterators.find;
 
 // this is a base implementation for shared functionality in both DependencyGraph and Delta
 @ApiStatus.Internal
@@ -30,36 +39,6 @@ public abstract class GraphImpl implements Graph {
   private static final Set<String> ourMandatoryIndexNames = Set.of(
     NodeDependenciesIndex.NAME, SubclassesIndex.NAME, TypealiasesIndex.NAME
   );
-
-  public interface IndexFactory {
-    Iterable<BackDependencyIndex> createIndices(@NotNull MapletFactory cFactory);
-
-
-    /**
-     * An index factory creating set of mandatory indices that must be present in all graph instances
-     */
-    static IndexFactory mandatoryIndices() {
-      return containerFactory -> List.of(
-        new NodeDependenciesIndex(containerFactory),
-        new SubclassesIndex(containerFactory),
-        new TypealiasesIndex(containerFactory)
-      );
-    }
-
-    /**
-     *
-     * @param extension indices
-     * @return a combined index factory that creates all mandatory indices plus those specified  
-     */
-    static IndexFactory create(Function<MapletFactory, BackDependencyIndex>... extIndices) {
-      IndexFactory mandatory = mandatoryIndices();
-      return containerFactory -> collect(
-        map(Arrays.asList(extIndices), extIndex -> extIndex.apply(containerFactory)),
-        collect(mandatory.createIndices(containerFactory), new ArrayList<>())
-      );
-    }
-
-  }
 
   protected GraphImpl(@NotNull MapletFactory cFactory, IndexFactory indexFactory) {
     myContainerFactory = cFactory;
@@ -79,9 +58,9 @@ public abstract class GraphImpl implements Graph {
       myDependencyIndex = find(myIndices, idx -> NodeDependenciesIndex.NAME.equals(idx.getName()));
 
       // important: if multiple implementations of NodeSource are available, change to generic graph element externalizer
-      Externalizer<NodeSource> srcExternalizer = Externalizer.forGraphElement(PathSource::new, NodeSource[]::new);
-      myNodeToSourcesMap = cFactory.createSetMultiMaplet("node-sources-map", Externalizer.forGraphElement(JvmNodeReferenceID::new, JvmNodeReferenceID[]::new), srcExternalizer);
-      mySourceToNodesMap = cFactory.createSetMultiMaplet("source-nodes-map", srcExternalizer, Externalizer.forAnyGraphElement(Node<?, ?>[]::new));
+      ComparableTypeExternalizer<NodeSource> srcExternalizer = ComparableTypeExternalizer.forGraphElement(PathSource::new, NodeSource[]::new, Comparator.comparing(NodeSource::toString));
+      myNodeToSourcesMap = cFactory.createSetMultiMaplet("node-sources-map", ComparableTypeExternalizer.forGraphElement(JvmNodeReferenceID::new, JvmNodeReferenceID[]::new, ReferenceID::compareTo), srcExternalizer);
+      mySourceToNodesMap = cFactory.createSetMultiMaplet("source-nodes-map", srcExternalizer, ComparableTypeExternalizer.forAnyGraphElement(Node<?, ?>[]::new, Comparator.comparing(Node::getReferenceID)));
     }
     catch (RuntimeException e) {
       closeIgnoreErrors();

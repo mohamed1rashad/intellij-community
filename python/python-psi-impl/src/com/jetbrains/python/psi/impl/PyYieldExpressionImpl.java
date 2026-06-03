@@ -8,6 +8,7 @@ import com.jetbrains.python.psi.PyElementVisitor;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.PyYieldExpression;
+import com.jetbrains.python.psi.types.PyAnyType;
 import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
@@ -31,7 +32,7 @@ public class PyYieldExpressionImpl extends PyElementImpl implements PyYieldExpre
       final PyType type = e != null ? context.getType(e) : null;
       var generatorDesc = PyTypingTypeProvider.GeneratorTypeDescriptor.fromGeneratorOrProtocol(type, context);
       if (generatorDesc != null) {
-        return generatorDesc.returnType();
+        return generatorDesc.returnType;
       }
       return PyBuiltinCache.getInstance(this).getNoneType();
     }
@@ -46,7 +47,7 @@ public class PyYieldExpressionImpl extends PyElementImpl implements PyYieldExpre
     final PyType type = expr != null ? context.getType(expr) : PyBuiltinCache.getInstance(this).getNoneType();
 
     if (isDelegating()) {
-      return PyTargetExpressionImpl.getIterationType(type, expr, this, context);
+      return PyTargetExpressionImpl.getIterationType(type, expr, this, false, context);
     }
     return type;
   }
@@ -58,7 +59,7 @@ public class PyYieldExpressionImpl extends PyElementImpl implements PyYieldExpre
         var returnType = context.getReturnType(function);
         var generatorDesc = PyTypingTypeProvider.GeneratorTypeDescriptor.fromGeneratorOrProtocol(returnType, context);
         if (generatorDesc != null) {
-          return generatorDesc.sendType();
+          return generatorDesc.sendType;
         }
       }
     }
@@ -68,10 +69,10 @@ public class PyYieldExpressionImpl extends PyElementImpl implements PyYieldExpre
       final PyType type = e != null ? context.getType(e) : null;
       var generatorDesc = PyTypingTypeProvider.GeneratorTypeDescriptor.fromGeneratorOrProtocol(type, context);
       if (generatorDesc != null) {
-        return generatorDesc.sendType();
+        return generatorDesc.sendType;
       }
       return PyBuiltinCache.getInstance(this).getNoneType();
     }
-    return null;
+    return PyAnyType.getUnknown();
   }
 }

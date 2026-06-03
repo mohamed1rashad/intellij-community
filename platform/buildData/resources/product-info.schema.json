@@ -49,6 +49,10 @@
       "description": "Date when the current major version was firstly released, in yyyyMMdd format.",
       "type": "string"
     },
+    "minRequiredJavaVersion": {
+      "description": "Minimum Java version required to run this IDE (e.g., 21)",
+      "type": "number"
+    },
     "launch": {
       "description": "Specifies how the IDE can be launched",
       "type": "array",
@@ -104,6 +108,10 @@
             "description": "A name of the class to launch",
             "type": "string"
           },
+          "stdioRedirectArg" : {
+            "description": "The name of a special argument that will trigger the launcher to capture its original stdout and provide it separately as a system property",
+            "type" : "string"
+          },
           "customCommands": {
             "description": "Specifies custom values for some properties if IDE is started with a specific command",
             "type": "array",
@@ -143,6 +151,10 @@
                 },
                 "mainClass": {
                   "description": "Overrides value of 'mainClass' for the specified commands",
+                  "type": "string"
+                },
+                "stdioRedirectArg": {
+                  "description": "The name of a special argument that will trigger the launcher to capture its original stdout and provide it separately as a system property",
                   "type": "string"
                 },
                 "envVarBaseName": {

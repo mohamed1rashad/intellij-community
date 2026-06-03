@@ -2,7 +2,6 @@
 package org.jetbrains.plugins.github.pullrequest
 
 import com.intellij.collaboration.async.launchNow
-import com.intellij.collaboration.async.nestedDisposable
 import com.intellij.collaboration.ui.codereview.list.ReviewListViewModel
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
@@ -10,7 +9,14 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.util.coroutines.childScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.github.api.data.GHUser
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestShort
@@ -27,7 +33,7 @@ import org.jetbrains.plugins.github.util.GithubSettings
 class GHPRListViewModel internal constructor(
   project: Project,
   parentCs: CoroutineScope,
-  private val dataContext: GHPRDataContext,
+  dataContext: GHPRDataContext,
 ) : ReviewListViewModel {
   private val cs = parentCs.childScope(javaClass.name)
 
@@ -39,9 +45,6 @@ class GHPRListViewModel internal constructor(
   val account: GithubAccount = dataContext.securityService.account
   private val currentUser: GHUser = dataContext.securityService.currentUser
   val repository: @NlsSafe String = repositoryDataService.repositoryCoordinates.repositoryPath.repository
-
-  private val outdatedState = MutableStateFlow(false)
-  val outdated: StateFlow<Boolean> = outdatedState.asStateFlow()
 
   val isLoading: StateFlow<Boolean> = listLoader.isLoading
   val error: StateFlow<Throwable?> = listLoader.error
@@ -66,14 +69,11 @@ class GHPRListViewModel internal constructor(
         }
       }
     }
-
-    dataContext.listUpdatesChecker.addOutdatedStateChangeListener(cs.nestedDisposable()) {
-      outdatedState.value = dataContext.listUpdatesChecker.outdated
-    }
   }
 
   private val searchHistoryModel = GHPRSearchHistoryModel(project.service<GHPRListPersistentSearchHistory>())
-  val searchVm: GHPRSearchPanelViewModel = GHPRSearchPanelViewModel(cs, project, repositoryDataService, searchHistoryModel, dataContext.securityService.currentUser)
+  val searchVm: GHPRSearchPanelViewModel =
+    GHPRSearchPanelViewModel(cs, project, repositoryDataService, dataContext.securityService, searchHistoryModel)
 
   private val _focusRequests = Channel<Unit>(1)
   internal val focusRequests: Flow<Unit> = _focusRequests.receiveAsFlow()

@@ -12,9 +12,20 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FactoryMap;
-import com.intellij.util.indexing.*;
+import com.intellij.util.indexing.CompositeDataIndexer;
+import com.intellij.util.indexing.DataIndexer;
+import com.intellij.util.indexing.DefaultFileTypeSpecificWithProjectInputFilter;
+import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.util.indexing.FileBasedIndexExtension;
+import com.intellij.util.indexing.FileContent;
+import com.intellij.util.indexing.ID;
+import com.intellij.util.indexing.IndexedFile;
 import com.intellij.util.indexing.impl.MapReduceIndexMappingException;
-import com.intellij.util.io.*;
+import com.intellij.util.io.DataExternalizer;
+import com.intellij.util.io.DataInputOutputUtil;
+import com.intellij.util.io.EnumeratorStringDescriptor;
+import com.intellij.util.io.IOUtil;
+import com.intellij.util.io.KeyDescriptor;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
@@ -22,7 +33,13 @@ import org.jetbrains.annotations.Unmodifiable;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -69,7 +86,7 @@ public final class FileIncludeIndex extends FileBasedIndexExtension<String, List
         return FILE_INCLUDE_PROVIDER_EP_NAME
             .getExtensionList()
             .stream()
-            .filter(provider -> provider.acceptFile(file.getFile()))
+            .filter(provider -> provider.acceptFile(file))
             .collect(Collectors.toSet());
       }
 
@@ -145,7 +162,7 @@ public final class FileIncludeIndex extends FileBasedIndexExtension<String, List
           return false;
         }
         for (FileIncludeProvider provider : FILE_INCLUDE_PROVIDER_EP_NAME.getExtensionList()) {
-          if (provider.acceptFile(file, indexedFile.getProject())) {
+          if (provider.acceptFile(indexedFile)) {
             return true;
           }
         }

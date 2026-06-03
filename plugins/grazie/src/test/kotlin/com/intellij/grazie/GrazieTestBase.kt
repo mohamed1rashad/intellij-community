@@ -1,7 +1,6 @@
 // Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.grazie
 
-import ai.grazie.nlp.langs.LanguageISO
 import ai.grazie.rules.settings.TextStyle
 import com.intellij.codeInspection.LocalInspectionTool
 import com.intellij.grazie.grammar.LanguageToolChecker
@@ -12,16 +11,17 @@ import com.intellij.grazie.spellcheck.GrazieCheckers
 import com.intellij.grazie.spellcheck.GrazieSpellCheckingInspection
 import com.intellij.grazie.text.TextChecker
 import com.intellij.grazie.utils.TextStyleDomain
-import com.intellij.grazie.utils.TextStyleDomain.*
+import com.intellij.grazie.utils.TextStyleDomain.AIPrompt
+import com.intellij.grazie.utils.TextStyleDomain.CodeComment
+import com.intellij.grazie.utils.TextStyleDomain.CodeDocumentation
+import com.intellij.grazie.utils.TextStyleDomain.Commit
 import com.intellij.lang.Language
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.ExtensionPointName
-import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
-import com.intellij.openapi.util.registry.Registry
-import com.intellij.spellchecker.SpellCheckerManager.Companion.getInstance
+import com.intellij.openapi.util.io.NioFiles
 import com.intellij.testFramework.ExtensionTestUtil
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
@@ -54,15 +54,17 @@ abstract class GrazieTestBase : BasePlatformTestCase() {
       }
     }
 
-    fun loadLangs(langs: Collection<Lang>, project: Project) {
-      langs.filter { it in hunspellLangs }.forEach { loadLang(it, project) }
+    @JvmStatic
+    fun installTestChecker(disposable: Disposable) {
+      val newExtensions = TextChecker.allCheckers().map { if (it is LanguageToolChecker) LanguageToolChecker.TestChecker() else it }
+      ExtensionTestUtil.maskExtensions(ExtensionPointName("com.intellij.grazie.textChecker"), newExtensions, disposable)
     }
 
-    fun unloadLangs(project: Project) {
-      hunspellLangs.forEach { unloadLang(it.iso, project) }
+    fun loadLangs(langs: Collection<Lang>, disposable: Disposable) {
+      langs.filter { it in hunspellLangs }.forEach { loadLang(it, disposable) }
     }
 
-    private fun loadLang(lang: Lang, project: Project) {
+    private fun loadLang(lang: Lang, disposable: Disposable) {
       val zipPath = PathManager.getResourceRoot(
         PathManager::class.java.classLoader,
         "dictionary/${lang.iso.name.lowercase()}.aff"
@@ -74,19 +76,11 @@ abstract class GrazieTestBase : BasePlatformTestCase() {
       if (!Files.exists(zip)) {
         fail("Hunspell-${lang.iso} not found in classpath")
       }
-      val outputDir = GrazieDynamic.getLangDynamicFolder(lang).resolve(lang.hunspellRemote!!.storageName)
+      val outputDir = GrazieDynamic.dynamicFolder.resolve(lang.hunspellRemote!!.storageName)
       Files.createDirectories(outputDir)
       ZipUtil.extract(zip, outputDir, HunspellDescriptor.filenameFilter())
-      getInstance(project).spellChecker!!.addDictionary(lang.dictionary!!)
-    }
-
-    private fun unloadLang(iso: LanguageISO, project: Project) {
-      val lang = Lang.entries.find { it.iso == iso }!!
-      getInstance(project).removeDictionary(getDictionaryPath(lang))
-    }
-
-    private fun getDictionaryPath(lang: Lang): String {
-      return GrazieDynamic.getLangDynamicFolder(lang).resolve(lang.hunspellRemote!!.file).toString()
+      lang.dictionary!! // pre initialize dictionary
+      Disposer.register(disposable) { NioFiles.deleteRecursively(outputDir) }
     }
   }
 
@@ -94,27 +88,21 @@ abstract class GrazieTestBase : BasePlatformTestCase() {
 
   protected open val additionalEnabledContextLanguages: Set<Language> = emptySet()
 
-  protected open val enableGrazieChecker: Boolean = false
-
   override fun getBasePath() = "community/plugins/grazie/src/test/testData"
 
   override fun setUp() {
     super.setUp()
-    maskSaxParserFactory(testRootDisposable)
-    if (enableGrazieChecker) Registry.get("spellchecker.grazie.enabled").setValue(true, testRootDisposable)
     myFixture.enableInspections(*inspectionTools)
 
+    maskSaxParserFactory(testRootDisposable)
+    installTestChecker(testRootDisposable)
     enableProofreadingFor(enabledLanguages)
-
-    val newExtensions = TextChecker.allCheckers().map { if (it is LanguageToolChecker) LanguageToolChecker.TestChecker() else it }
-    ExtensionTestUtil.maskExtensions(ExtensionPointName("com.intellij.grazie.textChecker"), newExtensions, testRootDisposable)
   }
 
   override fun tearDown() {
     try {
       GrazieConfig.update { GrazieConfig.State() }
       service<GrazieCheckers>().awaitConfiguration()
-      unloadLangs(project)
     }
     catch (e: Throwable) {
       addSuppressedException(e)
@@ -132,7 +120,7 @@ abstract class GrazieTestBase : BasePlatformTestCase() {
   ) {
     // Load langs manually to prevent potential deadlock
     val enabledLanguages = languages + GrazieConfig.get().enabledLanguages
-    loadLangs(enabledLanguages, project)
+    loadLangs(enabledLanguages, testRootDisposable)
 
     GrazieConfig.update { state ->
       val checkingContext = state.checkingContext.copy(

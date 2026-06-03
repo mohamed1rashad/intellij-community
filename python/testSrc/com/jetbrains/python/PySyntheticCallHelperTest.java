@@ -12,7 +12,10 @@ import com.jetbrains.python.psi.PyReferenceExpression;
 import com.jetbrains.python.psi.PyTargetExpression;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PySyntheticCallHelper;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -137,7 +140,7 @@ public class PySyntheticCallHelperTest extends PyTestCase {
     doTest("str | int", """
       from typing import overload, Any
       class Clazz:
-          if True:
+          if input():
             def foo(self, x: str) -> str:
                 pass
           else:
@@ -184,7 +187,7 @@ public class PySyntheticCallHelperTest extends PyTestCase {
   }
 
   public void testGenericClassMethod() {
-    doTest("list", """
+    doTest("list[Any]", """
       class Clazz[T]:
         def foo(self) -> T:
           pass
@@ -231,7 +234,7 @@ public class PySyntheticCallHelperTest extends PyTestCase {
   }
 
   public void testGenericClassMethodInExternalFile() {
-    doMultiFileTest("list", """
+    doMultiFileTest("list[Any]", """
       from lib import Clazz
       instance = Clazz[list]()
       """, () -> {
@@ -245,7 +248,7 @@ public class PySyntheticCallHelperTest extends PyTestCase {
   }
 
   public void testGenericClassMethodWithOverloadsInExternalFile() {
-    doMultiFileTest("float | list", """
+    doMultiFileTest("float | int | list[Any]", """
       from lib import Clazz
       instance = Clazz[list]()
       """, () -> {

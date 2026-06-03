@@ -2,6 +2,7 @@ package com.jetbrains.python.psi.types;
 
 import com.intellij.openapi.util.text.StringUtil;
 import com.jetbrains.python.PyNames;
+import com.jetbrains.python.psi.impl.ParamHelper;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -20,12 +21,17 @@ public final class PyCallableParameterListTypeImpl implements PyCallableParamete
   }
 
   @Override
+  public @NotNull List<PyCallableParameter> getUnpackedParameters(@NotNull TypeEvalContext context) {
+    return ParamHelper.unpackContainerParameters(myParameters, context);
+  }
+
+  @Override
   public @NotNull String getName() {
     final TypeEvalContext context = TypeEvalContext.codeInsightFallback(null);
     return String.format("[%s]",
                          StringUtil.join(myParameters, param -> {
                                            PyType type = param.getType(context);
-                                           return type != null ? type.getName() : PyNames.UNKNOWN_TYPE;
+                                           return type != null ? type.getName() : PyNames.ANY_TYPE;
                                          },
                                          ", "));
   }
@@ -41,6 +47,11 @@ public final class PyCallableParameterListTypeImpl implements PyCallableParamete
   @Override
   public int hashCode() {
     return Objects.hash(myParameters);
+  }
+
+  @Override
+  public String toString() {
+    return "PyCallableParameterListType: " + getName();
   }
 
   @Override

@@ -4,6 +4,8 @@ package com.intellij.psi.codeStyle;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.util.text.Matcher;
 import com.intellij.util.text.NameUtilCore;
+import com.intellij.util.text.matching.KeyboardLayoutConverter;
+import com.intellij.util.text.matching.MatchingMode;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -11,6 +13,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
+/**
+ * todo: move to platform module as soon as com.intellij.psi.codeStyle.NameUtil.MatchingCaseSensitivity deleted
+ */
 public final class NameUtil {
   private static final int MAX_LENGTH = 40;
   //heuristics: 15 can take 10-20 ms in some cases, while 10 works in 1-5 ms
@@ -19,12 +24,7 @@ public final class NameUtil {
   private NameUtil() {}
 
   public static @NotNull List<String> nameToWordsLowerCase(@NotNull String name){
-    String[] words = NameUtilCore.nameToWords(name);
-    List<String> list = new ArrayList<>(words.length);
-    for (String word : words) {
-      list.add(Strings.toLowerCase(word));
-    }
-    return list;
+    return NameUtilCore.nameToWordList(name).stream().map(Strings::toLowerCase).toList();
   }
 
   public static @NotNull String buildRegexp(@NotNull String pattern, int exactPrefixLen, boolean allowToUpper, boolean allowToLower) {
@@ -179,12 +179,12 @@ public final class NameUtil {
                                                            boolean preferLongerNames,
                                                            boolean isArray) {
     ArrayList<String> answer = new ArrayList<>();
-    String[] words = NameUtilCore.nameToWords(name);
+    List<@NotNull String> words = NameUtilCore.nameToWordList(name);
 
-    for (int step = 0; step < words.length; step++) {
-      int wordCount = preferLongerNames ? words.length - step : step + 1;
+    for (int step = 0; step < words.size(); step++) {
+      int wordCount = preferLongerNames ? words.size() - step : step + 1;
 
-      String startWord = words[words.length - wordCount];
+      String startWord = words.get(words.size() - wordCount);
       char c = startWord.charAt(0);
       if( c == '_' || !Character.isJavaIdentifierStart( c ) )
       {
@@ -199,7 +199,7 @@ public final class NameUtil {
 
   private static @NotNull String compoundSuggestion(@NotNull String prefix,
                                                     boolean upperCaseStyle,
-                                                    String @NotNull [] words,
+                                                    List<@NotNull String> words,
                                                     int wordCount,
                                                     @NotNull String startWord,
                                                     char c,
@@ -222,9 +222,9 @@ public final class NameUtil {
     }
     buffer.append(startWord);
 
-    for (int i = words.length - wordCount + 1; i < words.length; i++) {
-      String word = words[i];
-      String prevWord = words[i - 1];
+    for (int i = words.size() - wordCount + 1; i < words.size(); i++) {
+      String word = words.get(i);
+      String prevWord = words.get(i - 1);
       if (upperCaseStyle) {
         word = Strings.toUpperCase(word);
         if (prevWord.charAt(prevWord.length() - 1) != '_' && word.charAt(0) != '_') {
@@ -256,28 +256,48 @@ public final class NameUtil {
     return suggestion;
   }
 
+  /**
+   * @deprecated use {@link NameUtil#splitNameIntoWordList} (String)} to avoid redundant allocations
+   */
+  @Deprecated(forRemoval = true)
   public static String @NotNull [] splitNameIntoWords(@NotNull String name) {
     return NameUtilCore.splitNameIntoWords(name);
   }
 
+  @NotNull
+  public static List<@NotNull String> splitNameIntoWordList(@NotNull String name) {
+    return NameUtilCore.splitNameIntoWordList(name);
+  }
+
+  /**
+   * @deprecated use {@link NameUtilCore#nameToWordList(String)} to avoid redundant allocations
+   */
+  @Deprecated(forRemoval = true)
   public static String @NotNull [] nameToWords(@NotNull String name) {
     return NameUtilCore.nameToWords(name);
+  }
+
+  @NotNull
+  public static List<@NotNull String> nameToWordList(@NotNull String name) {
+    return NameUtilCore.nameToWordList(name);
   }
 
   public static Matcher buildMatcher(@NotNull String pattern,
                                      int exactPrefixLen,
                                      boolean allowToUpper,
                                      boolean allowToLower) {
-    MatchingCaseSensitivity options = !allowToLower && !allowToUpper ? MatchingCaseSensitivity.ALL
-                                                                     : exactPrefixLen > 0 ? MatchingCaseSensitivity.FIRST_LETTER
-                                                                                          : MatchingCaseSensitivity.NONE;
-    return buildMatcher(pattern, options);
+    MatchingMode matchingMode =
+      !allowToLower && !allowToUpper ? MatchingMode.MATCH_CASE
+                                     : exactPrefixLen > 0 ? MatchingMode.FIRST_LETTER
+                                                          : MatchingMode.IGNORE_CASE;
+    return buildMatcher(pattern, matchingMode);
   }
 
   public static final class MatcherBuilder {
     private final String pattern;
     private String separators = "";
-    private MatchingCaseSensitivity caseSensitivity = MatchingCaseSensitivity.NONE;
+    private MatchingMode matchingMode =
+      MatchingMode.IGNORE_CASE;
     private boolean typoTolerant = false;
     private boolean preferStartMatches = false;
     private boolean allOccurrences = false;
@@ -286,8 +306,17 @@ public final class NameUtil {
       this.pattern = pattern;
     }
 
+    public MatcherBuilder withMatchingMode(MatchingMode matchingMode) {
+      this.matchingMode = matchingMode;
+      return this;
+    }
+
+    /**
+     * @deprecated use {@link #withMatchingMode(MatchingMode)}
+     */
+    @Deprecated(forRemoval = true)
     public MatcherBuilder withCaseSensitivity(MatchingCaseSensitivity caseSensitivity) {
-      this.caseSensitivity = caseSensitivity;
+      this.matchingMode = caseSensitivity.matchingMode();
       return this;
     }
 
@@ -312,13 +341,14 @@ public final class NameUtil {
     }
 
     public MinusculeMatcher build() {
-      MinusculeMatcher matcher = typoTolerant ? FixingLayoutTypoTolerantMatcher.create(pattern, caseSensitivity, separators) :
-                                 allOccurrences ? AllOccurrencesMatcher.create(pattern, caseSensitivity, separators) :
-                                 new FixingLayoutMatcher(pattern, caseSensitivity, separators);
+      KeyboardLayoutConverter keyboardLayoutConverter = PlatformKeyboardLayoutConverter.INSTANCE;
+      MinusculeMatcher matcher = typoTolerant ? FixingLayoutTypoTolerantMatcher.create(pattern, matchingMode, separators, keyboardLayoutConverter) :
+                                 allOccurrences ? AllOccurrencesMatcher.create(pattern, matchingMode, separators, keyboardLayoutConverter) :
+                                 new FixingLayoutMatcher(pattern, matchingMode, separators, keyboardLayoutConverter);
       if (preferStartMatches) {
         matcher = new PreferStartMatchMatcherWrapper(matcher);
       }
-      matcher = PinyinMatcher.create(matcher);
+      matcher = PinyinMatcher.create(pattern, matcher);
       return matcher;
     }
   }
@@ -327,16 +357,25 @@ public final class NameUtil {
     return new MatcherBuilder(pattern);
   }
 
+  public static @NotNull MinusculeMatcher buildMatcher(@NotNull String pattern,
+                                                       @NotNull MatchingMode matchingMode) {
+    return buildMatcher(pattern).withMatchingMode(matchingMode).build();
+  }
+
+  /**
+   * @deprecated use {@link #buildMatcher(String, MatchingMode)}
+   */
+  @Deprecated(forRemoval = true)
   public static @NotNull MinusculeMatcher buildMatcher(@NotNull String pattern, @NotNull MatchingCaseSensitivity options) {
-    return buildMatcher(pattern).withCaseSensitivity(options).build();
+    return buildMatcher(pattern, options.matchingMode());
   }
 
   public static MinusculeMatcher buildMatcherWithFallback(@NotNull String pattern,
                                                           @NotNull String fallbackPattern,
-                                                          @NotNull MatchingCaseSensitivity options) {
+                                                          @NotNull MatchingMode matchingMode) {
     return pattern.equals(fallbackPattern)
-           ? buildMatcher(pattern, options)
-           : new MatcherWithFallback(buildMatcher(pattern, options), buildMatcher(fallbackPattern, options));
+           ? buildMatcher(pattern, matchingMode)
+           : new MatcherWithFallback(buildMatcher(pattern, matchingMode), buildMatcher(fallbackPattern, matchingMode));
   }
 
   public static @NotNull String capitalizeAndUnderscore(@NotNull String name) {
@@ -344,7 +383,7 @@ public final class NameUtil {
   }
 
   public static @NotNull String splitWords(@NotNull String text, char separator, @NotNull Function<? super String, String> transformWord) {
-    final String[] words = NameUtilCore.nameToWords(text);
+    final List<@NotNull String> words = NameUtilCore.nameToWordList(text);
     boolean insertSeparator = false;
     final StringBuilder buf = new StringBuilder();
     for (String word : words) {
@@ -361,10 +400,21 @@ public final class NameUtil {
       buf.append(transformWord.apply(word));
     }
     return buf.toString();
-
   }
 
+  /**
+   * @deprecated use {@link MatchingMode} instead
+   */
+  @Deprecated(forRemoval = true)
   public enum MatchingCaseSensitivity {
-    NONE, FIRST_LETTER, ALL
+    NONE, FIRST_LETTER, ALL;
+
+    @NotNull MatchingMode matchingMode() {
+      return switch (this) {
+        case NONE -> MatchingMode.IGNORE_CASE;
+        case FIRST_LETTER -> MatchingMode.FIRST_LETTER;
+        case ALL -> MatchingMode.MATCH_CASE;
+      };
+    }
   }
 }

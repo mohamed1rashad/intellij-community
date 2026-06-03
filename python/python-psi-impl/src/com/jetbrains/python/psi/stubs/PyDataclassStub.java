@@ -2,11 +2,25 @@
 package com.jetbrains.python.psi.stubs;
 
 import com.intellij.psi.util.QualifiedName;
+import com.jetbrains.python.codeInsight.PyDataclassesKt;
+import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.impl.stubs.PyCustomClassStub;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public interface PyDataclassStub extends PyCustomClassStub {
+/**
+ * Represents dataclass-related properties directly available in a class definition, i.e. not considering its ancestor classes,
+ * decorator parameter defaults or any other "external" configuration sources.
+ * <p>
+ * Note that omitted properties should have {@code null} value, not the default. These are substituted with the corresponding defaults
+ * later during analysis after checking other possible sources.
+ * <p>
+ * To get a complete "merged" set of properties use {@link PyDataclassesKt#parseDataclassParameters(PyClass, TypeEvalContext)}.
+ *
+ * @see PyDataclassesKt#parseDataclassParameters(PyClass, TypeEvalContext)
+ */
+public interface PyDataclassStub extends PyCustomClassStub, PydanticConfigFlags {
 
   /**
    * @return library used to determine dataclass.

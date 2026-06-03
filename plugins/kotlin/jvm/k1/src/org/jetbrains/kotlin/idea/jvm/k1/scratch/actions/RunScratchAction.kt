@@ -4,11 +4,13 @@ package org.jetbrains.kotlin.idea.jvm.k1.scratch.actions
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.DumbService
 import com.intellij.task.ProjectTaskManager
 import com.intellij.task.impl.ProjectTaskManagerImpl
+import org.jetbrains.kotlin.K1Deprecation
 import org.jetbrains.kotlin.idea.core.script.k1.ScriptConfigurationManager
 import org.jetbrains.kotlin.idea.jvm.k1.scratch.K1KotlinScratchFile
 import org.jetbrains.kotlin.idea.jvm.k1.scratch.SequentialScratchExecutor
@@ -19,6 +21,7 @@ import org.jetbrains.kotlin.idea.jvm.shared.scratch.printDebugMessage
 import org.jetbrains.kotlin.utils.addToStdlib.UnsafeCastFunction
 import org.jetbrains.kotlin.idea.jvm.shared.scratch.LOG as log
 
+@K1Deprecation
 class RunScratchAction : ScratchAction(
     KotlinJvmBundle.messagePointer("scratch.run.button"), AllIcons.Actions.Execute
 ) {
@@ -34,7 +37,6 @@ class RunScratchAction : ScratchAction(
     }
 
     object Handler {
-        @OptIn(UnsafeCastFunction::class)
         fun doAction(scratchFile: K1KotlinScratchFile, isAutoRun: Boolean) {
             val project = scratchFile.project
             val isRepl = scratchFile.options.isRepl
@@ -50,6 +52,7 @@ class RunScratchAction : ScratchAction(
                         executor.execute()
                     }
                 } catch (ex: Throwable) {
+                    if (ex is ControlFlowException) return
                     executor.errorOccurs(KotlinJvmBundle.message("exception.occurs.during.run.scratch.action"), ex, true)
                 }
             }

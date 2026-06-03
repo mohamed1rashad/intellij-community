@@ -105,6 +105,7 @@ com.intellij.xdebugger.XDebugSession
 - a:reportMessage(java.lang.String,com.intellij.openapi.ui.MessageType,javax.swing.event.HyperlinkListener):V
 - a:resume():V
 - a:runToPosition(com.intellij.xdebugger.XSourcePosition,Z):V
+- runWhenUiReady(java.util.function.Consumer):V
 - a:sessionResumed():V
 - a:setBreakpointInvalid(com.intellij.xdebugger.breakpoints.XLineBreakpoint,java.lang.String):V
 - a:setBreakpointMuted(Z):V
@@ -120,6 +121,14 @@ com.intellij.xdebugger.XDebugSession
 - a:stop():V
 - a:updateBreakpointPresentation(com.intellij.xdebugger.breakpoints.XLineBreakpoint,javax.swing.Icon,java.lang.String):V
 - a:updateExecutionPosition():V
+com.intellij.xdebugger.XDebugSessionBuilder
+- a:contentToReuse(com.intellij.execution.ui.RunContentDescriptor):com.intellij.xdebugger.XDebugSessionBuilder
+- a:environment(com.intellij.execution.runners.ExecutionEnvironment):com.intellij.xdebugger.XDebugSessionBuilder
+- a:icon(javax.swing.Icon):com.intellij.xdebugger.XDebugSessionBuilder
+- a:sessionName(java.lang.String):com.intellij.xdebugger.XDebugSessionBuilder
+- a:showTab(Z):com.intellij.xdebugger.XDebugSessionBuilder
+- a:showToolWindowOnSuspendOnly(Z):com.intellij.xdebugger.XDebugSessionBuilder
+- a:startSession():com.intellij.xdebugger.XSessionStartedResult
 com.intellij.xdebugger.XDebugSessionListener
 - java.util.EventListener
 - beforeSessionResume():V
@@ -142,6 +151,7 @@ Fa:com.intellij.xdebugger.XDebuggerManager
 - a:getDebugSession(com.intellij.execution.ui.ExecutionConsole):com.intellij.xdebugger.XDebugSession
 - a:getDebugSessions():com.intellij.xdebugger.XDebugSession[]
 - s:getInstance(com.intellij.openapi.project.Project):com.intellij.xdebugger.XDebuggerManager
+- a:newSessionBuilder(com.intellij.xdebugger.XDebugProcessStarter):com.intellij.xdebugger.XDebugSessionBuilder
 - a:startSession(com.intellij.execution.runners.ExecutionEnvironment,com.intellij.xdebugger.XDebugProcessStarter):com.intellij.xdebugger.XDebugSession
 - a:startSessionAndShowTab(java.lang.String,com.intellij.execution.ui.RunContentDescriptor,com.intellij.xdebugger.XDebugProcessStarter):com.intellij.xdebugger.XDebugSession
 - a:startSessionAndShowTab(java.lang.String,com.intellij.execution.ui.RunContentDescriptor,Z,com.intellij.xdebugger.XDebugProcessStarter):com.intellij.xdebugger.XDebugSession
@@ -187,6 +197,9 @@ com.intellij.xdebugger.XExpression
 com.intellij.xdebugger.XNamedTreeNode
 - javax.swing.tree.TreeNode
 - a:getName():java.lang.String
+com.intellij.xdebugger.XSessionStartedResult
+- a:getRunContentDescriptor():com.intellij.execution.ui.RunContentDescriptor
+- a:getSession():com.intellij.xdebugger.XDebugSession
 com.intellij.xdebugger.XSourcePosition
 - a:createNavigatable(com.intellij.openapi.project.Project):com.intellij.pom.Navigatable
 - a:getFile():com.intellij.openapi.vfs.VirtualFile
@@ -298,6 +311,7 @@ a:com.intellij.xdebugger.breakpoints.XBreakpointType
 - getSuspendNoneIcon():javax.swing.Icon
 - getTitle():java.lang.String
 - getVisibleStandardPanels():java.util.EnumSet
+- hasCustomCondition(com.intellij.xdebugger.breakpoints.XBreakpoint):Z
 - isAddBreakpointButtonVisible():Z
 - isSuspendThreadSupported():Z
 - shouldShowInBreakpointsDialog(com.intellij.openapi.project.Project):Z
@@ -447,6 +461,7 @@ a:com.intellij.xdebugger.evaluation.XDebuggerEditorsProvider
 - <init>():V
 - afterEditorCreated(com.intellij.openapi.editor.Editor):V
 - createDocument(com.intellij.openapi.project.Project,com.intellij.xdebugger.XExpression,com.intellij.xdebugger.XSourcePosition,com.intellij.xdebugger.evaluation.EvaluationMode):com.intellij.openapi.editor.Document
+- createDocument(com.intellij.openapi.project.Project,com.intellij.xdebugger.XExpression,com.intellij.xdebugger.XSourcePosition,com.intellij.xdebugger.evaluation.EvaluationMode,java.lang.String):com.intellij.openapi.editor.Document
 - createDocument(com.intellij.openapi.project.Project,java.lang.String,com.intellij.xdebugger.XSourcePosition,com.intellij.xdebugger.evaluation.EvaluationMode):com.intellij.openapi.editor.Document
 - createExpression(com.intellij.openapi.project.Project,com.intellij.openapi.editor.Document,com.intellij.lang.Language,com.intellij.xdebugger.evaluation.EvaluationMode):com.intellij.xdebugger.XExpression
 - a:getFileType():com.intellij.openapi.fileTypes.FileType
@@ -543,7 +558,7 @@ com.intellij.xdebugger.frame.XFullValueEvaluator$XFullValueEvaluationCallback
 - com.intellij.xdebugger.Obsolescent
 - com.intellij.xdebugger.frame.XValueCallback
 - evaluated(java.lang.String):V
-- a:evaluated(java.lang.String,java.awt.Font):V
+- evaluated(java.lang.String,java.awt.Font):V
 a:com.intellij.xdebugger.frame.XInlineDebuggerDataCallback
 - <init>():V
 - a:computed(com.intellij.xdebugger.XSourcePosition):V
@@ -636,8 +651,7 @@ a:com.intellij.xdebugger.frame.XValueModifier
 - <init>():V
 - calculateInitialValueEditorText(com.intellij.xdebugger.frame.XValueModifier$XInitialValueCallback):V
 - getInitialValueEditorText():java.lang.String
-- setValue(com.intellij.xdebugger.XExpression,com.intellij.xdebugger.frame.XValueModifier$XModificationCallback):V
-- setValue(java.lang.String,com.intellij.xdebugger.frame.XValueModifier$XModificationCallback):V
+- a:setValue(com.intellij.xdebugger.XExpression,com.intellij.xdebugger.frame.XValueModifier$XModificationCallback):V
 com.intellij.xdebugger.frame.XValueModifier$XInitialValueCallback
 - a:setValue(java.lang.String):V
 com.intellij.xdebugger.frame.XValueModifier$XModificationCallback
@@ -710,10 +724,10 @@ com.intellij.xdebugger.hotswap.HotSwapResultListener
 com.intellij.xdebugger.hotswap.HotSwapSession
 - a:getChanges():java.util.Set
 - a:getProject():com.intellij.openapi.project.Project
-- a:startHotSwapListening():com.intellij.xdebugger.hotswap.HotSwapResultListener
+- a:startHotSwapListening(Z):com.intellij.xdebugger.hotswap.HotSwapResultListener
+- bs:startHotSwapListening$default(com.intellij.xdebugger.hotswap.HotSwapSession,Z,I,java.lang.Object):com.intellij.xdebugger.hotswap.HotSwapResultListener
 com.intellij.xdebugger.hotswap.HotSwapSessionManager
 - a:createSession(com.intellij.xdebugger.hotswap.HotSwapProvider,com.intellij.openapi.Disposable):com.intellij.xdebugger.hotswap.HotSwapSession
-- s:getInstance(com.intellij.openapi.project.Project):com.intellij.xdebugger.hotswap.HotSwapSessionManager
 - a:onSessionSelected(com.intellij.xdebugger.hotswap.HotSwapSession):V
 com.intellij.xdebugger.hotswap.SourceFileChangesCollector
 - com.intellij.openapi.Disposable
@@ -794,6 +808,8 @@ com.intellij.xdebugger.ui.DebuggerColors
 - sf:NOT_TOP_FRAME_ATTRIBUTES:com.intellij.openapi.editor.colors.TextAttributesKey
 - sf:SMART_STEP_INTO_SELECTION:com.intellij.openapi.editor.colors.TextAttributesKey
 - sf:SMART_STEP_INTO_TARGET:com.intellij.openapi.editor.colors.TextAttributesKey
+com.intellij.xdebugger.ui.ExecutionPointHighlighterProvider
+- a:getHighlightRange():com.intellij.openapi.util.TextRange
 c:com.intellij.xdebugger.ui.XDebugTabLayouter
 - <init>():V
 - registerAdditionalContent(com.intellij.execution.ui.RunnerLayoutUi):V

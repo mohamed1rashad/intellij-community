@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiElementVisitor
 import com.intellij.psi.impl.source.tree.LeafPsiElement
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.scopes.KaScope
 import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
@@ -17,7 +18,12 @@ import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.codeinsight.api.classic.inspections.AbstractKotlinInspection
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtVisitorVoid
+import org.jetbrains.kotlin.psi.createDeclarationByPattern
+import org.jetbrains.kotlin.psi.getOrCreateBody
 
 private val JAVA_IO_SERIALIZABLE_CLASS_ID = ClassId.fromString("java/io/Serializable")
 private val JAVA_IO_SERIALIZATION_READ_RESOLVE = Name.identifier("readResolve")
@@ -56,8 +62,9 @@ private class ImplementReadResolveQuickFix : PsiUpdateModCommandQuickFix() {
     }
 }
 
+@OptIn(KaExperimentalApi::class)
 private fun KtObjectDeclaration.doesImplementSerializable(): Boolean = analyze(this) {
-    buildClassType(symbol).isSubtypeOf(JAVA_IO_SERIALIZABLE_CLASS_ID)
+    typeCreator.classType(symbol).isSubtypeOf(JAVA_IO_SERIALIZABLE_CLASS_ID)
 }
 
 private fun KtObjectDeclaration.doesImplementReadResolve(): Boolean = analyze(this) {

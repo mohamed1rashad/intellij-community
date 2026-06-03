@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.k2.hints;
 
@@ -55,6 +55,11 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
         runTest("../../idea/tests/testData/codeInsight/hints/types/ConstInitializerType.kt");
     }
 
+    @TestMetadata("ConstructorLikeFunctionCall.kt")
+    public void testConstructorLikeFunctionCall() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/ConstructorLikeFunctionCall.kt");
+    }
+
     @TestMetadata("ConstructorWithExplicitTypeParametersType.kt")
     public void testConstructorWithExplicitTypeParametersType() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/ConstructorWithExplicitTypeParametersType.kt");
@@ -68,6 +73,11 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
     @TestMetadata("ConstructorWithoutTypeParametersType.kt")
     public void testConstructorWithoutTypeParametersType() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/ConstructorWithoutTypeParametersType.kt");
+    }
+
+    @TestMetadata("ContextParameters.kt")
+    public void testContextParameters() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/ContextParameters.kt");
     }
 
     @TestMetadata("DefinitelyNonNullTypes.kt")
@@ -165,6 +175,11 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
         runTest("../../idea/tests/testData/codeInsight/hints/types/JavaNonNullableArray.kt");
     }
 
+    @TestMetadata("JavaTypeWithWarningLevelNullability.kt")
+    public void testJavaTypeWithWarningLevelNullability() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/JavaTypeWithWarningLevelNullability.kt");
+    }
+
     @TestMetadata("LambdaReturnType.kt")
     public void testLambdaReturnType() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/LambdaReturnType.kt");
@@ -243,6 +258,11 @@ public class KtReferenceTypeHintsProviderTestGenerated extends AbstractKtReferen
     @TestMetadata("SuspendFunctionalType.kt")
     public void testSuspendFunctionalType() throws Exception {
         runTest("../../idea/tests/testData/codeInsight/hints/types/SuspendFunctionalType.kt");
+    }
+
+    @TestMetadata("TruncatedTypes.kt")
+    public void testTruncatedTypes() throws Exception {
+        runTest("../../idea/tests/testData/codeInsight/hints/types/TruncatedTypes.kt");
     }
 
     @TestMetadata("TypeInCompanion.kt")

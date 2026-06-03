@@ -48,20 +48,6 @@ public final class DocumentationManagerUtil {
   @Deprecated
   public static void createHyperlink(
     StringBuilder buffer,
-    PsiElement refElement,
-    String refText,
-    String label,
-    boolean plainLink
-  ) {
-    createHyperlink(buffer, refText, label, plainLink);
-  }
-
-  /**
-   * @deprecated use {@link #createHyperlink(StringBuilder, String, String, boolean)}
-   */
-  @Deprecated
-  public static void createHyperlink(
-    StringBuilder buffer,
     @SuppressWarnings("unused") PsiElement refElement,
     String refText,
     String label,

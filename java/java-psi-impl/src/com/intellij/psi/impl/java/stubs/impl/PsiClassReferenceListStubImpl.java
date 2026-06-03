@@ -1,7 +1,14 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl.java.stubs.impl;
 
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.impl.cache.ExternalTypeAnnotationContainer;
 import com.intellij.psi.impl.cache.TypeAnnotationContainer;
 import com.intellij.psi.impl.cache.TypeInfo;
 import com.intellij.psi.impl.compiled.ClsJavaCodeReferenceElementImpl;
@@ -17,18 +24,13 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 public class PsiClassReferenceListStubImpl extends StubBase<PsiReferenceList> implements PsiClassReferenceListStub {
   private final TypeInfo @NotNull [] myInfos;
   private volatile PsiClassType [] myTypes;
 
   public PsiClassReferenceListStubImpl(@NotNull IJavaElementType type, StubElement parent, String @NotNull [] names) {
-    this(type, parent, ContainerUtil.map2Array(
-      ContainerUtil.filter(names, PsiClassReferenceListStubImpl::isCorrectGenericSequence),
-      TypeInfo.class,
-      TypeInfo::fromString)
-    );
+    this(type, parent, ContainerUtil.map2Array(names, TypeInfo.class, TypeInfo::fromString));
   }
 
   public PsiClassReferenceListStubImpl(@NotNull IJavaElementType type, StubElement parent,
@@ -65,6 +67,13 @@ public class PsiClassReferenceListStubImpl extends StubBase<PsiReferenceList> im
       for (int i = 0; i < types.length; i++) {
         TypeInfo info = myInfos[i];
         TypeAnnotationContainer annotations = info.getTypeAnnotations();
+        if (annotations == TypeAnnotationContainer.EMPTY) {
+          PsiElement psi = myParent.getPsi();
+          if (psi instanceof PsiTypeParameter) {
+            annotations = ExternalTypeAnnotationContainer.create((PsiTypeParameter)psi);
+            annotations = annotations.forConjunction(i);
+          }
+        }
         ClsJavaCodeReferenceElementImpl reference = new ClsJavaCodeReferenceElementImpl(getPsi(), info.text(), annotations);
         types[i] = new PsiClassReferenceType(reference, null).annotate(annotations.getProvider(reference));
       }
@@ -96,18 +105,6 @@ public class PsiClassReferenceListStubImpl extends StubBase<PsiReferenceList> im
       }
     }
     return types;
-  }
-
-  private static boolean isCorrectGenericSequence(@Nullable String text) {
-    if (text == null) return true;
-    int depth = 0;
-    for (int i = 0; i < text.length(); i++) {
-      char ch = text.charAt(i);
-      if (ch == '<') depth++;
-      else if (ch == '>') depth--;
-      if (depth < 0) return false;
-    }
-    return depth == 0;
   }
 
   @Override

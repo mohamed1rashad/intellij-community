@@ -31,21 +31,7 @@ internal class PyDetectedSdkAdditionalData(override var targetEnvironmentConfigu
   }
 }
 
-/**
- * Returns new [PyDetectedSdk] with the additional data that corresponds to the local or non-local interpreter based on the provided flag.
- *
- * @see com.jetbrains.python.sdk.PySdkExtKt.isValid
- */
-internal fun createDetectedSdk(name: String, isLocal: Boolean): PyDetectedSdk {
-  val sdk = PyDetectedSdk(name)
-  if (!isLocal) {
-    val sdkModificator = sdk.sdkModificator
-    sdkModificator.sdkAdditionalData = PyDetectedSdkAdditionalData(targetEnvironmentConfiguration = null, flavor = null)
-    sdkModificator.commitChanges()
-  }
-  return sdk
-}
-
+@Deprecated("Will be dropped soon along with PyDetectedSDK, do not use")
 internal fun createDetectedSdk(name: String,
                                targetEnvironmentConfiguration: TargetEnvironmentConfiguration?,
                                flavor: PythonSdkFlavor<*>? = null): PyDetectedSdk {

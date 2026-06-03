@@ -3,8 +3,6 @@
 package org.jetbrains.kotlin.nj2k.externalCodeProcessing
 
 import com.intellij.lang.java.JavaLanguage
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiMember
 import com.intellij.psi.PsiMethod
@@ -13,17 +11,21 @@ import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.idea.base.psi.isConstructorDeclaredProperty
 import org.jetbrains.kotlin.idea.base.psi.kotlinFqName
 import org.jetbrains.kotlin.j2k.ExternalCodeProcessing
-import org.jetbrains.kotlin.j2k.ProgressPortionReporter
 import org.jetbrains.kotlin.j2k.ReferenceSearcher
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.nj2k.KotlinNJ2KBundle
-import org.jetbrains.kotlin.nj2k.externalCodeProcessing.NewExternalCodeProcessing.MemberKey.*
+import org.jetbrains.kotlin.nj2k.externalCodeProcessing.NewExternalCodeProcessing.MemberKey.FieldKey
+import org.jetbrains.kotlin.nj2k.externalCodeProcessing.NewExternalCodeProcessing.MemberKey.LightMethodKey
+import org.jetbrains.kotlin.nj2k.externalCodeProcessing.NewExternalCodeProcessing.MemberKey.PhysicalMethodKey
 import org.jetbrains.kotlin.nj2k.fqNameWithoutCompanions
 import org.jetbrains.kotlin.nj2k.psi
 import org.jetbrains.kotlin.nj2k.tree.JKDeclaration
 import org.jetbrains.kotlin.nj2k.types.typeFqName
 import org.jetbrains.kotlin.nj2k.types.typeFqNamePossiblyMappedToKotlin
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.psiUtil.forEachDescendantOfType
 
 class NewExternalCodeProcessing(
@@ -97,26 +99,8 @@ class NewExternalCodeProcessing(
         }
     }
 
-    override fun prepareWriteOperation(progress: ProgressIndicator?): () -> Unit {
-        progress?.text = KotlinNJ2KBundle.message("progress.searching.usages.to.update")
-
-        val usages = mutableListOf<ExternalUsagesFixer.JKMemberInfoWithUsages>()
-        for ((index, member) in members.values.withIndex()) {
-            if (progress != null) {
-                progress.text2 = member.fqName?.shortName()?.identifier ?: continue
-                progress.checkCanceled()
-
-                ProgressManager.getInstance().runProcess(
-                    { usages += member.collectUsages() },
-                    ProgressPortionReporter(progress, index / members.size.toDouble(), 1.0 / members.size)
-                )
-            } else {
-                usages += member.collectUsages()
-            }
-        }
-        return {
-            ExternalUsagesFixer(usages).fix()
-        }
+    override fun collectUsages(): List<ExternalUsagesFixer.JKMemberInfoWithUsages> {
+        return members.values.map { it.collectUsages() }
     }
 
     private fun JKMemberData.collectUsages(): ExternalUsagesFixer.JKMemberInfoWithUsages {
@@ -137,5 +121,3 @@ class NewExternalCodeProcessing(
         return ExternalUsagesFixer.JKMemberInfoWithUsages(this, javaUsages, kotlinUsages)
     }
 }
-
-

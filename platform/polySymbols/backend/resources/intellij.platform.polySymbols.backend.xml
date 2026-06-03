@@ -1,8 +1,20 @@
 <idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
     <module name="intellij.platform.backend"/>
+    <module name="intellij.libraries.kotlin.reflect"/>
+    <module name="intellij.platform.analysis"/>
+    <module name="intellij.platform.core"/>
+    <module name="intellij.platform.core.impl"/>
+    <module name="intellij.platform.core.ui"/>
+    <module name="intellij.platform.editor.ui"/>
+    <module name="intellij.platform.indexing"/>
+    <module name="intellij.platform.lang"/>
+    <module name="intellij.platform.lang.impl"/>
     <module name="intellij.platform.polySymbols"/>
+    <module name="intellij.platform.projectModel.impl"/>
   </dependencies>
+  <!-- endregion -->
 
   <extensionPoints>
     <extensionPoint qualifiedName="com.intellij.polySymbols.psiReferenceProvider"
@@ -11,11 +23,11 @@
       <with attribute="hostElementClass" implements="com.intellij.model.psi.PsiExternalReferenceHost"/>
       <with attribute="implementationClass" implements="com.intellij.polySymbols.references.PsiPolySymbolReferenceProvider"/>
     </extensionPoint>
-    <extensionPoint qualifiedName="com.intellij.polySymbols.psiSourcedSymbolProvider"
-                    interface="com.intellij.polySymbols.search.PsiSourcedPolySymbolProvider"
+    <extensionPoint qualifiedName="com.intellij.polySymbols.psiLinkedSymbolProvider"
+                    interface="com.intellij.polySymbols.search.PsiLinkedPolySymbolProvider"
                     dynamic="true"/>
-    <extensionPoint qualifiedName="com.intellij.polySymbols.psiSourcedSymbol"
-                    beanClass="com.intellij.polySymbols.search.impl.PolySymbolPsiSourcedSymbolHostClassEP"
+    <extensionPoint qualifiedName="com.intellij.polySymbols.psiLinkedSymbol"
+                    beanClass="com.intellij.polySymbols.search.impl.PolySymbolPsiLinkedSymbolHostClassEP"
                     dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.polySymbols.inspectionToolMapping"
                     beanClass="com.intellij.polySymbols.inspections.impl.PolySymbolInspectionToolMappingEP"
@@ -45,9 +57,9 @@
     <polySymbols.psiReferenceCacheInfoProvider
       implementation="com.intellij.polySymbols.references.impl.DefaultPsiPolySymbolReferenceCacheInfoProvider"/>
 
-    <referencesSearch implementation="com.intellij.polySymbols.search.PsiSourcedPolySymbolReferenceSearcher"/>
-    <refactoring.helper implementation="com.intellij.polySymbols.refactoring.PsiSourcedPolySymbolRefactoringHelper"/>
-    <renameHandler implementation="com.intellij.polySymbols.refactoring.PsiSourcedPolySymbolRenameHandler"/>
+    <referencesSearch implementation="com.intellij.polySymbols.search.PsiLinkedPolySymbolReferenceSearcher"/>
+    <refactoring.helper implementation="com.intellij.polySymbols.refactoring.PsiLinkedPolySymbolRefactoringHelper"/>
+    <renameHandler implementation="com.intellij.polySymbols.refactoring.PsiLinkedPolySymbolRenameHandler"/>
 
     <rename.symbolRenameTargetFactory implementation="com.intellij.polySymbols.refactoring.PolySymbolRenameTargetFactory"/>
     <lang.symbolSearchTarget forClass="com.intellij.polySymbols.PolySymbol"

@@ -12,9 +12,40 @@ import com.intellij.gradle.toolingExtension.impl.model.dependencyModel.writeDepe
 import com.intellij.openapi.externalSystem.model.project.ExternalSystemSourceType
 import com.intellij.openapi.externalSystem.model.project.IExternalSystemSourceType
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.plugins.gradle.model.*
+import org.jetbrains.plugins.gradle.model.DefaultExternalFilter
+import org.jetbrains.plugins.gradle.model.DefaultExternalSourceDirectorySet
+import org.jetbrains.plugins.gradle.model.DefaultExternalSourceSet
+import org.jetbrains.plugins.gradle.model.ExternalDependency
+import org.jetbrains.plugins.gradle.model.ExternalFilter
+import org.jetbrains.plugins.gradle.model.ExternalSourceDirectorySet
+import org.jetbrains.plugins.gradle.model.ExternalSourceSet
+import org.jetbrains.plugins.gradle.model.FilePatternSet
+import org.jetbrains.plugins.gradle.model.FilePatternSetImpl
+import org.jetbrains.plugins.gradle.model.GradleSourceSetModel
 import org.jetbrains.plugins.gradle.tooling.serialization.SerializationService
-import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.*
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.MAP_KEY_FIELD
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.MAP_VALUE_FIELD
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.assertFieldName
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.assertNotNull
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.createIonWriter
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readBoolean
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readFile
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readFileList
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readFileSet
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readInteger
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readList
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readMap
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readString
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readStringList
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readStringSet
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeBoolean
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeCollection
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeFile
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeFiles
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeInteger
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeMap
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeString
+import org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeStrings
 import org.jetbrains.plugins.gradle.tooling.serialization.step
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -45,15 +76,16 @@ class GradleSourceSetSerialisationService : SerializationService<GradleSourceSet
   }
 
   class SourceSetModelReadContext {
-    val dependencyContext = DependencyReadContext()
+    val dependencyContext: DependencyReadContext = DependencyReadContext()
   }
 
   class SourceSetModelWriteContext {
-    val dependencyContext = DependencyWriteContext()
+    val dependencyContext: DependencyWriteContext = DependencyWriteContext()
   }
 
   companion object {
 
+    private const val SOURCE_SET_MODEL_TOOLCHAIN_VERSION_FIELD: String = "toolchainVersion"
     private const val SOURCE_SET_MODEL_SOURCE_COMPATIBILITY_FIELD: String = "sourceCompatibility"
     private const val SOURCE_SET_MODEL_TARGET_COMPATIBILITY_FIELD: String = "targetCompatibility"
     private const val SOURCE_SET_MODEL_TASK_ARTIFACTS_FIELD: String = "taskArtifacts"
@@ -87,6 +119,7 @@ class GradleSourceSetSerialisationService : SerializationService<GradleSourceSet
     @JvmStatic
     fun writeSourceSetModel(writer: IonWriter, context: SourceSetModelWriteContext, model: GradleSourceSetModel) {
       writer.step(IonType.STRUCT) {
+        writeInteger(writer, SOURCE_SET_MODEL_TOOLCHAIN_VERSION_FIELD, model.toolchainVersion)
         writeString(writer, SOURCE_SET_MODEL_SOURCE_COMPATIBILITY_FIELD, model.sourceCompatibility)
         writeString(writer, SOURCE_SET_MODEL_TARGET_COMPATIBILITY_FIELD, model.targetCompatibility)
         writeFiles(writer, SOURCE_SET_MODEL_TASK_ARTIFACTS_FIELD, model.taskArtifacts)
@@ -104,6 +137,7 @@ class GradleSourceSetSerialisationService : SerializationService<GradleSourceSet
     fun readSourceSetModel(reader: IonReader, context: SourceSetModelReadContext): DefaultGradleSourceSetModel {
       return reader.step {
         DefaultGradleSourceSetModel().apply {
+          toolchainVersion = readInteger(reader, SOURCE_SET_MODEL_TOOLCHAIN_VERSION_FIELD)
           sourceCompatibility = readString(reader, SOURCE_SET_MODEL_SOURCE_COMPATIBILITY_FIELD)
           targetCompatibility = readString(reader, SOURCE_SET_MODEL_TARGET_COMPATIBILITY_FIELD)
           taskArtifacts = readFileList(reader, SOURCE_SET_MODEL_TASK_ARTIFACTS_FIELD)

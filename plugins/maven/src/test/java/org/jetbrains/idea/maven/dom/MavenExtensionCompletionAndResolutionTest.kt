@@ -8,6 +8,8 @@ import org.jetbrains.idea.maven.indices.MavenIndicesTestFixture
 import org.junit.Test
 
 class MavenExtensionCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
+  override fun skipPluginResolution() = false
+
   override fun createIndicesFixture(): MavenIndicesTestFixture {
     return MavenIndicesTestFixture(dir, project, testRootDisposable,"plugins")
   }
@@ -83,8 +85,7 @@ class MavenExtensionCompletionAndResolutionTest : MavenDomWithIndicesTestCase() 
                                     "maven-compiler-plugin",
                                     "maven-site-plugin",
                                     "maven-surefire-plugin",
-                                    "build-helper-maven-plugin",
-                                    "project")
+                                    "build-helper-maven-plugin")
   }
 
   @Test
@@ -131,7 +132,7 @@ class MavenExtensionCompletionAndResolutionTest : MavenDomWithIndicesTestCase() 
                        </build>
                        """.trimIndent())
 
-    val pluginVersion = getDefaultPluginVersion("org.apache.maven:maven-compiler-plugin")
+    val pluginVersion = projectsManager.projects[0].plugins.first { it.artifactId == "maven-compiler-plugin" }.version
     val pluginPath =
       "plugins/org/apache/maven/plugins/maven-compiler-plugin/$pluginVersion/maven-compiler-plugin-$pluginVersion.pom"
     val filePath = myIndicesFixture!!.repositoryHelper.getTestData(pluginPath)

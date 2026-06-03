@@ -1,8 +1,9 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.uiDesigner.lw;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.UIManager;
+import java.awt.Color;
+import java.awt.SystemColor;
 import java.lang.reflect.Field;
 
 public final class ColorDescriptor {
@@ -23,14 +24,28 @@ public final class ColorDescriptor {
 
   static ColorDescriptor fromSystemColor(final String systemColor) {
     ColorDescriptor result = new ColorDescriptor(null);
-    result.mySystemColor = systemColor;
+    if (checkField(SystemColor.class, systemColor)) {
+      result.mySystemColor = systemColor;
+    }
     return result;
   }
 
   static ColorDescriptor fromAWTColor(final String awtColor) {
     ColorDescriptor result = new ColorDescriptor(null);
-    result.myAWTColor = awtColor;
+    if (checkField(Color.class, awtColor)) {
+      result.myAWTColor = awtColor;
+    }
     return result;
+  }
+
+  private static boolean checkField(Class aClass, String fieldName) {
+    try {
+      aClass.getDeclaredField(fieldName);
+      return true;
+    }
+    catch (NoSuchFieldException ignored) {
+      return false;
+    }
   }
 
   private static Color getColorField(final Class aClass, final String fieldName) {

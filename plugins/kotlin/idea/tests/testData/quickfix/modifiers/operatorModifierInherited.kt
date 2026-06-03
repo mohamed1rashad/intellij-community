@@ -1,4 +1,5 @@
 // "Add 'operator' modifier" "true"
+// K2_ERROR: 'operator' modifier is required on 'fun get(idx: Int): Any' defined in 'Foo'.
 open class Foo {
     fun get(idx: Int): Any = 5
 }
@@ -10,4 +11,4 @@ fun test(): Any {
 }
 
 // FUS_QUICKFIX_NAME: org.jetbrains.kotlin.idea.inspections.AddModifierFixFactory$createAction$1
-// FUS_K2_QUICKFIX_NAME: org.jetbrains.kotlin.idea.quickfix.AddModifierFix
+// FUS_K2_QUICKFIX_NAME: org.jetbrains.kotlin.idea.k2.codeinsight.fixes.ModifierRequiredFixFactoriesKt$createFixIfAvailable$1

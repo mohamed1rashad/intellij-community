@@ -2,19 +2,26 @@
 package com.intellij.terminal
 
 import com.intellij.diagnostic.ThreadDumper
-import com.intellij.execution.process.*
+import com.intellij.execution.process.ColoredProcessHandler
+import com.intellij.execution.process.NopProcessHandler
+import com.intellij.execution.process.OSProcessHandler
+import com.intellij.execution.process.ProcessOutputTypes
 import com.intellij.openapi.application.UI
 import com.intellij.openapi.util.Disposer
+import com.intellij.terminal.testApp.SimpleCliApp
+import com.intellij.terminal.testApp.SimplePrinterApp
 import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.jediterm.core.util.TermSize
 import com.jediterm.terminal.TerminalColor
 import com.jediterm.terminal.TextStyle
-import com.jediterm.terminal.model.TerminalTextBuffer
-import kotlinx.coroutines.*
-import java.io.InputStream
-import java.io.OutputStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import org.assertj.core.api.Assertions
+import org.junit.jupiter.api.Assumptions
 import java.lang.management.ThreadInfo
-import java.util.concurrent.CompletableFuture
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
@@ -23,27 +30,27 @@ class TerminalExecutionConsoleTest : BasePlatformTestCase() {
 
   override fun runInDispatchThread(): Boolean = false
 
-  fun `test disposing console should stop emulator thread`(): Unit = timeoutRunBlocking(20.seconds) {
+  fun `test disposing console should stop emulator thread`(): Unit = timeoutRunBlocking(DEFAULT_TEST_TIMEOUT) {
     val processHandler = NopProcessHandler()
     val console = withContext(Dispatchers.UI) {
-      TerminalExecutionConsole(project, null)
+      TerminalExecutionConsoleBuilder(project).build()
     }
     console.attachToProcess(processHandler)
     processHandler.startNotify()
-    awaitCondition(5.seconds) { findEmulatorThreadInfo() != null }
+    awaitCondition { findEmulatorThreadInfo() != null }
     assertNotNull(findEmulatorThreadInfo())
     withContext(Dispatchers.UI) {
       Disposer.dispose(console)
     }
-    awaitCondition(5.seconds) { findEmulatorThreadInfo() == null }
+    awaitCondition { findEmulatorThreadInfo() == null }
     assertNull(findEmulatorThreadInfo())
+    processHandler.destroyProcess()
+    processHandler.awaitTerminated()
   }
 
-  private suspend fun awaitCondition(timeout: Duration, condition: () -> Boolean) {
-    withTimeoutOrNull(timeout) {
-      while (!condition()) {
-        delay(100.milliseconds)
-      }
+  private suspend fun awaitCondition(condition: () -> Boolean) {
+    while (!condition()) {
+      delay(100.milliseconds)
     }
   }
 
@@ -52,49 +59,213 @@ class TerminalExecutionConsoleTest : BasePlatformTestCase() {
     return threadInfos.find { it.threadName.startsWith("TerminalEmulator-") }
   }
 
+  fun `test convert LF to CRLF for processes without PTY`(): Unit = timeoutRunBlockingWithConsole { console ->
+    val processHandler = OSProcessHandler(MockPtyBasedProcess(false), "my command", Charsets.UTF_8)
+    console.attachToProcess(processHandler)
+    @Suppress("DEPRECATION")
+    console.withConvertLfToCrlfForNonPtyProcess(true)
+    TestProcessTerminationMessage.attach(processHandler)
+    processHandler.startNotify()
+    processHandler.notifyTextAvailable("Foo\nBar\nBaz", ProcessOutputTypes.STDOUT)
+    processHandler.destroyProcess()
+    console.awaitOutputContainsSubstring(substringToFind = TestProcessTerminationMessage.getMessage(MockPtyBasedProcess.EXIT_CODE))
+    val output = TerminalOutput.collect(console.terminalWidget)
+    output.assertLinesAre(listOf(
+      "my command",
+      "Foo",
+      "Bar",
+      "Baz",
+      TestProcessTerminationMessage.getMessage(MockPtyBasedProcess.EXIT_CODE)
+    ))
+    processHandler.assertTerminated()
+  }
+
   fun `test support ColoredProcessHandler`(): Unit = timeoutRunBlockingWithConsole { console ->
-    val processHandler = ColoredProcessHandler(MockPtyBasedProcess, "my command line", Charsets.UTF_8)
+    val processHandler = ColoredProcessHandler(MockPtyBasedProcess(true), "my command line", Charsets.UTF_8)
     assertTrue(TerminalExecutionConsole.isAcceptable(processHandler))
     console.attachToProcess(processHandler)
     processHandler.startNotify()
     processHandler.notifyTextAvailable("\u001b[0m", ProcessOutputTypes.STDOUT)
     processHandler.notifyTextAvailable("\u001b[32mFoo\u001b[0m", ProcessOutputTypes.STDOUT)
-    processHandler.setShouldDestroyProcessRecursively(false)
-    ProcessTerminatedListener.attach(processHandler, project, $$"Process finished with exit code $EXIT_CODE$")
+    TestProcessTerminationMessage.attach(processHandler)
     processHandler.destroyProcess()
-    val terminalWidget = console.terminalWidget
-    awaitCondition(5.seconds) {
-      ScreenText.collect(terminalWidget.terminalTextBuffer).contains(MockPtyBasedProcess.EXIT_CODE.toString())
-    }
-    assertTrue(terminalWidget.text.startsWith("my command line\nFoo"))
-    val screenText = ScreenText.collect(terminalWidget.terminalTextBuffer)
-    assertTrue(screenText.contains(Chunk("Foo", TextStyle(TerminalColor(2), null))))
+    console.awaitOutputContainsSubstring(substringToFind = TestProcessTerminationMessage.getMessage(MockPtyBasedProcess.EXIT_CODE))
+    val output = TerminalOutput.collect(console.terminalWidget)
+    output.assertLinesAre(listOf(
+      "my command line",
+      "Foo",
+      TestProcessTerminationMessage.getMessage(MockPtyBasedProcess.EXIT_CODE)
+    ))
+    output.assertContainsChunk(TerminalOutputChunk("Foo", TextStyle(TerminalColor(2), null)))
+    processHandler.assertTerminated()
   }
 
   fun `test support OSProcessHandler`(): Unit = timeoutRunBlockingWithConsole { console ->
-    val processHandler = OSProcessHandler(MockPtyBasedProcess, "command line", Charsets.UTF_8)
+    val processHandler = OSProcessHandler(MockPtyBasedProcess(true), "command line", Charsets.UTF_8)
     assertTrue(TerminalExecutionConsole.isAcceptable(processHandler))
     console.attachToProcess(processHandler)
     processHandler.startNotify()
     processHandler.notifyTextAvailable("\u001b[0m", ProcessOutputTypes.STDOUT)
     processHandler.notifyTextAvailable("\u001b[32mFoo\u001b[0m", ProcessOutputTypes.STDOUT)
     processHandler.notifyTextAvailable("\u001b[43mBar\u001b[0m", ProcessOutputTypes.STDOUT)
-    val terminalWidget = console.terminalWidget
-    awaitCondition(5.seconds) {
-      ScreenText.collect(terminalWidget.terminalTextBuffer).contains("Bar")
-    }
-    assertTrue(terminalWidget.text.startsWith("command line\nFooBar"))
-    val screenText = ScreenText.collect(terminalWidget.terminalTextBuffer)
-    assertTrue(screenText.contains(Chunk("Foo", TextStyle(TerminalColor(2), null))))
-    assertTrue(screenText.contains(Chunk("Bar", TextStyle(null, TerminalColor(3)))))
+    console.awaitOutputContainsSubstring(substringToFind = "Bar")
+    console.assertOutputStartsWithLines(expectedStartLines = listOf("command line", "FooBar"))
+    val output = TerminalOutput.collect(console.terminalWidget)
+    output.assertContainsChunk(TerminalOutputChunk("Foo", TextStyle(TerminalColor(2), null)))
+    output.assertContainsChunk(TerminalOutputChunk("Bar", TextStyle(null, TerminalColor(3))))
+    processHandler.destroyProcess()
+    processHandler.awaitTerminated()
   }
 
-  fun <T> timeoutRunBlockingWithConsole(
-    timeout: Duration = 20.seconds,
+  fun `test same styled consecutive texts are merged`(): Unit = timeoutRunBlockingWithConsole { console ->
+    val processHandler = NopProcessHandler()
+    console.attachToProcess(processHandler)
+    processHandler.startNotify()
+    processHandler.notifyTextAvailable("\u001b[0m", ProcessOutputTypes.STDOUT)
+    processHandler.notifyTextAvailable("\u001b[32mThis", ProcessOutputTypes.STDOUT)
+    processHandler.notifyTextAvailable(" is", ProcessOutputTypes.STDOUT)
+    processHandler.notifyTextAvailable(" the first\u001b[0m", ProcessOutputTypes.STDOUT)
+    processHandler.notifyTextAvailable("\u001b[32m chu", ProcessOutputTypes.STDOUT)
+    processHandler.notifyTextAvailable("nk.\u001b[0m", ProcessOutputTypes.STDOUT)
+    console.awaitOutputContainsSubstring(substringToFind = "This is the first chunk.")
+    processHandler.notifyTextAvailable("\u001b[33m This is a different chunk.", ProcessOutputTypes.STDOUT)
+    console.awaitOutputContainsSubstring(substringToFind = " This is a different chunk.")
+
+    val output = TerminalOutput.collect(console.terminalWidget)
+    Assertions.assertThat(output.contains("This is the first chunk. This is a different chunk."))
+      .describedAs(output.lines.flatMap { it.outputChunks }.toString())
+      .isFalse
+    processHandler.destroyProcess()
+    processHandler.awaitTerminated()
+  }
+
+  fun `test basic SimpleCliApp java process`(): Unit = timeoutRunBlockingWithConsole { console ->
+    val textToPrint = "Hello, World"
+    val javaCommand = SimpleCliApp.NonRuntime.createCommand(SimpleCliApp.Options(
+      textToPrint, 0, null
+    ))
+    val processHandler = createTerminalProcessHandler(this, javaCommand, console.termSize)
+    console.attachToProcess(processHandler)
+    TestProcessTerminationMessage.attach(processHandler)
+    processHandler.startNotify()
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf(
+      textToPrint,
+      TestProcessTerminationMessage.getMessage(0)
+    ))
+    console.assertOutputStartsWithLines(expectedStartLines = listOf(javaCommand.commandLine))
+    processHandler.assertTerminated()
+  }
+
+  fun `test basic SimpleCliApp java process with non-zero exit code`(): Unit = timeoutRunBlockingWithConsole { console ->
+    val textToPrint = "Something went wrong"
+    val javaCommand = SimpleCliApp.NonRuntime.createCommand(SimpleCliApp.Options(
+      textToPrint, 42, null
+    ))
+    val processHandler = createTerminalProcessHandler(this, javaCommand, console.termSize)
+    console.attachToProcess(processHandler)
+    TestProcessTerminationMessage.attach(processHandler)
+    processHandler.startNotify()
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf(
+      textToPrint,
+      TestProcessTerminationMessage.getMessage(42)
+    ))
+    console.assertOutputStartsWithLines(expectedStartLines = listOf(javaCommand.commandLine))
+    processHandler.assertTerminated()
+  }
+
+  fun `test read input in SimpleCliApp java process`(): Unit = timeoutRunBlockingWithConsole { console ->
+    val textToPrint = "Enter your name:"
+    val javaCommand = SimpleCliApp.NonRuntime.createCommand(SimpleCliApp.Options(
+      textToPrint, 0, "exit"
+    ))
+    val processHandler = createTerminalProcessHandler(this, javaCommand, console.termSize)
+    console.attachToProcess(processHandler)
+    TestProcessTerminationMessage.attach(processHandler)
+    processHandler.startNotify()
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf(textToPrint))
+    processHandler.writeToStdinAndHitEnter("exit")
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf(
+      textToPrint + "exit",
+      "Read line: exit",
+      "",
+      TestProcessTerminationMessage.getMessage(0)
+    ))
+    console.assertOutputStartsWithLines(expectedStartLines = listOf(javaCommand.commandLine))
+    processHandler.assertTerminated()
+  }
+
+  fun `test output auto scrolling`(): Unit = timeoutRunBlockingWithConsole(TermSize(200, 30)) { console ->
+    val javaCommand = SimplePrinterApp.NonRuntime.createCommand(SimplePrinterApp.Options("foo", 3))
+    val processHandler = createTerminalProcessHandler(this, javaCommand, console.termSize)
+    console.attachToProcess(processHandler)
+    TestProcessTerminationMessage.attach(processHandler)
+
+    processHandler.startNotify()
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf("foo1", "foo2", "foo3", "Input:"))
+    awaitAllOutputVisible(console)
+
+    processHandler.writeToStdinAndHitEnter("30 bar")
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf("bar28", "bar29", "bar30", "Input:"))
+    awaitScrolledToBottom(console)
+
+    processHandler.writeToStdinAndHitEnter(SimplePrinterApp.EXIT)
+    console.awaitOutputEndsWithLines(expectedEndLines = listOf(TestProcessTerminationMessage.getMessage(0)))
+    processHandler.assertTerminated()
+  }
+
+  private suspend fun awaitAllOutputVisible(console: TerminalExecutionConsole) {
+    withContext(Dispatchers.UI) {
+      Assumptions.assumeTrue(canShowAllOutput(console))
+      awaitCondition {
+        Assertions.assertThat(canShowAllOutput(console)).isTrue
+        val historyLinesCount = console.historyLinesCount
+        console.terminalWidget.terminalPanel.verticalScrollModel.value == -historyLinesCount
+      }
+    }
+  }
+
+  private suspend fun awaitScrolledToBottom(console: TerminalExecutionConsole) {
+    withContext(Dispatchers.UI) {
+      awaitCondition {
+        Assertions.assertThat(canShowAllOutput(console)).isFalse
+        console.terminalWidget.terminalPanel.verticalScrollModel.value == 0
+      }
+    }
+  }
+
+  private val TerminalExecutionConsole.historyLinesCount: Int
+    get() {
+      val textBuffer = terminalWidget.terminalTextBuffer
+      textBuffer.lock()
+      try {
+        return textBuffer.historyLinesCount
+      }
+      finally {
+        textBuffer.unlock()
+      }
+    }
+
+  private fun canShowAllOutput(console: TerminalExecutionConsole): Boolean {
+    val textBuffer = console.terminalWidget.terminalTextBuffer
+    textBuffer.lock()
+    try {
+      val cursor = console.terminalWidget.terminal.cursorPosition
+      val historyLinesCount = textBuffer.historyLinesCount
+      val termHeight = textBuffer.height
+      return historyLinesCount + cursor.y <= termHeight
+    }
+    finally {
+      textBuffer.unlock()
+    }
+  }
+
+  private fun <T> timeoutRunBlockingWithConsole(
+    initialSize: TermSize = TermSize(200, 24),
+    timeout: Duration = DEFAULT_TEST_TIMEOUT,
     action: suspend CoroutineScope.(TerminalExecutionConsole) -> T,
   ): T = timeoutRunBlocking(timeout) {
     val console = withContext(Dispatchers.UI) {
-      TerminalExecutionConsole(project, null)
+      TerminalExecutionConsoleBuilder(project).initialTermSize(initialSize).build()
     }
     try {
       action(console)
@@ -108,50 +279,4 @@ class TerminalExecutionConsoleTest : BasePlatformTestCase() {
 
 }
 
-
-internal class Chunk(val text: String, val style: TextStyle)
-
-internal class ScreenText(val chunks: List<Chunk>) {
-
-  fun contains(text: String): Boolean = chunks.any { it.text.contains(text) }
-
-  fun contains(chunksToFind: Chunk): Boolean = chunks.any {
-    it.text == chunksToFind.text && it.style == chunksToFind.style
-  }
-
-  companion object {
-    fun collect(textBuffer: TerminalTextBuffer): ScreenText {
-      val result: List<Chunk> = textBuffer.screenLinesStorage.flatMap {
-        it.entries.map { entry ->
-          Chunk(entry.text.toString(), entry.style)
-        }
-      }
-      return ScreenText(result)
-    }
-  }
-}
-
-internal object MockPtyBasedProcess : Process(), PtyBasedProcess {
-
-  const val EXIT_CODE = 123
-
-  private val exitCodeFuture: CompletableFuture<Int> = CompletableFuture()
-
-  override fun destroy() {
-    exitCodeFuture.complete(EXIT_CODE)
-  }
-
-  override fun waitFor(): Int = exitCodeFuture.get()
-
-  override fun exitValue(): Int {
-    return exitCodeFuture.getNow(null) ?: throw IllegalThreadStateException()
-  }
-
-  override fun getOutputStream(): OutputStream = OutputStream.nullOutputStream()
-  override fun getErrorStream(): InputStream = InputStream.nullInputStream()
-  override fun getInputStream(): InputStream = InputStream.nullInputStream()
-
-  override fun hasPty(): Boolean = true
-
-  override fun setWindowSize(columns: Int, rows: Int) {}
-}
+private val DEFAULT_TEST_TIMEOUT: Duration = 60.seconds

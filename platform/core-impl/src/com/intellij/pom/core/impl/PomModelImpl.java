@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.pom.core.impl;
 
 import com.intellij.lang.ASTNode;
@@ -8,7 +8,11 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
-import com.intellij.openapi.progress.*;
+import com.intellij.openapi.progress.EmptyProgressIndicator;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressIndicatorProvider;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.TextRange;
@@ -22,13 +26,23 @@ import com.intellij.pom.event.PomModelListener;
 import com.intellij.pom.impl.PomTransactionBase;
 import com.intellij.pom.tree.TreeAspect;
 import com.intellij.pom.wrappers.PsiEventWrapperAspect;
-import com.intellij.psi.*;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.impl.*;
+import com.intellij.psi.impl.ChangedPsiRangeUtil;
+import com.intellij.psi.impl.DebugUtil;
+import com.intellij.psi.impl.DiffLog;
+import com.intellij.psi.impl.PsiDocumentManagerEx;
+import com.intellij.psi.impl.PsiManagerEx;
+import com.intellij.psi.impl.PsiToDocumentSynchronizer;
+import com.intellij.psi.impl.PsiTreeChangeEventImpl;
 import com.intellij.psi.impl.file.impl.FileManager;
-import com.intellij.psi.impl.smartPointers.SmartPointerManagerImpl;
+import com.intellij.psi.impl.smartPointers.SmartPointerManagerEx;
 import com.intellij.psi.impl.source.DummyHolder;
 import com.intellij.psi.impl.source.PsiFileImpl;
+import com.intellij.psi.impl.source.resolve.FileContextUtil;
 import com.intellij.psi.impl.source.tree.FileElement;
 import com.intellij.psi.impl.source.tree.TreeUtil;
 import com.intellij.psi.text.BlockSupport;
@@ -39,9 +53,17 @@ import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Stack;
 import com.intellij.util.lang.CompoundRuntimeException;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Set;
 
 public class PomModelImpl extends UserDataHolderBase implements PomModel {
   private final Project myProject;
@@ -178,7 +200,7 @@ public class PomModelImpl extends UserDataHolderBase implements PomModel {
   }
 
   private void commitTransaction(@NotNull PsiFile containingFileByTree, @Nullable Document document) {
-    final PsiDocumentManagerBase manager = (PsiDocumentManagerBase)PsiDocumentManager.getInstance(myProject);
+    final PsiDocumentManagerEx manager = (PsiDocumentManagerEx)PsiDocumentManager.getInstance(myProject);
     final PsiToDocumentSynchronizer synchronizer = manager.getSynchronizer();
 
     boolean isFromCommit = manager.isCommitInProgress();
@@ -255,7 +277,7 @@ public class PomModelImpl extends UserDataHolderBase implements PomModel {
 
   @Contract("_,null -> null")
   private @Nullable Document startTransaction(@NotNull PomTransaction transaction, @Nullable PsiFile psiFile) {
-    final PsiDocumentManagerBase manager = (PsiDocumentManagerBase)PsiDocumentManager.getInstance(myProject);
+    final PsiDocumentManagerEx manager = (PsiDocumentManagerEx)PsiDocumentManager.getInstance(myProject);
     final PsiToDocumentSynchronizer synchronizer = manager.getSynchronizer();
     final PsiElement changeScope = transaction.getChangeScope();
 
@@ -263,7 +285,7 @@ public class PomModelImpl extends UserDataHolderBase implements PomModel {
       PsiUtilCore.ensureValid(psiFile);
     }
 
-    boolean physical = changeScope.isPhysical();
+    boolean physical = shouldFirePhysicalPsiEvents(changeScope);
     if (synchronizer.toProcessPsiEvent()) {
       // fail-fast to prevent any psi modifications that would cause psi/document text mismatch
       if (isDocumentUncommitted(psiFile)) {
@@ -277,7 +299,7 @@ public class PomModelImpl extends UserDataHolderBase implements PomModel {
 
     VirtualFile vFile = psiFile == null ? null : psiFile.getViewProvider().getVirtualFile();
     if (psiFile != null) {
-      ((SmartPointerManagerImpl) SmartPointerManager.getInstance(myProject)).fastenBelts(vFile);
+      SmartPointerManagerEx.getInstanceEx(myProject).fastenBelts(vFile);
       if (psiFile instanceof PsiFileImpl) {
         ((PsiFileImpl)psiFile).beforeAstChange();
       }
@@ -358,8 +380,11 @@ public class PomModelImpl extends UserDataHolderBase implements PomModel {
 
   @ApiStatus.Internal
   public static boolean shouldFirePhysicalPsiEvents(@NotNull PsiElement scope) {
-    // injections are physical even in non-physical PSI :(
-    return scope.isPhysical();
+    if (!scope.isPhysical()) return false;
+
+    PsiFile file = scope.getContainingFile();
+    PsiElement hostElement = FileContextUtil.getFileContext(file);
+    return hostElement == null || hostElement.isPhysical();
   }
 
   private void sendAfterChildrenChangedEvent(@NotNull PsiFile scope, int oldLength) {

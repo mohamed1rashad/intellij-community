@@ -4,6 +4,7 @@ package com.intellij.ide.starters.remote
 import com.intellij.ide.starters.shared.CommonStarterContext
 import com.intellij.ide.starters.shared.DEFAULT_PACKAGE_NAME
 import com.intellij.ide.starters.shared.StarterAppPackaging
+import com.intellij.ide.starters.shared.StarterConfigFileFormat
 import com.intellij.ide.starters.shared.StarterLanguageLevel
 
 class WebStarterContext : CommonStarterContext() {
@@ -14,6 +15,7 @@ class WebStarterContext : CommonStarterContext() {
   var packageName: String = DEFAULT_PACKAGE_NAME
   var languageLevel: StarterLanguageLevel? = null
   var packaging: StarterAppPackaging? = null
+  var configFileFormat: StarterConfigFileFormat? = null
 
   val dependencies: MutableSet<WebStarterDependency> = HashSet()
 

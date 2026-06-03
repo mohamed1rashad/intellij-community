@@ -5,6 +5,7 @@ import com.intellij.injected.editor.VirtualFileWindow
 import com.intellij.openapi.project.Project
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.backend.workspace.toVirtualFileUrl
+import com.intellij.platform.backend.workspace.workspaceModel
 import com.intellij.psi.PsiFile
 import org.jetbrains.kotlin.analysis.api.projectStructure.KaLibraryModule
 import org.jetbrains.kotlin.analysis.api.projectStructure.KaModule
@@ -59,17 +60,17 @@ internal class FirKaScriptingModuleFactory : FirKaModuleFactory {
         val project = ktFile.project
         val virtualFile = file.originalFile.virtualFile
 
+        val snapshot = project.workspaceModel.currentSnapshot
         if (!nameSequence.endsWith(KotlinFileType.DOT_SCRIPT_EXTENSION)) {
             val workspaceModel = WorkspaceModel.getInstance(project)
-            val snapshot = workspaceModel.currentSnapshot
 
             val url = virtualFile.toVirtualFileUrl(workspaceModel.getVirtualFileUrlManager())
             val entitiesByUrl = snapshot.getVirtualFileUrlIndex().findEntitiesByUrl(url)
-            if (entitiesByUrl.none() || entitiesByUrl.none { it is KotlinScriptEntity }) {
+            if (entitiesByUrl.none { it is KotlinScriptEntity }) {
                 return null
             }
         }
 
-        return KaScriptModuleImpl(project, virtualFile)
+        return KaScriptModuleImpl(project, virtualFile, snapshot)
     }
 }

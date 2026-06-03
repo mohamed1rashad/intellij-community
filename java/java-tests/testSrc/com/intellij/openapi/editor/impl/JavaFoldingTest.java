@@ -74,6 +74,7 @@ public class JavaFoldingTest extends JavaFoldingTestCase {
        */
       import java.util.*;
       class Foo { List a; Map b; }
+      <caret>
                               """;
     configure(text);
     FoldRegion foldRegion = myFixture.getEditor().getFoldingModel().getCollapsedRegionAtOffset(0);
@@ -204,6 +205,21 @@ public class JavaFoldingTest extends JavaFoldingTestCase {
     FoldRegion accessorStartFold = foldingModel.getCollapsedRegionAtOffset(indexOfBar);
     assertNotNull(accessorStartFold);
     assertFalse(accessorStartFold.isExpanded());
+  }
+
+  public void testClassInitializer() {
+    @Language("JAVA") String text = """
+      class Foo {
+          static {
+              System.out.println("init");
+          }
+      }""";
+
+    configure(text);
+    FoldingModelImpl foldingModel = (FoldingModelImpl)myFixture.getEditor().getFoldingModel();
+    FoldRegion fold = foldingModel.getFoldRegion(text.indexOf("{", text.indexOf("static")), text.indexOf("}") + 1);
+    assertNotNull(fold);
+    assertEquals("{...}", fold.getPlaceholderText());
   }
 
   public void test_closure_folding_doesn_t_expand_when_editing_inside() {

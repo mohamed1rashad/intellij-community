@@ -12,7 +12,14 @@ import com.intellij.openapi.projectRoots.JavaSdk;
 import com.intellij.openapi.projectRoots.ProjectJdkTable;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.projectRoots.SdkModificator;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.CompilerModuleExtension;
+import com.intellij.openapi.roots.LanguageLevelModuleExtension;
+import com.intellij.openapi.roots.LibraryOrderEntry;
+import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.ModuleRootModificationUtil;
+import com.intellij.openapi.roots.OrderEntry;
+import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.util.Disposer;
@@ -48,6 +55,7 @@ public abstract class JavaModuleFixtureBuilderImpl<T extends ModuleFixture> exte
   private final List<MavenLib> myMavenLibraries = new ArrayList<>();
 
   private String myJdk;
+  private @NotNull LanguageLevel myJdkVersion = LanguageLevel.JDK_1_7;
   private MockJdkLevel myMockJdkLevel = MockJdkLevel.jdk14;
   private LanguageLevel myLanguageLevel;
 
@@ -117,6 +125,15 @@ public abstract class JavaModuleFixtureBuilderImpl<T extends ModuleFixture> exte
   }
 
   @Override
+  public @NotNull JavaModuleFixtureBuilder addJdkVersion(@NotNull LanguageLevel jdkVersion) {
+    if (myJdk != null) {
+      throw new IllegalStateException("Cannot set JDK version after JDK path has been set");
+    }
+    myJdkVersion = jdkVersion;
+    return this;
+  }
+
+  @Override
   public void setMockJdkLevel(final @NotNull MockJdkLevel level) {
     myMockJdkLevel = level;
   }
@@ -176,7 +193,7 @@ public abstract class JavaModuleFixtureBuilderImpl<T extends ModuleFixture> exte
         }
       }
       else {
-        jdk = IdeaTestUtil.getMockJdk17();
+        jdk = IdeaTestUtil.getMockJdk(myJdkVersion);
       }
 
       registerJdk(jdk, module.getProject());

@@ -1206,7 +1206,14 @@ public class GenericsHighlighting8Test extends LightDaemonAnalyzerTestCase {
   public void testInferenceErrorAttribution() {doTest();}
   public void testLocalClassParameters() {doTest();}
   public void testRawAtFBoundAtNew() { doTest(); }
+  public void testUnboxingTrivialGeneric(){doTest();}
   
   @TestFor(issues = "IDEA-378878")
   public void testWildcardAfterMethodRef() { doTest(); }
+
+  @TestFor(issues = "IDEA-385574")
+  public void testIDEA385574(){ doTest(); }
+
+  @TestFor(issues = "IDEA-386630")
+  public void testIDEA386630(){ doTest(); }
 }

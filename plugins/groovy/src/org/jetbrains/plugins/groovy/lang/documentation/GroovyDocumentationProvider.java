@@ -21,7 +21,25 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiCompiledFile;
+import com.intellij.psi.PsiDocCommentBase;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterList;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.util.PsiFormatUtil;
 import com.intellij.psi.util.PsiFormatUtilBase;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -562,13 +580,13 @@ public final class GroovyDocumentationProvider implements CodeDocumentationProvi
 
       final PsiType returnType = method.getInferredReturnType();
       if ((returnType != null || method.getModifierList().hasModifierProperty(GrModifier.DEF)) && !PsiTypes.voidType().equals(returnType)) {
-        builder.append(CodeDocumentationUtil.createDocCommentLine(RETURN_TAG, contextComment.getContainingFile(), commenter));
+        builder.append(CodeDocumentationUtil.createDocCommentLine(RETURN_TAG, contextComment, commenter));
         builder.append(LINE_SEPARATOR);
       }
 
       final PsiClassType[] references = method.getThrowsList().getReferencedTypes();
       for (PsiClassType reference : references) {
-        builder.append(CodeDocumentationUtil.createDocCommentLine(THROWS_TAG, contextComment.getContainingFile(), commenter));
+        builder.append(CodeDocumentationUtil.createDocCommentLine(THROWS_TAG, contextComment, commenter));
         builder.append(reference.getClassName());
         builder.append(LINE_SEPARATOR);
       }
@@ -576,7 +594,7 @@ public final class GroovyDocumentationProvider implements CodeDocumentationProvi
     else if (owner instanceof GrTypeDefinition) {
       final PsiTypeParameterList typeParameterList = ((PsiClass)owner).getTypeParameterList();
       if (typeParameterList != null) {
-        JavaDocumentationProvider.createTypeParamsListComment(builder, commenter, typeParameterList);
+        JavaDocumentationProvider.createTypeParamsListComment(builder, commenter, typeParameterList, contextComment);
       }
     }
     return !builder.isEmpty() ? builder.toString() : null;

@@ -11,7 +11,7 @@ Driver uses [JMX](https://en.wikipedia.org/wiki/Java_Management_Extensions) as t
 -Dcom.sun.management.jmxremote.rmi.port=5000
 -Dcom.sun.management.jmxremote.authenticate=false
 -Dcom.sun.management.jmxremote.ssl=false
--Djava.rmi.server.hostname=<host-ip>
+-Djava.rmi.server.hostname=${host-ip}
 ```
 
 Then, you will be able to create a driver and call IDE:
@@ -190,7 +190,7 @@ class OpenGradleJavaFileTest {
   @BeforeEach
   fun startIde() {
     bgRun = Starter.newContext(ideInfo = IdeProductProvider.IU) {
-      project = RemoteArchiveProjectInfo(projectURL = "https://repo.labs.intellij.net/artifactory/idea-test-data/lwjgl3-maven-gradle_2.zip")
+      project = RemoteArchiveProjectInfo(projectURL = "https://packages.jetbrains.team/files/p/ij/intellij-test-data/repo-labs-archive/idea-test-data/akka.zip")
     }.runIdeWithDriver()
   }
 
@@ -213,7 +213,7 @@ class OpenGradleJavaFileTest {
     @JvmStatic
     fun startIde() {
       run = Starter.newContext(ideInfo = IdeProductProvider.IU) {
-        project = RemoteArchiveProjectInfo(projectURL = "https://repo.labs.intellij.net/artifactory/idea-test-data/lwjgl3-maven-gradle_2.zip")
+        project = RemoteArchiveProjectInfo(projectURL = "https://packages.jetbrains.team/files/p/ij/intellij-test-data/repo-labs-archive/idea-test-data/akka.zip")
       }.runIdeWithDriver()
     }
 

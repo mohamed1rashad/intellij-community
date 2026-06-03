@@ -2,33 +2,44 @@
 package com.intellij.polySymbols.impl
 
 import com.intellij.model.Pointer
-import com.intellij.polySymbols.*
+import com.intellij.openapi.util.ModificationTracker
+import com.intellij.openapi.util.SimpleModificationTracker
+import com.intellij.polySymbols.PolySymbol
+import com.intellij.polySymbols.PolySymbolKind
+import com.intellij.polySymbols.PolySymbolQualifiedName
 import com.intellij.polySymbols.completion.PolySymbolCodeCompletionItem
 import com.intellij.polySymbols.context.PolyContext
+import com.intellij.polySymbols.framework.FrameworkId
+import com.intellij.polySymbols.framework.framework
 import com.intellij.polySymbols.patterns.PolySymbolPattern
-import com.intellij.polySymbols.query.*
+import com.intellij.polySymbols.query.PolySymbolCodeCompletionQueryParams
+import com.intellij.polySymbols.query.PolySymbolListSymbolsQueryParams
+import com.intellij.polySymbols.query.PolySymbolNameMatchQueryParams
+import com.intellij.polySymbols.query.PolySymbolNamesProvider
+import com.intellij.polySymbols.query.PolySymbolQueryExecutor
+import com.intellij.polySymbols.query.PolySymbolQueryParams
+import com.intellij.polySymbols.query.PolySymbolQueryStack
+import com.intellij.polySymbols.query.impl.PolySymbolQueryExecutorImpl
 import com.intellij.util.containers.ContainerUtil
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.util.concurrent.ConcurrentHashMap
 
 @Internal
-abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin : PolySymbolOrigin> : StaticPolySymbolScope {
+abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin> : StaticPolySymbolScope {
 
-  private val namesProviderCache: MutableMap<PolySymbolNamesProvider, NameProvidersCache> = ContainerUtil.createConcurrentSoftKeySoftValueMap()
+  private val namesProviderCache: MutableMap<PolySymbolNamesProvider, NameProvidersCache> =
+    ContainerUtil.createConcurrentSoftKeySoftValueMap()
   private var namesProviderCacheMisses = 0
 
-  private val queryExecutorCache: MutableMap<PolySymbolQueryExecutor, QueryExecutorContributionsCache> = ContainerUtil.createConcurrentSoftKeySoftValueMap()
+  private val queryExecutorCache: MutableMap<PolySymbolQueryExecutor, QueryExecutorContributionsCache> =
+    ContainerUtil.createConcurrentSoftKeySoftValueMap()
   private var queryExecutorCacheMisses = 0
 
   private val roots = mutableMapOf<Root, Origin>()
 
-  @JvmField
-  protected var modCount: Long = 0
-
   abstract override fun createPointer(): Pointer<out StaticPolySymbolScopeBase<Root, Contribution, Origin>>
 
-  final override fun getModificationCount(): Long =
-    modCount
+  final override val modificationTracker: ModificationTracker = SimpleModificationTracker()
 
   final override fun getMatchingSymbols(
     qualifiedName: PolySymbolQualifiedName,
@@ -40,12 +51,12 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
     }.toList()
 
   final override fun getSymbols(
-    qualifiedKind: PolySymbolQualifiedKind,
+    kind: PolySymbolKind,
     params: PolySymbolListSymbolsQueryParams,
     stack: PolySymbolQueryStack,
   ): List<PolySymbol> =
     getMaps(params).flatMap {
-      it.getSymbols(qualifiedKind, params)
+      it.getSymbols(kind, params)
     }.toList()
 
   final override fun getCodeCompletions(
@@ -71,11 +82,11 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
   internal fun getSymbols(
     contribution: Contribution,
     origin: Origin,
-    qualifiedKind: PolySymbolQualifiedKind,
+    kind: PolySymbolKind,
     params: PolySymbolListSymbolsQueryParams,
   ): List<PolySymbol> =
     getMap(params.queryExecutor, contribution, origin)
-      .getSymbols(qualifiedKind, params)
+      .getSymbols(kind, params)
       .toList()
 
   internal fun getCodeCompletions(
@@ -106,13 +117,11 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
 
   protected abstract fun adaptAllContributions(
     contribution: Contribution,
-    framework: FrameworkId?,
     origin: Origin,
   ): Sequence<StaticSymbolContributionAdapter>
 
   protected abstract fun adaptAllRootContributions(
     root: Root,
-    framework: FrameworkId?,
     origin: Origin,
   ): Sequence<StaticSymbolContributionAdapter>
 
@@ -122,7 +131,7 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
     origin: Origin,
   ): ContributionSearchMap =
     getOrCreateMap(queryExecutor, contribution) { consumer ->
-      adaptAllContributions(contribution, origin.framework, origin).forEach(consumer)
+      adaptAllContributions(contribution, origin).forEach(consumer)
     }
 
 
@@ -132,7 +141,7 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
     origin: Origin,
   ): ContributionSearchMap =
     getOrCreateMap(queryExecutor, root) { consumer ->
-      adaptAllRootContributions(root, origin.framework, origin).forEach(consumer)
+      adaptAllRootContributions(root, origin).forEach(consumer)
     }
 
   private fun getOrCreateMap(
@@ -165,13 +174,13 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
   }
 
   internal fun addRoot(root: Root?, origin: Origin) {
-    modCount++
+    (modificationTracker as SimpleModificationTracker).incModificationCount()
     if (root == null) return
     roots[root] = origin
   }
 
   internal fun removeRoot(root: Root?) {
-    modCount++
+    (modificationTracker as SimpleModificationTracker).incModificationCount()
     roots.remove(root)
   }
 
@@ -179,7 +188,7 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
     roots[root]
 
   interface StaticSymbolContributionAdapter {
-    val qualifiedKind: PolySymbolQualifiedKind
+    val kind: PolySymbolKind
     val name: String
     val pattern: PolySymbolPattern?
     val framework: FrameworkId?
@@ -188,11 +197,11 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
       framework == null || context.framework == null || context.framework == framework
   }
 
-  private inner class ContributionSearchMap(namesProvider: PolySymbolNamesProvider)
-    : SearchMap<StaticSymbolContributionAdapter>(namesProvider) {
+  private inner class ContributionSearchMap(namesProvider: PolySymbolNamesProvider) :
+    SearchMap<StaticSymbolContributionAdapter>(namesProvider) {
 
     fun add(item: StaticSymbolContributionAdapter) {
-      add(item.qualifiedKind.withName(item.name), item.pattern, item)
+      add(item.kind.withName(item.name), item.pattern, item)
     }
 
     override fun Sequence<StaticSymbolContributionAdapter>.mapAndFilter(params: PolySymbolQueryParams): Sequence<PolySymbol> {
@@ -217,11 +226,11 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
       }
 
     fun checkForModifications() {
-      if (namesProvider.modificationCount != this.namesProviderTimestamp) {
+      if (namesProvider.modificationTracker.modificationCount != this.namesProviderTimestamp) {
         synchronized(this) {
-          if (namesProvider.modificationCount != this.namesProviderTimestamp) {
+          if (namesProvider.modificationTracker.modificationCount != this.namesProviderTimestamp) {
             mapsCache.clear()
-            this.namesProviderTimestamp = namesProvider.modificationCount
+            this.namesProviderTimestamp = namesProvider.modificationTracker.modificationCount
           }
         }
       }
@@ -236,15 +245,22 @@ abstract class StaticPolySymbolScopeBase<Root : Any, Contribution : Any, Origin 
       symbolsCache.getOrPut(item) { item.withQueryExecutorContext(queryExecutor) }
 
     fun checkForModifications() {
-      if (queryExecutor.modificationCount != this.queryExecutorModificationCount) {
+      if (calcQueryExecutorModificationCount() != this.queryExecutorModificationCount) {
         synchronized(this) {
-          if (queryExecutor.modificationCount != this.queryExecutorModificationCount) {
+          val count = calcQueryExecutorModificationCount()
+          if (count != this.queryExecutorModificationCount) {
             symbolsCache.clear()
-            this.queryExecutorModificationCount = queryExecutor.modificationCount
+            this.queryExecutorModificationCount = count
           }
         }
       }
     }
+
+    private fun calcQueryExecutorModificationCount(): Long =
+      queryExecutor.namesProvider.modificationTracker.modificationCount +
+      (queryExecutor as PolySymbolQueryExecutorImpl).rootScope.sumOf {
+        (it as? StaticPolySymbolScope)?.modificationTracker?.modificationCount ?: 0L
+      }
 
   }
 

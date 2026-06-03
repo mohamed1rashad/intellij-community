@@ -17,16 +17,23 @@ import com.intellij.openapi.wm.impl.headertoolbar.MainToolbar
 import com.intellij.toolWindow.StripesUxCustomizer
 import com.intellij.toolWindow.ToolWindowButtonManager
 import com.intellij.toolWindow.xNext.XNextStripesUxCustomizer
-import com.intellij.ui.BorderPainter
+import com.intellij.ui.Graphics2DDelegate
 import com.intellij.ui.JBColor
 import com.intellij.ui.mac.WindowTabsComponent
 import com.intellij.ui.tabs.JBTabPainter
+import com.intellij.ui.tabs.JBTabsPosition
 import com.intellij.ui.tabs.impl.JBTabsImpl
 import com.intellij.ui.tabs.impl.TabLabel
 import com.intellij.ui.tabs.impl.TabPainterAdapter
+import com.intellij.util.ui.JBSwingUtilities
 import com.intellij.util.ui.JBUI
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Graphics
+import java.awt.Insets
+import java.awt.Paint
+import java.awt.Rectangle
 import javax.swing.JComponent
 import javax.swing.JFrame
 import javax.swing.JPanel
@@ -50,6 +57,18 @@ open class InternalUICustomization {
       instance = result
       return result
     }
+
+    @JvmStatic
+    fun runGlobalCGTransformWithInactiveFrameSupport(component: JComponent, graphics: Graphics): Graphics {
+      if (graphics is Graphics2DDelegate) {
+        return graphics
+      }
+
+      val customization = getInstance()
+      val inactiveFrameGraphics = customization?.inactiveFrameGraphics(graphics, component) ?: graphics
+
+      return JBSwingUtilities.runGlobalCGTransform(component, inactiveFrameGraphics)
+    }
   }
 
   open fun progressWidget(project: Project): JComponent? = null
@@ -61,8 +80,6 @@ open class InternalUICustomization {
   open val commonTabPainterAdapter: TabPainterAdapter? = null
 
   open val debuggerTabPainterAdapter: TabPainterAdapter? = null
-
-  open val shouldPaintEditorFadeout: Boolean = true
 
   open val toolWindowUIDecorator: ToolWindowUIDecorator = ToolWindowUIDecorator()
 
@@ -76,6 +93,8 @@ open class InternalUICustomization {
     }
 
   open val isMainMenuBottomBorder: Boolean = true
+
+  open val isRoundedTabDuringDrag: Boolean = false
 
   internal open fun configureToolWindowPane(toolWindowPaneParent: JComponent, buttonManager: ToolWindowButtonManager) {}
 
@@ -95,7 +114,11 @@ open class InternalUICustomization {
 
   open fun configureMainToolbar(toolbar: MainToolbar) {}
 
-  open fun configureTopNavBar(navBar: TopNavBarComponentFacade) {}
+  /**
+   * For Islands theme: the components are painted with the IDE background or gradient if set.
+   * For other themes: has no effect
+   */
+  open fun registerWindowBackgroundComponent(component: JComponent) {}
 
   open fun getEditorToolbarButtonLook(): ActionButtonLook? = null
 
@@ -105,7 +128,17 @@ open class InternalUICustomization {
 
   open fun installEditorBackground(component: JComponent) {}
 
+  open fun updateEditorHeader(editorHeaderPanel: JComponent) {}
+
   open fun configureSearchReplaceComponent(component: EditorHeaderComponent): JComponent = component
+
+  open fun configureLfeSearchReplaceComponent(component: EditorHeaderComponent): JComponent = component
+
+  open fun configureTerminalSearchReplaceComponent(component: EditorHeaderComponent): JComponent = component
+
+  open fun configureEditorTopComponent(component: JComponent, top: Boolean): JComponent? = null
+
+  open fun configureEditorTopContainer(container: JComponent) {}
 
   open fun shouldPaintEditorTabsBottomBorder(editorCompositePanel: JComponent): Boolean = true
 
@@ -116,6 +149,8 @@ open class InternalUICustomization {
   open fun transformButtonGraphics(graphics: Graphics): Graphics = graphics
 
   open fun preserveGraphics(graphics: Graphics): Graphics = graphics
+
+  open fun inactiveFrameGraphics(graphics: Graphics, component: Component): Graphics = graphics
 
   open fun backgroundImageGraphics(component: JComponent, graphics: Graphics): Graphics = graphics
 
@@ -130,8 +165,6 @@ open class InternalUICustomization {
   open val isMacScrollBar: Boolean = false
 
   open fun attachIdeFrameBackgroundPainter(frame: IdeFrame, glassPane: IdeGlassPane): Unit = Unit
-
-  open fun paintFrameBackground(frame: Window, component: Component, g: Graphics2D) {}
 
   open fun updateBackgroundPainter() {}
 
@@ -159,20 +192,30 @@ open class InternalUICustomization {
 
   open fun getProjectTabContentInsets(): Insets? = null
 
-  open fun paintProjectTabsContainer(component: JComponent, g: Graphics): Boolean = false
-
   open fun createProjectTab(frame: JFrame, tabsComponent: WindowTabsComponent) {}
 
-  open fun paintProjectTab(frame: JFrame, label: TabLabel, g: Graphics, tabs: JBTabsImpl, selected: Boolean, index: Int, lastIndex: Int): Boolean = false
+  open fun paintProjectTab(
+    frame: JFrame,
+    label: TabLabel,
+    g: Graphics,
+    tabs: JBTabsImpl,
+    selected: Boolean,
+    index: Int,
+    lastIndex: Int,
+  ): Boolean = false
 
-  open fun paintTab(g: Graphics, rect: Rectangle, hovered: Boolean, selected: Boolean): Boolean = false
+  open fun paintTab(g: Graphics, position: JBTabsPosition, rect: Rectangle, hovered: Boolean, selected: Boolean): Boolean = false
 
-  open fun paintTabBorder(g: Graphics, tabPlacement: Int, tabIndex: Int, x: Int, y: Int, w: Int, h: Int, isSelected: Boolean): Boolean = false
+  open fun paintTabBorder(g: Graphics, tabPlacement: Int, tabIndex: Int, x: Int, y: Int, w: Int, h: Int, isSelected: Boolean): Boolean =
+    false
 
   open fun getTabLayoutStart(layout: ContentLayout): Int = 0
-}
 
-@ApiStatus.Internal
-interface TopNavBarComponentFacade {
-  var borderPainter: BorderPainter
+  open fun getSingleRowTabInsets(tabsPosition: JBTabsPosition): Insets? = null
+
+  open fun calculateTabWidth(widthWithInsets: Int, insetsWidth: Int): Int = widthWithInsets
+
+  open fun onStatusBarVisibilityChanged(centerComponent: JComponent, isStatusBarVisible: Boolean) {}
+
+  open fun getTabHOffsetUnscaled(compactMode: Boolean, position: JBTabsPosition): Int = 0
 }

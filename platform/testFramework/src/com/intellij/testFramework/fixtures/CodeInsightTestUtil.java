@@ -1,7 +1,11 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework.fixtures;
 
-import com.intellij.codeInsight.daemon.impl.*;
+import com.intellij.codeInsight.daemon.impl.AnnotationHolderImpl;
+import com.intellij.codeInsight.daemon.impl.AnnotationSessionImpl;
+import com.intellij.codeInsight.daemon.impl.DaemonProgressIndicator;
+import com.intellij.codeInsight.daemon.impl.IdentifierHighlighterUpdater;
+import com.intellij.codeInsight.daemon.impl.IdentifierHighlightingResult;
 import com.intellij.codeInsight.editorActions.smartEnter.SmartEnterProcessor;
 import com.intellij.codeInsight.editorActions.smartEnter.SmartEnterProcessors;
 import com.intellij.codeInsight.generation.surroundWith.SurroundWithHandler;
@@ -28,7 +32,6 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -326,7 +329,9 @@ public final class CodeInsightTestUtil {
     Out result = annotator.doAnnotate(in);
     resultChecker.accept(result);
     return AnnotationSessionImpl.computeWithSession(psiFile, false, annotator, annotationHolder -> {
-      ApplicationManager.getApplication().runReadAction(() -> ((AnnotationHolderImpl)annotationHolder).applyExternalAnnotatorWithContext(psiFile, result));
+      ReadAction.runBlocking(
+        () -> ((AnnotationHolderImpl)annotationHolder).applyExternalAnnotatorWithContext(psiFile, result)
+      );
       ((AnnotationHolderImpl)annotationHolder).assertAllAnnotationsCreated();
       return List.copyOf(((AnnotationHolderImpl)annotationHolder));
     });

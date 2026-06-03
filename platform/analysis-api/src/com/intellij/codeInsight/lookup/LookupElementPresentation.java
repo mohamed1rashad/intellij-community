@@ -9,8 +9,8 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import java.awt.Color;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -130,15 +130,6 @@ public class LookupElementPresentation {
     ensureMutable();
     myTypeText = text;
     myTypeIcon = icon;
-  }
-
-  /**
-   * @deprecated Always returns true. To speed up completion by delaying rendering more expensive parts,
-   * implement {@link LookupElement#getExpensiveRenderer()}.
-   */
-  @Deprecated(forRemoval = true)
-  public boolean isReal() {
-    return true;
   }
 
   public @Nullable Icon getIcon() {

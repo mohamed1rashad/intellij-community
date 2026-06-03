@@ -40,11 +40,19 @@ public abstract class PyTypeVisitorExt<T> extends PyTypeVisitor<T> {
   }
 
   public T visitPyUnionType(@NotNull PyUnionType unionType) {
-    return visitPyType(unionType);
+    return visitPyCompositeType(unionType);
   }
 
   public T visitPyUnsafeUnionType(@NotNull PyUnsafeUnionType unsafeUnionType) {
-    return visitPyType(unsafeUnionType);
+    return visitPyCompositeType(unsafeUnionType);
+  }
+
+  public T visitPyIntersectionType(@NotNull PyIntersectionType intersectionType) {
+    return visitPyCompositeType(intersectionType);
+  }
+
+  public T visitPyCompositeType(@NotNull PyCompositeType compositeType) {
+    return visitPyType(compositeType);
   }
 
   public T visitPyTypingNewType(@NotNull PyTypingNewType typingNewType) {
@@ -57,5 +65,13 @@ public abstract class PyTypeVisitorExt<T> extends PyTypeVisitor<T> {
 
   public T visitPyConcatenateType(@NotNull PyConcatenateType concatenateType) {
     return visitPyType(concatenateType);
+  }
+
+  public T visitPyOverloadType(@NotNull PyOverloadType overloadType) {
+    return visitPyType(overloadType);
+  }
+
+  public T visitPyUnpackedTypedDictType(@NotNull PyUnpackedTypedDictType unpackedTypedDictType) {
+    return visitPyType(unpackedTypedDictType);
   }
 }

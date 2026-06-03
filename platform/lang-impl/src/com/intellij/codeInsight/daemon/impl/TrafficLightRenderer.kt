@@ -22,23 +22,43 @@ import com.intellij.lang.Language
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.editor.*
+import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.EditorBundle
+import com.intellij.openapi.editor.EditorKind
+import com.intellij.openapi.editor.HectorComponentPanel
+import com.intellij.openapi.editor.HectorComponentPanelsProvider
 import com.intellij.openapi.editor.ex.EditorMarkupModel
 import com.intellij.openapi.editor.ex.MarkupModelEx
 import com.intellij.openapi.editor.ex.RangeHighlighterEx
 import com.intellij.openapi.editor.impl.DocumentMarkupModel
 import com.intellij.openapi.editor.impl.event.MarkupModelListener
-import com.intellij.openapi.editor.markup.*
+import com.intellij.openapi.editor.markup.AnalyzerStatus
+import com.intellij.openapi.editor.markup.AnalyzingType
+import com.intellij.openapi.editor.markup.ErrorStripeRenderer
+import com.intellij.openapi.editor.markup.InspectionsLevel
+import com.intellij.openapi.editor.markup.InspectionsState
+import com.intellij.openapi.editor.markup.LanguageHighlightLevel
+import com.intellij.openapi.editor.markup.PassWrapper
+import com.intellij.openapi.editor.markup.RangeHighlighter
+import com.intellij.openapi.editor.markup.SeverityStatusItem
+import com.intellij.openapi.editor.markup.StatusItem
+import com.intellij.openapi.editor.markup.UIController
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.project.DumbService.Companion.isDumb
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectFileIndex
-import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.psi.PsiCompiledElement
 import com.intellij.psi.PsiDocumentManager
@@ -47,6 +67,7 @@ import com.intellij.util.ArrayUtilRt
 import com.intellij.util.SlowOperations
 import com.intellij.util.UtilBundle.message
 import com.intellij.util.concurrency.ThreadingAssertions
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.io.storage.HeavyProcessLatch
 import com.intellij.util.ui.EdtInvocationManager
@@ -55,7 +76,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.awt.Container
-import java.util.*
+import java.util.Collections
 import java.util.concurrent.CancellationException
 
 open class TrafficLightRenderer private constructor(
@@ -107,10 +128,12 @@ open class TrafficLightRenderer private constructor(
   private fun init(project: Project, document: Document) {
     val model = DocumentMarkupModel.forDocument(document, project, true) as MarkupModelEx
     EdtInvocationManager.invokeLaterIfNeeded(Runnable {
-      for (rangeHighlighter in model.getAllHighlighters()) {
-        incErrorCount(rangeHighlighter, 1)
-      }
       if (isDisposed) return@Runnable
+      for (highlighter in model.getAllHighlighters()) {
+        if (highlighter.isValid) {
+          incErrorCount(highlighter, 1)
+        }
+      }
       model.addMarkupModelListener(this, object : MarkupModelListener {
         override fun afterAdded(highlighter: RangeHighlighterEx) {
           incErrorCount(highlighter, 1)
@@ -234,15 +257,17 @@ open class TrafficLightRenderer private constructor(
   @get:ApiStatus.Internal
   val daemonCodeAnalyzerStatus: DaemonCodeAnalyzerStatus
     get() {
-      ApplicationManager.getApplication().assertIsNonDispatchThread()
-      ApplicationManager.getApplication().assertReadAccessAllowed()
+    ThreadingAssertions.assertBackgroundThread()
+    ThreadingAssertions.assertReadAccess()
       return getDaemonCodeAnalyzerStatus(this.severityRegistrar)
     }
 
+  @RequiresBackgroundThread
+  @RequiresReadLock
   protected open fun getDaemonCodeAnalyzerStatus(severityRegistrar: SeverityRegistrar): DaemonCodeAnalyzerStatus {
     // this method is rather expensive and PSI-related, need to execute in BGT and cache the result to show in EDT later
-    ApplicationManager.getApplication().assertIsNonDispatchThread()
-    ApplicationManager.getApplication().assertReadAccessAllowed()
+    ThreadingAssertions.assertBackgroundThread()
+    ThreadingAssertions.assertReadAccess()
     val status = DaemonCodeAnalyzerStatus()
     status.errorAnalyzingFinished = true
     val psiFile = getPsiFile()
@@ -579,7 +604,7 @@ open class TrafficLightRenderer private constructor(
   }
 
   // actions shouldn't be anonymous classes for statistics reasons
-  private class ShowImportTooltipAction(private val renderer: TrafficLightRenderer)
+  internal class ShowImportTooltipAction(private val renderer: TrafficLightRenderer)
     : ToggleAction(EditorBundle.message("iw.show.import.tooltip")) {
     override fun isSelected(e: AnActionEvent): Boolean {
       val psiFile = renderer.getPsiFile()
@@ -627,10 +652,10 @@ open class TrafficLightRenderer private constructor(
     private fun computeTrafficLightRendererInfo(document: Document, project: Project): TrafficLightRendererInfo {
       val psiDocumentManager = PsiDocumentManager.getInstance(project)
       val fileIndex = ProjectFileIndex.getInstance(project)
-      return ApplicationManager.getApplication().runReadAction(ThrowableComputable {
-        val file = psiDocumentManager.getPsiFile(document) ?: return@ThrowableComputable EMPTY_TRAFFIC_LIGHT_INFO
+      return runReadActionBlocking {
+        val file = psiDocumentManager.getPsiFile(document) ?: return@runReadActionBlocking EMPTY_TRAFFIC_LIGHT_INFO
         doComputeTrafficLightRendererInfo(file, project, fileIndex)
-      })
+      }
     }
 
     @RequiresReadLock

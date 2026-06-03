@@ -4,11 +4,11 @@ package com.intellij.codeInsight;
 import com.intellij.codeInsight.documentation.DocumentationManager;
 import com.intellij.lang.documentation.DocumentationProvider;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.polySymbols.testFramework.PolySymbolsTestUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
-import com.intellij.polySymbols.testFramework.WebTestUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -115,12 +115,12 @@ public class XmlDocumentationTest extends BasePlatformTestCase {
 
     String text = context.generateDoc();
     assertThat(text).isNotNull();
-    WebTestUtil.checkTextByFile(myFixture, cleanupHtmlDoc(text), baseFileNames[0] + ".expected.html");
+    PolySymbolsTestUtil.checkTextByFile(myFixture, cleanupHtmlDoc(text), baseFileNames[0] + ".expected.html");
 
     if (completionVariant != null) {
       String completionText = context.generateDocForCompletion(completionVariant);
       assertThat(completionText).isNotNull();
-      WebTestUtil.checkTextByFile(myFixture, cleanupHtmlDoc(completionText),
+      PolySymbolsTestUtil.checkTextByFile(myFixture, cleanupHtmlDoc(completionText),
                                   baseFileNames[0] + ".expected.completion.html");
     }
   }

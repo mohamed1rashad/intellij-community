@@ -7,7 +7,11 @@ import com.intellij.lang.Language;
 import com.intellij.lang.LanguageUtil;
 import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.popup.*;
+import com.intellij.openapi.ui.popup.JBPopupFactory;
+import com.intellij.openapi.ui.popup.ListPopup;
+import com.intellij.openapi.ui.popup.ListPopupStep;
+import com.intellij.openapi.ui.popup.ListSeparator;
+import com.intellij.openapi.ui.popup.PopupStep;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
 import com.intellij.openapi.util.NlsContexts.PopupTitle;
 import com.intellij.openapi.util.Pair;
@@ -21,10 +25,17 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JLabel;
+import javax.swing.SwingConstants;
+import java.awt.Dimension;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -45,6 +56,7 @@ public abstract class LRUPopupBuilder<T> {
   private JBIterable<T> myTopValues = JBIterable.empty();
   private JBIterable<T> myMiddleValues = JBIterable.empty();
   private JBIterable<T> myBottomValues = JBIterable.empty();
+  private JBIterable<String> myPinnedIds = JBIterable.empty();
   private Function<? super T, String> myExtraSpeedSearchNamer;
 
   public static @NotNull ListPopup forFileLanguages(@NotNull Project project,
@@ -119,6 +131,34 @@ public abstract class LRUPopupBuilder<T> {
     return this;
   }
 
+  /**
+   * Pins an item (by its {@code storageId}) inside the LRU section of the popup.
+   *
+   * <p>Semantics:
+   * <ul>
+   *   <li>The LRU section shows at most {@value #LRU_ITEMS} entries in total
+   *       (this cap does <b>not</b> include extra top/middle/bottom items).</li>
+   *   <li>Pinned recents are always rendered at the <b>bottom</b> of the LRU section,
+   *       in the order they were added via this method.</li>
+   *   <li>Pinned recents behave like normal recents: when selected, they become most recent
+   *       and are persisted to the history.</li>
+   *   <li>Pinned recents are never evicted by the per-popup cap: if the cap is exceeded,
+   *       non-pinned recents are truncated first.</li>
+   *   <li>If the {@code storageId} does not correspond to any value passed via {@link #forValues(Iterable)},
+   *       this hint has no effect.</li>
+   * </ul>
+   *
+   * <p>Alternative to {@link #withSelection(Object)}: keeps the LRU section size intact and
+   * allows pinning multiple items at the bottom of the LRU section.</p>
+   *
+   * @param storageId an ID produced by {@link #getStorageId(Object)}
+   * @return this builder for chaining
+   */
+  public @NotNull LRUPopupBuilder<T> withPinnedId(@NotNull String storageId) {
+    myPinnedIds = myPinnedIds.append(storageId);
+    return this;
+  }
+
   public @NotNull LRUPopupBuilder<T> onChosen(@Nullable Consumer<? super T> consumer) {
     myOnChosen = consumer;
     return this;
@@ -138,6 +178,21 @@ public abstract class LRUPopupBuilder<T> {
     List<String> ids = new ArrayList<>(restoreLRUItems());
     if (mySelection != null) {
       ids.add(getStorageId(mySelection));
+    } else {
+      for (String id : myPinnedIds) {
+        if (ids.contains(id)) continue;
+
+        if (ids.size() == LRU_ITEMS) {
+          // Evict the last lru element not in pinned values before adding a pinned item to keep the lru size consistent
+          for (int i = ids.size() - 1; i >= 0; i--) {
+            if (!myPinnedIds.contains(ids.get(i))) {
+              ids.remove(i);
+              break;
+            }
+          }
+        }
+        ids.add(id);
+      }
     }
     List<T> topItems = myTopValues.toList();
     List<T> lru = new ArrayList<>(LRU_ITEMS);

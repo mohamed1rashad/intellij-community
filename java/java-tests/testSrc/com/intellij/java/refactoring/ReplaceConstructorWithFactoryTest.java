@@ -9,7 +9,11 @@ import com.intellij.codeInsight.lookup.LookupManager;
 import com.intellij.codeInsight.lookup.impl.LookupImpl;
 import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
 import com.intellij.ide.IdeEventQueue;
-import com.intellij.modcommand.*;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModChooseAction;
+import com.intellij.modcommand.ModCommand;
+import com.intellij.modcommand.ModCommandExecutor;
+import com.intellij.modcommand.Presentation;
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl;
 import com.intellij.testFramework.LightJavaCodeInsightTestCase;
 import com.intellij.testFramework.LightProjectDescriptor;
@@ -136,6 +140,18 @@ public class ReplaceConstructorWithFactoryTest extends LightJavaCodeInsightTestC
     runTest("ArrayCreation", null);
   }
 
+  public void testPrecariousAnchor() {
+    runTest("PrecariousAnchor", null); // See IDEA-389677
+  }
+
+  public void testRawConstructorCall() {
+    runTest("RawConstructorCall", null);
+  }
+
+  public void testRawQualifiedInnerConstructorCall() {
+    runTest("RawQualifiedInnerConstructorCall", null);
+  }
+
   private void assertNotAvailable(String name) {
     configureByFile("/refactoring/replaceConstructorWithFactory/before" + name + ".java");
     ReplaceConstructorWithFactoryAction action = new ReplaceConstructorWithFactoryAction();
@@ -144,12 +160,12 @@ public class ReplaceConstructorWithFactoryTest extends LightJavaCodeInsightTestC
     assertNull(presentation);
   }
 
-  private void runTest(final String testIndex, @NonNls String targetClassName) {
-    configureByFile("/refactoring/replaceConstructorWithFactory/before" + testIndex + ".java");
+  private void runTest(final String testName, @NonNls String targetClassName) {
+    configureByFile("/refactoring/replaceConstructorWithFactory/before" + testName + ".java");
     setupEditorForInjectedLanguage();
     perform(targetClassName);
     NonBlockingReadActionImpl.waitForAsyncTaskCompletion();
-    checkResultByFile("/refactoring/replaceConstructorWithFactory/after" + testIndex + ".java");
+    checkResultByFile("/refactoring/replaceConstructorWithFactory/after" + testName + ".java");
   }
 
   private void perform(String targetClassName) {

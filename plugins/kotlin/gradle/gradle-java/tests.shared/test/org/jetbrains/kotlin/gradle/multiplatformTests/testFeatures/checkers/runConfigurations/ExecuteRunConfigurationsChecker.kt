@@ -2,7 +2,11 @@
 package org.jetbrains.kotlin.gradle.multiplatformTests.testFeatures.checkers.runConfigurations
 
 import com.intellij.application.subscribe
-import com.intellij.execution.*
+import com.intellij.execution.ExecutionListener
+import com.intellij.execution.ExecutionManager
+import com.intellij.execution.PsiLocation
+import com.intellij.execution.RunConfigurationExtension
+import com.intellij.execution.RunnerAndConfigurationSettings
 import com.intellij.execution.actions.ConfigurationContext.createEmptyContextForLocation
 import com.intellij.execution.configurations.JavaParameters
 import com.intellij.execution.configurations.RunConfigurationBase
@@ -13,6 +17,7 @@ import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.process.ProcessListener
 import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.application.smartReadAction
 import com.intellij.openapi.extensions.LoadingOrder
@@ -23,11 +28,19 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.psi.PsiElement
 import com.intellij.util.concurrency.ThreadingAssertions
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.jetbrains.kotlin.gradle.multiplatformTests.AbstractTestChecker
 import org.jetbrains.kotlin.gradle.multiplatformTests.KotlinSyncTestsContext
 import org.jetbrains.kotlin.gradle.multiplatformTests.workspace.findMostSpecificExistingFileOrNewDefault
 import org.jetbrains.kotlin.idea.base.util.allScope
+import org.jetbrains.kotlin.idea.base.util.module
 import org.jetbrains.kotlin.idea.codeInsight.gradle.combineMultipleFailures
 import org.jetbrains.kotlin.idea.stubindex.KotlinFullClassNameIndex
 import org.jetbrains.kotlin.idea.stubindex.KotlinFunctionShortNameIndex
@@ -41,7 +54,7 @@ import kotlin.test.fail
 import kotlin.time.Duration
 
 /**
- * Executes a given run configuration associated with the configured functions (see [ExecuteRunConfigurationsConfiguration.functionFqNames])
+ * Executes a given run configuration associated with the configured functions (see [ExecuteRunConfigurationsConfiguration.functionDetails])
  * The output of the execution will be put into a test-data file.
  */
 object ExecuteRunConfigurationsChecker : AbstractTestChecker<ExecuteRunConfigurationsConfiguration>() {
@@ -52,15 +65,18 @@ object ExecuteRunConfigurationsChecker : AbstractTestChecker<ExecuteRunConfigura
 
     override fun KotlinSyncTestsContext.check() {
         testConfiguration.getConfiguration(ExecuteRunConfigurationsChecker)
-            .functionFqNames.combineMultipleFailures { functionFqn -> checkFunction(functionFqn) }
+            .functionDetails.combineMultipleFailures { functionDetails ->
+                checkFunction(functionDetails)
+            }
     }
 
-    private fun KotlinSyncTestsContext.checkFunction(fqn: String) {
-        val actualOutput = execute(assertRunConfiguration(fqn)).joinToString("\n")
+    private fun KotlinSyncTestsContext.checkFunction(functionDetails: FunctionDetails) {
+        val fqn = functionDetails.fqn
+        val actualOutput = execute(assertRunConfiguration(functionDetails)).joinToString("\n")
         val expectedTestDataFile = findMostSpecificExistingFileOrNewDefault(checkerClassifier = "run-output-$fqn")
 
         KotlinTestUtils.assertEqualsToFile(expectedTestDataFile, actualOutput) { text ->
-            text.replace(Regex("""\d\d?:\d\d?:\d\d?\s*(\w\w)?:"""), "<time>:")
+            text.replace(Regex("""\d\d?:\d\d?:\d\d?[\s ]*(\w\w)?:"""), "<time>:")
                 .replace(Regex("""\h*Download.*\n"""), "")
                 .lineSequence()
                 .map { it.split("//").first().trimEnd() } // Support comments
@@ -166,26 +182,28 @@ object ExecuteRunConfigurationsChecker : AbstractTestChecker<ExecuteRunConfigura
                 .create(DefaultRunExecutor.getRunExecutorInstance(), runConfiguration)
                 .build()
 
-            ExecutionManager.getInstance(testProject).restartRunProfile(environment)
+            ApplicationManager.getApplication().invokeAndWait {
+                ExecutionManager.getInstance(testProject).restartRunProfile(environment)
+            }
         }
 
     private fun <T> runBlockingWithTimeout(timeout: Duration, action: CoroutineScope.(continuation: Continuation<T>) -> Unit): T {
         return runBlocking {
             withTimeout(timeout) {
-                suspendCoroutine { continuation -> action(continuation) }
+                suspendCancellableCoroutine { continuation -> action(continuation) }
             }
         }
     }
 
-    private fun KotlinSyncTestsContext.assertRunConfiguration(functionFqn: String): RunnerAndConfigurationSettings {
-        return findRunConfiguration(functionFqn) ?: fail("Missing runConfiguration for '$functionFqn'")
+    private fun KotlinSyncTestsContext.assertRunConfiguration(functionDetails: FunctionDetails): RunnerAndConfigurationSettings {
+        return findRunConfiguration(functionDetails) ?: fail("Missing runConfiguration for '${functionDetails.fqn}'")
     }
 
-    private fun KotlinSyncTestsContext.findRunConfiguration(functionFqn: String): RunnerAndConfigurationSettings? {
+    private fun KotlinSyncTestsContext.findRunConfiguration(functionDetails: FunctionDetails): RunnerAndConfigurationSettings? {
         ThreadingAssertions.assertBackgroundThread()
         return runBlocking {
             smartReadAction(testProject) {
-                val psiElement = findTestPsiElementByFqn(functionFqn)
+                val psiElement = findTestPsiElementByFqn(functionDetails)
                 createEmptyContextForLocation(PsiLocation(psiElement)).configuration
             }
         }
@@ -194,19 +212,39 @@ object ExecuteRunConfigurationsChecker : AbstractTestChecker<ExecuteRunConfigura
     /**
      * Finds either the class (by fqn) or test function (by fqn) to execute the test
      */
-    private fun KotlinSyncTestsContext.findTestPsiElementByFqn(fqn: String): PsiElement = runReadAction {
+    private fun KotlinSyncTestsContext.findTestPsiElementByFqn(functionDetails: FunctionDetails): PsiElement = runReadAction {
+        val fqn = functionDetails.fqn
         val fqName = FqName(fqn)
         KotlinFullClassNameIndex[fqName.asString(), testProject, testProject.allScope()].apply {
             if (size == 1) return@runReadAction single()
         }
 
         KotlinFunctionShortNameIndex[fqName.shortName().asString(), testProject, testProject.allScope()]
-            .filter { it.fqName == fqName }
+            .filter {
+                it.fqName == fqName
+            }
+            .filter {
+                functionDetails.containingFileName?.let { fileName ->
+                    fileName == it.containingFile.name
+                } ?: true
+            }
+            .filter {
+                functionDetails.moduleName?.let { moduleName ->
+                    moduleName == it.module?.name
+                } ?: true
+            }
             .apply {
-                if (isEmpty()) fail("Missing function '$fqn'")
-                if (size > 1) fail("Multiple functions with fqn '$fqn'")
+                if (isEmpty()) fail(buildFailureMessage("Missing function", functionDetails))
+                if (size > 1) fail(buildFailureMessage("Multiple functions", functionDetails))
             }
             .single()
             .identifyingElement ?: fail("Missing 'identifyingElement'")
+    }
+
+    private fun buildFailureMessage(prefix: String, functionDetails: FunctionDetails): String = buildString {
+        append(prefix)
+        append(" with fqn: '${functionDetails.fqn}'")
+        functionDetails.containingFileName?.let { append(", containingFileName: '$it'") }
+        functionDetails.moduleName?.let { append(", moduleName: '$it'") }
     }
 }

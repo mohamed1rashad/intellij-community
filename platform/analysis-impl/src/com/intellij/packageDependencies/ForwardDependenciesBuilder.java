@@ -12,7 +12,11 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiRecursiveElementVisitor;
 import com.intellij.psi.search.GlobalSearchScope;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -136,7 +140,7 @@ public class ForwardDependenciesBuilder extends DependenciesBuilder {
               }
             }
           });
-          Set<PsiFile> deps = getDependencies().computeIfAbsent(file, __ -> new HashSet<>());
+          Set<PsiFile> deps = getDependencies().computeIfAbsent(file, _ -> new HashSet<>());
           deps.addAll(found);
 
           getDirectDependencies().put(psiFile, new HashSet<>(found));

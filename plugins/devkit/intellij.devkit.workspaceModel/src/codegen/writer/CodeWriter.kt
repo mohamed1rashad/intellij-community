@@ -2,83 +2,92 @@
 package com.intellij.devkit.workspaceModel.codegen.writer
 
 import com.intellij.application.options.CodeStyle
+import com.intellij.application.options.codeStyle.cache.CodeStyleCachingService
+import com.intellij.copyright.withCopyrightUpdateDisabled
 import com.intellij.devkit.workspaceModel.CodegenJarLoader
 import com.intellij.devkit.workspaceModel.DevKitWorkspaceModelBundle
 import com.intellij.devkit.workspaceModel.codegen.writer.CodeWriter.addGeneratedObjModuleFile
 import com.intellij.devkit.workspaceModel.metaModel.WorkspaceMetaModelProvider
-import com.intellij.lang.ASTNode
+import com.intellij.lang.LanguageImportStatements
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.application.ex.ApplicationManagerEx
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.command.executeCommand
+import com.intellij.openapi.application.writeIntentReadAction
+import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.TextRange
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.*
+import com.intellij.platform.ide.progress.withModalProgress
+import com.intellij.platform.util.progress.reportRawProgress
+import com.intellij.psi.PsiDirectory
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiManager
 import com.intellij.psi.codeStyle.CodeStyleManager
-import com.intellij.psi.codeStyle.CodeStyleSettings
-import com.intellij.psi.impl.source.codeStyle.CodeEditUtil
-import com.intellij.util.concurrency.annotations.RequiresEdt
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.containers.FactoryMap
-import com.intellij.util.containers.MultiMap
 import com.intellij.workspaceModel.codegen.deft.meta.CompiledObjModule
-import com.intellij.workspaceModel.codegen.engine.*
-import kotlinx.coroutines.delay
+import com.intellij.workspaceModel.codegen.engine.CodeGenerator
+import com.intellij.workspaceModel.codegen.engine.GenerationProblem
+import com.intellij.workspaceModel.codegen.engine.GenerationResult
+import com.intellij.workspaceModel.codegen.engine.GeneratorSettings
+import com.intellij.workspaceModel.codegen.engine.ObjClassGeneratedCode
+import com.intellij.workspaceModel.codegen.engine.ObjModuleFileGeneratedCode
+import com.intellij.workspaceModel.codegen.engine.SKIPPED_TYPES
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.jetbrains.io.JsonReaderEx
 import org.jetbrains.io.JsonUtil
-import org.jetbrains.kotlin.idea.formatter.kotlinCustomSettings
-import org.jetbrains.kotlin.lexer.KtTokens
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.children
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtFile
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.psiUtil.isPublic
+import org.jetbrains.kotlin.psi.psiUtil.visibilityModifierType
 import org.jetbrains.kotlin.resolve.ImportPath
 import java.io.IOException
-import java.net.URL
-import java.util.*
+import java.net.URI
+import java.util.ServiceLoader
 import java.util.jar.Manifest
-import kotlin.time.Duration.Companion.seconds
 
 private val LOG = logger<CodeWriter>()
 
 object CodeWriter {
-  @RequiresEdt
+  @RequiresBackgroundThread
   suspend fun generate(
     project: Project, module: Module, sourceFolder: VirtualFile,
     processAbstractTypes: Boolean, explicitApiEnabled: Boolean,
     isTestSourceFolder: Boolean, isTestModule: Boolean,
     targetFolderGenerator: () -> VirtualFile?,
     existingTargetFolder: () -> VirtualFile?,
+    formatCode: Boolean,
   ) {
     val sourceFilePerObjModule = HashMap<String, VirtualFile>()
-    val ktClasses = HashMap<String, KtClass>()
+    val ktClasses = HashMap<String, KtClassOrObject>()
     readAction {
-      VfsUtilCore.processFilesRecursively(sourceFolder) {
-        if (it.extension == "kt") {
-          val ktFile = PsiManager.getInstance(project).findFile(it) as? KtFile?
+      VfsUtilCore.processFilesRecursively(sourceFolder) { file ->
+        if (file.extension == "kt") {
+          val ktFile = PsiManager.getInstance(project).findFile(file) as? KtFile?
 
-          ktFile?.declarations
-            ?.filterIsInstance<KtClass>()
-            ?.filter { it.name != null }
-            ?.forEach { ktClass ->
-              val fqName = ktClass.fqName!!.asString()
-              val objModuleName = fqName
-                .replace(ktClass.name!!, "")
-                .substringBeforeLast(".")
+          ktFile?.declarations?.filterIsInstance<KtClassOrObject>()?.filter { it.name != null }?.forEach { ktClass ->
+            val fqName = ktClass.fqName!!.asString()
+            val objModuleName = fqName.replace(ktClass.name!!, "").substringBeforeLast(".")
 
-              /**
-               *  We find one virtual file for each module.
-               *  This is necessary to find the relative path for the generated GeneratedObjModuleFile.
-               *  See [addGeneratedObjModuleFile] method.
-               */
-              sourceFilePerObjModule[objModuleName] = it
-              ktClasses[fqName] = ktClass
-            }
+            /**
+             *  We find one virtual file for each module.
+             *  This is necessary to find the relative path for the generated GeneratedObjModuleFile.
+             *  See [addGeneratedObjModuleFile] method.
+             */
+            sourceFilePerObjModule[objModuleName] = file
+            ktClasses[fqName] = ktClass
+          }
         }
         return@processFilesRecursively true
       }
@@ -94,126 +103,117 @@ object CodeWriter {
       return
     }
 
-    waitSmartMode(project)
-    executeCommand(project, DevKitWorkspaceModelBundle.message("command.name.generate.code.for.workspace.entities.in", sourceFolder.name)) {
-      val title = DevKitWorkspaceModelBundle.message("progress.title.generating.code")
-      ApplicationManagerEx.getApplicationEx().runWriteActionWithCancellableProgressInDispatchThread(title, project, null) { indicator ->
-        indicator.text = DevKitWorkspaceModelBundle.message("progress.text.collecting.classes.metadata")
-        val metaLoader: WorkspaceMetaModelProvider = service<WorkspaceMetaModelProvider>()
-        val objModules = metaLoader.loadObjModules(ktClasses, module, processAbstractTypes, isTestSourceFolder)
+    DumbService.getInstance(project).waitForSmartMode()
 
-        val results = generate(codeGenerator, objModules, explicitApiEnabled, isTestModule)
-        val generatedCode = results.flatMap { it.generatedCode }
-        val problems = results.flatMap { it.problems }
-        WorkspaceCodegenProblemsProvider.getInstance(project).reportProblems(problems)
+    val generatedFiles = ArrayList<KtFile>()
 
-        if (generatedCode.isEmpty() || problems.any { it.level == GenerationProblem.Level.ERROR }) {
-          LOG.info("Not found types for generation")
-          val genFolder = existingTargetFolder.invoke()
-          if (genFolder != null) {
-            indicator.text = DevKitWorkspaceModelBundle.message("progress.text.removing.old.code")
-            removeGeneratedCode(ktClasses, genFolder)
+    val commandName = DevKitWorkspaceModelBundle.message("command.name.generate.code.for.workspace.entities.in", sourceFolder.name)
+
+    withCopyrightUpdateDisabled(project) {
+      withModalProgress(project, commandName) {
+        reportRawProgress { reporter ->
+          reporter.text(DevKitWorkspaceModelBundle.message("progress.text.collecting.classes.metadata"))
+          val (objModules, metaProblems) = readAction {
+            service<WorkspaceMetaModelProvider>().loadObjModules(ktClasses, module, processAbstractTypes, isTestSourceFolder)
           }
-          return@runWriteActionWithCancellableProgressInDispatchThread
-        }
-
-        val genFolder = existingTargetFolder.invoke() ?: targetFolderGenerator.invoke()
-        if (genFolder == null) {
-          LOG.info("Generated source folder doesn't exist. Skip processing source folder with path: ${sourceFolder}")
-          return@runWriteActionWithCancellableProgressInDispatchThread
-        }
-
-        // compatibility invoke in FacetEntity and KotlinSettingsEntity
-        val savedCompatibilityInvokeCode = mutableMapOf<KtClass, PsiElement>()
-        saveCompatibilityCode(ktClasses, savedCompatibilityInvokeCode)
-
-        indicator.text = DevKitWorkspaceModelBundle.message("progress.text.removing.old.code")
-        removeGeneratedCode(ktClasses, genFolder)
-
-        val topLevelDeclarations = MultiMap.create<KtFile, Pair<KtClass, List<KtDeclaration>>>()
-        val importsByFile = FactoryMap.create<KtFile, Imports> { Imports(it.packageFqName.asString()) }
-        val generatedFiles = ArrayList<KtFile>()
-
-        indicator.text = DevKitWorkspaceModelBundle.message("progress.text.writing.code")
-        indicator.isIndeterminate = false
-
-        generatedCode.forEachIndexed { i, code ->
-          val psiFactory = KtPsiFactory(project)
-          indicator.fraction = 0.15 + 0.1 * i / generatedCode.size
-          when (code) {
-            is ObjModuleFileGeneratedCode ->
-              addGeneratedObjModuleFile(
-                code, generatedFiles, project,
-                sourceFolder, genFolder,
-                sourceFilePerObjModule, importsByFile, psiFactory
-              )
-            is ObjClassGeneratedCode ->
-              addGeneratedObjClassFile(
-                code, generatedFiles, project,
-                sourceFolder, genFolder,
-                ktClasses, importsByFile,
-                topLevelDeclarations, psiFactory,
-                savedCompatibilityInvokeCode
-              )
+          if (metaProblems.isNotEmpty()) {
+            WorkspaceCodegenProblemsProvider.getInstance(project).reportMetaProblem(metaProblems)
+            return@withModalProgress
           }
-        }
 
-        importsByFile.forEach { (file, imports) ->
-          addImports(file, imports)
-        }
+          val results = generate(codeGenerator, objModules, explicitApiEnabled, isTestModule)
+          val generatedCode = results.flatMap { it.generatedCode }
+          val problems = results.flatMap { it.problems }
+          WorkspaceCodegenProblemsProvider.getInstance(project).reportProblems(problems)
 
-        CodeStyle.runWithLocalSettings(project, CodeStyle.getSettings(project)) { localSettings ->
-          localSettings.setUpCodeStyle()
-          generatedFiles.forEachIndexed { i, file ->
-            indicator.fraction = 0.25 + 0.7 * i / generatedFiles.size
-            CodeStyleManager.getInstance(project).reformat(file)
-            file.apiFileNameForImplFile?.let { ktClasses[it] }?.containingKtFile?.let { apiFile -> copyHeaderComment(apiFile, file) }
+          if (generatedCode.isEmpty() || problems.any { it.level == GenerationProblem.Level.ERROR }) {
+            return@withModalProgress
           }
-          topLevelDeclarations.entrySet().forEach { (file, placeAndDeclarations) ->
-            val addedElements = ArrayList<KtDeclaration>()
-            for ((place, declarations) in placeAndDeclarations) {
-              var nextPlace: PsiElement = place
-              val newElements = ArrayList<KtDeclaration>()
-              for (declaration in declarations) {
-                val added = file.addAfter(declaration, nextPlace) as KtDeclaration
-                newElements.add(added)
-                nextPlace = added
+
+          val genFolder = existingTargetFolder.invoke() ?: targetFolderGenerator.invoke()
+          if (genFolder == null) {
+            LOG.info("Generated source folder doesn't exist. Skip processing source folder with path: ${sourceFolder}")
+            return@withModalProgress
+          }
+
+          reporter.text(DevKitWorkspaceModelBundle.message("progress.text.removing.old.code"))
+          writeCommandActionWithGroupId(project, commandName) {
+            removeGeneratedCode(genFolder)
+          }
+
+          reporter.text(DevKitWorkspaceModelBundle.message("progress.text.writing.code"))
+
+          val importsByFile = FactoryMap.create<KtFile, Imports> { Imports(it.packageFqName.asString()) }
+          generatedCode.forEachIndexed { i, code ->
+            writeCommandActionWithGroupId(project, commandName) {
+              val psiFactory = KtPsiFactory(project)
+              reporter.fraction(0.15 + 0.1 * i / generatedCode.size)
+              when (code) {
+                is ObjModuleFileGeneratedCode ->
+                  addGeneratedObjModuleFile(
+                    code, generatedFiles, project,
+                    sourceFolder, genFolder,
+                    sourceFilePerObjModule, importsByFile, psiFactory)
+                is ObjClassGeneratedCode ->
+                  addGeneratedObjClassFile(
+                    code, generatedFiles, project,
+                    sourceFolder, genFolder,
+                    ktClasses, importsByFile, psiFactory,
+                  )
               }
-              addGeneratedRegionStartComment(file, newElements.first())
-              addGeneratedRegionEndComment(file, newElements.last())
-              addedElements.addAll(newElements)
             }
           }
-
-          val filesWithGeneratedRegions = ktClasses.values.groupBy { it.containingFile }.toList()
-          filesWithGeneratedRegions.forEachIndexed { i, (file, classes) ->
-            indicator.fraction = 0.95 + 0.05 * i / filesWithGeneratedRegions.size
-            reformatCodeInGeneratedRegions(file, classes.mapNotNull { it.body?.node } + listOf(file.node))
+          writeCommandActionWithGroupId(project, commandName) {
+            importsByFile.forEach { (file, imports) ->
+              addImports(file, imports)
+            }
           }
+          if (!formatCode) return@withModalProgress
 
+          reporter.text(DevKitWorkspaceModelBundle.message("progress.title.project.analysis"))
+
+          DumbService.getInstance(project).waitForSmartMode()
+
+          reporter.text(DevKitWorkspaceModelBundle.message("progress.title.reformatting.code"))
+
+          for ((i, file) in generatedFiles.withIndex()) {
+            reporter.fraction(0.25 + 0.7 * i / generatedFiles.size)
+            DumbService.getInstance(project).waitForSmartMode()
+            // this has to be invoked outside EDT because the callback scheduleWhenSettingsComputed is invoked on EDT
+            file.awaitCodeStyleCalculation()
+
+            writeCommandActionWithGroupId(project, commandName) {  // same groupId chains them
+              addCopyright(file, ktClasses)
+              LanguageImportStatements.INSTANCE.forFile(file).forEach { it.processFile(file).run() }
+              PsiDocumentManager.getInstance(file.project).doPostponedOperationsAndUnblockDocument(file.viewProvider.document!!)
+              CodeStyleManager.getInstance(project).reformat(file)
+            }
+          }
         }
       }
     }
   }
 
-  private fun CodeStyleSettings.setUpCodeStyle() {
-    val kotlinCustomSettings = this.kotlinCustomSettings
-    kotlinCustomSettings.NAME_COUNT_TO_USE_STAR_IMPORT = Int.MAX_VALUE
+  @RequiresBackgroundThread
+  private suspend fun PsiFile.awaitCodeStyleCalculation() {
+    val latch = CompletableDeferred<Unit>()
+    CodeStyle.getSettings(this) // trigger settings computation
+    CodeStyleCachingService.getInstance(project).scheduleWhenSettingsComputed(this) {
+      latch.complete(Unit)
+    }
+    latch.await()
   }
 
-  /**
-   * Documentation for [com.intellij.openapi.project.IndexNotReadyException] says that it's enough to run completeJustSubmittedTasks only
-   * once. However, in practive this is not enough.
-   */
-  private suspend fun waitSmartMode(project: Project) {
-    for (i in 1..100) {
-      if (i == 100) error("99 delays were not enough to wait for smart mode")
-      if (DumbService.isDumb(project)) {
-        DumbService.getInstance(project).completeJustSubmittedTasks()
-        delay(1.seconds)
-      }
-      else break
+  private fun addCopyright(file: KtFile, ktClasses: HashMap<String, KtClassOrObject>) {
+    if (file.name == GENERATED_METADATA_STORAGE_FILE) {
+      val someEntitySourceFile = ktClasses.values.firstOrNull { it.name?.contains("Entity") ?: false }?.containingKtFile
+      val anySourceFile = someEntitySourceFile ?: ktClasses.values.firstOrNull()?.containingKtFile ?: return
+      copyHeaderComment(anySourceFile, file)
+      return
     }
+    val sourceClassName = getSourceClassNameForGeneratedFile(file)
+    val sourceFile = ktClasses[sourceClassName]?.containingKtFile ?: return
+    copyHeaderComment(sourceFile, file)
   }
 
   private fun codegenApiVersionsAreCompatible(project: Project, codeGeneratorFromDownloadedJar: CodeGenerator): Boolean {
@@ -224,12 +224,17 @@ object CodeWriter {
       return true
     }
 
-    val message = if (apiVersionFromDownloadedJar == CodegenApiVersion.UNKNOWN_VERSION || apiVersionInDevkit > apiVersionFromDownloadedJar) {
-      DevKitWorkspaceModelBundle.message("notification.workspace.incompatible.codegen.api.versions.content.newer", apiVersionInDevkit, apiVersionFromDownloadedJar)
-    }
-    else {
-      DevKitWorkspaceModelBundle.message("notification.workspace.incompatible.codegen.api.versions.content.older", apiVersionInDevkit, apiVersionFromDownloadedJar)
-    }
+    val message =
+      if (apiVersionFromDownloadedJar == CodegenApiVersion.UNKNOWN_VERSION || apiVersionInDevkit > apiVersionFromDownloadedJar) {
+        DevKitWorkspaceModelBundle.message("notification.workspace.incompatible.codegen.api.versions.content.newer",
+                                           apiVersionInDevkit,
+                                           apiVersionFromDownloadedJar)
+      }
+      else {
+        DevKitWorkspaceModelBundle.message("notification.workspace.incompatible.codegen.api.versions.content.older",
+                                           apiVersionInDevkit,
+                                           apiVersionFromDownloadedJar)
+      }
 
     val groupId = DevKitWorkspaceModelBundle.message("notification.workspace.incompatible.codegen.api.versions")
     NotificationGroupManager.getInstance()
@@ -242,7 +247,7 @@ object CodeWriter {
 
   private fun getApiVersionFromJSON(clazz: Class<*>): String {
     return getApiVersionFromJarFile(clazz, CodegenApiVersion.JSON_RELATIVE_PATH) { jsonPath ->
-      URL(jsonPath).openStream().reader().use { reader ->
+      URI(jsonPath).toURL().openStream().reader().use { reader ->
         val jsonReader = JsonReaderEx(reader.readText())
         val objects = JsonUtil.nextObject(jsonReader)
         objects[CodegenApiVersion.ATTRIBUTE_NAME] as? String
@@ -252,7 +257,7 @@ object CodeWriter {
 
   private fun getApiVersionFromManifest(clazz: Class<*>): String {
     return getApiVersionFromJarFile(clazz, CodegenApiVersion.MANIFEST_RELATIVE_PATH) { manifestPath ->
-      URL(manifestPath).openStream().use {
+      URI(manifestPath).toURL().openStream().use {
         val manifest = Manifest(it)
         val attributes = manifest.mainAttributes
         attributes.getValue(CodegenApiVersion.ATTRIBUTE_NAME)
@@ -285,25 +290,14 @@ object CodeWriter {
   ): List<GenerationResult> {
     val generatorSettings = GeneratorSettings(explicitApiEnabled = explicitApiEnabled, testModeEnabled = isTestModule)
     val entitiesImplementations = objModules.map { codeGenerator.generateEntitiesImplementation(it, generatorSettings) }
+      .filter { it.generatedCode.isNotEmpty() || it.problems.isNotEmpty() }
+    if (entitiesImplementations.any { it.problems.any { problem -> problem.level == GenerationProblem.Level.ERROR } })
+      return entitiesImplementations
     val metadataStorageImplementation = codeGenerator.generateMetadataStoragesImplementation(objModules, generatorSettings)
     return entitiesImplementations + metadataStorageImplementation
   }
-  
-  private fun saveCompatibilityCode(ktClasses: Map<String, KtClass>, savedCompatibilityInvokeCode: MutableMap<KtClass, PsiElement>) {
-    for (ktClass in ktClasses.values) {
-      val companionDeclaration = ktClass.body?.declarations?.find { it is KtObjectDeclaration && it.isCompanion() } as? KtObjectDeclaration
-                                 ?: continue
-      val compatibilityInvoke = companionDeclaration.declarations.find { it is KtNamedFunction && it.name == "create" && it.annotationEntries.any { it.shortName.toString() == "Deprecated" } }
-                                ?: continue
-      savedCompatibilityInvokeCode[ktClass] = compatibilityInvoke.copy()
-    }
-  }
 
-  private fun removeGeneratedCode(ktClasses: Map<String, KtClass>, genFolder: VirtualFile) {
-    ktClasses.values.flatMapTo(HashSet()) { listOfNotNull(it.containingFile.node, it.body?.node) }.forEach {
-      removeChildrenInGeneratedRegions(it)
-    }
-
+  private fun removeGeneratedCode(genFolder: VirtualFile) {
     //remove generated files, e.g. MetadataStorageImpl.kt
     removeFiles(genFolder) {
       it.isGeneratedFile
@@ -351,13 +345,9 @@ object CodeWriter {
   }
 
   private fun addGeneratedObjClassFile(
-    code: ObjClassGeneratedCode, generatedFiles: MutableList<KtFile>,
-    project: Project, sourceFolder: VirtualFile, genFolder: VirtualFile,
-    ktClasses: Map<String, KtClass>, importsByFile: MutableMap<KtFile, Imports>,
-    topLevelDeclarations: MultiMap<KtFile, Pair<KtClass, List<KtDeclaration>>>, psiFactory: KtPsiFactory, 
-    savedCompatibilityInvokeCode: MutableMap<KtClass, PsiElement>,
+    code: ObjClassGeneratedCode, generatedFiles: MutableList<KtFile>, project: Project, sourceFolder: VirtualFile, genFolder: VirtualFile,
+    ktClasses: Map<String, KtClassOrObject>, importsByFile: MutableMap<KtFile, Imports>, psiFactory: KtPsiFactory,
   ) {
-
     if (code.target.name in SKIPPED_TYPES) return
 
     val target = code.target
@@ -367,56 +357,58 @@ object CodeWriter {
       LOG.warn("Class $apiInterfaceName was not found")
       return
     }
-    val apiFile = apiClass.containingKtFile
-    val apiImports = importsByFile.getValue(apiFile)
-    addInnerDeclarations(apiClass, code, apiImports, savedCompatibilityInvokeCode)
-
+    val apiPackageFqName = apiClass.containingKtFile.packageFqName
     val sourceFile = apiClass.containingFile.virtualFile
     val targetDirectory = getPsiDirectory(project, genFolder, sourceFolder, sourceFile)
     run {
-      val apiPackageFqnName = apiFile.packageFqName.asString()
+      val apiPackageFqnName = apiPackageFqName.asString()
       val generatedApiImports = Imports(apiPackageFqnName)
       apiClass.containingKtFile.importDirectives.mapNotNull { it.importPath }.forEach { import ->
         generatedApiImports.add(import.pathStr)
       }
       val psiFactory = KtPsiFactory(apiClass.project)
       val topLevelCode = code.topLevelCode ?: ""
-      val generatedApiFile = psiFactory.createFile("${code.target.name}Api.kt", generatedApiImports.findAndRemoveFqns(topLevelCode))
-      generatedApiFile.packageFqName = apiFile.packageFqName
+      val filename = "${code.target.name}$GENERATED_MODIFICATIONS_SUFFIX"
+      val generatedModificationsFile = psiFactory.createFile(filename, generatedApiImports.findAndRemoveFqns(topLevelCode))
+      generatedModificationsFile.packageFqName = apiPackageFqName
 
-      val compatibilityTopLevelDeclarations = mutableListOf<KtDeclaration>()
-      // val allDeclarationsFile = psiFactory.createFile(apiImports.findAndRemoveFqns(topLevelCode))
-      // allDeclarationsFile.importList?.copy()?.let { generatedApiFile.importList?.replace(it) }
-      val declarations = generatedApiFile.declarations
+      val declarations = generatedModificationsFile.declarations
       for (declaration in declarations) {
         if (declaration.firstChild.text.contains("Deprecated")) {
-          compatibilityTopLevelDeclarations.add(declaration.copy() as KtDeclaration)
           declaration.delete()
           continue
         }
-        
       }
-      if (compatibilityTopLevelDeclarations.isNotEmpty()) {
-        topLevelDeclarations.putValue(apiFile, apiClass to compatibilityTopLevelDeclarations)
+
+      val visibility = apiClass.visibilityModifierType().takeIf { !apiClass.isPublic }
+      if (visibility != null) {
+        generatedModificationsFile.declarations.forEach { it.addModifier(visibility) }
+      }
+
+      val apiClassFileAnnotationsNoJvmName = apiClass.containingKtFile.annotationEntries.filter { it.shortName?.asString() != "JvmName" }
+      val generatedModificationsFileAnnotations = generatedModificationsFile.fileAnnotationList
+                                                  ?: error("Generated EntityModifications file should have at least JvmName annotation, but it is missing for ${generatedModificationsFile.name}")
+      apiClassFileAnnotationsNoJvmName.forEach { annotation ->
+        generatedModificationsFileAnnotations.add(annotation)
       }
 
       val apiTargetDirectory = targetDirectory.parent!!
-      apiTargetDirectory.findFile(generatedApiFile.name)?.delete()
+      apiTargetDirectory.findFile(generatedModificationsFile.name)?.delete()
       //todo remove other old generated files
-      val addedFile = apiTargetDirectory.add(generatedApiFile) as KtFile
+      val addedFile = apiTargetDirectory.add(generatedModificationsFile) as KtFile
       generatedFiles.add(addedFile)
       importsByFile[addedFile] = generatedApiImports
     }
     val implementationClassText = code.implementationClass
     if (implementationClassText != null) {
-      val implPackageFqnName = "${apiFile.packageFqName.asString()}.impl"
+      val implPackageFqnName = "${apiPackageFqName.asString()}.impl"
       val implImports = Imports(implPackageFqnName)
-      val implFile = psiFactory.createFile("${code.target.name}Impl.kt", implImports.findAndRemoveFqns(implementationClassText))
+      val implFile =
+        psiFactory.createFile("${code.target.name}$GENERATED_IMPL_SUFFIX", implImports.findAndRemoveFqns(implementationClassText))
       apiClass.containingKtFile.importDirectives.mapNotNull { it.importPath }.forEach { import ->
         implImports.add(import.pathStr)
       }
-      targetDirectory.findFile(implFile.name)?.delete()
-      //todo remove other old generated files
+      targetDirectory.findFile(implFile.name)?.delete() //todo remove other old generated files
       val addedFile = targetDirectory.add(implFile) as KtFile
       generatedFiles.add(addedFile)
       importsByFile[addedFile] = implImports
@@ -431,13 +423,13 @@ object CodeWriter {
   }
 
   private fun copyHeaderComment(apiFile: KtFile, implFile: KtFile) {
-    val apiPackageDirectiveNode = apiFile.packageDirective?.node ?: return
-    val fileNode = implFile.node
-    var nodeToCopy = apiPackageDirectiveNode.treePrev
-    var anchorBefore = fileNode.firstChildNode
+    val firstNonComment = apiFile.fileAnnotationList?.node ?: apiFile.packageDirective?.node ?: return
+    val implFileNode = implFile.node
+    var nodeToCopy = firstNonComment.treePrev
+    var anchorBefore = implFileNode.firstChildNode
     while (nodeToCopy != null) {
       val copied = nodeToCopy.copyElement()
-      fileNode.addChild(copied, anchorBefore)
+      implFileNode.addChild(copied, anchorBefore)
       anchorBefore = copied
       nodeToCopy = nodeToCopy.treePrev
     }
@@ -460,103 +452,21 @@ object CodeWriter {
     }
   }
 
-  private fun addInnerDeclarations(ktClass: KtClass, code: ObjClassGeneratedCode, imports: Imports, savedCompatibilityInvokeCode: MutableMap<KtClass, PsiElement>) {
-    if (code.builderInterface.isEmpty()) return
-    val psiFactory = KtPsiFactory(ktClass.project)
-    val builderInterface = ktClass.addDeclaration(psiFactory.createClass(imports.findAndRemoveFqns(code.builderInterface)))
-    val companionObject = ktClass.addDeclaration(psiFactory.createObject(imports.findAndRemoveFqns(code.companionObject)))
-    val body = ktClass.getOrCreateBody()
-    addGeneratedRegionStartComment(body, builderInterface)
-    addGeneratedRegionEndComment(body, companionObject)
-    
-    val compatibilityInvoke = savedCompatibilityInvokeCode.remove(ktClass) ?: return
-    addCompatibilityInvoke(companionObject, compatibilityInvoke, psiFactory)
-  }
-  
-  private fun addCompatibilityInvoke(companionObject: KtObjectDeclaration, compatibilityInvoke: PsiElement, psiFactory: KtPsiFactory) {
-    val companionBody = companionObject.getOrCreateBody()
-    companionBody.addBefore(compatibilityInvoke, companionBody.rBrace)
-    companionBody.addBefore(psiFactory.createNewLine(), companionBody.rBrace)
-    companionBody.addBefore(psiFactory.createComment(GENERATED_COMPATIBILITY_REGION_END), companionBody.rBrace)
-  }
-
-  private fun addGeneratedRegionStartComment(parent: KtElement, place: KtElement) {
-    val psiFactory = KtPsiFactory(parent.project)
-    val startCommentElements = psiFactory.createFile("\n$GENERATED_REGION_START\n").children
-    parent.addRangeBefore(startCommentElements.first { it is PsiWhiteSpace }, startCommentElements.last(), place)
-  }
-
-  private fun addGeneratedRegionEndComment(parent: KtElement, place: KtElement) {
-    val psiFactory = KtPsiFactory(parent.project)
-    val endCommentElements = psiFactory.createFile("\n$GENERATED_REGION_END\n").children
-    parent.addRangeAfter(endCommentElements.first { it is PsiWhiteSpace }, endCommentElements.last(), place)
-  }
-
-  private fun removeChildrenInGeneratedRegions(node: ASTNode) {
-    for (region in findGeneratedRegions(node)) {
-      CodeEditUtil.removeChildren(node, region.first, region.second)
+  private fun getSourceClassNameForGeneratedFile(file: KtFile): String? {
+    val packageName = file.packageFqName.asString()
+    if (file.name.endsWith(GENERATED_IMPL_SUFFIX)) {
+      // packageName includes "impl"
+      return "${packageName.dropLast(4)}${file.name.dropLast(GENERATED_IMPL_SUFFIX.length)}"
     }
-  }
-
-  private fun reformatCodeInGeneratedRegions(file: PsiFile, nodes: List<ASTNode>) {
-    val generatedRegions = nodes.flatMap { findGeneratedRegions(it) }
-    if (generatedRegions.isEmpty()) return
-    val regions = generatedRegions.map { TextRange.create(it.first.startOffset, it.second.startOffset + it.second.textLength) }
-    CodeStyleManager.getInstance(file.project).reformatText(file, joinAdjacentRegions(regions))
-  }
-
-  private fun joinAdjacentRegions(regions: List<TextRange>): List<TextRange> {
-    val result = ArrayList<TextRange>()
-    regions.sortedBy { it.startOffset }.forEach { next ->
-      val last = result.lastOrNull()
-      if (last != null && last.endOffset >= next.startOffset) {
-        result[result.lastIndex] = last.union(next)
-      }
-      else {
-        result.add(next)
-      }
+    if (file.name.endsWith(GENERATED_MODIFICATIONS_SUFFIX)) {
+      return "$packageName.${file.name.dropLast(GENERATED_MODIFICATIONS_SUFFIX.length)}"
     }
-    return result
+    return null
   }
 
-  private fun findGeneratedRegions(node: ASTNode): ArrayList<Pair<ASTNode, ASTNode>> {
-    val generatedRegions = ArrayList<Pair<ASTNode, ASTNode>>()
-    var regionStart: ASTNode? = null
-    node.children().forEach { child ->
-      if (child.isGeneratedRegionStart) {
-        regionStart = if (child.treePrev?.elementType == KtTokens.WHITE_SPACE) child.treePrev else child
-      }
-      else if (child.isGeneratedRegionEnd) {
-        regionStart?.let { generatedRegions.add(it to child) }
-      }
-    }
-    return generatedRegions
-  }
+  private const val GENERATED_IMPL_SUFFIX = "Impl.kt"
 
-  private val KtFile.apiFileNameForImplFile: String?
-    get() {
-      val packageName = packageFqName.asString()
-      if (!packageName.endsWith(".impl") || !name.endsWith("Impl.kt")) return null
-      return "${packageFqName.asString().dropLast(4)}${name.dropLast(7)}"
-    }
-
-  // generated region
-  private const val GENERATED_REGION_START = "//region generated code"
-
-  private const val GENERATED_REGION_END = "//endregion"
-
-  private val ASTNode.isGeneratedRegionStart: Boolean
-    get() =
-      elementType == KtTokens.EOL_COMMENT && text == GENERATED_REGION_START || firstChildNode?.isGeneratedRegionStart == true
-
-  private val ASTNode.isGeneratedRegionEnd: Boolean
-    get() =
-      elementType == KtTokens.EOL_COMMENT && text == GENERATED_REGION_END
-  
-  // compatability region
-  private const val GENERATED_COMPATIBILITY_REGION_START = "//region compatibility generated code"
-
-  private const val GENERATED_COMPATIBILITY_REGION_END = "//endregion compatibility generated code"
+  private const val GENERATED_MODIFICATIONS_SUFFIX = "Modifications.kt"
 
   private const val GENERATED_METADATA_STORAGE_FILE = "MetadataStorageImpl.kt"
 
@@ -573,9 +483,19 @@ object CodeWriter {
 
     const val UNKNOWN_VERSION = "unknown version"
   }
+}
 
-  // This function was added because CodeStyleManager throws an exception for big MetadataStorageImpl files
-  private fun Iterable<KtFile>.withoutBigFiles(): Iterable<KtFile> {
-    return filterNot { it.name == GENERATED_METADATA_STORAGE_FILE }
+private suspend fun <T> writeCommandActionWithGroupId(
+  project: Project,
+  @NlsContexts.Command commandName: String,
+  action: () -> T,
+): T {
+  return withContext(Dispatchers.EDT) {
+    writeIntentReadAction {
+      WriteCommandAction.writeCommandAction(project)
+        .withName(commandName)
+        .withGroupId(commandName)
+        .compute<T, Throwable>(action)
+    }
   }
 }

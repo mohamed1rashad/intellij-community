@@ -4,16 +4,30 @@ package com.intellij.python.junit5Tests.framework.metaInfo
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.PluginPathManager
 import org.jetbrains.annotations.TestOnly
+import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.extension.ExtensionContext
 import java.nio.file.Path
+import kotlin.io.path.Path
+import kotlin.io.path.exists
 import kotlin.io.path.listDirectoryEntries
 import kotlin.jvm.optionals.getOrNull
 
 @TestOnly
-enum class Repository(val contentRootResolver: (String) -> String) {
-  PY_COMMUNITY({ "${PathManager.getHomePath()}/community/python/${it}" }),
-  PY_PROFESSIONAL({ "${PathManager.getHomePath()}/python/${it}" }),
-  PLUGINS({ PluginPathManager.getPluginHomePath(it) })
+enum class Repository(internal val contentRootResolver: (String) -> Path) {
+  PY_COMMUNITY({ getContentDir(tryAddingCommunity = true, it) }),
+  PY_PROFESSIONAL({ getContentDir(tryAddingCommunity = false, it) }),
+  PLUGINS({ Path(PluginPathManager.getPluginHomePath(it)) })
+}
+
+private fun getContentDir(tryAddingCommunity: Boolean, content: String): Path {
+  var path = PathManager.getHomeDirFor(Repository::class.java)!!
+  if (tryAddingCommunity) {
+    val community = path.resolve("community") // Community might also be a part of the path in community tests
+    if (community.exists()) {
+      path = community
+    }
+  }
+  return path.resolve("python").resolve(content)
 }
 
 /**
@@ -23,6 +37,7 @@ enum class Repository(val contentRootResolver: (String) -> String) {
  * @property contentRootPath Specifies the path in the [repository] which will be used as $CONTENT_ROOT.
  */
 @TestOnly
+@ExtendWith(TestMetaInfoExtension::class)
 annotation class TestClassInfo(
   val repository: Repository = Repository.PY_COMMUNITY,
   val contentRootPath: String = "testSrc",
@@ -35,7 +50,7 @@ internal fun TestClassInfo.resolvePath(pathWithPlaceholders: String): Path {
     return Path.of(pathWithPlaceholders)
   }
 
-  val contentRoot = repository.contentRootResolver(contentRootPath)
+  val contentRoot = repository.contentRootResolver(contentRootPath).toString()
   val testDataPath = pathWithPlaceholders.replace(contentRootPlaceholder, contentRoot)
 
   return Path.of(testDataPath)
@@ -54,7 +69,7 @@ data class TestClassInfoData(val testDataPath: Path?) {
 }
 
 @TestOnly
-data class TestMethodInfoData(val testCaseFilePath: Path?)
+data class TestMethodInfoData(val testCaseRelativePath: Path?)
 
 
 internal fun <T : Annotation> getAnnotation(context: ExtensionContext?, clazz: Class<T>): T? {

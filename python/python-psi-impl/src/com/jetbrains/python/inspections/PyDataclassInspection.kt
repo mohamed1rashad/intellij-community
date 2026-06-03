@@ -8,35 +8,60 @@ import com.intellij.codeInspection.ProblemHighlightType
 import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.psi.PsiElementVisitor
 import com.intellij.psi.PsiNameIdentifierOwner
+import com.intellij.util.containers.addIfNotNull
 import com.intellij.util.containers.tailOrEmpty
 import com.jetbrains.python.PyNames
 import com.jetbrains.python.PyPsiBundle
-import com.jetbrains.python.codeInsight.*
 import com.jetbrains.python.codeInsight.PyDataclassNames.Attrs
 import com.jetbrains.python.codeInsight.PyDataclassNames.Dataclasses
+import com.jetbrains.python.codeInsight.PyDataclassParameters
+import com.jetbrains.python.codeInsight.parseDataclassParameters
+import com.jetbrains.python.codeInsight.parseStdDataclassParameters
+import com.jetbrains.python.codeInsight.parseStdOrDataclassTransformDataclassParameters
+import com.jetbrains.python.codeInsight.resolveDataclassFieldParameters
+import com.jetbrains.python.codeInsight.resolvesToOmittedDefault
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider
 import com.jetbrains.python.documentation.PythonDocumentationProvider
-import com.jetbrains.python.psi.*
+import com.jetbrains.python.psi.AccessDirection
+import com.jetbrains.python.psi.PyBinaryExpression
+import com.jetbrains.python.psi.PyCallExpression
+import com.jetbrains.python.psi.PyClass
+import com.jetbrains.python.psi.PyDelStatement
+import com.jetbrains.python.psi.PyExpression
+import com.jetbrains.python.psi.PyFunction
+import com.jetbrains.python.psi.PyNamedParameter
+import com.jetbrains.python.psi.PyQualifiedExpression
+import com.jetbrains.python.psi.PyReferenceExpression
+import com.jetbrains.python.psi.PyTargetExpression
+import com.jetbrains.python.psi.PyTypedElement
+import com.jetbrains.python.psi.PyUtil
 import com.jetbrains.python.psi.impl.ParamHelper
+import com.jetbrains.python.psi.impl.PyCallExpressionHelper
 import com.jetbrains.python.psi.impl.PyEvaluator
-import com.jetbrains.python.psi.impl.mapArguments
-import com.jetbrains.python.psi.types.*
+import com.jetbrains.python.psi.impl.stubs.PyDataclassFieldStubImpl
+import com.jetbrains.python.psi.stubs.PyDataclassFieldStub
+import com.jetbrains.python.psi.types.PyClassType
+import com.jetbrains.python.psi.types.PyCollectionType
+import com.jetbrains.python.psi.types.PyStructuralType
+import com.jetbrains.python.psi.types.PyType
+import com.jetbrains.python.psi.types.PyTypeChecker
+import com.jetbrains.python.psi.types.PyUnionType
+import com.jetbrains.python.psi.types.TypeEvalContext
 import one.util.streamex.StreamEx
 
 class PyDataclassInspection : PyInspection() {
 
-  companion object {
-    private val ORDER_OPERATORS = setOf("__lt__", "__le__", "__gt__", "__ge__")
-
-    private enum class ClassOrder {
-      MANUALLY, DC_ORDERED, DC_UNORDERED, UNKNOWN
+  override fun buildVisitor(
+    holder: ProblemsHolder,
+    isOnTheFly: Boolean,
+    session: LocalInspectionToolSession,
+  ): PsiElementVisitor {
+    val context = PyInspectionVisitor.getContext(session)
+    if (context.usesExternalTypeEngine) {
+      return PsiElementVisitor.EMPTY_VISITOR
     }
+    return Visitor(holder, context)
   }
-
-  override fun buildVisitor(holder: ProblemsHolder,
-                            isOnTheFly: Boolean,
-                            session: LocalInspectionToolSession): PsiElementVisitor = Visitor(
-    holder,PyInspectionVisitor.getContext(session))
 
   private class Visitor(holder: ProblemsHolder, context: TypeEvalContext) : PyInspectionVisitor(holder, context) {
 
@@ -108,7 +133,7 @@ class PyDataclassInspection : PyInspection() {
 
         processAnnotationsExistence(node, dataclassParameters)
 
-        PyNamedTupleInspection.inspectFieldsOrder(
+        PyNamedTupleInspection.Helper.inspectFieldsOrder(
           cls = node,
           classFieldsFilter = {
             val parameters = parseDataclassParameters(it, myTypeEvalContext)
@@ -192,7 +217,7 @@ class PyDataclassInspection : PyInspection() {
         }
 
         val callableType = callees.first()
-        val mapping = node.mapArguments(callableType, myTypeEvalContext)
+        val mapping = PyCallExpressionHelper.mapArguments(node, callableType, myTypeEvalContext)
 
         val dataclassParameter = callableType.getParameters(myTypeEvalContext)?.firstOrNull()
         val dataclassArgument = mapping.mappedParameters.entries.firstOrNull { it.value == dataclassParameter }?.key
@@ -213,7 +238,12 @@ class PyDataclassInspection : PyInspection() {
         val cls = getInstancePyClass(node.qualifier) ?: return
         val resolved = node.getReference(resolveContext).multiResolve(false)
 
-        if (resolved.isNotEmpty() && resolved.asSequence().map { it.element }.all { it is PyTargetExpression && isInitVar(it) }) {
+        if (
+          resolved.isNotEmpty() &&
+          resolved.asSequence()
+            .map { it.element }
+            .all { it is PyTargetExpression && getInitVarType(it) != null }
+        ) {
           registerProblem(node.lastChild,
                           PyPsiBundle.message("INSP.dataclasses.object.could.have.no.attribute.because.it.declared.as.init.only", cls.name, node.name),
                           ProblemHighlightType.GENERIC_ERROR_OR_WARNING)
@@ -224,14 +254,28 @@ class PyDataclassInspection : PyInspection() {
     private fun checkMutatingFrozenAttribute(expression: PyQualifiedExpression) {
       val cls = getInstancePyClass(expression.qualifier) ?: return
 
-      if (StreamEx
-          .of(cls).append(cls.getAncestorClasses(myTypeEvalContext))
-          .mapNotNull { parseDataclassParameters(it, myTypeEvalContext) }
-          .any { it.frozen }) {
+      val allClasses = listOf(cls) + cls.getAncestorClasses(myTypeEvalContext)
+      val allClassesAttributes = allClasses.mapNotNull { parseDataclassParameters(it, myTypeEvalContext) }
+      if (
+        allClassesAttributes.any { it.frozen == true }
+        || expression.isFrozenDataclassField(allClasses)
+      ) {
         registerProblem(expression,
                         PyPsiBundle.message("INSP.dataclasses.object.attribute.read.only", cls.name, expression.name),
                         ProblemHighlightType.GENERIC_ERROR)
       }
+    }
+
+    private fun PyQualifiedExpression.isFrozenDataclassField(allClasses: List<PyClass>): Boolean {
+      val fieldName = name ?: return false
+      val fieldDecl = allClasses.firstNotNullOfOrNull {
+        it.findClassAttribute(fieldName, false, myTypeEvalContext)
+      } ?: return false
+
+      val stub = fieldDecl.stub?.getCustomStub(PyDataclassFieldStub::class.java)
+                 ?: PyDataclassFieldStubImpl.create(fieldDecl)
+                 ?: return false
+      return stub.frozen() == true
     }
 
     private fun getDataclassHierarchyOrder(cls: PyClass, operator: String?): Pair<ClassOrder, PyDataclassParameters.Type?> {
@@ -318,7 +362,7 @@ class PyDataclassInspection : PyInspection() {
                         ProblemHighlightType.GENERIC_ERROR)
       }
 
-      if (dataclassParameters.frozen && mutatingMethodsExist) {
+      if (dataclassParameters.frozen == true && mutatingMethodsExist) {
         registerProblem(dataclassParameters.frozenArgument,
                         PyPsiBundle.message("INSP.dataclasses.frozen.attribute.should.be.false.if.class.defines.setattr.or.delattr"),
                         ProblemHighlightType.GENERIC_ERROR)
@@ -359,7 +403,8 @@ class PyDataclassInspection : PyInspection() {
           "__repr__" -> reprMethod = it
           "__str__" -> strMethod = it
           "__eq__",
-          in ORDER_OPERATORS -> cmpMethods.add(it)
+          in ORDER_OPERATORS,
+            -> cmpMethods.add(it)
           "__setattr__", "__delattr__" -> mutatingMethods.add(it)
           PyNames.HASH -> hashMethod = it
         }
@@ -386,7 +431,7 @@ class PyDataclassInspection : PyInspection() {
         cmpMethods.forEach { problems.add(it to "cmp/order") }
       }
 
-      if (dataclassParameters.frozen && mutatingMethods.isNotEmpty()) {
+      if (dataclassParameters.frozen == true && mutatingMethods.isNotEmpty()) {
         mutatingMethods.forEach { problems.add(it to "frozen") }
       }
 
@@ -402,8 +447,8 @@ class PyDataclassInspection : PyInspection() {
         }
       }
 
-      if (dataclassParameters.order && dataclassParameters.frozen && hashMethod != null) {
-        registerProblem(hashMethod?.nameIdentifier,
+      if (dataclassParameters.order && dataclassParameters.frozen == true && hashMethod != null) {
+        registerProblem(hashMethod.nameIdentifier,
                         PyPsiBundle.message("INSP.dataclasses.hash.ignored.if.class.already.defines.cmp.or.order.or.frozen.parameters"),
                         ProblemHighlightType.GENERIC_ERROR_OR_WARNING)
       }
@@ -419,7 +464,7 @@ class PyDataclassInspection : PyInspection() {
           .multiResolveCallee(resolveContext)
           .filter { it.callable?.qualifiedName == Dataclasses.DATACLASSES_FIELD }
           .any {
-            value.mapArguments(it, myTypeEvalContext).mappedParameters.values.any { p ->
+            PyCallExpressionHelper.mapArguments(value, it, myTypeEvalContext).mappedParameters.values.any { p ->
               p.name == "default_factory"
             }
           }
@@ -474,9 +519,11 @@ class PyDataclassInspection : PyInspection() {
         sameAttrInitializers
           .asSequence()
           .drop(1)
-          .forEach { registerProblem(it.nameIdentifier,
-                                     PyPsiBundle.message("INSP.dataclasses.attribute.default.set.using.method", first.name),
-                                     ProblemHighlightType.GENERIC_ERROR) }
+          .forEach {
+            registerProblem(it.nameIdentifier,
+                            PyPsiBundle.message("INSP.dataclasses.attribute.default.set.using.method", first.name),
+                            ProblemHighlightType.GENERIC_ERROR)
+          }
       }
     }
 
@@ -563,18 +610,13 @@ class PyDataclassInspection : PyInspection() {
     }
 
     private fun processAsInitVar(field: PyTargetExpression, postInit: PyFunction?): InitVarField? {
-      val fieldType = myTypeEvalContext.getType(field)
-      if (isInitVar(fieldType)) {
-        if (postInit == null) {
-          registerProblem(field,
-                          PyPsiBundle.message("INSP.dataclasses.attribute.useless.until.post.init.declared", field.name),
-                          ProblemHighlightType.LIKE_UNUSED_SYMBOL)
-        }
-
-        return InitVarField(getInitVarType(fieldType))
+      val innerInitVarType = getInitVarType(field) ?: return null
+      if (postInit == null) {
+        registerProblem(field,
+                        PyPsiBundle.message("INSP.dataclasses.attribute.useless.until.post.init.declared", field.name),
+                        ProblemHighlightType.LIKE_UNUSED_SYMBOL)
       }
-
-      return null
+      return InitVarField(innerInitVarType)
     }
 
     private class InitVarField(val type: PyType?)
@@ -583,7 +625,7 @@ class PyDataclassInspection : PyInspection() {
       val fieldStub = resolveDataclassFieldParameters(dataclass, dataclassParameters, field, myTypeEvalContext) ?: return
       val call = field.findAssignedValue() as? PyCallExpression ?: return
 
-      if (PyTypingTypeProvider.isClassVar(field, myTypeEvalContext) || isInitVar(field)) {
+      if (PyTypingTypeProvider.isClassVar(field, myTypeEvalContext) || getInitVarType(field) != null) {
         if (fieldStub.hasDefaultFactory) {
           registerProblem(call.getKeywordArgument("default_factory"),
                           PyPsiBundle.message("INSP.dataclasses.field.cannot.have.default.factory"),
@@ -596,10 +638,12 @@ class PyDataclassInspection : PyInspection() {
       }
     }
 
-    private fun processPostInitDefinition(cls: PyClass,
-                                          postInit: PyFunction,
-                                          dataclassParameters: PyDataclassParameters,
-                                          localInitVars: List<PyType?>) {
+    private fun processPostInitDefinition(
+      cls: PyClass,
+      postInit: PyFunction,
+      dataclassParameters: PyDataclassParameters,
+      localInitVars: List<PyType?>,
+    ) {
       if (!dataclassParameters.init) {
         registerProblem(postInit.nameIdentifier,
                         PyPsiBundle.message("INSP.dataclasses.post.init.would.not.be.called.until.init.parameter.set.to.true"),
@@ -616,10 +660,7 @@ class PyDataclassInspection : PyInspection() {
 
         ancestor.processClassLevelDeclarations { element, _ ->
           if (element is PyTargetExpression) {
-            val fieldType = myTypeEvalContext.getType(element)
-            if (isInitVar(fieldType)) {
-              allInitVars.add(getInitVarType(fieldType))
-            }
+            allInitVars.addIfNotNull(getInitVarType(element))
           }
 
           return@processClassLevelDeclarations true
@@ -706,19 +747,12 @@ class PyDataclassInspection : PyInspection() {
       }
     }
 
-    private fun isInitVar(field: PyTargetExpression): Boolean {
-      return isInitVar(myTypeEvalContext.getType(field))
-    }
-
-    private fun isInitVar(fieldType: PyType?): Boolean {
-      return fieldType is PyCollectionType && fieldType.classQName == Dataclasses.DATACLASSES_INITVAR
-    }
-
-    private fun getInitVarType(fieldType: PyType?): PyType? {
-      if (fieldType !is PyCollectionType || fieldType.classQName != Dataclasses.DATACLASSES_INITVAR) {
-        throw IllegalArgumentException()
+    private fun getInitVarType(field: PyTargetExpression): PyType? {
+      val fieldType = myTypeEvalContext.getType(field)
+      if (fieldType is PyCollectionType && fieldType.classQName == Dataclasses.DATACLASSES_INITVAR) {
+        return fieldType.elementTypes.singleOrNull()
       }
-      return fieldType.elementTypes.singleOrNull()
+      return null
     }
 
     private fun isExpectedDataclass(
@@ -744,4 +778,10 @@ class PyDataclassInspection : PyInspection() {
              )
     }
   }
+}
+
+private val ORDER_OPERATORS = setOf("__lt__", "__le__", "__gt__", "__ge__")
+
+private enum class ClassOrder {
+  MANUALLY, DC_ORDERED, DC_UNORDERED, UNKNOWN
 }

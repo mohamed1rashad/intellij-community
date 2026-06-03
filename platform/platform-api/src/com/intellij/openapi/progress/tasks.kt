@@ -34,40 +34,7 @@ suspend fun <T> withBackgroundProgress(
   return withBackgroundProgress(project, title, action)
 }
 
-@Deprecated(
-  "Moved to com.intellij.platform.ide.progress",
-  ReplaceWith(
-    "withBackgroundProgress(project, title, cancellable, action)",
-    "com.intellij.platform.ide.progress.withBackgroundProgress",
-  ),
-  level = DeprecationLevel.ERROR,
-)
-suspend fun <T> withBackgroundProgress(
-  project: Project,
-  title: @ProgressTitle String,
-  cancellable: Boolean,
-  action: suspend CoroutineScope.() -> T
-): T {
-  return withBackgroundProgress(project, title, cancellable, action)
-}
-
-@Deprecated(
-  "Moved to com.intellij.platform.ide.progress",
-  ReplaceWith(
-    "withBackgroundProgress(project, title, cancellation, action)",
-    "com.intellij.platform.ide.progress.withBackgroundProgress",
-  ),
-  level = DeprecationLevel.ERROR,
-)
-suspend fun <T> withBackgroundProgress(
-  project: Project,
-  title: @ProgressTitle String,
-  cancellation: TaskCancellation,
-  action: suspend CoroutineScope.() -> T
-): T {
-  return withBackgroundProgress(project, title, cancellation, action)
-}
-
+@ApiStatus.ScheduledForRemoval
 @Deprecated(
   "Moved to com.intellij.platform.ide.progress",
   ReplaceWith(
@@ -84,25 +51,6 @@ fun <T> runWithModalProgressBlocking(
   action: suspend CoroutineScope.() -> T,
 ): T {
   return runWithModalProgressBlocking(project, title, action)
-}
-
-@Deprecated(
-  "Moved to com.intellij.platform.ide.progress",
-  ReplaceWith(
-    "runWithModalProgressBlocking(owner, title, cancellation, action)",
-    "com.intellij.platform.ide.progress.runWithModalProgressBlocking",
-  ),
-  level = DeprecationLevel.ERROR,
-)
-@RequiresBlockingContext
-@RequiresEdt
-fun <T> runWithModalProgressBlocking(
-  owner: ModalTaskOwner,
-  title: @ModalProgressTitle String,
-  cancellation: TaskCancellation = TaskCancellation.cancellable(),
-  action: suspend CoroutineScope.() -> T,
-): T {
-  return runWithModalProgressBlocking(owner, title, cancellation, action)
 }
 
 @Deprecated(

@@ -7,7 +7,7 @@ import com.intellij.internal.statistic.beans.MetricEvent
 import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.service.fus.collectors.ProjectUsagesCollector
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
@@ -23,14 +23,14 @@ import org.jetbrains.kotlin.idea.configuration.getPlatform
 import org.jetbrains.kotlin.idea.facet.KotlinFacet
 import org.jetbrains.kotlin.idea.facet.KotlinFacetType
 import org.jetbrains.kotlin.konan.target.KonanTarget
-import java.util.*
+import java.util.Locale
 
 internal class ProjectConfigurationCollector : ProjectUsagesCollector() {
     override fun getGroup(): EventLogGroup = GROUP
 
-    override fun getMetrics(project: Project): Set<MetricEvent> {
+    override suspend fun collect(project: Project): Set<MetricEvent> {
         val metrics = mutableSetOf<MetricEvent>()
-        val modulesLanguageDataInfo = runReadAction {
+        val modulesLanguageDataInfo = readAction {
             ProjectFacetManager.getInstance(project).getModulesWithFacet(KotlinFacetType.TYPE_ID).map {
                 ProgressManager.checkCanceled()
 
@@ -82,7 +82,7 @@ internal class ProjectConfigurationCollector : ProjectUsagesCollector() {
         }
     }
 
-    private val GROUP = EventLogGroup("kotlin.project.configuration", 48)
+    private val GROUP = EventLogGroup("kotlin.project.configuration", 70)
 
     private val systemField = EventFields.String("system", listOf("JPS", "Maven", "Gradle", "unknown"))
     private val platformField = EventFields.String("platform", composePlatformFields())
@@ -121,4 +121,5 @@ internal class ProjectConfigurationCollector : ProjectUsagesCollector() {
         nonDefaultLanguageFeaturesField,
     )
 }
+
 

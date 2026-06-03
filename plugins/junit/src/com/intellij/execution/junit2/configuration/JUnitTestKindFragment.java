@@ -25,22 +25,39 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.JavaCodeFragment;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
-import com.intellij.ui.*;
+import com.intellij.ui.EditorTextFieldWithBrowseButton;
+import com.intellij.ui.InsertPathAction;
+import com.intellij.ui.RawCommandLineEditor;
+import com.intellij.ui.TextAccessor;
 import com.intellij.ui.components.fields.ExpandableTextField;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IconUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.*;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.ALL_IN_PACKAGE;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.BY_SOURCE_CHANGES;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.BY_SOURCE_POSITION;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.CATEGORY;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.CLASS;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.DIR;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.METHOD;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.PATTERN;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.TAGS;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.UNIQUE_ID;
+import static com.intellij.execution.junit2.configuration.JUnitConfigurationModel.getKindName;
 
 public class JUnitTestKindFragment extends SettingsEditorFragment<JUnitConfiguration, JPanel> {
 
@@ -65,7 +82,7 @@ public class JUnitTestKindFragment extends SettingsEditorFragment<JUnitConfigura
     myModel.reloadTestKindModel(myTypeChooser, myModuleSelector.getModule(), () -> {
       myTypeChooser.addActionListener(e -> myModel.setType(myTypeChooser.getItem()));
     });
-    myTypeChooser.setRenderer(SimpleListCellRenderer.create("", value -> getKindName(value)));
+    myTypeChooser.setRenderer(BuilderKt.textListCellRenderer("", value -> getKindName(value)));
 
     EditorTextFieldWithBrowseButton packageField = new EditorTextFieldWithBrowseButton(project, false);
     TextFieldWithBrowseButton pattern = new TextFieldWithBrowseButton(new ExpandableTextField(text -> Arrays.asList(text.split("\\|\\|")),

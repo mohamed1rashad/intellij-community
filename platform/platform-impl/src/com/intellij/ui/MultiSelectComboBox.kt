@@ -3,7 +3,6 @@ package com.intellij.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.ui.ComboBox
-import com.intellij.openapi.ui.ComboBoxWithWidePopup
 import com.intellij.util.ui.JBUI
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
@@ -36,7 +35,8 @@ import javax.swing.plaf.basic.BasicComboBoxUI
  *
  * @param items The list of available items.
  * @param itemToTextConverter The function for extracting an item's presentable name.
- * @param selectedItems The list of initially selected values
+ *
+ * @property selectedItems The list of initially selected values
  *
  * @author Anton Kozub
  */
@@ -101,7 +101,8 @@ class MultiSelectComboBox<T>(
   }
 
   fun setItems(newItems: Array<T>) {
-    setItems(newItems.toList())
+    myItems = newItems.toMutableList()
+    setSelectedItems(mySelectedItems)
   }
 
   fun getItemAt(index: Int): T? = myItems.elementAtOrNull(index)
@@ -176,7 +177,7 @@ class MultiSelectComboBox<T>(
   }
 
   private fun handleSelectionInPopupMenu() {
-    val selectedItem = myComboBox.selectedItem as? T ?: return
+    @Suppress("UNCHECKED_CAST") val selectedItem = myComboBox.selectedItem as? T ?: return
 
     if (selectedItem !in mySelectedItems && selectedItem in myComboBoxModel)
       selectItem(selectedItem)

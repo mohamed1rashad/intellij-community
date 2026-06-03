@@ -7,7 +7,14 @@ import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandProcessor;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.LanguageLineWrapPositionStrategy;
+import com.intellij.openapi.editor.LineWrapPositionStrategy;
+import com.intellij.openapi.editor.RangeMarker;
+import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -23,31 +30,31 @@ import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.*;
+import java.awt.Font;
 import java.util.List;
 
 import static com.intellij.openapi.actionSystem.CommonDataKeys.PROJECT;
 
-@ApiStatus.Internal
+@ApiStatus.Experimental
 public final class LineWrappingUtil {
   private static final String WRAP_LINE_COMMAND_NAME = "AutoWrapLongLine";
 
-  /**
+  /*
    * This key is used as a flag that indicates if {@code 'wrap long line during formatting'} activity is performed now.
    */
   public static final Key<Boolean> WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY
     = new Key<>("WRAP_LONG_LINE_DURING_FORMATTING_IN_PROGRESS_KEY");
 
   public static void wrapLongLinesIfNecessary(@NotNull PsiFile file,
-                                       @NotNull Document document,
-                                       int startOffset,
-                                       int endOffset,
-                                       List<? extends TextRange> enabledRanges,
-                                       int rightMargin) {
+                                              @NotNull Document document,
+                                              int startOffset,
+                                              int endOffset,
+                                              List<? extends TextRange> enabledRanges,
+                                              int rightMargin) {
     final VirtualFile vFile = FileDocumentManager.getInstance().getFile(document);
     if ((vFile == null || vFile instanceof LightVirtualFile) && !ApplicationManager.getApplication().isUnitTestMode()) {
-      // we assume that control flow reaches this place when the document is backed by a "virtual" file so any changes made by
-      // a formatter affect only PSI and it is out of sync with a document text
+      // we assume that control flow reaches this place when the document is backed by a "virtual" file, so any changes made by
+      // a formatter affect only PSI, and it is out of sync with a document text
       return;
     }
 
@@ -82,8 +89,13 @@ public final class LineWrappingUtil {
     }
   }
 
-  public static void doWrapLongLinesIfNecessary(final @NotNull Editor editor, final @NotNull Project project, @NotNull Document document,
-                                                int startOffset, int endOffset, List<? extends TextRange> enabledRanges, int rightMargin) {
+  public static void doWrapLongLinesIfNecessary(@NotNull Editor editor,
+                                                @NotNull Project project,
+                                                @NotNull Document document,
+                                                int startOffset,
+                                                int endOffset,
+                                                List<? extends TextRange> enabledRanges,
+                                                int rightMargin) {
     // Normalization.
     int startOffsetToUse = Math.clamp(startOffset, 0, document.getTextLength());
     int endOffsetToUse = Math.clamp(endOffset, 0, document.getTextLength());
@@ -129,10 +141,11 @@ public final class LineWrappingUtil {
         preferredWrapPosition, false, false
       );
       if (wrapOffset < 0 // No appropriate wrap position is found.
-          // No point in splitting line when its left part contains only white spaces, example:
+          // No point in splitting a line when its left part contains only white spaces, example:
           //    line start -> |                   | <- right margin
-          //                  |   aaaaaaaaaaaaaaaa|aaaaaaaaaaaaaaaaaaaa() <- don't want to wrap this line even if it exceeds right margin
-          || CharArrayUtil.shiftBackward(text, startLineOffset, wrapOffset - 1, " \t") < startLineOffset) {
+          //                  |   aaaaaaaaaaaaaaaa|aaaaaaaaaaaaaaaaaaaa() <- don't want to wrap this line even if it exceeds the right margin
+          || CharArrayUtil.shiftBackward(text, startLineOffset, wrapOffset - 1, " \t") < startLineOffset
+          || wrapOffset <= startLineOffset || wrapOffset >= endLineOffset) {
         continue;
       }
 
@@ -140,8 +153,8 @@ public final class LineWrappingUtil {
       editor.getCaretModel().moveToOffset(wrapOffset);
       emulateEnter(editor, project, shifts);
 
-      //If number of inserted symbols on new line after wrapping more or equal then symbols left on previous line
-      //there was no point to wrapping it, so reverting to before wrapping version
+      //If number of inserted symbols on new line after wrapping more or equal than symbols left on previous line,
+      //there was no point in wrapping it, so reverting to before wrapping version
       if (shifts[1] - 1 >= wrapOffset - startLineOffset) {
         document.deleteString(wrapOffset, wrapOffset + shifts[1]);
       }
@@ -151,7 +164,6 @@ public final class LineWrappingUtil {
         endOffsetToUse += shifts[1];
         cumulativeShift += shifts[1];
       }
-
     }
   }
 
@@ -167,9 +179,9 @@ public final class LineWrappingUtil {
    *
    * @param editor       target editor
    * @param project      target project
-   * @param shifts       two-elements array which is expected to be filled with the following info:
-   *                       1. The first element holds added lines number;
-   *                       2. The second element holds added symbols number;
+   * @param shifts       two-elements array that is expected to be filled with the following info:
+   *                       1. The first element holds the added lines number;
+   *                       2. The second element holds an added symbols number;
    */
   private static void emulateEnter(final @NotNull Editor editor, @NotNull Project project, int[] shifts) {
     DataContext dataContext = prepareContext(project, editor);
@@ -219,10 +231,10 @@ public final class LineWrappingUtil {
   }
 
   /**
-   * Checks if it's worth to try to wrap target line (it's long enough) and tries to calculate preferred wrap position.
+   * Checks if it's worth trying to wrap the target line (it's long enough) and tries to calculate the preferred wrap position.
    *
    * @param editor                target editor
-   * @param text                  text contained at the given editor
+   * @param text                  text contained in the given editor
    * @param tabSize               tab space to use (number of visual columns occupied by a tab)
    * @param spaceSize             space width in pixels
    * @param startLineOffset       start offset of the text line to process
@@ -356,8 +368,8 @@ public final class LineWrappingUtil {
   }
 
   private static @NotNull DataContext prepareContext(@NotNull Project project, @NotNull Editor editor) {
-    // There is a possible case that formatting is performed from project view and editor is not opened yet. The problem is that
-    // its data context doesn't contain information about project then. So, we explicitly support that here (see IDEA-72791).
+    // There is a possible case that formatting is performed from the project view and the editor is not opened yet. The problem is that
+    // its data context doesn't contain information about a project then. So, we explicitly support that here (see IDEA-72791).
     Project editorProject = editor.getProject();
     DataContext context = EditorUtil.getEditorDataContext(editor);
     if (editorProject != null) return context;

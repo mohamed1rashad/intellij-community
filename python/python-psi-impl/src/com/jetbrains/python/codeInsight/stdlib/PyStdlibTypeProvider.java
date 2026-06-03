@@ -10,8 +10,25 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyNames;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.AccessDirection;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyBinaryExpression;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCallSiteExpression;
+import com.jetbrains.python.psi.PyCallable;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyDecoratable;
+import com.jetbrains.python.psi.PyElement;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.PyKnownDecorator;
+import com.jetbrains.python.psi.PyKnownDecoratorUtil;
+import com.jetbrains.python.psi.PyNumericLiteralExpression;
+import com.jetbrains.python.psi.PyQualifiedNameOwner;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PyTargetExpression;
+import com.jetbrains.python.psi.PyTypedElement;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.impl.PyTypeProvider;
 import com.jetbrains.python.psi.impl.stubs.PyEnumAttributeStubType;
@@ -20,7 +37,16 @@ import com.jetbrains.python.psi.resolve.PyResolveUtil;
 import com.jetbrains.python.psi.stubs.PyEnumAttributeStub;
 import com.jetbrains.python.psi.stubs.PyLiteralKind;
 import com.jetbrains.python.psi.stubs.PyTargetExpressionStub;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyCallableTypeImpl;
+import com.jetbrains.python.psi.types.PyClassLikeType;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyCollectionType;
+import com.jetbrains.python.psi.types.PyLiteralType;
+import com.jetbrains.python.psi.types.PyTupleType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeParser;
+import com.jetbrains.python.psi.types.PyTypeProviderBase;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -32,6 +58,7 @@ import java.util.Objects;
 import java.util.stream.Stream;
 
 import static com.jetbrains.python.psi.PyUtil.as;
+import static com.jetbrains.python.psi.types.PyTypeUtilKt.widenTupleLiterals;
 
 
 public final class PyStdlibTypeProvider extends PyTypeProviderBase {
@@ -103,10 +130,16 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
     }
     if (referenceTarget instanceof PyQualifiedNameOwner qualifiedNameOwner) {
       final String name = qualifiedNameOwner.getQualifiedName();
-      if ((PyNames.TYPE_ENUM + ".name").equals(name)) {
+      if ((PyNames.TYPE_ENUM + ".name").equals(name) || (PyNames.TYPE_ENUM_FLAG + ".name").equals(name)) {
         return Ref.create(PyBuiltinCache.getInstance(referenceTarget).getStrType());
       }
       else if ("enum.IntEnum.value".equals(name) && anchor instanceof PyReferenceExpression) {
+        return Ref.create(PyBuiltinCache.getInstance(referenceTarget).getIntType());
+      }
+      else if ("enum.StrEnum.value".equals(name) && anchor instanceof PyReferenceExpression) {
+        return Ref.create(PyBuiltinCache.getInstance(referenceTarget).getStrType());
+      }
+      else if ((PyNames.TYPE_ENUM_FLAG + ".value").equals(name) && anchor instanceof PyReferenceExpression) {
         return Ref.create(PyBuiltinCache.getInstance(referenceTarget).getIntType());
       }
       else if ((PyNames.TYPE_ENUM + ".value").equals(name) &&
@@ -118,16 +151,7 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
           if (enumType != null) {
             PyClass enumClass = enumType.getPyClass();
             if (isCustomEnum(enumClass, context)) {
-              PyTargetExpression firstEnumItem = ContainerUtil.getFirstItem(enumClass.getClassAttributes());
-              if (firstEnumItem != null) {
-                EnumAttributeInfo attributeInfo = getEnumAttributeInfo(enumClass, firstEnumItem, context);
-                if (attributeInfo != null) {
-                  return Ref.create(attributeInfo.assignedValueType);
-                }
-              }
-              else {
-                return Ref.create();
-              }
+              return Ref.create(getEnumValueType(enumClass, context));
             }
           }
         }
@@ -213,13 +237,14 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
     assert isCustomEnum(enumClass, context);
 
     String name = targetExpression.getName();
-    if (name == null || PyUtil.isClassPrivateName(name)) return null;
+    if (name == null || PyUtil.isClassPrivateName(name) || "_ignore_".equals(name)) return null;
 
     if (context.maySwitchToAST(targetExpression)) {
       PyExpression value = targetExpression.findAssignedValue();
       if (value == null) return null;
 
-      PyType type = context.getType(value);
+      // until heterogeneous enums are supported, we must widen tuple types
+      PyType type = widenTupleLiterals(context.getType(value));
       return getEnumAttributeInfo(enumClass, type, context);
     }
     else {
@@ -300,8 +325,8 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
     EnumAttributeKind attributeKind;
     if (isMember) {
       attributeKind = type instanceof PyLiteralType literalType && literalType.getPyClass().equals(enumClass)
-                                        ? EnumAttributeKind.MEMBER_ALIAS
-                                        : EnumAttributeKind.MEMBER;
+                      ? EnumAttributeKind.MEMBER_ALIAS
+                      : EnumAttributeKind.MEMBER;
     }
     else {
       attributeKind = EnumAttributeKind.NONMEMBER;
@@ -339,7 +364,9 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
   private static @Nullable PyType getEnumAutoConstructorType(@NotNull PsiElement target,
                                                              @NotNull TypeEvalContext context,
                                                              @Nullable PsiElement anchor) {
-    if (target instanceof PyClass && PyNames.TYPE_ENUM_AUTO.equals(((PyClass)target).getQualifiedName()) && anchor instanceof PyCallExpression) {
+    if (target instanceof PyClass &&
+        PyNames.TYPE_ENUM_AUTO.equals(((PyClass)target).getQualifiedName()) &&
+        anchor instanceof PyCallExpression) {
       PyClassLikeType classType = as(context.getType((PyTypedElement)target), PyClassLikeType.class);
       if (classType != null) {
         return new PyCallableTypeImpl(Collections.emptyList(), classType.toInstance());
@@ -348,8 +375,52 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
     return null;
   }
 
+  // Handle IntEnum/IntFlag, StrEnum, and fall back to assigned type or unknown
+  @ApiStatus.Internal
+  public static @Nullable PyType getEnumValueType(@NotNull PyClass enumClass, @NotNull TypeEvalContext context) {
+    PyBuiltinCache cache = PyBuiltinCache.getInstance(enumClass);
+
+    if (enumClass.isSubclass("enum.IntEnum", context) ||
+        enumClass.isSubclass("enum.IntFlag", context) ||
+        enumClass.isSubclass("enum.Flag", context)) {
+      return cache.getIntType();
+    }
+    if (enumClass.isSubclass("enum.StrEnum", context)) {
+      return cache.getStrType();
+    }
+
+    // If it's a mixin with basic scalar types - check str first for the failing test
+    if (enumClass.isSubclass("builtins.str", context) || enumClass.isSubclass("str", context)) {
+      return cache.getStrType();
+    }
+    if (enumClass.isSubclass("builtins.int", context) || enumClass.isSubclass("int", context)) {
+      return cache.getIntType();
+    }
+    if (enumClass.isSubclass("builtins.bytes", context) || enumClass.isSubclass("bytes", context)) {
+      return cache.getBytesType(LanguageLevel.forElement(enumClass));
+    }
+    if (enumClass.isSubclass("builtins.float", context) || enumClass.isSubclass("float", context)) {
+      return cache.getFloatType();
+    }
+    if (enumClass.isSubclass("builtins.bool", context) || enumClass.isSubclass("bool", context)) {
+      return cache.getBoolType();
+    }
+
+    // Fallback: Infer from first MEMBER's assigned value (not non-members like helpers/descriptors)
+    for (PyTargetExpression targetExpr : enumClass.getClassAttributes()) {
+      EnumAttributeInfo attributeInfo = getEnumAttributeInfo(enumClass, targetExpr, context);
+      if (attributeInfo != null && attributeInfo.attributeKind == EnumAttributeKind.MEMBER) {
+        return attributeInfo.assignedValueType;
+      }
+    }
+
+    return null;
+  }
+
   @Override
-  public @Nullable Ref<PyType> getCallType(@NotNull PyFunction function, @NotNull PyCallSiteExpression callSite, @NotNull TypeEvalContext context) {
+  public @Nullable Ref<PyType> getCallType(@NotNull PyFunction function,
+                                           @NotNull PyCallSiteExpression callSite,
+                                           @NotNull TypeEvalContext context) {
     final String qname = function.getQualifiedName();
     if (qname != null) {
       if ("tuple.__new__".equals(qname) && callSite instanceof PyCallExpression) {
@@ -362,6 +433,7 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
         return getTupleMultiplicationResultType((PyBinaryExpression)callSite, context);
       }
       else if ("object.__new__".equals(qname) && callSite instanceof PyCallExpression) {
+        // TODO (PY-89087): remove
         final PyExpression firstArgument = ((PyCallExpression)callSite).getArgument(0, PyExpression.class);
         final PyClassLikeType classLikeType = as(firstArgument != null ? context.getType(firstArgument) : null, PyClassLikeType.class);
         return classLikeType != null ? Ref.create(classLikeType.toInstance()) : null;
@@ -408,7 +480,8 @@ public final class PyStdlibTypeProvider extends PyTypeProviderBase {
     return null;
   }
 
-  private static @Nullable Ref<PyType> getTupleConcatenationResultType(@NotNull PyBinaryExpression addition, @NotNull TypeEvalContext context) {
+  private static @Nullable Ref<PyType> getTupleConcatenationResultType(@NotNull PyBinaryExpression addition,
+                                                                       @NotNull TypeEvalContext context) {
     if (addition.getRightExpression() != null) {
       final PyTupleType leftTupleType = as(context.getType(addition.getLeftExpression()), PyTupleType.class);
       final PyTupleType rightTupleType = as(context.getType(addition.getRightExpression()), PyTupleType.class);

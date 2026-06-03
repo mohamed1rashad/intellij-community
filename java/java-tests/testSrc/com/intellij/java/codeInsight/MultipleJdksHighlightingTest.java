@@ -29,7 +29,11 @@ import com.intellij.openapi.roots.ModuleRootModificationUtil;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
 import com.intellij.psi.search.searches.MethodReferencesSearch;
 import com.intellij.psi.util.PsiUtilCore;
@@ -38,7 +42,11 @@ import com.intellij.testFramework.IndexingTestUtil;
 import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.builders.JavaModuleFixtureBuilder;
-import com.intellij.testFramework.fixtures.*;
+import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
+import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory;
+import com.intellij.testFramework.fixtures.JavaCodeInsightTestFixture;
+import com.intellij.testFramework.fixtures.JavaTestFixtureFactory;
+import com.intellij.testFramework.fixtures.TestFixtureBuilder;
 
 import java.io.File;
 import java.io.IOException;
@@ -78,13 +86,13 @@ public class MultipleJdksHighlightingTest extends UsefulTestCase {
 
     builders[0] = projectBuilder.addModule(JavaModuleFixtureBuilder.class);
     builders[0].setLanguageLevel(LanguageLevel.JDK_1_3);
-    builders[0].addJdk(IdeaTestUtil.getMockJdk14Path().getPath());
+    builders[0].addJdkVersion(LanguageLevel.JDK_1_4);
 
     builders[1] = projectBuilder.addModule(JavaModuleFixtureBuilder.class);
-    builders[1].addJdk(IdeaTestUtil.getMockJdk17Path().getPath());
+    builders[1].addJdkVersion(LanguageLevel.JDK_1_7);
 
     builders[2] = projectBuilder.addModule(JavaModuleFixtureBuilder.class);
-    builders[2].addJdk(IdeaTestUtil.getMockJdk18Path().getPath());
+    builders[2].addJdkVersion(LanguageLevel.JDK_1_8);
 
     myFixture.setUp();
 

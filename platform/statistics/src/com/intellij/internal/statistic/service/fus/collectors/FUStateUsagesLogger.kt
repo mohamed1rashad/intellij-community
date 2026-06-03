@@ -18,12 +18,19 @@ import com.intellij.internal.statistic.utils.getPluginInfo
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
-import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.diagnostic.rethrowControlFlowException
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.waitForSmartMode
-import kotlinx.coroutines.*
+import com.intellij.openapi.util.registry.RegistryManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.future.asDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.ApiStatus.Obsolete
 import kotlin.time.Duration.Companion.hours
@@ -76,12 +83,17 @@ class FUStateUsagesLogger private constructor(coroutineScope: CoroutineScope) : 
             continue
           }
 
-          launch {
+          launch(Dispatchers.IO) {
             logMetricsOrError(
               project = project,
               recorderLoggers = recorderLoggers,
               usagesCollector = usagesCollector,
-              metrics = { collectMetrics(usagesCollector) },
+              metrics = {
+                // some state collectors may easily hit external processes and ask for environment information
+                withContext(Dispatchers.IO) {
+                  collectMetrics(usagesCollector)
+                }
+              },
             )
           }
         }
@@ -92,7 +104,7 @@ class FUStateUsagesLogger private constructor(coroutineScope: CoroutineScope) : 
       project: Project?,
       recorderLoggers: MutableMap<String, StatisticsEventLogger>,
       usagesCollector: FeatureUsagesCollector,
-      metrics: () -> Set<MetricEvent>,
+      metrics: suspend () -> Set<MetricEvent>,
     ) {
       var group = usagesCollector.group
       if (group == null) {
@@ -113,9 +125,7 @@ class FUStateUsagesLogger private constructor(coroutineScope: CoroutineScope) : 
         logUsagesAsStateEvents(project = project, group = group, metrics = data, logger = logger)
       }
       catch (e: Throwable) {
-        if (Logger.shouldRethrow(e)) {
-          throw e
-        }
+        rethrowControlFlowException(e)
 
         if (project != null && project.isDisposed) {
           return
@@ -200,6 +210,9 @@ class FUStateUsagesLogger private constructor(coroutineScope: CoroutineScope) : 
   }
 
   internal suspend fun logApplicationStates(onStartup: Boolean) {
+    // state loggers may depend on Registry
+    RegistryManager.getInstanceAsync()
+
     logCollectorsMetrics(project = null,
                          getCollectors = { UsageCollectors.getApplicationCollectors(this@FUStateUsagesLogger, onStartup) },
                          collectMetrics = { it.getMetricsAsync() })
@@ -214,7 +227,7 @@ class ProjectFUStateUsagesLogger(
 ) : UsagesCollectorConsumer {
 
   init {
-    coroutineScope.launch {
+    coroutineScope.launch(Dispatchers.IO) {
       project.waitForSmartMode()
       logProjectStateRegularly()
     }
@@ -232,6 +245,9 @@ class ProjectFUStateUsagesLogger(
   }
 
   private suspend fun logProjectState() {
+    // state loggers may depend on Registry
+    RegistryManager.getInstanceAsync()
+
     logCollectorsMetrics(project = project,
                          getCollectors = { UsageCollectors.getProjectCollectors(this@ProjectFUStateUsagesLogger) },
                          collectMetrics = { it.collect(project) })

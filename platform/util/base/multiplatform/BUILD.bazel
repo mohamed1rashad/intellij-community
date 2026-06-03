@@ -2,8 +2,8 @@
 load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library")
 
 jvm_provided_library(
-  name = "platform_syntax_multiplatformSupport_provided",
-  lib = "//platform/syntax/syntax-multiplatformSupport:multiplatformSupport"
+  name = "platform_multiplatformSupport_provided",
+  lib = "//platform/multiplatformSupport"
 )
 
 jvm_library(
@@ -15,9 +15,31 @@ jvm_library(
   deps = [
     "@lib//:jetbrains-annotations",
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlinx-coroutines-core",
-    "@lib//:kotlinx-coroutines-debug",
-    ":platform_syntax_multiplatformSupport_provided",
+    "//libraries/kotlinx/coroutines/core",
+    "//libraries/kotlinx/coroutines/debug",
+    ":platform_multiplatformSupport_provided",
+  ]
+)
+
+jvm_library(
+  name = "multiplatform_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.util.base.multiplatform",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = "@community//:k8",
+  runtime_deps = [
+    ":multiplatform",
+    "//libraries/kotlinx/coroutines/core:core_test_lib",
+    "//libraries/kotlinx/coroutines/debug:debug_test_lib",
+    "//platform/multiplatformSupport",
+    "//platform/multiplatformSupport:multiplatformSupport_test_lib",
   ]
 )
 ### auto-generated section `build intellij.platform.util.base.multiplatform` end
+
+### auto-generated section `iml intellij.platform.util.base.multiplatform` start
+exports_files([
+  "intellij.platform.util.base.multiplatform.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.util.base.multiplatform` end

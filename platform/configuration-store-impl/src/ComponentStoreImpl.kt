@@ -14,12 +14,31 @@ import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.notification.NotificationsManager
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.CoroutineSupport.UiDispatcherKind
+import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.ui
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.NamedComponent
+import com.intellij.openapi.components.PathMacroManager
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.RoamingType
+import com.intellij.openapi.components.SerializablePersistentStateComponent
+import com.intellij.openapi.components.ServiceDescriptor
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.StateStorage
+import com.intellij.openapi.components.StateStorageChooserEx
 import com.intellij.openapi.components.StateStorageChooserEx.Resolution
+import com.intellij.openapi.components.StateStorageOperation
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
+import com.intellij.openapi.components.TrackingPathMacroSubstitutor
 import com.intellij.openapi.components.impl.stores.IComponentStore
-import com.intellij.openapi.diagnostic.*
+import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.ControlFlowException
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.debug
+import com.intellij.openapi.diagnostic.getOrHandleException
+import com.intellij.openapi.diagnostic.getOrLogException
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.impl.shared.ConfigFolderChangedListener
@@ -38,12 +57,17 @@ import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.messages.MessageBus
 import com.intellij.util.xmlb.SettingsInternalApi
 import com.intellij.util.xmlb.XmlSerializerUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 @JvmField
@@ -74,7 +98,7 @@ internal fun setRoamableComponentSaveThreshold(thresholdInSeconds: Int) {
   NOT_ROAMABLE_COMPONENT_SAVE_THRESHOLD = thresholdInSeconds
 }
 
-private class ComponentStoreImplReloadListener : ConfigFolderChangedListener {
+internal class ComponentStoreImplReloadListener : ConfigFolderChangedListener {
   override suspend fun onChange(changedFileSpecs: Set<String>, deletedFileSpecs: Set<String>, componentStore: IComponentStore) {
     (componentStore as ComponentStoreImpl).reloadComponents(changedFileSpecs, deletedFileSpecs)
   }
@@ -83,6 +107,8 @@ private class ComponentStoreImplReloadListener : ConfigFolderChangedListener {
 @Internal
 abstract class ComponentStoreImpl : IComponentStore {
   private val components = ConcurrentHashMap<String, ComponentInfo>()
+
+  private val componentInitializationListeners = CopyOnWriteArrayList<ComponentInitializationListener>()
 
   open val project: Project?
     get() = null
@@ -101,7 +127,18 @@ abstract class ComponentStoreImpl : IComponentStore {
     if (project == null) service<FeatureUsageSettingsEvents>() else project.service<FeatureUsageSettingsEvents>()
   }
 
-  internal fun getComponents(): Map<String, ComponentInfo> = components
+  @Internal
+  fun getComponents(): Map<String, ComponentInfo> = components
+
+  /**
+   * Adds a listener for initialization of [PersistentStateComponent]s
+   *
+   * @param listener the listener
+   */
+  @Internal
+  fun addComponentInitializationListener(listener: ComponentInitializationListener) {
+    componentInitializationListeners.add(listener)
+  }
 
   @Internal
   fun incrementModificationCount(componentName: String) {
@@ -155,13 +192,13 @@ abstract class ComponentStoreImpl : IComponentStore {
             @Suppress("UNCHECKED_CAST")
             initComponentWithoutStateSpec(component as PersistentStateComponent<Any>, configurationSchemaKey, componentInfo.pluginId) {
               nonCancelableInvocator(it)
-              component.initializeComponent()
+              initializeComponent(component, stateSpec)
             }
           }
           else {
             nonCancelableInvocator {
               component.noStateLoaded()
-              component.initializeComponent()
+              initializeComponent(component, stateSpec)
             }
           }
         }
@@ -173,7 +210,7 @@ abstract class ComponentStoreImpl : IComponentStore {
             @Suppress("UNCHECKED_CAST")
             doInitComponent(info = componentInfo, component = component as PersistentStateComponent<Any>, changedStorages = null, reloadData = ThreeState.NO) {
               nonCancelableInvocator(it)
-              component.initializeComponent()
+              initializeComponent(component, stateSpec)
             }
 
             // if not service, so, component manager will check it later for all components
@@ -190,7 +227,7 @@ abstract class ComponentStoreImpl : IComponentStore {
           else {
             nonCancelableInvocator {
               component.noStateLoaded()
-              component.initializeComponent()
+              initializeComponent(component, stateSpec)
             }
           }
           registerComponent(componentName, componentInfo)
@@ -208,6 +245,18 @@ abstract class ComponentStoreImpl : IComponentStore {
         throw e
       }
       error(PluginException("Cannot init component state (componentName=$componentName, componentClass=${component.javaClass.simpleName})", e, pluginId))
+    }
+  }
+
+  private fun initializeComponent(component: PersistentStateComponent<*>, stateSpec: State?) {
+    component.initializeComponent()
+
+    componentInitializationListeners.forEach {
+      runCatching {
+        it.onComponentInitialized(stateSpec)
+      }.getOrHandleException { e ->
+        LOG.error("Exception in component initialization listener", e)
+      }
     }
   }
 
@@ -880,7 +929,7 @@ internal suspend fun getStateForComponent(component: PersistentStateComponent<*>
   return when {
     component is SerializablePersistentStateComponent<*> -> component.state
     // maybe read action
-    stateSpec.getStateRequiresEdt -> withContext(Dispatchers.ui(UiDispatcherKind.RELAX)) { component.state }
+    stateSpec.getStateRequiresEdt -> withContext(Dispatchers.EDT) { component.state }
     else -> readAction { component.state }
   }
 }

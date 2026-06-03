@@ -22,24 +22,36 @@ import com.intellij.platform.util.coroutines.childScope
 import com.intellij.ui.JBColor
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.JBLayeredPane
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.AlignY
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.actionButton
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.gridLayout.UnscaledGaps
 import com.intellij.util.ui.JBUI
-import com.jetbrains.rd.util.concurrentMapOf
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.awt.Dimension
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
-import javax.swing.*
+import java.util.concurrent.ConcurrentHashMap
+import javax.swing.Action
+import javax.swing.JButton
+import javax.swing.JComponent
+import javax.swing.JLayeredPane
+import javax.swing.JPanel
 import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.time.Duration.Companion.seconds
 
-private const val PANEL_MAX_WIDTH = 1000
+private const val PANEL_PREFERRED_WIDTH = 1000
 private const val SEARCH_MAX_WIDTH = 400
 private const val PANEL_NARROW_WIDTH = 850
 
-
 internal fun SettingsDialog.createEditorToolbar(actions: List<Action>): DialogPanel? {
-  val actionGroup = getActionGroup("Back", "Forward");
+  val actionGroup = getActionGroup("Back", "Forward")
   val toolbar = ActionManager.getInstance().createActionToolbar(ActionPlaces.SETTINGS_HISTORY, actionGroup!!, true)
   val settingsEditor = editor as? SettingsEditor ?: return null
   settingsEditor.search.preferredSize = JBUI.size(SEARCH_MAX_WIDTH, settingsEditor.search.preferredSize.height)
@@ -101,8 +113,7 @@ internal fun SettingsDialog.createEditorToolbar(actions: List<Action>): DialogPa
       }
     }
   }
-  editorToolbar.maximumSize = JBUI.size(PANEL_MAX_WIDTH, editorToolbar.maximumSize.height)
-  editorToolbar.preferredSize = JBUI.size(PANEL_MAX_WIDTH, editorToolbar.preferredSize.height)
+  editorToolbar.preferredSize = JBUI.size(PANEL_PREFERRED_WIDTH, editorToolbar.preferredSize.height)
   editorToolbar.minimumSize = JBUI.size(10, editorToolbar.minimumSize.height)
   editorToolbar.border = JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()),
                                                JBUI.Borders.customLineRight(JBColor.border()))
@@ -110,7 +121,7 @@ internal fun SettingsDialog.createEditorToolbar(actions: List<Action>): DialogPa
 
   return panel {
     row {
-      cell(editorToolbar).resizableColumn()
+      cell(editorToolbar).resizableColumn().align(AlignX.FILL)
     }
   }
 
@@ -154,11 +165,10 @@ internal fun SettingsEditor.paneWithCorner(panel: JPanel, helpButton: JButton): 
 
 internal fun SettingsEditor.createWrapperPanel(splitter: OnePixelSplitter) : DialogPanel {
   splitter.border = JBUI.Borders.customLineRight(JBColor.border())
-  splitter.preferredSize = JBUI.size(PANEL_MAX_WIDTH, splitter.preferredSize.height)
-  splitter.maximumSize = JBUI.size(PANEL_MAX_WIDTH, splitter.maximumSize.height)
+  splitter.preferredSize = JBUI.size(PANEL_PREFERRED_WIDTH, splitter.preferredSize.height)
   val panel = panel {
     row {
-      cell(splitter).resizableColumn().align(AlignY.FILL)
+      cell(splitter).resizableColumn().align(AlignX.FILL).align(AlignY.FILL)
     }.resizableRow()
   }
   return panel
@@ -170,7 +180,7 @@ internal class ResetConfigurableHandler(
   coroutineScope: CoroutineScope,
   disposable: Disposable,
 ) {
-  private val jobs = concurrentMapOf<String, Job>()
+  private val jobs = ConcurrentHashMap<String, Job>()
   private val properties = PropertiesComponent.getInstance(project)
   private val myCoroutineScope: CoroutineScope = coroutineScope.childScope("ResetConfigurableHandler", EmptyCoroutineContext, true)
 
@@ -186,7 +196,7 @@ internal class ResetConfigurableHandler(
       myCoroutineScope.launch {
         val job = this.coroutineContext[Job] ?: return@launch
         jobs.put(configurableId, job)?.cancel()
-        delay(System.getProperty("settings.editor.reset.delay.seconds", "60").toLong() * 1000)
+        delay((System.getProperty("settings.editor.reset.delay.seconds", "60").toLongOrNull() ?: 60).seconds)
         jobs.remove(configurableId, job)
         if (properties.getValue(SettingsEditor.SELECTED_CONFIGURABLE) != configurableId) {
           context.fireReset(configurable)

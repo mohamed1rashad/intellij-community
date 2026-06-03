@@ -1,7 +1,6 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.changes;
 
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
@@ -20,12 +19,26 @@ import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.FactoryMap;
 import com.intellij.util.containers.MultiMap;
-import com.intellij.vcs.changes.ChangeListChangeIdCache;
+import com.intellij.vcs.changes.ChangesViewChangeIdProvider;
 import com.intellij.vcsUtil.VcsUtil;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -871,7 +884,7 @@ public final class ChangeListWorker {
       Map<ListData, Set<Change>> mapping = getChangesMapping();
       myReadOnlyChangesCache = mapping;
       if (myMainWorker) {
-        ChangeListChangeIdCache.getInstance(myProject).updateCache(mapping.values());
+        ChangesViewChangeIdProvider.getInstance(myProject).updateChangeListsCache(mapping.values());
       }
     }
 
@@ -950,6 +963,7 @@ public final class ChangeListWorker {
 
   public static final class ChangeListUpdater implements ChangeListManagerGate {
     private final ChangeListWorker myWorker;
+    private final ProjectLevelVcsManager myVcsManager;
 
     @SuppressWarnings("SSBasedInspection")
     private final Map<String, ObjectOpenHashSet<Change>> myChangesBeforeUpdateMap = FactoryMap.create(it -> new ObjectOpenHashSet<>());
@@ -961,6 +975,7 @@ public final class ChangeListWorker {
 
     public ChangeListUpdater(@NotNull ChangeListWorker worker) {
       myWorker = worker.copy();
+      myVcsManager = ProjectLevelVcsManager.getInstance(worker.getProject());
     }
 
     public @NotNull Project getProject() {
@@ -1037,7 +1052,7 @@ public final class ChangeListWorker {
         boolean isUnderScope = scope == null ||
                                before != null && scope.belongsTo(before.getFile()) ||
                                after != null && scope.belongsTo(after.getFile()) ||
-                               isIgnoredChange(before, after, getProject());
+                               isNotUnderVcs(before) && isNotUnderVcs(after);
         if (isUnderScope) {
           removed.add(change);
         }
@@ -1054,18 +1069,10 @@ public final class ChangeListWorker {
       return removed;
     }
 
-    private static boolean isIgnoredChange(@Nullable ContentRevision before, @Nullable ContentRevision after, @NotNull Project project) {
-      return isIgnoredRevision(before, project) && isIgnoredRevision(after, project);
-    }
-
-    private static boolean isIgnoredRevision(@Nullable ContentRevision revision, final @NotNull Project project) {
+    private boolean isNotUnderVcs(@Nullable ContentRevision revision) {
       if (revision == null) return true;
-      return ReadAction.compute(() -> {
-        if (project.isDisposed()) return false;
-        return ProjectLevelVcsManager.getInstance(project).isIgnored(revision.getFile());
-      });
+      return myVcsManager.getVcsFor(revision.getFile()) == null;
     }
-
 
     public void notifyDoneProcessingChanges(@NotNull DelayedNotificator dispatcher, @Nullable VcsDirtyScope scope) {
       List<ChangeList> changedLists = new ArrayList<>();

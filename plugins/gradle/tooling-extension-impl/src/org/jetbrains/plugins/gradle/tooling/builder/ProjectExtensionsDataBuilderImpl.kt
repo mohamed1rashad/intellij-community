@@ -1,17 +1,23 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.tooling.builder
 
 import com.intellij.gradle.toolingExtension.impl.modelBuilder.Messages
-import com.intellij.gradle.toolingExtension.impl.util.GradleConventionUtil
-import com.intellij.gradle.toolingExtension.impl.util.GradleConventionUtil.getConventionPlugins
+import com.intellij.gradle.toolingExtension.util.GradleConventionUtil
+import com.intellij.gradle.toolingExtension.util.GradleConventionUtil.getConventionPlugins
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil
+import com.intellij.gradle.toolingExtension.util.GradleVersionUtil.isCurrentGradleAtLeast
 import groovy.lang.Closure
 import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.plugins.ExtensionContainer
 import org.gradle.api.reflect.HasPublicType
-import org.jetbrains.plugins.gradle.model.*
+import org.jetbrains.plugins.gradle.model.DefaultGradleConfiguration
+import org.jetbrains.plugins.gradle.model.DefaultGradleConvention
+import org.jetbrains.plugins.gradle.model.DefaultGradleExtension
+import org.jetbrains.plugins.gradle.model.DefaultGradleExtensions
+import org.jetbrains.plugins.gradle.model.DefaultGradleProperty
+import org.jetbrains.plugins.gradle.model.GradleExtensions
 import org.jetbrains.plugins.gradle.tooling.Message
 import org.jetbrains.plugins.gradle.tooling.ModelBuilderContext
 import org.jetbrains.plugins.gradle.tooling.ModelBuilderService
@@ -83,13 +89,24 @@ class ProjectExtensionsDataBuilderImpl : ModelBuilderService {
       val result = mutableListOf<DefaultGradleConfiguration>()
       for (configurationName in configurations.names) {
         val configuration = configurations.getByName(configurationName)
-        val description = configuration.description
         val visible = if (GradleVersionUtil.isCurrentGradleOlderThan("9.1")) { configuration.isVisible } else { true }
-        val declarationAlternatives = getDeclarationAlternatives(configuration)
-        result.add(DefaultGradleConfiguration(configurationName, description, visible, scriptClasspathConfiguration, declarationAlternatives))
+        result.add(
+          DefaultGradleConfiguration(
+            configurationName,
+            configuration.description,
+            visible,
+            scriptClasspathConfiguration,
+            getDeclarationAlternatives(configuration),
+            canBeDeclared(configuration)
+          )
+        )
       }
       return result
     }
+
+    private fun canBeDeclared(configuration: Configuration): Boolean? =
+      if (isCurrentGradleAtLeast("8.2")) configuration.isCanBeDeclared
+      else null
 
     private fun getDeclarationAlternatives(configuration: Configuration): List<String> {
       try {
@@ -110,7 +127,7 @@ class ProjectExtensionsDataBuilderImpl : ModelBuilderService {
         return emptyList()
       }
       val result = mutableListOf<DefaultGradleConvention>()
-      if (GradleConventionUtil.isGradleConventionsSupported()) {
+      if (  GradleConventionUtil.isGradleConventionsSupported()) {
         getConventionPlugins(project).forEach { (key, value) ->
           result.add(DefaultGradleConvention(key, getType(value)))
         }

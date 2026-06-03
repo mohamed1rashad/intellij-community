@@ -3,10 +3,17 @@ package com.intellij.openapi.roots.ui.configuration.projectRoot;
 
 import com.google.common.collect.Sets;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.*;
-import com.intellij.openapi.diagnostic.ControlFlowException;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.TransactionGuard;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.progress.*;
+import com.intellij.openapi.progress.PerformInBackgroundOption;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Progressive;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.progress.util.ProgressIndicatorBase;
 import com.intellij.openapi.progress.util.ProgressIndicatorListener;
 import com.intellij.openapi.progress.util.RelayUiToDelegateIndicator;
@@ -32,8 +39,14 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.File;
-import java.util.*;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -198,7 +211,7 @@ public final class SdkDownloadTracker {
       }
 
       @Override
-      protected void handleDownloadError(@NotNull SdkType type, @NotNull @Nls String title, @NotNull Throwable exception) {
+      protected void handleDownloadError(@NotNull SdkType type, @NotNull @Nls String title, @NotNull IOException exception) {
         throw new RuntimeException("Failed to download and configure " + type.getPresentableName() + " for "
                          + myEditableSdks.copy() + ". " + exception.getMessage(), exception);
       }
@@ -354,14 +367,18 @@ public final class SdkDownloadTracker {
             }
 
             // make sure VFS has the right image of our SDK to avoid empty SDK from being created
-            VfsUtil.markDirtyAndRefresh(false, true, true, new File(myTask.getPlannedHomeDir()));
+            VfsUtil.markDirtyAndRefresh(false, true, true, Path.of(myTask.getPlannedHomeDir()));
 
             //update the pending SDKs
             onSdkDownloadCompletedSuccessfully();
           }
-          catch (Throwable e) {
+          catch (CancellationException e) {
             failed = true;
-            if (!myProgressIndicator.isCanceled() && !(e instanceof ControlFlowException)) {
+            throw e;
+          }
+          catch (IOException e) {
+            failed = true;
+            if (!myProgressIndicator.isCanceled()) {
               handleDownloadError(type, title, e);
             }
           }
@@ -375,11 +392,11 @@ public final class SdkDownloadTracker {
       runTask(title, taskAction);
     }
 
-    protected void handleDownloadError(@NotNull SdkType type, @NotNull @Nls String title, @NotNull Throwable exception) {
+    protected void handleDownloadError(@NotNull SdkType type, @NotNull @Nls String title, @NotNull IOException exception) {
       LOG.warn("SDK Download failed. " + exception.getMessage(), exception);
       if (ApplicationManager.getApplication().isUnitTestMode()) return;
       myModalityTracker.invokeLater(() -> {
-        Messages.showErrorDialog(ProjectBundle.message("error.message.sdk.download.failed", type.getPresentableName()), title);
+        Messages.showErrorDialog(ProjectBundle.message("error.message.sdk.download.failed", type.getPresentableName(), exception), title);
       });
     }
 

@@ -1,6 +1,6 @@
 ### auto-generated section `build intellij.platform.jewel.intUi.standalone` start
 load("//build:compiler-options.bzl", "create_kotlinc_options")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 create_kotlinc_options(
   name = "custom_jewel-intUi-standalone",
@@ -14,29 +14,54 @@ create_kotlinc_options(
   x_explicit_api_mode = "strict"
 )
 
-resourcegroup(
-  name = "jewel-intUi-standalone_resources",
-  srcs = glob(["src/main/resources/**/*"]),
-  strip_prefix = "src/main/resources"
-)
-
 jvm_library(
   name = "jewel-intUi-standalone",
   module_name = "intellij.platform.jewel.intUi.standalone",
   visibility = ["//visibility:public"],
-  srcs = glob(["src/main/kotlin/**/*.kt", "src/main/kotlin/**/*.java", "src/main/kotlin/**/*.form", "generated/**/*.kt", "generated/**/*.java"], allow_empty = True),
-  resources = [":jewel-intUi-standalone_resources"],
+  srcs = glob(["src/main/kotlin/**/*.kt", "src/main/kotlin/**/*.java", "src/main/kotlin/**/*.form", "generated/theme/**/*.kt", "generated/theme/**/*.java"], allow_empty = True),
+  resources = glob(["src/main/resources/**/*"]),
+  resource_strip_prefix = "src/main/resources",
   kotlinc_opts = ":custom_jewel-intUi-standalone",
   deps = [
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/coroutines/core",
     "//libraries/skiko",
     "@lib//:jetbrains-annotations",
     "//platform/jewel/ui",
     "//libraries/compose-foundation-desktop",
+    "//libraries/compose-runtime-desktop",
     "//platform/jewel/foundation",
     "//libraries/jbr",
-  ],
-  plugins = ["@lib//:compose-plugin"]
+    "@lib//:jna",
+    "//platform/icons-api",
+    "//platform/icons-impl",
+  ]
+)
+
+jvm_library(
+  name = "jewel-intUi-standalone_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.jewel.intUi.standalone",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_jewel-intUi-standalone",
+  runtime_deps = [
+    ":jewel-intUi-standalone",
+    "//libraries/kotlinx/coroutines/core:core_test_lib",
+    "//libraries/skiko:skiko_test_lib",
+    "//platform/jewel/ui:ui_test_lib",
+    "//libraries/compose-foundation-desktop:compose-foundation-desktop_test_lib",
+    "//libraries/compose-runtime-desktop:compose-runtime-desktop_test_lib",
+    "//platform/jewel/foundation:foundation_test_lib",
+    "//libraries/jbr:jbr_test_lib",
+    "//platform/icons-api:icons-api_test_lib",
+    "//platform/icons-impl:icons-impl_test_lib",
+  ]
 )
 ### auto-generated section `build intellij.platform.jewel.intUi.standalone` end
+
+### auto-generated section `iml intellij.platform.jewel.intUi.standalone` start
+exports_files([
+  "intellij.platform.jewel.intUi.standalone.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.jewel.intUi.standalone` end

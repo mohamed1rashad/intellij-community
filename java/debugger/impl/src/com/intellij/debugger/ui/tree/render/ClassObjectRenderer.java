@@ -8,12 +8,17 @@ import com.intellij.debugger.engine.FullValueEvaluatorProvider;
 import com.intellij.debugger.engine.JavaValue;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.PsiNavigateUtil;
 import com.intellij.xdebugger.impl.ui.DebuggerUIUtil;
-import com.sun.jdi.*;
+import com.sun.jdi.ClassType;
+import com.sun.jdi.Method;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.StringReference;
+import com.sun.jdi.Value;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collections;
@@ -52,7 +57,7 @@ final class ClassObjectRenderer extends CompoundRendererProvider {
               if (res instanceof StringReference) {
                 callback.evaluated("");
                 String className = ((StringReference)res).value();
-                ApplicationManager.getApplication().runReadAction(() -> {
+                ReadAction.runBlocking(() -> {
                   PsiClass psiClass = DebuggerUtils.findClass(className, valueDescriptor.getProject(), process.getSearchScope());
                   if (psiClass != null) {
                     PsiElement element = psiClass.getNavigationElement(); // do not do this in EDT

@@ -6,11 +6,10 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.platform.debugger.impl.rpc.XBreakpointTypeApi
 import com.intellij.platform.debugger.impl.rpc.XBreakpointTypeDto
+import com.intellij.platform.debugger.impl.rpc.XBreakpointTypeId
+import com.intellij.platform.debugger.impl.shared.proxy.XBreakpointTypeProxy
+import com.intellij.platform.debugger.impl.shared.proxy.XLineBreakpointTypeProxy
 import com.intellij.platform.project.projectId
-import com.intellij.xdebugger.impl.breakpoints.XBreakpointTypeProxy
-import com.intellij.xdebugger.impl.breakpoints.XLineBreakpointTypeProxy
-import com.intellij.xdebugger.impl.rpc.XBreakpointTypeId
-import fleet.multiplatform.shims.ConcurrentHashMap
 import fleet.rpc.client.durable
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -19,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 
 @Service(Service.Level.PROJECT)
@@ -34,19 +34,19 @@ internal class FrontendXBreakpointTypesManager(
     cs.launch {
       durable {
         val (initialBreakpointTypes, breakpointTypesFlow) = XBreakpointTypeApi.getInstance().getBreakpointTypeList(project.projectId())
-        handleBreakpointTypesFromBackend(initialBreakpointTypes)
+        handleBreakpointTypesFromBackend(cs, initialBreakpointTypes)
         typesInitialized.complete(Unit)
         breakpointTypesFlow.toFlow().collectLatest {
-          handleBreakpointTypesFromBackend(it)
+          handleBreakpointTypesFromBackend(cs, it)
           typesChanged.tryEmit(Unit)
         }
       }
     }
   }
 
-  private fun handleBreakpointTypesFromBackend(breakpointTypes: List<XBreakpointTypeDto>) {
+  private fun handleBreakpointTypesFromBackend(cs: CoroutineScope, breakpointTypes: List<XBreakpointTypeDto>) {
     for (dto in breakpointTypes) {
-      types.putIfAbsent(dto.id, createFrontendXBreakpointType(project, dto))
+      types.putIfAbsent(dto.id, createFrontendXBreakpointType(project, cs, dto))
     }
     val typesToRemove = types.keys - breakpointTypes.map { it.id }.toSet()
     for (typeToRemove in typesToRemove) {

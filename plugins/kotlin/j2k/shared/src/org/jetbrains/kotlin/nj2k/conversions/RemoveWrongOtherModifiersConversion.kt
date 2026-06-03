@@ -4,18 +4,23 @@ package org.jetbrains.kotlin.nj2k.conversions
 
 import org.jetbrains.kotlin.j2k.ConverterContext
 import org.jetbrains.kotlin.nj2k.RecursiveConversion
-import org.jetbrains.kotlin.nj2k.tree.*
+import org.jetbrains.kotlin.nj2k.tree.JKClass
 import org.jetbrains.kotlin.nj2k.tree.JKClass.ClassKind.OBJECT
+import org.jetbrains.kotlin.nj2k.tree.JKField
+import org.jetbrains.kotlin.nj2k.tree.JKMethod
+import org.jetbrains.kotlin.nj2k.tree.JKOtherModifiersOwner
+import org.jetbrains.kotlin.nj2k.tree.JKTreeElement
 import org.jetbrains.kotlin.nj2k.tree.OtherModifier.INNER
 import org.jetbrains.kotlin.nj2k.tree.OtherModifier.STATIC
+import org.jetbrains.kotlin.nj2k.tree.elementByModifier
 
 class RemoveWrongOtherModifiersConversion(context: ConverterContext) : RecursiveConversion(context) {
     override fun applyToElement(element: JKTreeElement): JKTreeElement {
         if (element !is JKOtherModifiersOwner) return recurse(element)
 
-        val modifierToRemove = when {
-            element is JKMethod -> STATIC
-            element is JKClass && element.classKind == OBJECT -> INNER
+        val modifierToRemove = when (element) {
+            is JKMethod, is JKField -> STATIC
+            is JKClass if element.classKind == OBJECT -> INNER
             else -> null
         }
 

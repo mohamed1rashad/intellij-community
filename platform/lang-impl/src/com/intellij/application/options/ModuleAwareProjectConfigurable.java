@@ -20,8 +20,12 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.ListSelectionModel;
+import java.awt.CardLayout;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,7 +122,7 @@ public abstract class ModuleAwareProjectConfigurable<T extends UnnamedConfigurab
         return configurable;
       }));
     }
-    moduleList.addListSelectionListener(__ -> showModuleConfigurable(layout, cardPanel, moduleList.getSelectedValue()));
+    moduleList.addListSelectionListener(_ -> showModuleConfigurable(layout, cardPanel, moduleList.getSelectedValue()));
 
     if (moduleList.getItemsCount() > 0) {
       moduleList.setSelectedIndex(0);

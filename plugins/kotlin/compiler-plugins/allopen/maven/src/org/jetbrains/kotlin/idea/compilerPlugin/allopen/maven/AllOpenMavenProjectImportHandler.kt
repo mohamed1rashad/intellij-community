@@ -2,33 +2,40 @@
 
 package org.jetbrains.kotlin.idea.compilerPlugin.allopen.maven
 
+import com.intellij.openapi.project.Project
+import com.intellij.util.text.VersionComparatorUtil
 import org.jetbrains.idea.maven.project.MavenProject
 import org.jetbrains.kotlin.allopen.AllOpenPluginNames.ANNOTATION_OPTION_NAME
 import org.jetbrains.kotlin.allopen.AllOpenPluginNames.PLUGIN_ID
 import org.jetbrains.kotlin.allopen.AllOpenPluginNames.SUPPORTED_PRESETS
 import org.jetbrains.kotlin.idea.base.plugin.artifacts.KotlinArtifacts
 import org.jetbrains.kotlin.idea.compilerPlugin.CompilerPluginSetup.PluginOption
-import org.jetbrains.kotlin.idea.jps.toJpsVersionAgnosticKotlinBundledPath
 import org.jetbrains.kotlin.idea.maven.compilerPlugin.AbstractMavenImportHandler
+import org.jetbrains.kotlin.idea.maven.getKotlinPlugin
+import java.nio.file.Path
 
-class AllOpenMavenProjectImportHandler : AbstractMavenImportHandler() {
-    override val compilerPluginId = PLUGIN_ID
-    override val pluginName = "allopen"
-    override val mavenPluginArtifactName = "kotlin-maven-allopen"
-    override val pluginJarFileFromIdea = KotlinArtifacts.allopenCompilerPlugin.toJpsVersionAgnosticKotlinBundledPath()
+class AllOpenMavenProjectImportHandler(project: Project) : AbstractMavenImportHandler(project) {
+    override val compilerPluginId: String = PLUGIN_ID
+    override val pluginName: String = "allopen"
+    override val mavenPluginArtifactName: String = "kotlin-maven-allopen"
+    override val pluginJarFileFromIdea: Path = KotlinArtifacts.allopenCompilerPluginPath
 
     override fun getOptions(
         mavenProject: MavenProject,
         enabledCompilerPlugins: List<String>,
         compilerPluginOptions: List<String>
     ): List<PluginOption>? {
-        if ("all-open" !in enabledCompilerPlugins && "spring" !in enabledCompilerPlugins) {
+        if ("all-open" !in enabledCompilerPlugins &&
+            "spring" !in enabledCompilerPlugins &&
+            !mavenProject.isJpaWithAllOpenEnabled(enabledCompilerPlugins)
+        ) {
             return null
         }
 
         val annotations = mutableListOf<String>()
 
         for ((presetName, presetAnnotations) in SUPPORTED_PRESETS) {
+            if (presetName == "jpa" && !mavenProject.isKotlinPluginIncludesExtendedListOfJpaOptions()) continue
             if (presetName in enabledCompilerPlugins) {
                 annotations.addAll(presetAnnotations)
             }
@@ -40,6 +47,16 @@ class AllOpenMavenProjectImportHandler : AbstractMavenImportHandler() {
         })
 
         return annotations.map { PluginOption(ANNOTATION_OPTION_NAME, it) }
+    }
+
+    private fun MavenProject.isJpaWithAllOpenEnabled(
+        enabledCompilerPlugins: List<String>
+    ): Boolean =
+        "jpa" in enabledCompilerPlugins && isKotlinPluginIncludesExtendedListOfJpaOptions()
+
+    private fun MavenProject.isKotlinPluginIncludesExtendedListOfJpaOptions(): Boolean {
+        val kotlinPluginVersion = getKotlinPlugin().version
+        return VersionComparatorUtil.compare(kotlinPluginVersion, "2.3.20-Beta2") >= 0
     }
 }
 

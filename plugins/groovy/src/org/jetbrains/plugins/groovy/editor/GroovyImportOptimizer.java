@@ -2,12 +2,17 @@
 package org.jetbrains.plugins.groovy.editor;
 
 import com.intellij.lang.ImportOptimizer;
-import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.EmptyRunnable;
 import com.intellij.openapi.util.NotNullComputable;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileFactory;
+import com.intellij.psi.PsiPackage;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import org.jetbrains.annotations.NotNull;
@@ -18,7 +23,14 @@ import org.jetbrains.plugins.groovy.lang.psi.api.toplevel.imports.GrImportStatem
 import org.jetbrains.plugins.groovy.lang.psi.util.GroovyImportUtil;
 import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class GroovyImportOptimizer implements ImportOptimizer {
   public static Comparator<GrImportStatement> getComparator(final GroovyCodeStyleSettings settings) {
@@ -91,10 +103,7 @@ public final class GroovyImportOptimizer implements ImportOptimizer {
         if (tempFile.getText().trim().equals(oldText)) return EmptyRunnable.getInstance();
       }
       return () -> {
-        final PsiDocumentManager documentManager = PsiDocumentManager.getInstance(myFile.getProject());
-        final Document document = documentManager.getDocument(myFile);
-        if (document != null) documentManager.commitDocument(document);
-
+        PsiDocumentManager.getInstance(myFile.getProject()).commitDocument(myFile.getFileDocument());
         List<GrImportStatement> existingImports = PsiUtil.getValidImportStatements(myFile);
 
         for (GrImportStatement statement : tempFile.getImportStatements()) {

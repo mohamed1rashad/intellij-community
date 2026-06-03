@@ -2,6 +2,7 @@
 package com.intellij.platform.backend.observation
 
 import com.intellij.concurrency.IntelliJContextElement
+import com.intellij.concurrency.IntelliJThreadContextElement
 import com.intellij.concurrency.currentThreadContext
 import com.intellij.concurrency.installThreadContext
 import com.intellij.openapi.components.Service
@@ -10,9 +11,13 @@ import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.registry.Registry
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.VisibleForTesting
 import java.util.concurrent.ConcurrentHashMap
@@ -109,7 +114,7 @@ internal class PlatformActivityTrackerService(private val scope: CoroutineScope)
   }
 
 
-  internal class ObservationTracker(private val mainJob: Job, val currentJob: CompletableJob) : AbstractCoroutineContextElement(Key), IntelliJContextElement {
+  internal class ObservationTracker(private val mainJob: Job, val currentJob: CompletableJob) : AbstractCoroutineContextElement(Key), IntelliJThreadContextElement<Unit> {
     companion object Key : CoroutineContext.Key<ObservationTracker>
 
     override fun produceChildElement(oldContext: CoroutineContext, isStructured: Boolean): IntelliJContextElement {
@@ -119,13 +124,16 @@ internal class PlatformActivityTrackerService(private val scope: CoroutineScope)
       return ObservationTracker(mainJob, newJob)
     }
 
-    override fun afterChildCompleted(context: CoroutineContext) {
+    override fun beforeStarted(context: CoroutineContext) {
+    }
+
+    override fun afterCompleted(context: CoroutineContext, oldState: Unit) {
       removeObservedComputation(currentJob)
       currentJob.complete()
     }
 
-    override fun childCanceled(context: CoroutineContext) {
-      afterChildCompleted(context)
+    override fun canceled(context: CoroutineContext) {
+      afterCompleted(context, Unit)
     }
   }
 

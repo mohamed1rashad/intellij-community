@@ -4,25 +4,36 @@ package com.intellij.ui;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.ui.render.RenderingUtil;
 import com.intellij.util.Function;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
+import kotlin.jvm.functions.Function1;
 import org.jetbrains.annotations.NotNull;
 import sun.swing.DefaultLookup;
 
-import javax.swing.*;
+import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.plaf.basic.BasicHTML;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Rectangle;
 
 /**
- * JBLabel-based (text and icon) list cell renderer.
- *
- * @see ColoredListCellRenderer for more complex SimpleColoredComponent-based variant.
+ * JBLabel-based (text and icon) list cell renderer. Will be replaced by {@link BuilderKt#listCellRenderer(Function1)} and
+ * {@link BuilderKt#textListCellRenderer(Function1)} in the future.
  *
  * @author gregsh
  */
 public abstract class SimpleListCellRenderer<T> extends JBLabel implements ListCellRenderer<T> {
+
+  /**
+   * @deprecated Doesn't support rounded selection.
+   * Use {@link BuilderKt#textListCellRenderer(String, Function1)} instead.
+   */
+  @Deprecated(forRemoval = true)
   public static @NotNull <T> SimpleListCellRenderer<T> create(@NotNull @NlsContexts.Label String nullValue,
                                                                         @NotNull Function<? super T, @NlsContexts.Label String> getText) {
     return new SimpleListCellRenderer<>() {
@@ -33,6 +44,11 @@ public abstract class SimpleListCellRenderer<T> extends JBLabel implements ListC
     };
   }
 
+  /**
+   * @deprecated Doesn't support rounded selection.
+   * Use {@link com.intellij.ui.dsl.listCellRenderer.BuilderKt#listCellRenderer(String, Function1)} instead.
+   */
+  @Deprecated(forRemoval = true)
   public static @NotNull <T> SimpleListCellRenderer<T> create(@NotNull Customizer<? super T> customizer) {
     return new SimpleListCellRenderer<>() {
       @Override
@@ -64,6 +80,11 @@ public abstract class SimpleListCellRenderer<T> extends JBLabel implements ListC
     setIcon(null);
     customize(list, value, index, isSelected, cellHasFocus);
     setOpaque(isSelected);
+
+    if (!isSelected) {
+      UIUtil.applyDeprecatedBackground(this);
+    }
+
     return this;
   }
 

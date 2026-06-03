@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.project
 
 import com.intellij.ide.lightEdit.LightEditCompatible
@@ -12,24 +12,31 @@ import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.extensions.ProjectExtensionPointName
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.project.DumbService.Companion.DUMB_MODE
-import com.intellij.openapi.project.DumbService.Companion.isDumb
 import com.intellij.openapi.project.DumbService.Companion.isDumbAware
 import com.intellij.openapi.roots.FileIndexFacade
-import com.intellij.openapi.util.*
+import com.intellij.openapi.util.Computable
+import com.intellij.openapi.util.ModificationTracker
+import com.intellij.openapi.util.NlsContexts
+import com.intellij.openapi.util.Ref
+import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.util.ThrowableRunnable
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresBlockingContext
+import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.messages.Topic
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
-import org.jetbrains.annotations.*
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Experimental
 import org.jetbrains.annotations.ApiStatus.Obsolete
-import java.util.*
+import org.jetbrains.annotations.Contract
+import org.jetbrains.annotations.NonNls
+import org.jetbrains.annotations.TestOnly
+import org.jetbrains.annotations.Unmodifiable
+import java.util.Collections
 import javax.swing.JComponent
 
 /**
@@ -138,6 +145,12 @@ abstract class DumbService {
     - `NonBlockingReadAction(...).inSmartMode()` 
   """)
   fun <T> runReadActionInSmartMode(r: Computable<T>): T {
+    if (ApplicationManager.getApplication().isReadAccessAllowed) {
+      // we can't wait for smart mode to begin (it'd result in a deadlock),
+      // so let's just pretend it's already smart and fail with IndexNotReadyException if not
+      return r.compute()
+    }
+
     val result = Ref<T>()
     runReadActionInSmartMode { result.set(r.compute()) }
     return result.get()
@@ -146,7 +159,7 @@ abstract class DumbService {
   /**
    * Backward compatibility for plugins, use [tryRunReadActionInSmartMode] with [DumbModeBlockedFunctionality] instead
    */
-  @Obsolete
+  @Deprecated("Use smartReadAction or ReadAction.nonBlocking() with .inSmartMode()")
   fun <T> tryRunReadActionInSmartMode(task: Computable<T>,
                                       notification: @NlsContexts.PopupContent String?): T? {
     return tryRunReadActionInSmartMode(task, notification, DumbModeBlockedFunctionality.Other)
@@ -155,9 +168,10 @@ abstract class DumbService {
   /**
    * WARNING: this method does not guarantee that Indexes are available if called under read action.
    *
-   * Consider using [com.intellij.openapi.application.smartReadAction] or
+   * Use [com.intellij.openapi.application.smartReadAction] or
    * [com.intellij.openapi.application.NonBlockingReadAction] with `inSmartMode` option.
    */
+  @Deprecated("Use smartReadAction or ReadAction.nonBlocking() with .inSmartMode()")
   fun <T> tryRunReadActionInSmartMode(task: Computable<T>,
                                       notification: @NlsContexts.PopupContent String?,
                                       functionality: DumbModeBlockedFunctionality): T? {
@@ -193,7 +207,7 @@ abstract class DumbService {
     This method is dangerous because it does not provide any guaranties if it is called inside another read action.
     Instead, consider using  
     - `com.intellij.openapi.application.smartReadAction` 
-    - `NonBlockingReadAction(...).inSmartMode()` 
+    - `ReadAction.nonBlocking(...).inSmartMode()` 
   """)
   fun runReadActionInSmartMode(r: Runnable) {
     if (ApplicationManager.getApplication().isReadAccessAllowed) {
@@ -204,12 +218,12 @@ abstract class DumbService {
     }
     while (true) {
       waitForSmartMode()
-      val success = ReadAction.compute<Boolean, RuntimeException> {
+      val success = ReadAction.computeBlocking<Boolean, RuntimeException> {
         if (project.isDisposed) {
           throw ProcessCanceledException()
         }
         if (isDumb) {
-          return@compute false
+          return@computeBlocking false
         }
         r.run()
         true
@@ -478,19 +492,20 @@ abstract class DumbService {
   abstract fun runWithWaitForSmartModeDisabled(): AccessToken
 
   /**
+   * This listener is always invoked on EDT after dumb mode changes.
+   * There is no guarantee that this listener runs synchronously with modification of dumb mode status.
+   * Consider using [DumbModeListenerBackgroundable]
+   *
    * @see [DUMB_MODE]
    */
   interface DumbModeListener {
-    /**
-     * The event arrives to EDT thread.
-     */
+    @RequiresEdt
     fun enteredDumbMode() {}
 
-    /**
-     * The event arrives to EDT thread.
-     */
+    @RequiresEdt
     fun exitDumbMode() {}
   }
+
 
   @ApiStatus.Internal
   abstract fun unsafeRunWhenSmart(runnable: Runnable)
@@ -558,7 +573,6 @@ abstract class DumbService {
     }
 
     @JvmStatic
-    @RequiresBlockingContext
     fun getInstance(project: Project): DumbService = project.service()
 
     @JvmStatic

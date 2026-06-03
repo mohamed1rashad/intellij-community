@@ -3,6 +3,7 @@ package com.jetbrains.python.sdk.add.v2.conda
 
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.observable.properties.AtomicBooleanProperty
+import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.observable.util.transform
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.ui.ComboBox
@@ -10,19 +11,33 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.validation.DialogValidationRequestor
 import com.intellij.openapi.ui.validation.WHEN_PROPERTY_CHANGED
 import com.intellij.openapi.ui.validation.and
+import com.intellij.platform.util.progress.withProgressText
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.Panel
 import com.intellij.ui.dsl.builder.bindItem
-import com.intellij.util.ui.JBUI
 import com.jetbrains.python.PyBundle.message
 import com.jetbrains.python.Result
-import com.jetbrains.python.errorProcessing.ErrorSink
+import com.jetbrains.python.conda.saveLocalPythonCondaPath
 import com.jetbrains.python.errorProcessing.PyResult
 import com.jetbrains.python.newProject.collector.InterpreterStatisticsInfo
 import com.jetbrains.python.sdk.ModuleOrProject
-import com.jetbrains.python.sdk.add.v2.*
+import com.jetbrains.python.sdk.add.v2.CondaEnvComboBoxListCellRenderer
+import com.jetbrains.python.sdk.add.v2.PathHolder
+import com.jetbrains.python.sdk.add.v2.PythonAddInterpreterModel
+import com.jetbrains.python.sdk.add.v2.PythonExistingEnvironmentConfigurator
+import com.jetbrains.python.sdk.add.v2.PythonInterpreterCreationTargets
+import com.jetbrains.python.sdk.add.v2.ValidatedPath
+import com.jetbrains.python.sdk.add.v2.ValidatedPathField
+import com.intellij.python.pytools.Version
+import com.jetbrains.python.sdk.add.v2.withAdjustedWidth
+import com.jetbrains.python.sdk.add.v2.createInstallCondaFix
+import com.jetbrains.python.sdk.add.v2.displayLoaderWhen
+import com.jetbrains.python.sdk.add.v2.savePathForEelOnly
+import com.jetbrains.python.sdk.add.v2.toStatisticsField
+import com.jetbrains.python.sdk.add.v2.validatablePathField
+import com.jetbrains.python.sdk.add.v2.withExtendableTextFieldEditor
 import com.jetbrains.python.sdk.flavors.conda.PyCondaEnv
 import com.jetbrains.python.sdk.flavors.conda.PyCondaEnvIdentity
 import com.jetbrains.python.statistics.InterpreterCreationMode
@@ -38,12 +53,15 @@ import java.awt.event.ActionEvent
 import javax.swing.AbstractAction
 
 
-internal class CondaExistingEnvironmentSelector<P : PathHolder>(model: PythonAddInterpreterModel<P>, private val errorSink: ErrorSink) : PythonExistingEnvironmentConfigurator<P>(model) {
+internal class CondaExistingEnvironmentSelector<P : PathHolder>(model: PythonAddInterpreterModel<P>) : PythonExistingEnvironmentConfigurator<P>(model) {
   private lateinit var envComboBox: ComboBox<PyCondaEnv?>
   private lateinit var condaExecutable: ValidatedPathField<Version, P, ValidatedPath.Executable<P>>
   private lateinit var reloadLink: ActionLink
   private val isReloadLinkVisible = AtomicBooleanProperty(false)
-
+  override val toolExecutable: ObservableProperty<ValidatedPath.Executable<P>?> = model.condaViewModel.condaExecutable
+  override val toolExecutablePersister: suspend (P) -> Unit = { pathHolder ->
+    savePathForEelOnly(pathHolder) { path -> saveLocalPythonCondaPath(path) }
+  }
 
   override fun setupUI(panel: Panel, validationRequestor: DialogValidationRequestor) {
     with(panel) {
@@ -53,7 +71,7 @@ internal class CondaExistingEnvironmentSelector<P : PathHolder>(model: PythonAdd
         validationRequestor = validationRequestor,
         labelText = message("sdk.create.custom.venv.executable.path", "conda"),
         missingExecutableText = message("sdk.create.custom.venv.missing.text", "conda"),
-        installAction = createInstallCondaFix(model, errorSink)
+        installAction = createInstallCondaFix(model)
       )
 
       rowsRange {
@@ -89,7 +107,7 @@ internal class CondaExistingEnvironmentSelector<P : PathHolder>(model: PythonAdd
             }
             .align(Align.FILL)
             .applyToComponent {
-              preferredSize = JBUI.size(preferredSize)
+              preferredSize = preferredSize.withAdjustedWidth
             }
             .component
         }
@@ -110,13 +128,15 @@ internal class CondaExistingEnvironmentSelector<P : PathHolder>(model: PythonAdd
     scope.launch(Dispatchers.EDT) {
       model.condaViewModel.condaEnvironmentsResult.collectLatest { environmentsResult ->
         envComboBox.removeAllItems()
-        environmentsResult?.successOrNull?.forEach(envComboBox::addItem)
+        val environments = environmentsResult?.successOrNull ?: return@collectLatest
+        environments.forEach(envComboBox::addItem)
+        model.condaViewModel.updateSelection(environments)
       }
     }
 
     reloadLink.action = object : AbstractAction(message("sdk.create.custom.conda.refresh.envs")) {
       override fun actionPerformed(e: ActionEvent?) {
-        model.condaViewModel.detectCondaEnvironments()
+        model.condaViewModel.detectCondaEnvironments(forceRefresh = true)
       }
     }
 
@@ -130,14 +150,12 @@ internal class CondaExistingEnvironmentSelector<P : PathHolder>(model: PythonAdd
       scope = scope,
     )
     condaExecutable.initialize(scope)
-    condaExecutable.displayLoaderWhen(
-      loading = model.condaViewModel.condaEnvironmentsLoading,
-      scope = scope,
-    )
   }
 
   override suspend fun getOrCreateSdk(moduleOrProject: ModuleOrProject): PyResult<Sdk> {
-    return model.selectCondaEnvironment(moduleOrProject, base = false)
+    return withProgressText(message("python.sdk.progress.conda.configuring")) {
+      model.selectCondaEnvironment(moduleOrProject, base = false)
+    }
   }
 
   override fun createStatisticsInfo(target: PythonInterpreterCreationTargets): InterpreterStatisticsInfo {

@@ -3,7 +3,6 @@ package org.jetbrains.plugins.terminal.arrangement;
 
 import com.intellij.execution.ExecutionException
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.ijent.IjentChildPtyProcessAdapter
 import com.intellij.execution.process.CapturingProcessRunner
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.openapi.components.Service
@@ -12,11 +11,16 @@ import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.platform.ijent.IjentChildPtyProcessAdapter
 import com.intellij.util.system.OS
 import com.pty4j.windows.conpty.WinConPtyProcess
 import com.pty4j.windows.winpty.WinPtyProcess
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Paths
 

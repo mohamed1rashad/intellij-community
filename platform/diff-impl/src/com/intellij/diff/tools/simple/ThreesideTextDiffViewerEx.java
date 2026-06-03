@@ -1,17 +1,29 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.simple;
 
 import com.intellij.diff.DiffContext;
 import com.intellij.diff.fragments.MergeLineFragment;
 import com.intellij.diff.requests.ContentDiffRequest;
-import com.intellij.diff.tools.util.*;
+import com.intellij.diff.tools.util.BaseSyncScrollable;
+import com.intellij.diff.tools.util.DiffChangedRangeProvider;
+import com.intellij.diff.tools.util.DiffDataKeys;
+import com.intellij.diff.tools.util.DiffSplitter;
+import com.intellij.diff.tools.util.FoldingModelSupport;
+import com.intellij.diff.tools.util.PrevNextDifferenceIterable;
+import com.intellij.diff.tools.util.PrevNextDifferenceIterableBase;
+import com.intellij.diff.tools.util.StatusPanel;
+import com.intellij.diff.tools.util.SyncScrollSupport;
 import com.intellij.diff.tools.util.base.TextDiffViewerUtil;
 import com.intellij.diff.tools.util.side.ThreesideContentPanel;
 import com.intellij.diff.tools.util.side.ThreesideTextDiffViewer;
-import com.intellij.diff.tools.util.text.LineOffsets;
-import com.intellij.diff.util.*;
+import com.intellij.diff.util.DiffDividerDrawUtil;
 import com.intellij.diff.util.DiffDividerDrawUtil.DividerPaintable;
+import com.intellij.diff.util.DiffDrawUtil;
 import com.intellij.diff.util.DiffUserDataKeysEx.ScrollToPolicy;
+import com.intellij.diff.util.DiffUtil;
+import com.intellij.diff.util.LineRange;
+import com.intellij.diff.util.Side;
+import com.intellij.diff.util.ThreeSide;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataSink;
@@ -29,8 +41,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.Component;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.util.Iterator;
 import java.util.List;
 
@@ -417,16 +431,6 @@ public abstract class ThreesideTextDiffViewerEx extends ThreesideTextDiffViewer 
     public @Nullable Data createState(@Nullable List<? extends MergeLineFragment> fragments,
                                       @NotNull FoldingModelSupport.Settings settings) {
       return createState(fragments, countLines(myEditors), settings);
-    }
-
-    public @Nullable Data createState(@Nullable List<? extends MergeLineFragment> fragments,
-                                      @NotNull List<? extends LineOffsets> lineOffsets,
-                                      @NotNull FoldingModelSupport.Settings settings) {
-      int[] lineCount = new int[myEditors.length];
-      for (int i = 0; i < myEditors.length; i++) {
-        lineCount[i] = lineOffsets.get(i).getLineCount();
-      }
-      return createState(fragments, lineCount, settings);
     }
 
     private @Nullable Data createState(@Nullable List<? extends MergeLineFragment> fragments,

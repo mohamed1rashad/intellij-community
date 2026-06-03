@@ -5,10 +5,6 @@ import org.jetbrains.kotlin.analysis.api.diagnostics.KaDiagnosticWithPsi
 import org.jetbrains.kotlin.analysis.api.fir.diagnostics.KaFirDiagnostic
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
 
-/**
- * Note: generic unresolved references registration is handled
- * by [org.jetbrains.kotlin.idea.k2.codeinsight.fixes.KotlinFirUnresolvedReferenceQuickFixProvider]
- */
 object ImportQuickFixFactories {
     val invisibleReferenceFactory: KotlinQuickFixFactory.IntentionBased<KaFirDiagnostic.InvisibleReference> =
         ImportQuickFixProvider.upcast()
@@ -29,6 +25,9 @@ object ImportQuickFixFactories {
         ImportQuickFixProvider.upcast()
 
     val noValueForParameterFactory: KotlinQuickFixFactory.IntentionBased<KaFirDiagnostic.NoValueForParameter> =
+        ImportQuickFixProvider.upcast()
+
+    val notAnAnnotationClassFactory: KotlinQuickFixFactory.IntentionBased<KaFirDiagnostic.NotAnAnnotationClass> =
         ImportQuickFixProvider.upcast()
 
     val argumentTypeMismatchFactory: KotlinQuickFixFactory.IntentionBased<KaFirDiagnostic.ArgumentTypeMismatch> =

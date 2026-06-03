@@ -2,13 +2,17 @@
 
 package org.jetbrains.kotlin.idea.groovy
 
+import com.intellij.modcommand.ActionContext
+import com.intellij.modcommand.ModCommand
 import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.roots.DependencyScope
 import com.intellij.openapi.roots.ExternalLibraryDescriptor
+import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.base.codeInsight.CliArgumentStringBuilder.buildArgumentString
@@ -17,27 +21,57 @@ import org.jetbrains.kotlin.idea.base.externalSystem.KotlinGradleFacade
 import org.jetbrains.kotlin.idea.base.util.module
 import org.jetbrains.kotlin.idea.base.util.reformat
 import org.jetbrains.kotlin.idea.compiler.configuration.IdeKotlinVersion
-import org.jetbrains.kotlin.idea.configuration.*
-import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.*
+import org.jetbrains.kotlin.idea.configuration.BuildSystemType
+import org.jetbrains.kotlin.idea.configuration.ChangedConfiguratorFiles
+import org.jetbrains.kotlin.idea.configuration.DEFAULT_GRADLE_PLUGIN_REPOSITORY
+import org.jetbrains.kotlin.idea.configuration.KOTLIN_GROUP_ID
+import org.jetbrains.kotlin.idea.configuration.MAVEN_CENTRAL
+import org.jetbrains.kotlin.idea.configuration.buildSystemType
+import org.jetbrains.kotlin.idea.configuration.getRepositoryForVersion
+import org.jetbrains.kotlin.idea.configuration.isRepositoryConfigured
+import org.jetbrains.kotlin.idea.configuration.toGradleCompileScope
+import org.jetbrains.kotlin.idea.configuration.toGroovyRepositorySnippet
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.COMPILER_OPTIONS
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.DefinedKotlinPluginManagementVersion
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.FOOJAY_RESOLVER_CONVENTION_NAME
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.FOOJAY_RESOLVER_NAME
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleBuildScriptManipulator
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleBuildScriptSupport
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleBuildScriptSupport.Companion.TEST_IMPLEMENTATION
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleBuildScriptSupport.Companion.TEST_LIB_ID
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleVersionInfo
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleVersionProvider
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.SettingsScriptBuilder
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.assertApplicableInMultiplatform
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.canBeConfigured
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.fetchGradleVersion
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.getBuildScriptSettingsPsiFile
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.getTopLevelBuildScriptSettingsPsiFile
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.scope
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.useNewSyntax
+import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.usesNewMultiplatform
 import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.CompilerOption
-import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.kotlinVersionIsEqualOrHigher
 import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.getCompilerOption
+import org.jetbrains.kotlin.idea.gradleJava.configuration.utils.kotlinVersionIsEqualOrHigher
 import org.jetbrains.kotlin.idea.groovy.inspections.DifferentKotlinGradleVersionInspection
 import org.jetbrains.kotlin.idea.projectConfiguration.RepositoryDescription
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.psi.psiUtil.getChildrenOfType
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
-import org.jetbrains.kotlin.tools.projectWizard.Versions
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile
 import org.jetbrains.plugins.groovy.lang.psi.GroovyPsiElementFactory
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrStatement
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrClosableBlock
-import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.*
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrApplicationStatement
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrAssignmentExpression
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrExpression
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrMethodCall
+import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.GrReferenceExpression
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.expressions.path.GrMethodCallExpression
 import org.jetbrains.plugins.groovy.lang.psi.api.util.GrStatementOwner
 import org.jetbrains.plugins.groovy.lang.psi.impl.GroovyPsiElementFactoryImpl
-import kotlin.Boolean
+import org.jetbrains.plugins.groovy.lang.psi.impl.booleanValue
 
 internal class GroovyGradleBuildScriptSupport : GradleBuildScriptSupport {
     override fun createManipulator(file: PsiFile, preferNewSyntax: Boolean): GroovyBuildScriptManipulator? {
@@ -57,23 +91,30 @@ class GroovyBuildScriptManipulator(
     override val scriptFile: GroovyFile,
     override val preferNewSyntax: Boolean
 ) : GradleBuildScriptManipulator<GroovyFile> {
-    override fun isApplicable(file: PsiFile) = file is GroovyFile
+    override fun isApplicable(file: PsiFile): Boolean = file is GroovyFile
+
+    override fun usesOldSyntax(kotlinPluginName: String): Boolean {
+        val fileText = runReadAction { scriptFile.text }
+        return containsDirective(fileText, getApplyPluginDirective(kotlinPluginName)) &&
+                fileText.contains("org.jetbrains.kotlin")
+    }
 
     private val gradleVersion = GradleVersionProvider.fetchGradleVersion(scriptFile)
 
     override fun isConfiguredWithOldSyntax(kotlinPluginName: String): Boolean {
-        val fileText = runReadAction { scriptFile.text }
-        return containsDirective(fileText, getApplyPluginDirective(kotlinPluginName)) &&
-                fileText.contains("org.jetbrains.kotlin") &&
-                fileText.contains("kotlin-stdlib")
+        return usesOldSyntax(kotlinPluginName) && !hasKotlinPluginApplyFalse()
     }
 
     override fun isConfigured(kotlinPluginExpression: String): Boolean {
-        val fileText = runReadAction { scriptFile.text }
         val pluginsBlockText = runReadAction { scriptFile.getBlockByName("plugins")?.text ?: "" }
-        return (containsDirective(pluginsBlockText, kotlinPluginExpression)) &&
-                fileText.contains("org.jetbrains.kotlin") &&
-                fileText.contains("kotlin-stdlib")
+        return containsDirective(pluginsBlockText, kotlinPluginExpression) && !hasKotlinPluginApplyFalse()
+    }
+
+    override fun hasKotlinPluginApplyFalse(): Boolean {
+        val pluginsBlock = scriptFile.getBlockByName("plugins") ?: return false
+        val kotlinPluginExpression = pluginsBlock.findKotlinPluginExpression()
+        val applyExpression = kotlinPluginExpression?.applyExpression ?: return false
+        return applyExpression.arguments.firstOrNull().booleanValue() == false
     }
 
     override fun PsiElement.getAllVariableStatements(variableName: String): List<PsiElement> {
@@ -99,7 +140,6 @@ class GroovyBuildScriptManipulator(
     override fun configureBuildScripts(
         kotlinPluginName: String,
         kotlinPluginExpression: String,
-        stdlibArtifactName: String,
         addVersion: Boolean,
         version: IdeKotlinVersion,
         jvmTarget: String?,
@@ -109,7 +149,7 @@ class GroovyBuildScriptManipulator(
 
         val useNewSyntax = useNewSyntax(kotlinPluginName, gradleVersion)
         if (useNewSyntax) {
-            val pluginsBlock = scriptFile.getPluginsBlock()
+            val pluginsBlock = scriptFile.getOrCreatePluginsBlock()
             val existingVersionExpression = pluginsBlock.findKotlinPluginExpression()
             if (existingVersionExpression?.applyExpression != null) {
                 // Cannot properly handle apply expression, delete and recreate statement
@@ -120,7 +160,7 @@ class GroovyBuildScriptManipulator(
                     "$kotlinPluginExpression version '${version.artifactVersion}'"
                 } else kotlinPluginExpression
             )
-            scriptFile.getRepositoriesBlock().apply {
+            scriptFile.getOrCreateRepositoriesBlock().apply {
                 val repository = getRepositoryForVersion(version)
                 val gradleFacade = KotlinGradleFacade.getInstance()
                 if (repository != null && gradleFacade != null) {
@@ -152,21 +192,39 @@ class GroovyBuildScriptManipulator(
             }
         }
 
-        scriptFile.getRepositoriesBlock().apply {
+        scriptFile.getOrCreateRepositoriesBlock().apply {
             addRepository(version)
             addMavenCentralIfMissing()
         }
 
-        scriptFile.getDependenciesBlock().apply {
-            addExpressionOrStatementInBlockIfNeeded(
-                getGroovyDependencySnippet(stdlibArtifactName, !useNewSyntax, gradleVersion),
-                isStatement = false,
-                isFirst = false
-            )
+        scriptFile.getOrCreateDependenciesBlock().apply {
+            addLastExpressionInBlockIfNeeded(getKotlinTestLibraryDependencySnippet(useNewSyntax))
         }
 
         scriptFile.configureToolchainOrKotlinCompilerOptions(jvmTarget, version, gradleVersion, changedFiles)
 
+    }
+
+    override fun configurePluginInPluginsGroup(
+        kotlinPluginExpression: String,
+        addVersion: Boolean,
+        version: IdeKotlinVersion,
+        applyFalse: Boolean,
+        changedFiles: ChangedConfiguratorFiles
+    ) {
+        changedFiles.storeOriginalFileContent(scriptFile)
+
+        val pluginsBlock = scriptFile.getOrCreatePluginsBlock()
+        pluginsBlock.addLastExpressionInBlockIfNeeded(pluginExpression(kotlinPluginExpression, addVersion, version, applyFalse))
+    }
+
+    override fun configurePluginOptions(kotlinPluginName: String, changedFiles: ChangedConfiguratorFiles, vararg options: String) {
+        scriptFile.apply {
+            val block = getBlockOrCreate(kotlinPluginName)
+            for (option in options) {
+                block.addLastExpressionInBlockIfNeeded(option)
+            }
+        }
     }
 
     override fun configureProjectBuildScript(kotlinPluginName: String, version: IdeKotlinVersion): Boolean {
@@ -191,7 +249,7 @@ class GroovyBuildScriptManipulator(
         return oldText != scriptFile.text
     }
 
-    override fun getKotlinVersionFromBuildScript(): IdeKotlinVersion? {
+    override fun getKotlinVersion(): IdeKotlinVersion? {
         return DifferentKotlinGradleVersionInspection.getKotlinPluginVersion(scriptFile)
     }
 
@@ -263,8 +321,8 @@ class GroovyBuildScriptManipulator(
     ): PsiElement? {
         if (usesNewMultiplatform()) {
             state.assertApplicableInMultiplatform()
-            val kotlinBlock = scriptFile.getKotlinBlock()
-            val sourceSetsBlock = kotlinBlock.getSourceSetsBlock()
+            val kotlinBlock = scriptFile.getOrCreateKotlinBlock()
+            val sourceSetsBlock = kotlinBlock.getOrCreateSourceSetsBlock()
             val allBlock = sourceSetsBlock.getBlockOrCreate("all")
             allBlock.addLastExpressionInBlockIfNeeded("languageSettings.enableLanguageFeature(\"${feature.name}\")")
             return allBlock.statements.lastOrNull()
@@ -316,43 +374,53 @@ class GroovyBuildScriptManipulator(
             libraryDescriptor.preferredVersion ?: libraryDescriptor.maxVersion ?: libraryDescriptor.minVersion
         )
 
-        if (targetModule != null && usesNewMultiplatform()) {
+        val dependenciesBlock = if (targetModule != null && usesNewMultiplatform()) {
             scriptFile
-                .getKotlinBlock()
-                .getSourceSetsBlock()
+                .getOrCreateKotlinBlock()
+                .getOrCreateSourceSetsBlock()
                 .getBlockOrCreate(targetModule.name.takeLastWhile { it != '.' })
-                .getDependenciesBlock()
-                .addLastExpressionInBlockIfNeeded(dependencyString)
+                .getOrCreateDependenciesBlock()
         } else {
-            scriptFile.getDependenciesBlock().apply {
-                addLastExpressionInBlockIfNeeded(dependencyString)
+            scriptFile.getOrCreateDependenciesBlock()
+        }
+
+        dependenciesBlock.addLastExpressionInBlockIfNeeded(dependencyString)
+        val codeStyleManager = CodeStyleManager.getInstance(scriptFile.project)
+        codeStyleManager.reformat(dependenciesBlock.parent, true)
+    }
+
+    override fun addKotlinLibraryToModuleBuildScriptModCommand(
+        targetModule: Module?,
+        scope: DependencyScope,
+        libraryDescriptor: ExternalLibraryDescriptor
+    ): ModCommand {
+        val actionContext = ActionContext(scriptFile.project, scriptFile, 0, TextRange(0, scriptFile.textLength), null)
+        return ModCommand.psiUpdate(actionContext) {
+            val file = it.getWritable(scriptFile)
+
+            val dependencyString = String.format(
+                "%s \"%s:%s:%s\"",
+                scope.toGradleCompileScope(scriptFile.isAndroidModule()),
+                libraryDescriptor.libraryGroupId,
+                libraryDescriptor.libraryArtifactId,
+                libraryDescriptor.preferredVersion ?: libraryDescriptor.maxVersion ?: libraryDescriptor.minVersion
+            )
+
+            val dependenciesBlock = if (targetModule != null && usesNewMultiplatform()) {
+                file
+                    .getOrCreateKotlinBlock()
+                    .getOrCreateSourceSetsBlock()
+                    .getBlockOrCreate(targetModule.name.takeLastWhile { it != '.' })
+                    .getOrCreateDependenciesBlock()
+            } else {
+                file.getOrCreateDependenciesBlock()
             }
+
+            dependenciesBlock.addLastExpressionInBlockIfNeeded(dependencyString)
         }
     }
 
-    override fun getKotlinStdlibVersion(): String? {
-        val versionProperty = "\$kotlin_version"
-        scriptFile.getBlockByName("buildScript")?.let {
-            if (it.text.contains("ext.kotlin_version = ")) {
-                return versionProperty
-            }
-        }
-
-        val dependencies = scriptFile.getBlockByName("dependencies")?.statements
-        val stdlibArtifactPrefix = "org.jetbrains.kotlin:kotlin-stdlib:"
-        dependencies?.forEach { dependency ->
-            val dependencyText = dependency.text
-            val startIndex = dependencyText.indexOf(stdlibArtifactPrefix) + stdlibArtifactPrefix.length
-            val endIndex = dependencyText.length - 1
-            if (startIndex != -1 && endIndex != -1) {
-                return dependencyText.substring(startIndex, endIndex)
-            }
-        }
-
-        return null
-    }
-
-    override fun addFoojayPlugin(changedFiles: ChangedConfiguratorFiles) {
+    override fun addFoojayPlugin(changedFiles: ChangedConfiguratorFiles, foojayVersion: String) {
         val settingsFile = scriptFile.module?.let {
             it.getTopLevelBuildScriptSettingsPsiFile() as? GroovyFile
         } ?: return
@@ -362,14 +430,13 @@ class GroovyBuildScriptManipulator(
         }
 
         changedFiles.storeOriginalFileContent(settingsFile)
-        addFoojayPlugin(settingsFile)
+        addFoojayPlugin(settingsFile, foojayVersion)
     }
 
-    override fun addFoojayPlugin(settingsFile: PsiFile) {
+    override fun addFoojayPlugin(settingsFile: PsiFile, foojayVersion: String) {
         if (settingsFile !is GroovyFile) return
-        val pluginBlock = settingsFile.getSettingsPluginsBlock()
+        val pluginBlock = settingsFile.getOrCreateSettingsPluginsBlock()
         if (pluginBlock.text.contains(FOOJAY_RESOLVER_NAME)) return
-        val foojayVersion = Versions.GRADLE_PLUGINS.FOOJAY_VERSION
         pluginBlock.addLastStatementInBlockIfNeeded("id '$FOOJAY_RESOLVER_CONVENTION_NAME' version '$foojayVersion'")
     }
 
@@ -403,12 +470,12 @@ class GroovyBuildScriptManipulator(
     }
 
     override fun addKotlinToolchain(targetVersionNumber: String) {
-        scriptFile.getKotlinBlock()
+        scriptFile.getOrCreateKotlinBlock()
             .addFirstExpressionInBlockIfNeeded("jvmToolchain($targetVersionNumber)")
     }
 
     override fun addKotlinExtendedDslToolchain(targetVersionNumber: String) {
-        scriptFile.getKotlinBlock().getBlockOrCreate("jvmToolchain")
+        scriptFile.getOrCreateKotlinBlock().getBlockOrCreate("jvmToolchain")
             .addFirstExpressionInBlockIfNeeded("languageVersion = JavaLanguageVersion.of($targetVersionNumber)")
     }
 
@@ -431,7 +498,7 @@ class GroovyBuildScriptManipulator(
         val firstChar = withoutParens.firstOrNull() ?: return this
         val lastChar = withoutParens.lastOrNull() ?: return this
         return if (firstChar == lastChar && (firstChar == '"' || firstChar == '\'')) {
-            return withoutParens.removeSurrounding(firstChar.toString())
+            withoutParens.removeSurrounding(firstChar.toString())
         } else withoutParens
     }
 
@@ -448,7 +515,7 @@ class GroovyBuildScriptManipulator(
         return if (usesNewMultiplatform()) {
             // For multiplatform projects, we configure the language level for all sourceSets
             // Note: It does not allow only targeting test sourceSets
-            val kotlinBlock = gradleFile.getKotlinBlock()
+            val kotlinBlock = gradleFile.getOrCreateKotlinBlock()
             val sourceSetsBlock = kotlinBlock.getBlockOrCreate("sourceSets")
             val allBlock = sourceSetsBlock.getBlockOrCreate("all")
             val languageSettingsBlock = allBlock.getBlockOrCreate("languageSettings")
@@ -478,7 +545,7 @@ class GroovyBuildScriptManipulator(
         ) -> GrStatement
     ): PsiElement? {
         if (usesNewMultiplatform()) { // Probably, this branch is NOT used in IDEA nowadays
-            val kotlinBlock = gradleFile.getKotlinBlock()
+            val kotlinBlock = gradleFile.getOrCreateKotlinBlock()
             val kotlinTargets = kotlinBlock.getBlockOrCreate("targets")
             val targetNames = mutableListOf<String>()
 
@@ -524,7 +591,7 @@ class GroovyBuildScriptManipulator(
         for (stmt in kotlinBlock.statements) {
             if ((stmt as? GrAssignmentExpression)?.lValue?.text == "kotlinOptions.$parameterName") {
                 return stmt.replaceIt(/* insideKotlinOptions = */ true, /* precomputedReplacement = */ null,
-                                      /* insideCompilerOptions = */ false
+                    /* insideCompilerOptions = */ false
                 )
             }
         }
@@ -598,7 +665,7 @@ class GroovyBuildScriptManipulator(
             /*
             If we didn't find, we try to find it in the `compilerOptions {`
              */
-            var compilerOptionsBlock = outerDslBlock.getBlockByName("compilerOptions")
+            var compilerOptionsBlock = outerDslBlock.getBlockByName(COMPILER_OPTIONS)
             if (compilerOptionsBlock != null) {
                 foundAndReplaced = compilerOptionsBlock.findAndReplaceCompilerOption(
                     parameterName,
@@ -607,7 +674,7 @@ class GroovyBuildScriptManipulator(
                     replaceIt = replaceIt,
                 )
             } else {
-                compilerOptionsBlock = outerDslBlock.createBlock("compilerOptions")
+                compilerOptionsBlock = outerDslBlock.createBlock(COMPILER_OPTIONS)
             }
 
             if (!foundAndReplaced) {
@@ -716,16 +783,40 @@ class GroovyBuildScriptManipulator(
 
     private fun getGroovyDependencySnippet(
         artifactName: String,
+        scope: String,
         withVersion: Boolean,
         gradleVersion: GradleVersionInfo
     ): String {
-        val configuration = gradleVersion.scope("implementation")
-        return "$configuration \"org.jetbrains.kotlin:$artifactName${if (withVersion) ":\$kotlin_version" else ""}\""
+        val configuration = gradleVersion.scope(scope)
+        return if (withVersion) {
+            // Double quotes are needed for $kotlin_version to be correctly interpolated and picked-up
+            $$"$$configuration \"org.jetbrains.kotlin:$$artifactName:$kotlin_version\""
+        } else {
+            "$configuration 'org.jetbrains.kotlin:$artifactName'"
+        }
+    }
+
+    private fun pluginExpression(
+        pluginName: String,
+        addVersion: Boolean,
+        version: IdeKotlinVersion,
+        applyFalse: Boolean
+    ): String = buildString {
+        append(pluginName)
+        if (addVersion) {
+            append(" version '")
+            append(version.artifactVersion)
+            append('\'')
+        }
+        if (applyFalse) {
+            append(" apply false")
+        }
     }
 
     private fun getApplyPluginDirective(pluginName: String) = "apply plugin: '$pluginName'"
 
     private fun containsDirective(fileText: String, directive: String): Boolean {
+        if (directive.isBlank()) return false
         return fileText.contains(directive)
                 || fileText.contains(directive.replace("\"", "'"))
                 || fileText.contains(directive.replace("'", "\""))
@@ -753,29 +844,29 @@ class GroovyBuildScriptManipulator(
     }
 
     private fun GrStatementOwner.getBuildScriptRepositoriesBlock(): GrClosableBlock =
-        getBuildScriptBlock().getRepositoriesBlock()
+        getBuildScriptBlock().getOrCreateRepositoriesBlock()
 
     private fun GrStatementOwner.getBuildScriptDependenciesBlock(): GrClosableBlock =
-        getBuildScriptBlock().getDependenciesBlock()
+        getBuildScriptBlock().getOrCreateDependenciesBlock()
 
     private fun GrClosableBlock.addMavenCentralIfMissing(): Boolean =
         if (!isRepositoryConfigured(text)) addLastExpressionInBlockIfNeeded(MAVEN_CENTRAL) else false
 
-    private fun GrStatementOwner.getRepositoriesBlock() = getBlockOrCreate("repositories")
+    private fun GrStatementOwner.getOrCreateRepositoriesBlock() = getBlockOrCreate("repositories")
 
-    private fun GrStatementOwner.getDependenciesBlock(): GrClosableBlock = getBlockOrCreate("dependencies")
+    private fun GrStatementOwner.getOrCreateDependenciesBlock(): GrClosableBlock = getBlockOrCreate("dependencies")
 
-    private fun GrStatementOwner.getKotlinBlock(): GrClosableBlock = getBlockOrCreate("kotlin")
+    private fun getKotlinTestLibraryDependencySnippet(useNewSyntax: Boolean): String =
+        getGroovyDependencySnippet(
+            artifactName = TEST_LIB_ID,
+            scope = TEST_IMPLEMENTATION,
+            withVersion = !useNewSyntax,
+            gradleVersion
+        )
 
-    private fun GrStatementOwner.getSourceSetsBlock(): GrClosableBlock = getBlockOrCreate("sourceSets")
+    private fun GrStatementOwner.getOrCreateKotlinBlock(): GrClosableBlock = getBlockOrCreate("kotlin")
 
-    private fun GrClosableBlock.addOrReplaceExpression(snippet: String, predicate: (GrStatement) -> Boolean) {
-        statements.firstOrNull(predicate)?.let { stmt ->
-            stmt.replaceWithStatementFromText(snippet)
-            return
-        }
-        addLastExpressionInBlockIfNeeded(snippet)
-    }
+    private fun GrStatementOwner.getOrCreateSourceSetsBlock(): GrClosableBlock = getBlockOrCreate("sourceSets")
 
     private fun getGroovyApplyPluginDirective(pluginName: String) = "apply plugin: '$pluginName'"
 
@@ -853,17 +944,17 @@ class GroovyBuildScriptManipulator(
             return getBlockByName(name)!!
         }
 
-        fun GrStatementOwner.getBlockOrPrepend(name: String) = getBlockOrCreate(name) { newBlock ->
+        fun GrStatementOwner.getBlockOrPrepend(name: String): GrClosableBlock = getBlockOrCreate(name) { newBlock ->
             addAfter(newBlock, null)
             true
         }
 
-        fun GrStatementOwner.getPluginsBlock() = getBlockOrCreate("plugins") { newBlock ->
+        fun GrStatementOwner.getOrCreatePluginsBlock(): GrClosableBlock = getBlockOrCreate("plugins") { newBlock ->
             addAfter(newBlock, getBlockByName("buildscript"))
             true
         }
 
-        fun GrStatementOwner.getSettingsPluginsBlock() = getBlockOrCreate("plugins") { newBlock ->
+        fun GrStatementOwner.getOrCreateSettingsPluginsBlock(): GrClosableBlock = getBlockOrCreate("plugins") { newBlock ->
             val beforeBlock = getBlockByName("buildscript") ?: getBlockByName("pluginManagement")
             addAfter(newBlock, beforeBlock?.parent)
             true

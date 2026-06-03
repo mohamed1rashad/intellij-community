@@ -6,11 +6,15 @@ import com.intellij.codeInsight.inline.completion.editor.InlineCompletionEditorT
 import com.intellij.codeInsight.inline.completion.logs.InlineCompletionLogsUtils.isLoggable
 import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.FeatureUsageData
-import com.intellij.internal.statistic.eventLog.events.*
+import com.intellij.internal.statistic.eventLog.events.EventField
+import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.eventLog.events.EventFields.createAdditionalDataField
+import com.intellij.internal.statistic.eventLog.events.ObjectEventField
+import com.intellij.internal.statistic.eventLog.events.PrimitiveEventField
+import com.intellij.internal.statistic.eventLog.events.VarargEventId
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
 import com.intellij.internal.statistic.utils.PluginInfo
-import com.intellij.util.application
+import com.intellij.openapi.application.runReadActionBlocking
 import kotlinx.serialization.Serializable
 import org.jetbrains.annotations.ApiStatus
 import java.util.concurrent.locks.ReentrantLock
@@ -20,7 +24,7 @@ import kotlin.coroutines.cancellation.CancellationException
 @ApiStatus.Internal
 @Deprecated("will be moved to inline.completion.v2")
 object InlineCompletionUsageTracker : CounterUsagesCollector() {
-  private val GROUP = EventLogGroup("inline.completion", 40)
+  private val GROUP = EventLogGroup("inline.completion", 41)
 
   const val INVOKED_EVENT_ID: String = "invoked"
   const val SHOWN_EVENT_ID: String = "shown"
@@ -98,6 +102,7 @@ object InlineCompletionUsageTracker : CounterUsagesCollector() {
       TYPED,
       ESCAPE_PRESSED,
       BACKSPACE_PRESSED,
+      @Deprecated("Not used anymore")
       KEY_PRESSED,
       INVALIDATED,
       MOUSE_PRESSED,
@@ -141,7 +146,6 @@ object InlineCompletionUsageTracker : CounterUsagesCollector() {
   @Deprecated("Superseded by INSERTED_STATE_EVENT")
   internal val INSERTED_STATE_EVENT_OLD: VarargEventId = GROUP.registerVarargEvent(
     eventId = INSERTED_STATE_EVENT_ID,
-    description = "State of the inserted inline proposal in the editor after some time",
     ShownEvents.REQUEST_ID,
     EventFields.Language,
     EventFields.CurrentFile,
@@ -167,7 +171,7 @@ object InlineCompletionUsageTracker : CounterUsagesCollector() {
 
     override fun onRequest(event: InlineCompletionEventType.Request): Unit = lock.withLock {
       invocationTracker = InlineCompletionInvocationTracker(event).also {
-        application.runReadAction { it.captureContext(event.request.editor, event.request.endOffset) }
+        runReadActionBlocking { it.captureContext(event.request.editor, event.request.endOffset) }
       }
       showTracker = null // Just in case
     }

@@ -26,7 +26,12 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaCodeFragment;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiNameHelper;
+import com.intellij.psi.PsiPackage;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.refactoring.ui.MemberSelectionTable;
 import com.intellij.refactoring.ui.PackageNameReferenceEditorCombo;
@@ -36,7 +41,12 @@ import com.intellij.testIntegration.JavaTestFramework;
 import com.intellij.testIntegration.JvmTestFramework;
 import com.intellij.testIntegration.TestFramework;
 import com.intellij.testIntegration.TestIntegrationUtils;
-import com.intellij.ui.*;
+import com.intellij.ui.EditorTextField;
+import com.intellij.ui.RecentsManager;
+import com.intellij.ui.ReferenceEditorComboWithBrowseButton;
+import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.dsl.listCellRenderer.LcrJavaHelper;
+import com.intellij.ui.dsl.listCellRenderer.RendererPresentation;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.concurrency.AppExecutorUtil;
@@ -46,14 +56,29 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.java.JavaModuleSourceRootTypes;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 import static com.intellij.testIntegration.createTest.CreateTestUtils.selectTargetDirectory;
 
@@ -165,8 +190,7 @@ public class CreateTestDialog extends DialogWrapper {
   }
 
   private void updateMethodsTable() {
-    List<MemberInfo> methods = TestIntegrationUtils.extractClassMethods(
-      myTargetClass, myShowInheritedMethodsBox.isSelected());
+    List<MemberInfo> methods = createMemberInfos(myTargetClass, myShowInheritedMethodsBox.isSelected());
 
     Set<PsiMember> selectedMethods = new HashSet<>();
     for (MemberInfo each : myMethodsTable.getSelectedMemberInfos()) {
@@ -177,6 +201,10 @@ public class CreateTestDialog extends DialogWrapper {
     }
 
     myMethodsTable.setMemberInfos(methods);
+  }
+
+  protected @NotNull List<@NotNull MemberInfo> createMemberInfos(PsiClass targetClass, boolean includeInherited) {
+    return TestIntegrationUtils.extractClassMethods(targetClass, includeInherited);
   }
 
   private String getDefaultLibraryName() {
@@ -350,12 +378,10 @@ public class CreateTestDialog extends DialogWrapper {
     constr.weighty = 1;
     panel.add(ScrollPaneFactory.createScrollPane(myMethodsTable), constr);
 
-    myLibrariesCombo.setRenderer(SimpleListCellRenderer.create((label, value, index) -> {
-      if (value != null) {
-        label.setText(value.getName());
-        label.setIcon(value.getIcon());
-      }
-    }));
+    myLibrariesCombo.setRenderer(LcrJavaHelper.create(
+      "",
+      value -> new RendererPresentation(value.getIcon(), value.getName())
+    ));
     final boolean hasTestRoots = !ModuleRootManager.getInstance(myTargetModule).getSourceRoots(JavaModuleSourceRootTypes.TESTS).isEmpty();
     final List<TestFramework> attachedLibraries = new ArrayList<>();
     final String defaultLibrary = getDefaultLibraryName();
@@ -411,7 +437,7 @@ public class CreateTestDialog extends DialogWrapper {
       public void actionPerformed(ActionEvent e) {
         if (mySelectedFramework instanceof JavaTestFramework) {
           ((JavaTestFramework)mySelectedFramework).setupLibrary(myTargetModule)
-            .onSuccess(__ -> myFixLibraryPanel.setVisible(false));
+            .onSuccess(_ -> myFixLibraryPanel.setVisible(false));
         }
         else {
           OrderEntryFix.addJarToRoots(mySelectedFramework.getLibraryPath(), myTargetModule, null);

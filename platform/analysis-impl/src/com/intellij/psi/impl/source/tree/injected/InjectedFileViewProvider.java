@@ -10,7 +10,13 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.AbstractFileViewProvider;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.MultiplePsiFilesPerDocumentFileViewProvider;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLanguageInjectionHost;
 import com.intellij.psi.impl.FreeThreadedFileViewProvider;
 import com.intellij.psi.impl.PsiManagerEx;
 import com.intellij.psi.templateLanguages.TemplateLanguageFileViewProvider;
@@ -24,7 +30,7 @@ import java.util.List;
 @Deprecated(forRemoval = true)
 public interface InjectedFileViewProvider extends FileViewProvider, FreeThreadedFileViewProvider {
   default void rootChangedImpl(@NotNull PsiFile psiFile) {
-    if (!isPhysical()) return; // injected PSI change happened inside reparse; ignore
+    if (SingleRootInjectedFileViewProvider.disabledTemporarily.get()) return; // injected PSI change happened inside reparse; ignore
     if (getPatchingLeaves()) return;
 
     DocumentWindowImpl documentWindow = getDocument();

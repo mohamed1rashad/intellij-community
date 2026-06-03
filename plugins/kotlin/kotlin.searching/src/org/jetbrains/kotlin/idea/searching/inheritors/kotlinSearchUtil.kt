@@ -18,10 +18,13 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
 import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
 import org.jetbrains.kotlin.asJava.unwrapped
 import org.jetbrains.kotlin.idea.base.analysis.KotlinUastOutOfCodeBlockModificationTracker
+import org.jetbrains.kotlin.idea.search.ExpectActualUtils
+import org.jetbrains.kotlin.idea.search.ExpectActualUtils.actualsForExpect
+import org.jetbrains.kotlin.idea.searching.kmp.findAllActualForExpect
 import org.jetbrains.kotlin.psi.KtCallableDeclaration
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
-import java.util.*
+import java.util.ArrayDeque
 
 /**
  * Returns a set of PsiMethods/KtFunctions/KtProperties which "deep" override current [this] declaration.
@@ -49,6 +52,25 @@ fun KtCallableDeclaration.hasAnyOverridings(): Boolean =
         )
     }
 
+@RequiresBackgroundThread(generateAssertion = false)
+fun KtCallableDeclaration.hasAnyActuals(): Boolean =
+    CachedValuesManager.getCachedValue(this) {
+        val hasAnyActuals = findAllActualForExpect().firstOrNull() != null
+        CachedValueProvider.Result.create(
+            hasAnyActuals,
+            KotlinUastOutOfCodeBlockModificationTracker.getInstance(project)
+        )
+    }
+
+@RequiresBackgroundThread(generateAssertion = false)
+fun KtClass.hasAnyActuals(): Boolean =
+    CachedValuesManager.getCachedValue(this) {
+        val hasAnyActuals = findAllActualForExpect().firstOrNull() != null
+        CachedValueProvider.Result.create(
+            hasAnyActuals,
+            KotlinUastOutOfCodeBlockModificationTracker.getInstance(project)
+        )
+    }
 
 
 /**
@@ -120,8 +142,9 @@ private fun KtCallableDeclaration.findAllOverridings(withFullHierarchy: Boolean,
 }
 
 /**
- * Finds all the classes inheriting from [this] class. The resulting set does not
- * include the class itself.
+ * Finds all the classes inheriting from [this] element.
+ * Note: The element must either be a [KtClass] or [PsiClass], otherwise an empty sequence is returned.
+ * The resulting set does not include the class itself.
  *
  * Example:
  * ```
@@ -134,7 +157,7 @@ private fun KtCallableDeclaration.findAllOverridings(withFullHierarchy: Boolean,
  * Calling this function for class `B` will return classes `C` and `D`.
  */
 @RequiresBackgroundThread(generateAssertion = false)
-fun KtClass.findAllInheritors(searchScope: SearchScope = useScope): Sequence<PsiElement> {
+fun PsiElement.findAllInheritors(searchScope: SearchScope = useScope): Sequence<PsiElement> {
     val queue = ArrayDeque<PsiElement>()
     val visited = HashSet<PsiElement>()
 
@@ -171,6 +194,13 @@ fun KtClass.findAllInheritors(searchScope: SearchScope = useScope): Sequence<Psi
         }
     }
 }
+
+/**
+ * See [PsiElement.findAllInheritors]
+ */
+@RequiresBackgroundThread(generateAssertion = false)
+fun KtClass.findAllInheritors(searchScope: SearchScope = useScope): Sequence<PsiElement> =
+    (this as PsiElement).findAllInheritors(searchScope)
 
 @RequiresBackgroundThread(generateAssertion = false)
 fun KtClass.hasAnyInheritors(): Boolean =

@@ -17,7 +17,7 @@ import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.concurrency.AsyncPromise;
 import org.jetbrains.concurrency.Promise;
 
-import java.awt.*;
+import java.awt.Component;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -58,6 +58,12 @@ public class HeadlessDataManager extends DataManagerImpl {
       manager.myUseProductionDataManager = false;
     });
     manager.myUseProductionDataManager = true;
+  }
+
+  @TestOnly
+  @ApiStatus.Internal
+  public static boolean isFallbackProductionDataManagerEnabled() {
+    return ((HeadlessDataManager)getInstance()).myUseProductionDataManager;
   }
 
   @Override

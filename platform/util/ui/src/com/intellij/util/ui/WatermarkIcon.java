@@ -3,10 +3,17 @@
 package com.intellij.util.ui;
 
 
-import javax.swing.*;
-import java.awt.*;
+import com.intellij.ui.RetrievableIcon;
+import com.intellij.ui.icons.IconReplacer;
+import org.jetbrains.annotations.NotNull;
 
-public final class WatermarkIcon implements Icon {
+import javax.swing.Icon;
+import java.awt.AlphaComposite;
+import java.awt.Component;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+
+public final class WatermarkIcon implements Icon, RetrievableIcon {
 
   private final Icon myIcon;
   private final float myAlpha;
@@ -33,4 +40,19 @@ public final class WatermarkIcon implements Icon {
     return myIcon.getIconHeight();
   }
 
+  @Override
+  public @NotNull Icon replaceBy(@NotNull IconReplacer replacer) {
+    Icon replaced = replacer.replaceIcon(myIcon);
+    return new WatermarkIcon(replaced, myAlpha);
+  }
+
+  @Override
+  public @NotNull Icon retrieveIcon() {
+    return myIcon;
+  }
+
+  @Override
+  public String toString() {
+    return "WatermarkIcon for " + myIcon;
+  }
 }

@@ -1,10 +1,10 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.execution.test.events
 
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.testFramework.GradleTestExecutionTestCase
 import org.jetbrains.plugins.gradle.testFramework.annotations.AllGradleVersionsSource
-import org.jetbrains.plugins.gradle.testFramework.util.assumeThatGradleIsAtLeast
+import org.jetbrains.plugins.gradle.tooling.annotation.TargetVersions
 import org.junit.jupiter.params.ParameterizedTest
 
 class GradleTestEventTest : GradleTestExecutionTestCase() {
@@ -166,9 +166,9 @@ class GradleTestEventTest : GradleTestExecutionTestCase() {
 
   @ParameterizedTest
   @AllGradleVersionsSource
+  @TargetVersions("7.0+")
   fun `test parametrized test count`(gradleVersion: GradleVersion) {
-    assumeThatGradleIsAtLeast(gradleVersion,"7.0")
-    testJunit5Project(gradleVersion) {
+    testJunitPlatformProject(gradleVersion) {
       writeText("src/test/java/org/example/TestCase.java", """
       | import org.junit.jupiter.params.ParameterizedTest;
       | import org.junit.jupiter.params.provider.ValueSource;
@@ -185,7 +185,10 @@ class GradleTestEventTest : GradleTestExecutionTestCase() {
       """.trimMargin())
 
       executeTasks(":test", isRunAsTest = true)
-      val pattern = "[%d] %s"
+      val pattern = when {
+        gradleVersion >= GradleVersion.version("9.0.0") -> "[%d] \"%s\""
+        else -> "[%d] %s"
+      }
 
       assertTestEventCount("test(String)",1, 1, 0, 0, 0, 0)
       assertTestEventCount(String.format(pattern, 1, 'a'),0, 0, 1, 1, 0, 0)

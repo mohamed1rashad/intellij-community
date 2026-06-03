@@ -1,9 +1,29 @@
 package com.intellij.driver.impl;
 
-import com.intellij.driver.model.*;
-import com.intellij.driver.model.transport.*;
-import com.intellij.ide.plugins.*;
-import com.intellij.openapi.application.*;
+import com.intellij.driver.model.DriverIllegalStateException;
+import com.intellij.driver.model.LockSemantics;
+import com.intellij.driver.model.OnDispatcher;
+import com.intellij.driver.model.ProductVersion;
+import com.intellij.driver.model.RdTarget;
+import com.intellij.driver.model.transport.NewInstanceCall;
+import com.intellij.driver.model.transport.Ref;
+import com.intellij.driver.model.transport.RefCall;
+import com.intellij.driver.model.transport.RefList;
+import com.intellij.driver.model.transport.RemoteCall;
+import com.intellij.driver.model.transport.RemoteCallResult;
+import com.intellij.driver.model.transport.ServiceCall;
+import com.intellij.driver.model.transport.UtilityCall;
+import com.intellij.ide.plugins.ContentModuleDescriptor;
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
+import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
+import com.intellij.ide.plugins.IdeaPluginDescriptorImplKt;
+import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.client.ClientKind;
@@ -20,18 +40,30 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
 import io.opentelemetry.context.Context;
 import kotlin.Metadata;
+import kotlin.coroutines.Continuation;
+import kotlin.coroutines.EmptyCoroutineContext;
 import kotlin.jvm.JvmStatic;
 import kotlin.text.StringsKt;
+import kotlinx.coroutines.BuildersKt;
 import org.apache.commons.lang3.ClassUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.SwingUtilities;
+import java.awt.IllegalComponentStateException;
 import java.lang.ref.WeakReference;
-import java.lang.reflect.*;
-import java.util.*;
+import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -219,21 +251,54 @@ public class Invoker implements InvokerMBean {
   }
 
   private static Object invokeMethod(CallTarget callTarget, Object instance, Object[] args) throws Exception {
+    var method = callTarget.targetMethod();
+
+    if (isSuspendMethod(method)) {
+      return invokeSuspend(method, instance, args);
+    }
+
     try {
-      return callTarget.targetMethod().invoke(instance, args);
+      return method.invoke(instance, args);
     }
     catch (IllegalArgumentException ie) {
-      String message = "Argument type mismatch for call " + callTarget.targetMethod() + ", actual types are [" +
+      String message = "Argument type mismatch for call " + method + ", actual types are [" +
                        getExpectedTypesMessage(args) + "]";
       LOG.warn(message, ie);
 
       throw new IllegalArgumentException(message, ie);
     }
     catch (Throwable e) {
-      LOG.warn("Error during remote driver call " + callTarget.targetMethod(), e);
+      LOG.warn("Error during remote driver call " + method, e);
 
       throw e;
     }
+  }
+
+  private static Object invokeSuspend(Method method, Object instance, Object[] args) throws Exception {
+    return BuildersKt.runBlocking(EmptyCoroutineContext.INSTANCE, (_, continuation) -> {
+      Object[] argsWithCont = Arrays.copyOf(args, args.length + 1);
+      argsWithCont[args.length] = continuation;
+      try {
+        return method.invoke(instance, argsWithCont);
+      }
+      catch (IllegalArgumentException ie) {
+        String message = "Argument type mismatch for call " + method + ", actual types are [" +
+                         getExpectedTypesMessage(args) + "]";
+        LOG.warn(message, ie);
+
+        throw new IllegalArgumentException(message, ie);
+      }
+      catch (Throwable e) {
+        LOG.warn("Error during remote driver call " + method, e);
+        ExceptionUtil.rethrow(e);
+        throw new RuntimeException(e);
+      }
+    });
+  }
+
+  private static boolean isSuspendMethod(Method method) {
+    Class<?>[] paramTypes = method.getParameterTypes();
+    return paramTypes.length > 0 && Continuation.class.isAssignableFrom(paramTypes[paramTypes.length - 1]);
   }
 
   private @Nullable Object withSemantics(@NotNull RemoteCall call, @NotNull Callable<?> supplier) {
@@ -353,8 +418,9 @@ public class Invoker implements InvokerMBean {
     }
 
     List<Method> targetMethods = availableMethods.stream()
-      .filter(m -> m.getName().equals(call.getMethodName()) && argCount == m.getParameterCount())
-      .toList();
+      .filter(m -> m.getName().equals(call.getMethodName())
+                   && (argCount == m.getParameterCount() || (argCount == m.getParameterCount() - 1 && isSuspendMethod(m)))
+      ).toList();
 
     if (targetMethods.isEmpty()) {
       StringBuilder message = new StringBuilder(

@@ -17,7 +17,11 @@ import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
-import com.intellij.openapi.fileTypes.*;
+import com.intellij.openapi.fileTypes.ExtensionFileNameMatcher;
+import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.FileTypeManager;
+import com.intellij.openapi.fileTypes.LanguageFileType;
+import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.fileTypes.ex.FileTypeIdentifiableByVirtualFile;
 import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
@@ -37,13 +41,28 @@ import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.IoTestUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.CharsetToolkit;
+import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.limits.FileSizeLimit;
 import com.intellij.openapi.wm.impl.status.EncodingPanel;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiManager;
 import com.intellij.refactoring.copy.CopyFilesOrDirectoriesHandler;
-import com.intellij.testFramework.*;
+import com.intellij.testFramework.DisposableRule;
+import com.intellij.testFramework.EditorTestUtil;
+import com.intellij.testFramework.EdtRule;
+import com.intellij.testFramework.HeavyPlatformTestCase;
+import com.intellij.testFramework.LightVirtualFile;
+import com.intellij.testFramework.OpenProjectTaskBuilderKt;
+import com.intellij.testFramework.PerformanceUnitTest;
+import com.intellij.testFramework.PlatformTestUtil;
+import com.intellij.testFramework.ProjectRule;
+import com.intellij.testFramework.PsiTestUtil;
+import com.intellij.testFramework.RunsInEdt;
+import com.intellij.testFramework.VfsTestUtil;
 import com.intellij.testFramework.rules.TempDirectory;
 import com.intellij.tools.ide.metrics.benchmark.Benchmark;
 import com.intellij.util.ArrayUtil;
@@ -56,10 +75,18 @@ import com.intellij.util.ui.UIUtil;
 import org.intellij.lang.annotations.Language;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.junit.*;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.ClassRule;
+import org.junit.Rule;
+import org.junit.Test;
 
-import javax.swing.*;
-import java.io.*;
+import javax.swing.Icon;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -73,7 +100,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Objects.requireNonNull;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 @RunsInEdt
 @SuppressWarnings({"UnnecessaryUnicodeEscape", "NonAsciiCharacters"})
@@ -251,6 +285,8 @@ public class FileEncodingTest implements TestDialog {
 
       setText(document, UTF8_XML_PROLOG + XML_TEST_BODY);
       FileDocumentManager.getInstance().saveAllDocuments();
+      //ensure pending VFS IOps are finished before reading files via Path API:
+      PlatformTestUtil.flushAllPendingVFSUpdates();
 
       byte[] savedBytes = Files.readAllBytes(file);
       String saved = new String(savedBytes, StandardCharsets.UTF_8).replace("\r\n", "\n");
@@ -318,7 +354,11 @@ public class FileEncodingTest implements TestDialog {
     //assertTrue(CharsetToolkit.hasUTF16LEBom(fileCopy.getBOM()));
 
     setText(document, "\u04ab\u04cd\u04ef");
+
     FileDocumentManager.getInstance().saveAllDocuments();
+    //ensure pending VFS IOps are finished before reading files via Path API:
+    PlatformTestUtil.flushAllPendingVFSUpdates();
+
     byte[] bytes = Files.readAllBytes(copy);
     assertTrue(Arrays.toString(bytes), CharsetToolkit.hasUTF16LEBom(bytes));
     assertEquals("[-1, -2, -85, 4, -51, 4, -17, 4]", Arrays.toString(bytes));
@@ -445,6 +485,9 @@ public class FileEncodingTest implements TestDialog {
     changed[0] = false;
 
     FileDocumentManager.getInstance().saveAllDocuments();
+    //ensure pending VFS IOps are finished before reading files via Path API:
+    PlatformTestUtil.flushAllPendingVFSUpdates();
+
     byte[] bytes = FileUtil.loadFileBytes(ioFile);
     //file on disk is still windows_1251
     assertArrayEquals(text.getBytes(WINDOWS_1251), bytes);
@@ -789,7 +832,7 @@ public class FileEncodingTest implements TestDialog {
   public void testUndoChangeEncoding() throws IOException {
     VirtualFile file = createTempFile("txt", NO_BOM, "xxx", StandardCharsets.UTF_8);
     file.setCharset(StandardCharsets.UTF_8);
-    UIUtil.dispatchAllInvocationEvents();
+    PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue();
     assertEquals(StandardCharsets.UTF_8, file.getCharset());
 
     FileDocumentManager documentManager = FileDocumentManager.getInstance();
@@ -803,7 +846,7 @@ public class FileEncodingTest implements TestDialog {
     assertEquals(StandardCharsets.UTF_8, file.getCharset());
 
     globalUndo();
-    UIUtil.dispatchAllInvocationEvents();
+    PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue();
 
     assertEquals(WINDOWS_1251, file.getCharset());
     requireNonNull(document.getText());
@@ -1077,6 +1120,7 @@ public class FileEncodingTest implements TestDialog {
     assertEquals(StandardCharsets.UTF_8, file.getCharset());
   }
 
+  @PerformanceUnitTest
   @Test
   public void testEncodingReDetectionRequestsOnDocumentChangeAreBatchedToImprovePerformance() throws IOException {
     VirtualFile file = createTempFile("txt", NO_BOM, "xxx", StandardCharsets.US_ASCII);
@@ -1090,7 +1134,7 @@ public class FileEncodingTest implements TestDialog {
       }
       encodingManager.waitAllTasksExecuted();
       UIUtil.dispatchAllInvocationEvents();
-    }).start();
+    }).runAsStressTest().start();
   }
 
   @Test
@@ -1233,7 +1277,7 @@ public class FileEncodingTest implements TestDialog {
       @Override public String getCharset(@NotNull VirtualFile file, byte @NotNull [] content) { return StandardCharsets.ISO_8859_1.name(); }
     }
     MyForcedFileType fileType = new MyForcedFileType();
-    FileEncodingProvider encodingProvider = (__, project) -> StandardCharsets.UTF_16;
+    FileEncodingProvider encodingProvider = (_, _) -> StandardCharsets.UTF_16;
     FileEncodingProvider.EP_NAME.getPoint().registerExtension(encodingProvider, getTestRootDisposable());
     FileTypeManagerImpl fileTypeManager = (FileTypeManagerImpl)FileTypeManagerEx.getInstanceEx();
     fileTypeManager.registerFileType(fileType, List.of(new ExtensionFileNameMatcher(ext)), getTestRootDisposable(),
@@ -1245,7 +1289,7 @@ public class FileEncodingTest implements TestDialog {
 
   @Test
   public void testDetectedCharsetOverridesFileEncodingProvider() throws IOException {
-    FileEncodingProvider encodingProvider = (__, project) -> WINDOWS_1251;
+    FileEncodingProvider encodingProvider = (_, _) -> WINDOWS_1251;
     FileEncodingProvider.EP_NAME.getPoint().registerExtension(encodingProvider, getTestRootDisposable());
     VirtualFile file = createTempFile("yyy", NO_BOM, "Some text" + THREE_RUSSIAN_LETTERS, StandardCharsets.UTF_8);
     assertEquals(StandardCharsets.UTF_8, file.getCharset());

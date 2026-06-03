@@ -3,6 +3,7 @@ package com.intellij.openapi.projectRoots.impl.jdkDownloader
 
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.components.BaseState
 import com.intellij.openapi.components.Service
@@ -14,21 +15,32 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectBundle
-import com.intellij.openapi.projectRoots.*
+import com.intellij.openapi.projectRoots.JdkUtil
+import com.intellij.openapi.projectRoots.ProjectJdkTable
+import com.intellij.openapi.projectRoots.Sdk
+import com.intellij.openapi.projectRoots.SdkType
+import com.intellij.openapi.projectRoots.SdkTypeId
 import com.intellij.openapi.projectRoots.SimpleJavaSdkType.notSimpleJavaSdkTypeIfAlternativeExistsAndNotDependentSdkType
 import com.intellij.openapi.projectRoots.impl.UnknownSdkTracker
+import com.intellij.openapi.projectRoots.isMockSdk
 import com.intellij.openapi.roots.OrderRootType
-import com.intellij.openapi.roots.ui.configuration.*
+import com.intellij.openapi.roots.ui.configuration.SdkDetector
 import com.intellij.openapi.roots.ui.configuration.SdkDetector.DetectedSdkListener
+import com.intellij.openapi.roots.ui.configuration.UnknownSdk
+import com.intellij.openapi.roots.ui.configuration.UnknownSdkDownloadableSdkFix
+import com.intellij.openapi.roots.ui.configuration.UnknownSdkFixConfigurator
+import com.intellij.openapi.roots.ui.configuration.UnknownSdkLocalSdkFix
+import com.intellij.openapi.roots.ui.configuration.UnknownSdkMultipleDownloadsFix
+import com.intellij.openapi.roots.ui.configuration.UnknownSdkResolver
 import com.intellij.openapi.roots.ui.configuration.UnknownSdkResolver.UnknownSdkLookup
 import com.intellij.openapi.roots.ui.configuration.projectRoot.SdkDownloadTask
-import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.JarFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.eel.provider.LocalEelDescriptor
 import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.eel.provider.toEelApi
 import com.intellij.util.SuspendingLazy
 import com.intellij.util.lang.JavaVersion
 import com.intellij.util.suspendingLazy
@@ -42,7 +54,7 @@ import org.jetbrains.jps.model.java.JdkVersionDetector
 import java.nio.file.Path
 import kotlin.io.path.isDirectory
 
-private class JdkAutoHint: BaseState() {
+internal class JdkAutoHint : BaseState() {
   val name by string()
   val path: String? by string()
   val version by string()
@@ -51,12 +63,12 @@ private class JdkAutoHint: BaseState() {
   val includeJars by list<String>()
 }
 
-private class JdkAutoHints : BaseState() {
+internal class JdkAutoHints : BaseState() {
   @get:XCollection
   val jdks by list<JdkAutoHint>()
 }
 
-private class JdkAutoHintService(private val project: Project) : SimplePersistentStateComponent<JdkAutoHints>(JdkAutoHints()) {
+internal class JdkAutoHintService(private val project: Project) : SimplePersistentStateComponent<JdkAutoHints>(JdkAutoHints()) {
   override fun loadState(state: JdkAutoHints) {
     super.loadState(state)
 
@@ -65,7 +77,7 @@ private class JdkAutoHintService(private val project: Project) : SimplePersisten
 
   companion object {
     @JvmStatic
-    fun getInstance(project: Project) : JdkAutoHintService = project.service()
+    fun getInstance(project: Project): JdkAutoHintService = project.service()
   }
 }
 
@@ -97,13 +109,17 @@ private class JarSdkConfigurator(val extraJars: List<String>) : UnknownSdkFixCon
 private val LOG = logger<JdkAuto>()
 
 class JdkAuto : UnknownSdkResolver {
-  override fun supportsResolution(sdkTypeId: SdkTypeId): Boolean = notSimpleJavaSdkTypeIfAlternativeExistsAndNotDependentSdkType().value(sdkTypeId)
+  override fun supportsResolution(sdkTypeId: SdkTypeId): Boolean =
+    notSimpleJavaSdkTypeIfAlternativeExistsAndNotDependentSdkType().value(sdkTypeId)
 
   override fun createResolver(project: Project?, indicator: ProgressIndicator): UnknownSdkLookup? {
     if (!Registry.`is`("jdk.auto.setup")) return null
     if (ApplicationManager.getApplication().isUnitTestMode) return null
     return createResolverImpl(project, indicator)
   }
+
+  @Service(Service.Level.PROJECT)
+  private class ProjectServiceScope(val coroutineScope: CoroutineScope)
 
   @Service
   private class ServiceScope(val coroutineScope: CoroutineScope)
@@ -120,7 +136,7 @@ class JdkAuto : UnknownSdkResolver {
                     }.firstOrNull() ?: return null
 
     return object : UnknownSdkLookup {
-      private val coroutineScope = service<ServiceScope>().coroutineScope
+      private val coroutineScope = project?.service<ProjectServiceScope>()?.coroutineScope ?: service<ServiceScope>().coroutineScope
 
       val projectEelDescriptor by lazy { project?.getEelDescriptor() ?: LocalEelDescriptor }
 
@@ -197,9 +213,14 @@ class JdkAuto : UnknownSdkResolver {
         }
       }
 
-      override fun proposeDownload(sdk: UnknownSdk, indicator: ProgressIndicator): UnknownSdkDownloadableSdkFix? = proposeDownload(sdk, indicator, null)
+      override fun proposeDownload(sdk: UnknownSdk, indicator: ProgressIndicator): UnknownSdkDownloadableSdkFix? =
+        proposeDownload(sdk, indicator, null)
 
-      override fun proposeDownload(sdk: UnknownSdk, indicator: ProgressIndicator, lookupReason: @Nls String?): UnknownSdkDownloadableSdkFix? {
+      override fun proposeDownload(
+        sdk: UnknownSdk,
+        indicator: ProgressIndicator,
+        lookupReason: @Nls String?,
+      ): UnknownSdkDownloadableSdkFix? {
         return runBlockingCancellable { proposeDownload0(sdk, lookupReason) }
       }
 
@@ -210,15 +231,15 @@ class JdkAuto : UnknownSdkResolver {
         LOG.info("Looking for a possible download for ${sdk.sdkType.presentableName} with name ${sdk.sdkName} ; $req")
 
         val jdks = lazyDownloadModel.getValue()
-                     .asSequence()
-                     .filter { CpuArch.fromString(it.arch) == CpuArch.CURRENT }
-                     .mapNotNull {
-                       val v = JavaVersion.tryParse(it.versionString)
-                       if (v != null) {
-                         it to v
-                       }
-                       else null
-                     }
+          .asSequence()
+          .filter { CpuArch.fromString(it.arch) == CpuArch.CURRENT }
+          .mapNotNull {
+            val v = JavaVersion.tryParse(it.versionString)
+            if (v != null) {
+              it to v
+            }
+            else null
+          }
 
         val matchingJdks = jdks.filter { req.matches(it.first) }
         val jdkToDownload = matchingJdks.singleOrNull() ?: jdks.singleOrNull { it.first.suggestedSdkName == sdk.sdkName }
@@ -231,7 +252,8 @@ class JdkAuto : UnknownSdkResolver {
 
         return if (jdkToDownload != null) {
           singleJdkDownloadFix(jarConfigurator, jdkToDownload.first, lookupReason)
-        } else {
+        }
+        else {
           multipleJdksDownloadFix(jarConfigurator, matchingJdks, lookupReason)
         }
       }
@@ -245,7 +267,8 @@ class JdkAuto : UnknownSdkResolver {
         override fun getPresentableVersionString() = jdkToDownload.presentableVersionString
 
         override fun getSdkLookupReason(): String? = lookupReason
-        override fun getDownloadDescription() = jdkToDownload.fullPresentationText + " (${(jdkToDownload.archiveSize / 1024 / 1024).toInt()} MB)"
+        override fun getDownloadDescription() =
+          jdkToDownload.fullPresentationText + " (${(jdkToDownload.archiveSize / 1024 / 1024).toInt()} MB)"
 
         override fun createTask(indicator: ProgressIndicator): SdkDownloadTask = runBlockingCancellable {
           val jdkInstaller = JdkInstaller.getInstance()
@@ -269,7 +292,9 @@ class JdkAuto : UnknownSdkResolver {
         override fun getVersionString() = item.versionString
         override fun getPresentableVersionString() = item.presentableVersionString
 
-        override fun getSdkLookupReason(): String? = lookupReason ?: ProjectBundle.message("sdk.download.picker.text", ApplicationInfo.getInstance().fullApplicationName)
+        override fun getSdkLookupReason(): String =
+          lookupReason ?: ProjectBundle.message("sdk.download.picker.text", ApplicationInfo.getInstance().fullApplicationName)
+
         override fun getDownloadDescription() = item.fullPresentationText + " (${item.archiveSizeInMB} MB)"
 
         override fun createTask(indicator: ProgressIndicator): SdkDownloadTask = runBlockingCancellable {
@@ -279,10 +304,17 @@ class JdkAuto : UnknownSdkResolver {
           JdkDownloadTask(item, request, project)
         }
 
-        override fun toString() = "UnknownSdkMultipleDownloadsFix{${items.joinToString(" / ") { it.fullPresentationText }}, eel=${projectEelDescriptor}}"
+        override fun toString() =
+          "UnknownSdkMultipleDownloadsFix{${items.joinToString(" / ") { it.fullPresentationText }}, eel=${projectEelDescriptor}}"
 
         override fun chooseItem(sdkTypeName: @NlsSafe String): Boolean {
-          val (selectedItem, path) = selectJdkAndPath(project, null, items, sdkType, null, sdkLookupReason, ProjectBundle.message("dialog.button.download.jdk"))
+          val (selectedItem, path) = selectJdkAndPath(project,
+                                                      null,
+                                                      items,
+                                                      sdkType,
+                                                      null,
+                                                      sdkLookupReason,
+                                                      ProjectBundle.message("dialog.button.download.jdk"))
                                      ?: return false
           item = selectedItem
           homeDir = path
@@ -337,7 +369,7 @@ class JdkAuto : UnknownSdkResolver {
         indicator.text = ProjectBundle.message("progress.text.checking.existing.jdks")
 
         val result = mutableListOf<JavaLocalSdkFix>()
-        for (it in ApplicationManager.getApplication().runReadAction(Computable { ProjectJdkTable.getInstance().allJdks})) {
+        for (it in runReadActionBlocking { ProjectJdkTable.getInstance().allJdks }) {
           if (it.sdkType != sdkType) {
             continue
           }
@@ -370,13 +402,13 @@ class JdkAuto : UnknownSdkResolver {
     val version: JavaVersion,
     val suggestedName: String,
     val includeJars: List<String> = emptyList(),
-    val prototype: Sdk? = null
+    val prototype: Sdk? = null,
   ) : UnknownSdkLocalSdkFix, UnknownSdkFixConfigurator by JarSdkConfigurator(includeJars) {
 
     override fun getExistingSdkHome() = homeDir
     override fun getVersionString() = JdkVersionDetector.formatVersionString(version)
     override fun getPresentableVersionString() = version.toFeatureMinorUpdateString()
-    override fun getSuggestedSdkName() : String = suggestedName
+    override fun getSuggestedSdkName(): String = suggestedName
     override fun getRegisteredSdkPrototype(): Sdk? = prototype
     override fun toString() = "UnknownSdkLocalSdkFix{$presentableVersionString, dir=$homeDir}"
   }

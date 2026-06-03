@@ -31,7 +31,7 @@ private var initialRefreshDone = false
 private val LOG: Logger
   get() = logger<DynamicPluginVfsListener>()
 
-private class DynamicPluginVfsListenerInitializer : ApplicationActivity {
+internal class DynamicPluginVfsListenerInitializer : ApplicationActivity {
   init {
     if (!java.lang.Boolean.getBoolean(AUTO_RELOAD_PLUGINS_SYSTEM_PROPERTY) || ApplicationManager.getApplication().isHeadlessEnvironment) {
       throw ExtensionNotApplicableException.create()
@@ -56,7 +56,7 @@ private class DynamicPluginVfsListenerInitializer : ApplicationActivity {
   }
 }
 
-private class DynamicPluginVfsListener : AsyncFileListener {
+internal class DynamicPluginVfsListener : AsyncFileListener {
   override fun prepareChange(events: List<VFileEvent>): AsyncFileListener.ChangeApplier? {
     if (!java.lang.Boolean.getBoolean(AUTO_RELOAD_PLUGINS_SYSTEM_PROPERTY)) {
       return null
@@ -65,7 +65,7 @@ private class DynamicPluginVfsListener : AsyncFileListener {
       return null
     }
 
-    val pluginsToReload = hashSetOf<IdeaPluginDescriptorImpl>()
+    val pluginsToReload = hashSetOf<PluginMainDescriptor>()
     for (event in events) {
       if (!event.isFromRefresh) continue
       if (event is VFileContentChangeEvent) {
@@ -76,7 +76,9 @@ private class DynamicPluginVfsListener : AsyncFileListener {
       }
     }
 
-    val descriptorsToReload = pluginsToReload.filter { it.isEnabled && DynamicPlugins.allowLoadUnloadWithoutRestart(it) }
+    val descriptorsToReload = pluginsToReload.filter {
+      PluginManagerCore.isLoaded(it.pluginId) && DynamicPlugins.checkCanLoadWithoutRestart(it)
+    }
     if (descriptorsToReload.isEmpty()) {
       return null
     }
@@ -112,13 +114,13 @@ private class DynamicPluginVfsListener : AsyncFileListener {
     }
   }
 
-  private fun findPluginByPath(file: VirtualFile): IdeaPluginDescriptorImpl? {
+  private fun findPluginByPath(file: VirtualFile): PluginMainDescriptor? {
     if (!VfsUtilCore.isAncestorOrSelf(PathManager.getPluginsPath(), file)) {
       return null
     }
-    return PluginManager.getPlugins().firstOrNull {
+    return PluginManagerCore.getPluginSet().allPlugins.firstOrNull {
       VfsUtilCore.isAncestorOrSelf(it.pluginPath.toAbsolutePath().toString(), file)
-    } as IdeaPluginDescriptorImpl?
+    }
   }
 }
 

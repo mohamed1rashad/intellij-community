@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 import sys
 
+from _pydevd_bundle.custom.pydevd_utils import should_evaluate_shape, has_attribute_safe
 from _pydevd_bundle.pydevd_constants import get_frame, RETURN_VALUES_DICT, ForkSafeLock, GENERATED_LEN_ATTR_NAME, silence_warnings_decorator
 from _pydevd_bundle.pydevd_xml import get_variable_details, get_type
 from _pydev_bundle.pydev_override import overrides
@@ -10,7 +11,7 @@ from _pydev_bundle import pydev_log
 from _pydevd_bundle import pydevd_vars
 from _pydev_bundle.pydev_imports import Exec
 from _pydevd_bundle.pydevd_frame_utils import FramesList
-from _pydevd_bundle.pydevd_utils import ScopeRequest, DAPGrouper, Timer
+from _pydevd_bundle.pydevd_utils import ScopeRequest, DAPGrouper, Timer, is_string
 from typing import Optional
 
 
@@ -54,7 +55,7 @@ class _AbstractVariable(object):
         for key, val in safe_repr_custom_attrs.items():
             setattr(safe_repr, key, val)
 
-        type_name, _type_qualifier, _is_exception_on_eval, resolver, value = get_variable_details(
+        type_name, type_qualifier, _is_exception_on_eval, resolver, value = get_variable_details(
             self.value, to_string=safe_repr, context=context
         )
 
@@ -62,8 +63,34 @@ class _AbstractVariable(object):
 
         attributes = []
 
+        if type_qualifier:
+            attributes.append(f"qualifiedType: {type_qualifier}.{type_name}")
+
+        try:
+            import inspect
+            src_file = inspect.getfile(self.value.__class__)
+            if src_file:
+                attributes.append(f"typeSourceFile: {src_file}")
+        except (TypeError, OSError):
+            pass
+
         if is_raw_string:
             attributes.append("rawString")
+
+        try:
+            if should_evaluate_shape():
+                if has_attribute_safe(self.value, 'shape') and not callable(self.value.shape):
+                    shape = str(tuple(self.value.shape))
+                    attributes.append(f"shape: {shape}")
+                elif has_attribute_safe(self.value, '__len__') and not is_string(self.value):
+                    shape = str(len(self.value))
+                    attributes.append(f"shape: {shape}")
+
+            if has_attribute_safe(self.value, "dtype"):
+                dtype = str(self.value.dtype)
+                attributes.append(f"dtype: {dtype}")
+        except:
+            pass
 
         name = self.name
 

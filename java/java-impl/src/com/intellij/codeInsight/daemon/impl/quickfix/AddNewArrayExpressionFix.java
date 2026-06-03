@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.codeInsight.daemon.QuickFixBundle;
@@ -7,7 +7,17 @@ import com.intellij.modcommand.ModPsiUpdater;
 import com.intellij.modcommand.Presentation;
 import com.intellij.modcommand.PsiUpdateModCommandAction;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.LambdaUtil;
+import com.intellij.psi.PsiArrayInitializerExpression;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypes;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.TypeConversionUtil;
@@ -42,20 +52,20 @@ public class AddNewArrayExpressionFix extends PsiUpdateModCommandAction<PsiArray
     doFix(myType, initializer);
   }
 
-  public static void doFix(@NotNull PsiArrayInitializerExpression initializer) {
+  public static PsiExpression doFix(@NotNull PsiArrayInitializerExpression initializer) {
     PsiType type = getType(initializer);
-    if (type == null) return;
-    doFix(type, initializer);
+    if (type == null) return null;
+    return doFix(type, initializer);
   }
-  
-  private static void doFix(@NotNull PsiType type, @NotNull PsiArrayInitializerExpression initializer) {
+
+  private static PsiExpression doFix(@NotNull PsiType type, @NotNull PsiArrayInitializerExpression initializer) {
     Project project = initializer.getProject();
     PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
     @NonNls String text = "new " + type.getCanonicalText() + "[]{}";
     PsiNewExpression newExpr = (PsiNewExpression) factory.createExpressionFromText(text, null);
     Objects.requireNonNull(newExpr.getArrayInitializer()).replace(initializer);
     newExpr = (PsiNewExpression) CodeStyleManager.getInstance(project).reformat(newExpr);
-    initializer.replace(newExpr);
+    return (PsiExpression)initializer.replace(newExpr);
   }
 
   private static PsiType getType(@NotNull PsiArrayInitializerExpression initializer) {

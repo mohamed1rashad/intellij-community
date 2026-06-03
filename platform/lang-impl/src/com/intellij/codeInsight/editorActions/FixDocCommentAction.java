@@ -5,11 +5,14 @@ import com.intellij.application.options.CodeStyle;
 import com.intellij.codeInsight.CodeInsightBundle;
 import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.documentation.DocCommentFixer;
-import com.intellij.lang.*;
+import com.intellij.lang.CodeDocumentationAwareCommenter;
+import com.intellij.lang.Commenter;
+import com.intellij.lang.Language;
+import com.intellij.lang.LanguageCommenters;
+import com.intellij.lang.LanguageDocumentation;
 import com.intellij.lang.documentation.CodeDocumentationProvider;
 import com.intellij.lang.documentation.CompositeDocumentationProvider;
 import com.intellij.lang.documentation.DocumentationProvider;
-import com.intellij.modcommand.ModPsiNavigator;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
@@ -17,14 +20,19 @@ import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.ModNavigator;
 import com.intellij.openapi.editor.actionSystem.EditorAction;
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler;
-import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiDocCommentBase;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.DocCommentSettings;
 import com.intellij.psi.codeStyle.LanguageCodeStyleSettingsProvider;
@@ -32,6 +40,8 @@ import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Objects;
 
 /**
  * Creates documentation comment for the current context if it's not created yet (e.g. the caret is inside a method which
@@ -81,7 +91,7 @@ public final class FixDocCommentAction extends EditorAction {
    * @param project     current project
    * @param navigator   navigator to use to set caret position
    */
-  public static void generateComment(final @NotNull PsiElement element, final @NotNull Project project, final @NotNull ModPsiNavigator navigator) {
+  public static void generateComment(final @NotNull PsiElement element, final @NotNull Project project, final @NotNull ModNavigator navigator) {
     Language language = element.getLanguage();
     final CodeDocumentationProvider docProvider = getDocumentationProvider(language);
     if (docProvider == null) {
@@ -140,7 +150,7 @@ public final class FixDocCommentAction extends EditorAction {
     }
     final Runnable task;
     if (pair.second == null || pair.second.getTextRange().isEmpty()) {
-      task = () -> generateComment(pair.first, EditorUtil.asPsiNavigator(editor), docProvider, commenter, project);
+      task = () -> generateComment(pair.first, editor.asModNavigator(), docProvider, commenter, project);
     }
     else {
       final DocCommentFixer fixer = DocCommentFixer.EXTENSION.forLanguage(language);
@@ -171,10 +181,11 @@ public final class FixDocCommentAction extends EditorAction {
    * @param project     current project
    */
   private static void generateComment(@NotNull PsiElement anchor,
-                                      @NotNull ModPsiNavigator navigator,
+                                      @NotNull ModNavigator navigator,
                                       @NotNull CodeDocumentationProvider documentationProvider,
                                       @NotNull CodeDocumentationAwareCommenter commenter,
                                       @NotNull Project project) {
+    PsiFile anchorFile = anchor.getContainingFile();
     Document document = anchor.getContainingFile().getFileDocument();
     int commentStartOffset = anchor.getTextRange().getStartOffset();
     int lineStartOffset = document.getLineStartOffset(document.getLineNumber(commentStartOffset));
@@ -194,24 +205,31 @@ public final class FixDocCommentAction extends EditorAction {
     int commentBodyRelativeOffset = 0;
     int caretLineOffset = 0;
     StringBuilder buffer = new StringBuilder();
-    String commentPrefix = commenter.getDocumentationCommentPrefix();
-    if (commentPrefix != null) {
-      buffer.append(commentPrefix).append("\n");
-      caretLineOffset++;
-      commentBodyRelativeOffset += commentPrefix.length() + 1;
-    }
 
-    String linePrefix = commenter.getDocumentationCommentLinePrefix();
-    if (linePrefix != null) {
-      buffer.append(linePrefix);
-      commentBodyRelativeOffset += linePrefix.length();
+    if (preferDocumentationLineComment(anchorFile, null)) {
+      buffer.append(commenter.getDocumentationLineCommentPrefix()).append("\n");
+      commentBodyRelativeOffset += Objects.requireNonNull(commenter.getDocumentationLineCommentPrefix()).length() + 1;
     }
-    buffer.append("\n");
-    commentBodyRelativeOffset++;
+    else {
+      String commentPrefix = commenter.getDocumentationCommentPrefix();
+      if (commentPrefix != null) {
+        buffer.append(commentPrefix).append("\n");
+        caretLineOffset++;
+        commentBodyRelativeOffset += commentPrefix.length() + 1;
+      }
 
-    String commentSuffix = commenter.getDocumentationCommentSuffix();
-    if (commentSuffix != null) {
-      buffer.append(commentSuffix).append("\n");
+      String linePrefix = commenter.getDocumentationCommentLinePrefix();
+      if (linePrefix != null) {
+        buffer.append(linePrefix);
+        commentBodyRelativeOffset += linePrefix.length();
+      }
+      buffer.append("\n");
+      commentBodyRelativeOffset++;
+
+      String commentSuffix = commenter.getDocumentationCommentSuffix();
+      if (commentSuffix != null) {
+        buffer.append(commentSuffix).append("\n");
+      }
     }
 
     if (buffer.length() <= 0) {
@@ -291,5 +309,21 @@ public final class FixDocCommentAction extends EditorAction {
       }
     }
     return result;
+  }
+
+  /// @param file    The file being worked on. Useful to retrieve the settings.
+  /// @param comment A comment possibly targeted by an action.
+  /// @return `true` if the language/comment prefers/id **line** documentation comments
+  /// over **block** documentation comments.
+  public static boolean preferDocumentationLineComment(@NotNull PsiFile file, @Nullable PsiDocCommentBase comment) {
+    Commenter commenter = LanguageCommenters.INSTANCE.forLanguage(file.getLanguage());
+    if (commenter instanceof CodeDocumentationAwareCommenter docCommenter) {
+      if (comment == null) {
+        return CodeStyle.getLanguageSettings(file).DOCUMENTATION_LINE_COMMENT_PREFERRED;
+      }
+      return docCommenter.isDocumentationLineComment(comment);
+    }
+    // Can't guess
+    return false;
   }
 }

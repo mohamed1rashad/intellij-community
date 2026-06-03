@@ -10,7 +10,11 @@ import com.intellij.codeInspection.ex.InspectionProfileWrapper;
 import com.intellij.ide.ui.UISettingsUtils;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.UiCompatibleDataProvider;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.SpellCheckingEditorCustomizationProvider;
@@ -31,7 +35,16 @@ import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
-import com.intellij.ui.*;
+import com.intellij.toolWindow.InternalDecoratorImpl;
+import com.intellij.ui.AdditionalPageAtBottomEditorCustomization;
+import com.intellij.ui.ColorUtil;
+import com.intellij.ui.EditorCustomization;
+import com.intellij.ui.EditorTextField;
+import com.intellij.ui.EditorTextFieldProvider;
+import com.intellij.ui.ErrorStripeEditorCustomization;
+import com.intellij.ui.SeparatorFactory;
+import com.intellij.ui.SoftWrapsEditorCustomization;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBLoadingPanel;
 import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
@@ -44,8 +57,10 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Box;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -67,9 +82,15 @@ public class CommitMessage extends JPanel implements Disposable, UiCompatibleDat
   private final @Nullable @Nls String myMessagePlaceholder;
 
   private static final @NotNull EditorCustomization COLOR_SCHEME_FOR_CURRENT_UI_THEME_CUSTOMIZATION = editor -> {
+    preventRecursiveBackground(editor.getComponent());
     editor.setBackgroundColor(null); // to use background from set color scheme
     editor.setColorsScheme(getCommitMessageColorScheme(editor));
   };
+
+  private static void preventRecursiveBackground(@NotNull JComponent component) {
+    UIUtil.forEachComponentInHierarchy(component,
+                                       child -> InternalDecoratorImpl.preventRecursiveBackgroundUpdateOnToolwindow((JComponent)child));
+  }
 
   private static @NotNull EditorColorsScheme getCommitMessageColorScheme(EditorEx editor) {
     boolean isLaFDark = ColorUtil.isDark(UIUtil.getPanelBackground());
@@ -132,6 +153,8 @@ public class CommitMessage extends JPanel implements Disposable, UiCompatibleDat
         add(createToolbar(false), BorderLayout.EAST);
       }
     }
+
+    preventRecursiveBackground(this);
 
     setBorder(createEmptyBorder());
 

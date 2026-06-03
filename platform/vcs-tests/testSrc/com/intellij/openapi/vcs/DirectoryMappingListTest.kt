@@ -1,7 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs
 
+import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.components.ComponentManagerEx
+import com.intellij.openapi.fileTypes.FileTypeManager
+import com.intellij.openapi.module.ModuleManager
+import com.intellij.openapi.roots.FileIndexFacade
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.io.IoTestUtil
@@ -15,7 +19,9 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.HeavyPlatformTestCase
+import com.intellij.testFramework.PerformanceUnitTest
 import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.PsiTestUtil
 import com.intellij.testFramework.TestLoggerFactory
 import com.intellij.tools.ide.metrics.benchmark.Benchmark
 import com.intellij.util.concurrency.ThreadingAssertions
@@ -325,6 +331,68 @@ class DirectoryMappingListTest : HeavyPlatformTestCase() {
     assertMappedRoot("$rootPath/parent/child/dir/subChild/subSubChild/file", "$rootPath/parent/child/dir/subChild/subSubChild")
   }
 
+  fun testExplicitMappedRootUnderIgnoredAncestor() {
+    val fileTypeManager = FileTypeManager.getInstance()
+    val originalIgnoredFileList = fileTypeManager.ignoredFilesList
+
+    try {
+      runWriteAction {
+        fileTypeManager.setIgnoredFilesList("$originalIgnoredFileList;ignored")
+      }
+
+      val externalRootPath = FileUtil.toSystemIndependentName(tempDir.newPath("outside").resolve("ignored").resolve("repo").toString())
+      val externalRoot = createFile(externalRootPath, isDirectory = true)
+      val module = ModuleManager.getInstance(myProject).findModuleByName("a")!!
+      PsiTestUtil.addContentRoot(module, externalRoot)
+      PlatformTestUtil.dispatchAllInvocationEventsInIdeEventQueue()
+
+      val fileIndex = FileIndexFacade.getInstance(myProject)
+      assertFalse(fileIndex.isUnderIgnored(externalRoot))
+
+      val externalRootFilePath = VcsUtil.getFilePath(externalRoot)
+      val versionedFilePath = "$externalRootPath/src/file.txt".filePath
+      val versionedFile = createFile(versionedFilePath.path)
+      val ignoredUnderRootPath = "$externalRootPath/ignored/nested.txt".filePath
+      val ignoredUnderRootFile = createFile(ignoredUnderRootPath.path)
+
+      assertTrue(vcsManager.isIgnored(externalRoot))
+      assertTrue(vcsManager.isIgnored(externalRootFilePath))
+      assertTrue(vcsManager.isIgnored(versionedFile))
+      assertTrue(vcsManager.isIgnored(versionedFilePath))
+      assertFalse(vcsManager.isIgnoredFileRoot(externalRoot))
+      assertFalse(vcsManager.isIgnoredFileRoot(versionedFile))
+      assertTrue(vcsManager.isIgnoredFileRoot(ignoredUnderRootFile))
+      assertFalse(vcsManager.isIgnoredUnderRoot(externalRoot, versionedFile))
+      assertFalse(vcsManager.isIgnoredUnderRoot(externalRoot, versionedFilePath))
+      assertTrue(vcsManager.isIgnoredUnderRoot(externalRoot, ignoredUnderRootFile))
+      assertTrue(vcsManager.isIgnoredUnderRoot(externalRoot, ignoredUnderRootPath))
+
+      vcsManager.setDirectoryMappings(listOf(VcsDirectoryMapping(externalRoot.path, MOCK)))
+      mappings.waitMappedRootsUpdate()
+
+      assertSame(vcsMock, vcsManager.getVcsFor(externalRoot))
+      assertSame(vcsMock, vcsManager.getVcsFor(externalRootFilePath))
+      assertSame(vcsMock, vcsManager.getVcsFor(versionedFile))
+      assertSame(vcsMock, vcsManager.getVcsFor(versionedFilePath))
+
+      assertEquals(externalRoot, vcsManager.getVcsRootFor(externalRoot))
+      assertEquals(externalRoot, vcsManager.getVcsRootFor(externalRootFilePath))
+      assertEquals(externalRoot, vcsManager.getVcsRootFor(versionedFile))
+      assertEquals(externalRoot, vcsManager.getVcsRootFor(versionedFilePath))
+
+      assertNull(vcsManager.getVcsFor(ignoredUnderRootFile))
+      assertNull(vcsManager.getVcsFor(ignoredUnderRootPath))
+      assertNull(vcsManager.getVcsRootFor(ignoredUnderRootFile))
+      assertNull(vcsManager.getVcsRootFor(ignoredUnderRootPath))
+    }
+    finally {
+      runWriteAction {
+        fileTypeManager.setIgnoredFilesList(originalIgnoredFileList)
+      }
+    }
+  }
+
+  @PerformanceUnitTest
   fun testPerformanceFewRootsFilePaths() {
     val roots = listOf(
       "$rootPath/parent/module1",
@@ -349,6 +417,7 @@ class DirectoryMappingListTest : HeavyPlatformTestCase() {
     }.start()
   }
 
+  @PerformanceUnitTest
   fun testPerformanceManyRootsFilePaths() {
     val roots = (0..1000).map { "$rootPath/parent/module$it" } +
                 "$rootPath/parent"
@@ -372,6 +441,7 @@ class DirectoryMappingListTest : HeavyPlatformTestCase() {
     }.start()
   }
 
+  @PerformanceUnitTest
   fun testPerformanceNestedRootsFilePaths() {
     var path = "$rootPath/parent"
     val roots = mutableListOf<String>()
@@ -399,6 +469,7 @@ class DirectoryMappingListTest : HeavyPlatformTestCase() {
     }.start()
   }
 
+  @PerformanceUnitTest
   fun testPerformanceFewRootsVirtualFiles() {
     val roots = listOf(
       "$rootPath/parent/module1",
@@ -423,6 +494,7 @@ class DirectoryMappingListTest : HeavyPlatformTestCase() {
     }.start()
   }
 
+  @PerformanceUnitTest
   fun testPerformanceManyRootsVirtualFiles() {
     val roots = (0..1000).map { "$rootPath/parent/module$it" } +
                 "$rootPath/parent"
@@ -446,6 +518,7 @@ class DirectoryMappingListTest : HeavyPlatformTestCase() {
     }.start()
   }
 
+  @PerformanceUnitTest
   fun testPerformanceNestedRootsVirtualFiles() {
     var path = "$rootPath/parent"
     val roots = mutableListOf<String>()

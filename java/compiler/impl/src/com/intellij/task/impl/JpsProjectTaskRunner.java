@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.task.impl;
 
 import com.intellij.compiler.impl.CompileDriver;
@@ -7,7 +7,12 @@ import com.intellij.compiler.impl.CompositeScope;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.impl.ExecutionManagerImpl;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.compiler.*;
+import com.intellij.openapi.compiler.CompilationStatusListener;
+import com.intellij.openapi.compiler.CompileContext;
+import com.intellij.openapi.compiler.CompileScope;
+import com.intellij.openapi.compiler.CompileStatusNotification;
+import com.intellij.openapi.compiler.CompilerManager;
+import com.intellij.openapi.compiler.CompilerTopics;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -21,7 +26,15 @@ import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.impl.compiler.ArtifactCompileScope;
 import com.intellij.packaging.impl.compiler.ArtifactsCompiler;
 import com.intellij.packaging.impl.compiler.ArtifactsWorkspaceSettings;
-import com.intellij.task.*;
+import com.intellij.task.EmptyCompileScopeBuildTask;
+import com.intellij.task.ModuleBuildTask;
+import com.intellij.task.ModuleFilesBuildTask;
+import com.intellij.task.ModuleResourcesBuildTask;
+import com.intellij.task.ProjectModelBuildTask;
+import com.intellij.task.ProjectTask;
+import com.intellij.task.ProjectTaskContext;
+import com.intellij.task.ProjectTaskRunner;
+import com.intellij.task.TaskRunnerResults;
 import com.intellij.tracing.Tracer;
 import com.intellij.util.ModalityUiUtil;
 import com.intellij.util.SmartList;
@@ -34,7 +47,14 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.concurrency.AsyncPromise;
 import org.jetbrains.concurrency.Promise;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -81,7 +101,7 @@ public final class JpsProjectTaskRunner extends ProjectTaskRunner {
   }
 
   @Override
-  public boolean canRun(@NotNull ProjectTask projectTask) {
+  public boolean canRun(@NotNull Project project, @NotNull ProjectTask projectTask, @Nullable ProjectTaskContext context) {
     return projectTask instanceof ModuleBuildTask || projectTask instanceof EmptyCompileScopeBuildTask ||
            (projectTask instanceof ProjectModelBuildTask && ((ProjectModelBuildTask<?>)projectTask).getBuildableElement() instanceof Artifact);
   }
@@ -348,8 +368,8 @@ public final class JpsProjectTaskRunner extends ProjectTaskRunner {
     private void notifyFinished() {
       if (myCollectingStopped && myNotifications.isEmpty()) {
         myPromise.setResult(myAborted && myErrors > 0 ? FAILED_AND_ABORTED :
-                            myAborted ? TaskRunnerResults.ABORTED : 
-                            myErrors > 0 ? TaskRunnerResults.FAILURE : 
+                            myAborted ? TaskRunnerResults.ABORTED :
+                            myErrors > 0 ? TaskRunnerResults.FAILURE :
                             TaskRunnerResults.SUCCESS);
       }
     }

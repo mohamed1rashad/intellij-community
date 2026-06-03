@@ -1,10 +1,9 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplaceGetOrSet", "ReplacePutWithAssignment", "OVERRIDE_DEPRECATION", "LiftReturnOrAssignment")
 
 package com.intellij.ide
 
 import com.intellij.configurationStore.ProjectStorePathManager
-import com.intellij.diagnostic.runActivity
 import com.intellij.ide.RecentProjectsManager.RecentProjectsChange
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
@@ -19,7 +18,12 @@ import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.PathManager.getSystemDir
 import com.intellij.openapi.application.ex.ApplicationInfoEx
 import com.intellij.openapi.application.ex.ApplicationManagerEx
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.RoamingType
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.trace
@@ -31,32 +35,42 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.project.ex.ProjectManagerEx
 import com.intellij.openapi.project.impl.createIdeFrame
 import com.intellij.openapi.util.ModificationTracker
-import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.io.toNioPathOrNull
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.wm.WindowManager
 import com.intellij.openapi.wm.ex.WindowManagerEx
-import com.intellij.openapi.wm.impl.*
+import com.intellij.openapi.wm.impl.FrameInfo
+import com.intellij.openapi.wm.impl.IDE_FRAME_EVENT_LOG
+import com.intellij.openapi.wm.impl.IdeFrameImpl
+import com.intellij.openapi.wm.impl.ProjectFrameBounds
+import com.intellij.openapi.wm.impl.WindowManagerImpl
+import com.intellij.openapi.wm.impl.checkForNonsenseBounds
 import com.intellij.openapi.wm.impl.customFrameDecorations.header.CustomWindowHeaderUtil
 import com.intellij.platform.diagnostic.telemetry.impl.span
+import com.intellij.platform.eel.EelUnavailableException
 import com.intellij.platform.eel.provider.EelInitialization
 import com.intellij.platform.eel.provider.LocalEelDescriptor
+import com.intellij.platform.eel.provider.asEelPath
 import com.intellij.platform.eel.provider.getEelDescriptor
 import com.intellij.platform.ide.diagnostic.startUpPerformanceReporter.FUSProjectHotStartUpMeasurer
 import com.intellij.project.ProjectStoreOwner
 import com.intellij.project.stateStore
-import com.intellij.ui.mac.createMacDelegate
-import com.intellij.ui.win.createWinDockDelegate
 import com.intellij.util.PathUtilRt
 import com.intellij.util.PlatformUtils
+import com.intellij.util.concurrency.annotations.RequiresBlockingContext
 import com.intellij.util.io.createParentDirectories
-import kotlinx.coroutines.*
+import com.intellij.util.text.nullize
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.annotations.VisibleForTesting
@@ -64,8 +78,10 @@ import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
-import java.util.*
+import java.util.AbstractMap
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.LongAdder
 import javax.swing.Icon
@@ -74,6 +90,7 @@ import kotlin.collections.Map.Entry
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.io.path.invariantSeparatorsPathString
+import kotlin.io.path.name
 import kotlin.io.path.relativeTo
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -92,6 +109,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     const val MAX_PROJECTS_IN_MAIN_MENU: Int = 6
 
     @JvmStatic
+    @RequiresBlockingContext
     fun getInstanceEx(): RecentProjectsManagerBase = RecentProjectsManager.getInstance() as RecentProjectsManagerBase
 
     @JvmName("isFileSystemPath")
@@ -105,9 +123,9 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
   private val nameCache: MutableMap<String, String> = Collections.synchronizedMap(HashMap())
 
   private val disableUpdatingRecentInfo = AtomicBoolean()
+  private val systemDockMenuUpdater = RecentProjectsSystemDockMenuUpdater(coroutineScope)
 
   private val nameResolveRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-  private val updateDockRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
   private val stateLock = Any()
   private var state = RecentProjectManagerState()
@@ -128,26 +146,6 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
         }
     }
 
-    if (!ApplicationManager.getApplication().isHeadlessEnvironment) {
-      coroutineScope.launch {
-        val delegate = when {
-                         SystemInfoRt.isMac -> createMacDelegate()
-                         SystemInfoRt.isWindows -> createWinDockDelegate()
-                         else -> null
-                       } ?: return@launch
-
-        updateDockRequests
-          .debounce(50.milliseconds)
-          .collectLatest {
-            runActivity("system dock menu") {
-              runCatching {
-                delegate.updateRecentProjectsMenu()
-              }.getOrLogException(LOG)
-            }
-          }
-      }
-    }
-
     ApplicationManager.getApplication().messageBus.connect(coroutineScope).subscribe(RecentProjectsManager.RECENT_PROJECTS_CHANGE_TOPIC, object : RecentProjectsChange {
       override fun change() {
         updateSystemDockMenu()
@@ -155,10 +153,15 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     })
   }
 
-  private fun updateSystemDockMenu() {
-    check(updateDockRequests.tryEmit(Unit))
+  internal fun startSystemDockUpdates() {
+    systemDockMenuUpdater.start()
   }
 
+  private fun updateSystemDockMenu() {
+    systemDockMenuUpdater.requestUpdate()
+  }
+
+  @Internal
   final override fun getState(): RecentProjectManagerState = state
 
   @Internal
@@ -199,6 +202,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     return key
   }
 
+  @Internal
   final override fun loadState(state: RecentProjectManagerState) {
     synchronized(stateLock) {
       this.state = state
@@ -265,10 +269,9 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
       if (state.additionalInfo.remove(path) != null) {
         modCounter.increment()
       }
-      for (group in state.groups) {
-        if (group.removeProject(path)) {
-          modCounter.increment()
-        }
+      val removedFromGroups = removePathsFromGroups(setOf(path))
+      if (removedFromGroups > 0) {
+        modCounter.add(removedFromGroups.toLong())
       }
       fireChangeEvent()
     }
@@ -280,6 +283,35 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     }
   }
 
+  private fun removePathsFromGroups(paths: Collection<String>): Int {
+    if (paths.isEmpty() || state.groups.isEmpty()) {
+      return 0
+    }
+
+    val pathsToRemove = (paths as? Set<String>) ?: paths.toHashSet()
+    var removedFromGroups = 0
+    for (group in state.groups) {
+      for (path in pathsToRemove) {
+        if (!group.projects.contains(path)) {
+          continue
+        }
+        group.removeProject(path)
+        removedFromGroups++
+      }
+    }
+    return removedFromGroups
+  }
+
+  private fun validateRecentProjects() {
+    val removedPaths = trimRecentProjects(modCounter = modCounter, map = state.additionalInfo)
+    if (removedPaths.isNotEmpty()) {
+      val removedFromGroups = removePathsFromGroups(paths = removedPaths)
+      if (removedFromGroups > 0) {
+        modCounter.add(removedFromGroups.toLong())
+      }
+    }
+  }
+
 
   override var lastProjectCreationLocation: String?
     get() {
@@ -288,11 +320,14 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
       }
     }
     set(value) {
+      if (value?.let { !isLocal(it) } ?: false) return // Do not update location if the value is not from the local file system
       val newValue = value?.takeIf { it.isNotBlank() }?.let { FileUtilRt.toSystemIndependentName(it) }
       synchronized(stateLock) {
         state.lastProjectLocation = newValue
       }
     }
+
+  private fun isLocal(location: String): Boolean = Path.of(location).asEelPath().descriptor is LocalEelDescriptor
 
   override fun updateLastProjectPath() {
     if (PlatformUtils.isJetBrainsClient()) {
@@ -380,6 +415,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     }
   }
 
+  @Internal
   fun addRecentPath(path: Path, info: RecentProjectMetaInfo) {
     addRecentPath(path.invariantSeparatorsPathString, info)
   }
@@ -387,6 +423,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
   /**
    * No-op if [path] is already present in recent projects
    */
+  @Internal
   fun addRecentPath(path: String, info: RecentProjectMetaInfo) {
     synchronized(stateLock) {
       val presentInfo = state.additionalInfo.putIfAbsent(path, info)
@@ -396,6 +433,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     }
   }
 
+  @Internal
   fun updateRecentMetadata(project: Project, metaInfoUpdater: RecentProjectMetaInfo.() -> Unit) {
     val projectPath = getProjectPath(project)?.invariantSeparatorsPathString ?: return
     synchronized(stateLock) {
@@ -427,6 +465,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
       getProjectMetaInfo(projectFile)?.let { info ->
         effectiveOptions = effectiveOptions.copy(
           projectWorkspaceId = info.projectWorkspaceId,
+          projectFrameTypeId = info.projectFrameTypeId,
           implOptions = OpenProjectImplOptions(recentProjectMetaInfo = info, frameInfo = info.frame)
         )
       }
@@ -513,7 +552,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
       info.projectOpenTimestamp = openTimestamp
 
       state.lastOpenedProject = projectPathString
-      validateRecentProjects(modCounter, state.additionalInfo)
+      validateRecentProjects()
     }
 
     updateSystemDockMenu()
@@ -562,7 +601,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
 
   fun getRecentPaths(): List<String> {
     synchronized(stateLock) {
-      validateRecentProjects(modCounter, state.additionalInfo)
+      validateRecentProjects()
       return state.additionalInfo.filter { !it.value.hidden }.keys.reversed()
     }
   }
@@ -591,6 +630,11 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     nameCache.get(path)?.let {
       return it
     }
+
+    // Use name cached from the previous IDE session to avoid I/O on non-local paths (e.g., WSL)
+    synchronized(stateLock) {
+      state.additionalInfo.get(path)?.customProjectName
+    }?.let { return it }
 
     synchronized(namesToResolve) {
       namesToResolve.add(path)
@@ -638,7 +682,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     disableUpdatingRecentInfo.set(true)
     try {
       if (openPaths.size == 1 || isOpenProjectsOneByOneRequired()) {
-        FUSProjectHotStartUpMeasurer.reportReopeningProjects(openPaths)
+        FUSProjectHotStartUpMeasurer.reportReopeningProjects(openPaths.map { Paths.get(it.key) })
         return openOneByOne(openPaths, index = 0, someProjectWasOpened = false)
       }
 
@@ -649,7 +693,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
         }.getOrLogException(LOG)
       }
 
-      FUSProjectHotStartUpMeasurer.reportReopeningProjects(toOpen)
+      FUSProjectHotStartUpMeasurer.reportReopeningProjects(toOpen.map { it.first })
 
       if (toOpen.size == 1) {
         val pair = toOpen.get(0)
@@ -677,11 +721,16 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
     LOG.trace { "openOneByOne: openPaths=$openPaths index=$index someProjectWasOpened=$someProjectWasOpened" }
 
     val (key, value) = openPaths.get(index)
-    EelInitialization.runEelInitialization(key)
+    try {
+      EelInitialization.runEelInitialization(key)
+    } catch (e : EelUnavailableException) {
+      LOG.error(e)
+    }
     val project = openProject(projectFile = Path.of(key), options = OpenProjectTask {
       forceOpenInNewFrame = true
       showWelcomeScreen = false
       projectWorkspaceId = value.projectWorkspaceId
+      projectFrameTypeId = value.projectFrameTypeId
       implOptions = OpenProjectImplOptions(recentProjectMetaInfo = value, frameInfo = value.frame)
     })
     val nextIndex = index + 1
@@ -726,6 +775,7 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
               forceOpenInNewFrame = true
               showWelcomeScreen = false
               projectWorkspaceId = info.projectWorkspaceId
+              projectFrameTypeId = info.projectFrameTypeId
               implOptions = OpenProjectImplOptions(recentProjectMetaInfo = info, frame = ideFrame)
             },
           )
@@ -879,7 +929,9 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
           }
         }
         info.displayName = getProjectDisplayName(project)
+        info.customProjectName = project.name.takeIf { path == null || it != getProjectNameOnlyByPath(path) }
         info.projectWorkspaceId = workspaceId
+        info.projectFrameTypeId = frameHelper.projectFrameTypeId
         info.frameTitle = frame.title
         info.colorInfo = ProjectColorInfoManager.getInstance(project).recentProjectColorInfo
       }
@@ -905,9 +957,14 @@ open class RecentProjectsManagerBase(coroutineScope: CoroutineScope) :
 
     var file: Path? = projectPath
     while (file != null) {
-      val projectMetaInfo = state.additionalInfo.remove(file.invariantSeparatorsPathString)
+      val filePath = file.invariantSeparatorsPathString
+      val projectMetaInfo = state.additionalInfo.remove(filePath)
       if (projectMetaInfo != null) {
         modCounter.increment()
+        val removedFromGroups = removePathsFromGroups(setOf(filePath))
+        if (removedFromGroups > 0) {
+          modCounter.add(removedFromGroups.toLong())
+        }
         fireChangeEvent()
         break
       }
@@ -981,9 +1038,17 @@ int32 "extendedState"
 
   @Internal
   fun updateProjectColor(projectBasePath: String, info: RecentProjectColorInfo) {
+    var updated = false
     synchronized(stateLock) {
-      getProjectMetaInfo(projectBasePath)?.colorInfo = info
-      modCounter.increment()
+      val metaInfo = state.additionalInfo.get(projectBasePath)
+      if (metaInfo != null) {
+        metaInfo.colorInfo = info
+        modCounter.increment()
+        updated = true
+      }
+    }
+    if (updated) {
+      fireProjectColorChangeEvent(projectBasePath)
     }
   }
 
@@ -1035,13 +1100,24 @@ private fun fireChangeEvent() {
   }
 }
 
+private fun fireProjectColorChangeEvent(projectBasePath: String) {
+  ApplicationManager.getApplication().invokeLater {
+    ApplicationManager.getApplication()
+      .messageBus
+      .syncPublisher(ProjectWindowCustomizerService.PROJECT_COLOR_CHANGE_TOPIC)
+      .projectColorChanged(projectBasePath)
+  }
+}
+
 private suspend fun fireLastProjectsReopenedEvent(activeProject: Project) {
   withContext(Dispatchers.EDT) {
     ApplicationManager.getApplication().messageBus.syncPublisher(RecentProjectsManager.LAST_PROJECTS_TOPIC).lastProjectsReopened(activeProject)
   }
 }
 
-private fun isUseProjectFrameAsSplash() = Registry.`is`("ide.project.frame.as.splash")
+private fun isUseProjectFrameAsSplash() = Registry.`is`("ide.project.frame.as.splash", false)
+
+private const val IDEA_PROJECT_FILE_EXTENSION = ".ipr"
 
 private fun readProjectName(path: String): String {
   if (!RecentProjectsManagerBase.isFileSystemPath(path)) {
@@ -1059,8 +1135,9 @@ private fun readProjectName(path: String): String {
   // Avoid greedy I/O under non-local projects. For example, in the case of WSL:
   //	1.	it may trigger Ijent initialization for each recent project
   //	2.	with Ijent disabled, performance may degrade further — 9P is very slow and could lead to UI freezes
-  if (file.getEelDescriptor() != LocalEelDescriptor) {
-    return path
+  val eelDescriptor = file.getEelDescriptor()
+  if (eelDescriptor != LocalEelDescriptor) {
+    return file.name.removeSuffix(IDEA_PROJECT_FILE_EXTENSION).nullize()?.let { it + " (" + eelDescriptor.name + ")" } ?: path
   }
 
   return ProjectStorePathManager.getInstance()
@@ -1070,26 +1147,23 @@ private fun readProjectName(path: String): String {
 
 private fun getLastProjectFrameInfoFile() = getSystemDir().resolve("lastProjectFrameInfo")
 
-private fun validateRecentProjects(modCounter: LongAdder, map: MutableMap<String, RecentProjectMetaInfo>) {
+private fun trimRecentProjects(modCounter: LongAdder, map: MutableMap<String, RecentProjectMetaInfo>): List<String> {
   val limit = AdvancedSettings.getInt("ide.max.recent.projects")
   var toRemove = map.size - limit
   if (limit < 1 || toRemove <= 0) {
-    return
+    return emptyList()
   }
 
-  val oldMapSize = map.size
-  val iterator = map.values.iterator()
-  while (true) {
-    if (!iterator.hasNext()) {
-      break
-    }
-
-    val info = iterator.next()
-    if (info.opened) {
+  val removedPaths = ArrayList<String>(toRemove)
+  val iterator = map.entries.iterator()
+  while (iterator.hasNext()) {
+    val entry = iterator.next()
+    if (entry.value.opened) {
       continue
     }
 
     iterator.remove()
+    removedPaths.add(entry.key)
     toRemove--
 
     if (toRemove <= 0) {
@@ -1097,14 +1171,15 @@ private fun validateRecentProjects(modCounter: LongAdder, map: MutableMap<String
     }
   }
 
-  if (oldMapSize != map.size) {
+  if (removedPaths.isNotEmpty()) {
     modCounter.increment()
   }
+  return removedPaths
 }
 
 internal fun getProjectNameOnlyByPath(path: String): String {
   val name = PathUtilRt.getFileName(path)
-  return if (path.endsWith(".ipr")) FileUtilRt.getNameWithoutExtension(name) else name
+  return if (path.endsWith(IDEA_PROJECT_FILE_EXTENSION)) FileUtilRt.getNameWithoutExtension(name) else name
 }
 
 @JvmInline
@@ -1123,6 +1198,9 @@ val OpenProjectTask.frame: IdeFrameImpl?
 
 val OpenProjectTask.frameInfo: FrameInfo?
   @Internal get() = (implOptions as OpenProjectImplOptions?)?.frameInfo
+
+val OpenProjectTask.recentProjectMetaInfo: RecentProjectMetaInfo?
+  @Internal get() = (implOptions as OpenProjectImplOptions?)?.recentProjectMetaInfo
 
 @Internal
 interface SystemDock {

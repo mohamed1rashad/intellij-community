@@ -6,7 +6,7 @@ import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.service.fus.collectors.ProjectUsagesCollector
 import com.intellij.internal.statistic.utils.StatisticsUtil.roundToPowerOfTwo
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ContentIterator
 import com.intellij.openapi.roots.ProjectRootManager
@@ -15,7 +15,7 @@ import com.intellij.util.indexing.FileBasedIndex
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
 
-private class IndexableFilesCollector : ProjectUsagesCollector() {
+internal class IndexableFilesCollector : ProjectUsagesCollector() {
   private val GROUP = EventLogGroup("project.indexable.files", 4)
   private val ALL_INDEXABLE_FILES = GROUP.registerEvent("all.indexable.files", EventFields.Int("count"))
   private val ALL_NON_INDEXABLE_FILES = GROUP.registerEvent("all.non.indexable.files", EventFields.Int("count"))
@@ -38,7 +38,7 @@ private class IndexableFilesCollector : ProjectUsagesCollector() {
         return@ContentIterator false
       }
 
-      runReadAction {
+      runReadActionBlocking {
         if (fileOrDir.isValid && !fileOrDir.isDirectory && !fileIndex.isExcluded(fileOrDir)) {
           if (fileIndex.isInContent(fileOrDir)) {
             inContentIndexableFiles++

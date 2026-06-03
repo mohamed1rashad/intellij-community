@@ -15,11 +15,11 @@
  */
 package org.intellij.lang.regexp.psi;
 
-import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.PsiNameIdentifierOwner;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public interface RegExpGroup extends RegExpAtom, PsiNamedElement {
+public interface RegExpGroup extends RegExpAtom, PsiNameIdentifierOwner {
 
   boolean isCapturing();
 
@@ -28,10 +28,9 @@ public interface RegExpGroup extends RegExpAtom, PsiNamedElement {
   /** @return true, if this is a named group of any kind, false otherwise */
   boolean isAnyNamedGroup();
 
-  @Nullable
-  String getGroupName();
+  @Nullable String getGroupName();
 
-  Type getType();
+  @NotNull Type getType();
 
   enum Type {
     /** (?<name>pattern) */
@@ -63,6 +62,7 @@ public interface RegExpGroup extends RegExpAtom, PsiNamedElement {
 
     /** (?<!pattern) */
     NEGATIVE_LOOKBEHIND,
+
     /** (?|pattern) */
     PCRE_BRANCH_RESET,
 

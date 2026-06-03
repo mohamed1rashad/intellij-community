@@ -2,6 +2,7 @@
 package com.intellij.ui.jcef;
 
 import com.intellij.execution.Platform;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.notification.NotificationGroup;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -14,17 +15,19 @@ import com.intellij.openapi.progress.Cancellation;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.Version;
+import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.util.registry.RegistryManager;
 import com.intellij.ui.JreHiDpiUtil;
 import com.intellij.ui.scale.DerivedScaleType;
 import com.intellij.ui.scale.ScaleContext;
 import com.intellij.util.ArrayUtil;
-import com.intellij.util.ui.StartupUiUtil;
 import com.jetbrains.cef.JCefAppConfig;
 import com.jetbrains.cef.JCefVersionDetails;
 import org.cef.CefApp;
 import org.cef.CefClient;
 import org.cef.CefSettings;
+import org.cef.OS;
+import org.cef.SystemBootstrap;
 import org.cef.browser.CefMessageRouter;
 import org.cef.browser.CefRendering;
 import org.cef.callback.CefSchemeHandlerFactory;
@@ -33,19 +36,27 @@ import org.cef.handler.CefAppHandlerAdapter;
 import org.cef.handler.CefRenderHandler;
 import org.cef.misc.BoolRef;
 import org.cef.misc.CefLog;
-import org.cef.misc.Utils;
 import org.jdom.IllegalDataException;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.UnmodifiableView;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
+import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.net.URL;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -67,13 +78,24 @@ import static com.intellij.ui.paint.PaintUtil.RoundingMode.ROUND;
 public final class JBCefApp {
   private static final Logger LOG = Logger.getInstance(JBCefApp.class);
   private static final boolean SKIP_VERSION_CHECK = Boolean.getBoolean("ide.browser.jcef.skip_version_check");
-  private static final boolean SKIP_MODULE_CHECK = Boolean.getBoolean("ide.browser.jcef.skip_module_check");
-  private static final boolean IS_REMOTE_ENABLED;
   private static final String REGISTRY_REMOTE_KEY = "ide.browser.jcef.out-of-process.enabled";
+  private static final String FRAMEWORK_DIR_PATH_ARG = "--framework-dir-path=";
+  private static final String BROWSER_SUBPROCESS_PATH_ARG = "--browser-subprocess-path=";
+  private static final String MAIN_BUNDLE_PATH_ARG = "--main-bundle-path=";
+  private static final String MAC_APP_BUNDLE_SUFFIX = ".app";
+  private static final String MAC_APP_CONTENTS_DIR = "Contents";
+  private static final String MAC_APP_EXECUTABLES_DIR = "MacOS";
+  private static final String JCEF_HELPER_NAME = "jcef Helper";
+  private static final String JCEF_HELPER_APP_NAME = JCEF_HELPER_NAME + MAC_APP_BUNDLE_SUFFIX;
 
+  private static JCefVersionDetails VERSION_DETAILS = null;
   private static final int MIN_SUPPORTED_CEF_MAJOR_VERSION = 119;
   private static final int MIN_SUPPORTED_JCEF_API_MAJOR_VERSION = 1;
   private static final int MIN_SUPPORTED_JCEF_API_MINOR_VERSION = 20;
+
+  private static final int    SETTINGS_CEF_VERSION_DEFAULT_VAL = 137;  // NOTE: this check is appeared when CEF 137 is used.
+  private static final String SETTINGS_CEF_VERSION_KEY = "cef_version_last_used";
+  private static final String SETTINGS_CEF_TEMP_CACHE_KEY = "cef_cleanup_temporary_cache_folder";
 
   private static final String MIN_SUPPORTED_GLIBC_DEFAULT = "2.28.0";
 
@@ -84,6 +106,8 @@ public final class JBCefApp {
   private String @Nullable [] myCefArgs;
   private final @Nullable CefSettings myCefSettings;
   private final @NotNull CompletableFuture<Integer> myDebuggingPort = new CompletableFuture<>();
+  private final boolean myIsRemoteEnabled;
+  private final @Nullable File myServerExe;
 
   private final @NotNull Disposable myDisposable = new Disposable() {
     @Override
@@ -122,57 +146,67 @@ public final class JBCefApp {
       if (isRemoteEnabledSystemProp != null) {
         final boolean val = isRemoteEnabledSystemProp.trim().compareToIgnoreCase("true") == 0;
         LOG.info(String.format("Force %s out-of-process jcef mode.", val ? "enabled" : "disabled"));
-      } else {
-        if (StartupUiUtil.isWayland())
-          LOG.debug("Out-of-process jcef mode is temporarily disabled in Wayland"); // TODO: fix https://youtrack.jetbrains.com/issue/IJPL-161273
-        else
-          System.setProperty(PROPERTY_NAME, "true");
       }
-    }
-
-    IS_REMOTE_ENABLED = CefApp.isRemoteEnabled();
-
-    if (IS_REMOTE_ENABLED) {
-      final Supplier<CefRendering> defaultRenderingFactory = () -> {
-        JBCefOSRHandlerFactory osrHandlerFactory = JBCefOSRHandlerFactory.getInstance();
-        JComponent component = osrHandlerFactory.createComponent(true);
-        CefRenderHandler handler = osrHandlerFactory.createCefRenderHandler(component);
-        return new CefRendering.CefRenderingWithHandler(handler, component);
-      };
-
-      // Temporary use reflection to avoid jcef-version increment
-      // TODO: use setDefaultRenderingFactory directly
-      try {
-        Class<?> cefAppClass = Class.forName("org.cef.CefApp");
-        Class<?> supplierClass = Class.forName("java.util.function.Supplier");
-        Method setDefaultRenderingFactoryMethod = cefAppClass.getMethod("setDefaultRenderingFactory", supplierClass);
-        setDefaultRenderingFactoryMethod.invoke(cefAppClass, defaultRenderingFactory);
-      }
-      catch (NoSuchMethodException | ClassNotFoundException ignored) {
-      }
-      catch (IllegalAccessException | InvocationTargetException ex) {
-        LOG.debug(ex);
-      }
-      catch (Throwable e) {
-        LOG.warn(e);
+      else {
+        System.setProperty(PROPERTY_NAME, "true");
       }
     }
   }
 
   private JBCefApp(@NotNull JCefAppConfig config) throws IllegalStateException {
     myDelegate = getActiveDelegate();
+    myIsRemoteEnabled = myDelegate == null && config.isRemoteEnabled();
+    myServerExe = config.getServerExe();
+    SystemBootstrap.setLoader(config.getLoader());
+
     if (myDelegate != null) {
       myCefSettings = null;
       myCefApp = null;
       myDebuggingPort.completeExceptionally(new UnsupportedOperationException());
     }
     else {
+      CefApp.setIsRemoteEnabled(myIsRemoteEnabled);
+      String cefFrameworkPathOSX = config.getCefFrameworkPathOSX();
+      if (cefFrameworkPathOSX == null && OS.isMacintosh() && !myIsRemoteEnabled) {
+        List<String> appArgs = config.getAppArgsAsList();
+        for (String appArg : config.getAppArgsAsList()) {
+          if (appArg.startsWith(FRAMEWORK_DIR_PATH_ARG)) {
+            cefFrameworkPathOSX = appArg.substring(FRAMEWORK_DIR_PATH_ARG.length());
+            break;
+          }
+        }
+        if (cefFrameworkPathOSX != null) {
+          Path helperPath = Path.of(cefFrameworkPathOSX).getParent().resolve(JCEF_HELPER_APP_NAME);
+          Path browserSubprocessPath = helperPath.resolve(MAC_APP_CONTENTS_DIR).resolve(MAC_APP_EXECUTABLES_DIR).resolve(JCEF_HELPER_NAME);
+          if (Files.isRegularFile(browserSubprocessPath)) {
+            appArgs.removeIf(arg -> arg.startsWith(BROWSER_SUBPROCESS_PATH_ARG) || arg.startsWith(MAIN_BUNDLE_PATH_ARG));
+            appArgs.add(BROWSER_SUBPROCESS_PATH_ARG + browserSubprocessPath);
+            appArgs.add(MAIN_BUNDLE_PATH_ARG + helperPath);
+          }
+        }
+      }
+      final String macCefFrameworkPathOSX = cefFrameworkPathOSX;
+      if (myIsRemoteEnabled) {
+        final Supplier<CefRendering> defaultRenderingFactory = () -> {
+          JBCefOSRHandlerFactory osrHandlerFactory = JBCefOSRHandlerFactory.getInstance();
+          JComponent component = osrHandlerFactory.createComponent(true);
+          CefRenderHandler handler = osrHandlerFactory.createCefRenderHandler(component);
+          return new CefRendering.CefRenderingWithHandler(handler, component);
+        };
+        CefApp.setDefaultRenderingFactory(defaultRenderingFactory);
+      }
+
       CefSettings settings = Cancellation.forceNonCancellableSectionInClassInitializer(() -> SettingsHelper.loadSettings(config));
       final String logPath = SettingsHelper.getLogPath();
       CefLog.init(logPath, settings.log_severity);
 
       JBCefHealthMonitor.getInstance().performHealthCheckAsync(settings, () -> {
-        CefApp.startup(ArrayUtil.EMPTY_STRING_ARRAY);
+        if (OS.isMacintosh() && macCefFrameworkPathOSX != null) {
+          CefApp.startupAsync(macCefFrameworkPathOSX);
+        }
+        else {
+          CefApp.startup(ArrayUtil.EMPTY_STRING_ARRAY);
+        }
       });
 
       BoolRef trackGPUCrashes = new BoolRef(false);
@@ -187,11 +221,13 @@ public final class JBCefApp {
       if (settings.log_severity != CefSettings.LogSeverity.LOGSEVERITY_DISABLE || settings.log_file != null || logPath != null)
         LOG.info(String.format("JCEF logging: level=%s, file=%s, chromium_log=%s", settings.log_severity, logPath, settings.log_file));
 
+      checkCEFVersionUpdate(settings);
+
       myCefArgs = args;
       CefApp.addAppHandler(new MyCefAppHandler(args, trackGPUCrashes.get()));
       myCefSettings = settings;
-      myCefApp = CefApp.getInstance(settings);
-      CEFAPP_INSTANCE_COUNT.intValue();
+      myCefApp = CefApp.getInstance(null, settings, myServerExe);
+      CEFAPP_INSTANCE_COUNT.incrementAndGet();
 
       if (myCefSettings.remote_debugging_port > 0) {
         myDebuggingPort.complete(myCefSettings.remote_debugging_port);
@@ -207,7 +243,7 @@ public final class JBCefApp {
         });
       }
 
-      if (IS_REMOTE_ENABLED) {
+      if (myIsRemoteEnabled) {
         StartupTest.checkBrowserCreation(myCefApp, () -> restartJCEF(true, true));
         if (ApplicationManager.getApplication().isInternal()) {
           //noinspection UnresolvedPluginConfigReference
@@ -233,56 +269,100 @@ public final class JBCefApp {
     Disposer.register(ApplicationManager.getApplication(), myDisposable);
   }
 
+  private static void checkCEFVersionUpdate(CefSettings settings) {
+    JCefVersionDetails version = getVersionDetails();
+    if (version == null) // NOTE: should always be FALSE (otherwise isSupported will return false and we won't execute JBCefApp ctor).
+      return;
+
+    final PropertiesComponent props = PropertiesComponent.getInstance();
+    final int cefVersionLast = props.getInt(SETTINGS_CEF_VERSION_KEY, SETTINGS_CEF_VERSION_DEFAULT_VAL);
+    final int cefVersionCurrent = version.cefVersion.major;
+    if (cefVersionCurrent != cefVersionLast) {
+      // NOTE: settings.cache_path is always not null
+      Path cache_path = Path.of(settings.cache_path);
+      Path tmp_cache_path = cache_path.getParent().resolve("jcef_cache_temp");
+      settings.cache_path = tmp_cache_path.toString();
+      LOG.info(String.format(
+        "JCEF: CEF version has been updated from %d to %d. Cache folder '%s' will be cleared in bg thread, CEF will be started with temporary cache folder '%s'",
+        cefVersionLast, cefVersionCurrent, cache_path, tmp_cache_path));
+
+      ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        props.setValue(SETTINGS_CEF_VERSION_KEY, cefVersionCurrent, SETTINGS_CEF_VERSION_DEFAULT_VAL);
+        props.setValue(SETTINGS_CEF_TEMP_CACHE_KEY, tmp_cache_path.toString());
+
+        try {
+          NioFiles.deleteRecursively(cache_path);
+        } catch (IOException e) {
+          LOG.info(String.format("JCEF: Failed to delete cache folder '%s', error: %s", cache_path, e.getMessage()));
+          JBCefNotifications.showClearCache(cache_path);
+        }
+      });
+    } else {
+      final String tempCache = props.getValue(SETTINGS_CEF_TEMP_CACHE_KEY);
+      if (tempCache != null && !tempCache.isEmpty()) {
+        props.setValue(SETTINGS_CEF_TEMP_CACHE_KEY, null);
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+          Path tmp = null;
+          try {
+            tmp = Path.of(tempCache);
+          } catch (InvalidPathException e) {
+            LOG.debug(String.format("JCEF: Invalid temporary cache path '%s', error: %s", tempCache, e.getMessage()));
+          }
+          if (tmp != null) {
+            try {
+              NioFiles.deleteRecursively(tmp);
+              LOG.info(String.format("JCEF: Deleted temporary cache folder '%s'", tempCache));
+            } catch (IOException e) {
+              LOG.info(String.format("JCEF: Failed to delete temporary cache folder '%s', error: %s", tempCache, e.getMessage()));
+            }
+          }
+        });
+      }
+    }
+  }
+
   private boolean restartJCEF(boolean withVerboseLogging, boolean withNewCachePath) {
-    if (!IS_REMOTE_ENABLED) {
+    if (!myIsRemoteEnabled) {
       return false;
     }
 
-    boolean result = false;
-    // Temporary use reflection to avoid jcef-version increment
-    // TODO: use setDefaultInstance directly  (CefApp cefApp)
-    Class<?> cefAppClass = null;
-    Method setDefaultMethod = null;
-    try {
-      cefAppClass = Class.forName("org.cef.CefApp");
-      setDefaultMethod = cefAppClass.getMethod("setDefaultInstance", cefAppClass);
-    }
-    catch (NoSuchMethodException | ClassNotFoundException ignored) {
+    if (myCefSettings == null) {
+      LOG.error("JCEF wasn't restarted (because running with CefDelegate).");
+      return false;
     }
 
-    if (setDefaultMethod != null) {
-      if (withVerboseLogging) {
-        myCefSettings.log_severity = CefSettings.LogSeverity.LOGSEVERITY_VERBOSE;
-        myCefSettings.log_file = PathManager.getLogPath() + Platform.current().fileSeparator + "jcef_" + ProcessHandle.current().pid() + "_i" + CEFAPP_INSTANCE_COUNT.get() + ".log";
-        myCefArgs = ArrayUtil.mergeArrays(myCefArgs, "--vmodule=statistics_recorder*=0", "--v=1");
-      }
-      if (withNewCachePath) {
-        myCefSettings.cache_path = System.getProperty("java.io.tmpdir") + Platform.current().fileSeparator + "jcef_cache_" + ProcessHandle.current().pid() + "_i" + CEFAPP_INSTANCE_COUNT.get();
-      }
+    if (myCefArgs == null)
+      myCefArgs = ArrayUtil.EMPTY_STRING_ARRAY;
 
-      CefApp.addAppHandler(new MyCefAppHandler(myCefArgs, true));
-      final CefApp newInstance = CefApp.getInstance(myCefArgs, myCefSettings);
-      if (newInstance == null) {
-        LOG.error("JCEF wasn't restarted (new instance is null).");
-        return false;
-      }
-      if (myCefApp == newInstance) {
-        LOG.info("JCEF wasn't restarted. It seems that args and settings were the same - please dispose current CefApp and then create a new one.");
-        return false;
-      }
-      CEFAPP_INSTANCE_COUNT.intValue();
-      try {
-        setDefaultMethod.invoke(cefAppClass, newInstance);
-        result = true;
-        if (myCefApp != null)
-          myCefApp.dispose();
-        myCefApp = newInstance;
-        LOG.info("JCEF has been restarted with verbose logging, with new cache_path '" + myCefSettings.cache_path + "', with log_file '" + myCefSettings.log_file + "'");
-      } catch (IllegalAccessException | InvocationTargetException ex){
-        LOG.debug(ex);
-      }
+    if (withVerboseLogging) {
+      myCefSettings.log_severity = CefSettings.LogSeverity.LOGSEVERITY_VERBOSE;
+      myCefSettings.log_file = PathManager.getLogPath() + Platform.current().fileSeparator + "jcef_chromium_" + ProcessHandle.current().pid() + "_i" + CEFAPP_INSTANCE_COUNT.get() + ".log";
+      myCefArgs = ArrayUtil.mergeArrays(myCefArgs, "--vmodule=statistics_recorder*=0", "--v=1");
     }
-    return result;
+    if (withNewCachePath) {
+      myCefSettings.cache_path = System.getProperty("java.io.tmpdir") + Platform.current().fileSeparator + "jcef_cache_" + ProcessHandle.current().pid() + "_i" + CEFAPP_INSTANCE_COUNT.get();
+    }
+
+    final String logPath = PathManager.getLogPath() + Platform.current().fileSeparator + "jcef_" + ProcessHandle.current().pid() + "_i" + CEFAPP_INSTANCE_COUNT.get() + ".log";
+    CefLog.init(logPath, myCefSettings.log_severity);
+
+    final CefApp newInstance = CefApp.getInstance(myCefArgs, myCefSettings, myServerExe);
+    if (newInstance == null) {
+      LOG.error("JCEF wasn't restarted (new instance is null).");
+      return false;
+    }
+    if (myCefApp == newInstance) {
+      LOG.info("JCEF wasn't restarted. It seems that args and settings were the same - please dispose current CefApp and then create a new one.");
+      return false;
+    }
+    CEFAPP_INSTANCE_COUNT.incrementAndGet();
+
+    CefApp.setDefaultInstance(newInstance);
+    if (myCefApp != null)
+      myCefApp.dispose();
+    myCefApp = newInstance;
+    LOG.info("JCEF has been restarted with verbose logging, with new cache_path '" + myCefSettings.cache_path + "', with log_file '" + myCefSettings.log_file + "'");
+    return true;
   }
 
   @NotNull
@@ -326,7 +406,12 @@ public final class JBCefApp {
           if (!JreHiDpiUtil.isJreHiDPIEnabled()) {
             System.setProperty("jcef.forceDeviceScaleFactor", String.valueOf(getForceDeviceScaleFactor()));
           }
-          config = JCefAppConfig.getInstance();
+          String nativeBundlePath = getNativeBundlePath();
+          if (nativeBundlePath != null && !isJcefFromJbr()) {
+            config = JCefAppConfig.getInstance(nativeBundlePath);
+          } else  {
+            config = JCefAppConfig.getInstance();
+          }
         }
         catch (Exception e) {
           LOG.error(e);
@@ -394,13 +479,10 @@ public final class JBCefApp {
     }
 
     if (!SKIP_VERSION_CHECK) {
-      JCefVersionDetails version;
-      try {
-        version = JCefAppConfig.getVersionDetails();
-      }
-      catch (Throwable e) {
+      JCefVersionDetails version = getVersionDetails();
+      if (version == null)
         return unsupported.apply("JCEF runtime version is not supported");
-      }
+
       if (MIN_SUPPORTED_CEF_MAJOR_VERSION > version.cefVersion.major) {
         return unsupported.apply("JCEF: minimum supported CEF major version is " + MIN_SUPPORTED_CEF_MAJOR_VERSION +
                                  ", current is " + version.cefVersion.major);
@@ -413,34 +495,27 @@ public final class JBCefApp {
                                  ", current is " + version.apiVersion.major + "." + version.apiVersion.minor);
       }
     }
-    String altCefPath = System.getProperty("ALT_CEF_FRAMEWORK_DIR", null);
-    if (altCefPath == null || altCefPath.isEmpty()) {
-      altCefPath = System.getenv("ALT_CEF_FRAMEWORK_DIR");
+
+    return isJcefFromJbr() || getNativeBundlePath() != null;
+  }
+
+  private static JCefVersionDetails getVersionDetails() {
+    if (VERSION_DETAILS == null) {
+      try {
+        VERSION_DETAILS = JCefAppConfig.getVersionDetails();
+      } catch (Throwable ignored) {}
+    }
+    return VERSION_DETAILS;
+  }
+
+  private static boolean isJcefFromJbr() {
+    URL url = JCefAppConfig.class.getResource("JCefAppConfig.class");
+    if (url == null) {
+      LOG.error("JCefAppConfig.class not found");
+      return false;
     }
 
-
-    final String altFramework = Utils.getString("ALT_CEF_FRAMEWORK_DIR");
-    final String altPipe = Utils.getString("ALT_CEF_SERVER_PIPE");
-    final String altPort = Utils.getString("ALT_CEF_SERVER_PORT");
-    final boolean isAltCefPathUsed = (altFramework != null && !altFramework.isEmpty())
-                                     || (altPipe != null && !altPipe.isEmpty())
-                                     || (altPort != null && !altPort.isEmpty());
-
-    final boolean skipModuleCheck = isAltCefPathUsed || SKIP_MODULE_CHECK;
-    if (!skipModuleCheck) {
-      URL url = JCefAppConfig.class.getResource("JCefAppConfig.class");
-      if (url == null) {
-        return unsupported.apply("JCefAppConfig.class not found");
-      }
-      String path = url.toString();
-      String name = JCefAppConfig.class.getName().replace('.', '/');
-      boolean isJbrModule = path != null && path.contains("/jcef/" + name);
-      if (!isJbrModule) {
-        return unsupported.apply("JCefAppConfig.class is not from a JBR module, url: " + path);
-      }
-    }
-
-    return true;
+    return url.getProtocol().equals("jrt");
   }
 
   /**
@@ -459,16 +534,6 @@ public final class JBCefApp {
     return myCefSettings.cache_path;
   }
 
-
-  /**
-   * @deprecated use {@link JBCefApp#getRemoteDebuggingPort(Consumer)} instead
-   */
-  @Deprecated(forRemoval = true)
-  @Contract(pure = true)
-  public @NotNull Integer getRemoteDebuggingPort() {
-    if (myCefSettings == null) throw new UnsupportedOperationException();
-    return myCefSettings.remote_debugging_port;
-  }
 
   /**
    * Schedules passing the debug port number to the consumer once the value is available.
@@ -548,7 +613,8 @@ public final class JBCefApp {
    *
    * @throws IllegalStateException if the method is called after {@code JBCefApp} initialization
    */
-  /*public*/ static void addCefCustomSchemeHandlerFactory(@NotNull JBCefApp.JBCefCustomSchemeHandlerFactory factory) {
+  @ApiStatus.Internal
+  public static void addCefCustomSchemeHandlerFactory(@NotNull JBCefApp.JBCefCustomSchemeHandlerFactory factory) {
     if (ourInitialized.get()) {
       throw new IllegalStateException("JBCefApp has already been initialized!");
     }
@@ -662,8 +728,8 @@ public final class JBCefApp {
     return JreHiDpiUtil.isJreHiDPIEnabled() ? scaledSize : ROUND.round(scaledSize / getForceDeviceScaleFactor());
   }
 
-  static boolean isRemoteEnabled() {
-    return IS_REMOTE_ENABLED;
+  boolean isRemoteEnabled() {
+    return myIsRemoteEnabled;
   }
 
   private static int readDebugPortFile(@NotNull Path filePath) throws IOException {
@@ -690,6 +756,29 @@ public final class JBCefApp {
     return CefDelegate.EP.findFirstSafe(CefDelegate::isActive);
   }
 
+  private static @Nullable String getNativeBundlePath() {
+    // the native bundle provider is used only if there is no JCEF in JBR
+    if (isJcefFromJbr()) {
+      LOG.info("JCEF is loaded from JBR, using default native bundle path");
+      return null;
+    }
+
+    @Nullable JBCefNativeBundleProvider provider = null;
+    if (!isJcefFromJbr()) {
+      provider = JBCefNativeBundleProvider.EP.findFirstSafe(JBCefNativeBundleProvider::isAvailable);
+    }
+    if (provider == null) {
+      return null;
+    }
+
+    String providerNativeBundlePath = provider.getNativeBundlePath();
+    if (providerNativeBundlePath != null) {
+      LOG.info("Using bundle path from: " + provider.getClass() + " path:" + providerNativeBundlePath);
+    }
+
+    return providerNativeBundlePath;
+  }
+
   private static boolean isLinuxLibcSupported() {
     String libcVersionString;
     try {
@@ -712,5 +801,38 @@ public final class JBCefApp {
     }
 
     return true;
+  }
+
+  /**
+   * Extracts the version JCEF version from the native bundle.
+   * The version format is not specified and could be changed in the future. The method could be removed.
+   */
+  @ApiStatus.Internal()
+  public static @Nullable String getNativeBundleVersionString() {
+    String nativeBundlePath = getNativeBundlePath();
+    if (nativeBundlePath == null) {
+      return null;
+    }
+
+    // TODO: use JCefAppConfig.getNativeBundleVersion() instead after it's get promoted
+    final Path versionFile = Path.of(nativeBundlePath, "jcef.version");
+    if (Files.exists(versionFile)) {
+      try {
+        for (String line : Files.readAllLines(versionFile)) {
+          if (line.contains("JCEF_VERSION_DETAILED")) {
+            String[] split = line.split("=");
+            if (split.length == 2) {
+              return split[1].trim();
+            }
+          }
+        }
+
+        return null;
+      }
+      catch (IOException e) {
+        return null;
+      }
+    }
+    return null;
   }
 }

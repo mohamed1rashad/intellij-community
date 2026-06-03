@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.changes.patch.tool
 
 import com.intellij.diff.DiffContext
@@ -6,7 +6,7 @@ import com.intellij.diff.DiffViewerEx
 import com.intellij.diff.EditorDiffViewer
 import com.intellij.diff.FrameDiffTool
 import com.intellij.diff.actions.impl.FocusOppositePaneAction
-import com.intellij.diff.actions.impl.SetEditorSettingsAction
+import com.intellij.diff.actions.impl.SetEditorSettingsActionGroup
 import com.intellij.diff.comparison.ByWord
 import com.intellij.diff.comparison.ComparisonPolicy
 import com.intellij.diff.comparison.DiffTooBigException
@@ -15,16 +15,32 @@ import com.intellij.diff.tools.holders.TextEditorHolder
 import com.intellij.diff.tools.simple.AlignableChange
 import com.intellij.diff.tools.simple.AlignedDiffModel
 import com.intellij.diff.tools.simple.AlignedDiffModelBase
-import com.intellij.diff.tools.util.*
+import com.intellij.diff.tools.util.BaseSyncScrollable
+import com.intellij.diff.tools.util.DiffDataKeys
+import com.intellij.diff.tools.util.DiffSplitter
+import com.intellij.diff.tools.util.FocusTrackerSupport
 import com.intellij.diff.tools.util.FocusTrackerSupport.Twoside
+import com.intellij.diff.tools.util.PrevNextDifferenceIterable
+import com.intellij.diff.tools.util.PrevNextDifferenceIterableBase
+import com.intellij.diff.tools.util.SimpleDiffPanel
 import com.intellij.diff.tools.util.SyncScrollSupport.TwosideSyncScrollSupport
 import com.intellij.diff.tools.util.base.TextDiffSettingsHolder.TextDiffSettings
 import com.intellij.diff.tools.util.base.TextDiffViewerUtil
 import com.intellij.diff.tools.util.base.TextDiffViewerUtil.ToggleAutoScrollAction
 import com.intellij.diff.tools.util.side.TwosideContentPanel
-import com.intellij.diff.util.*
+import com.intellij.diff.util.DiffDividerDrawUtil
+import com.intellij.diff.util.DiffDrawUtil
 import com.intellij.diff.util.DiffDrawUtil.LineHighlighterBuilder
-import com.intellij.openapi.actionSystem.*
+import com.intellij.diff.util.DiffUtil
+import com.intellij.diff.util.LineCol
+import com.intellij.diff.util.Side
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.application.runWriteAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
@@ -58,7 +74,7 @@ internal class SideBySidePatchDiffViewer(
 
   private val prevNextDifferenceIterable: MyPrevNextDifferenceIterable
   private val focusTrackerSupport: FocusTrackerSupport<Side>
-  private val editorSettingsAction: SetEditorSettingsAction
+  private val editorSettingsAction: SetEditorSettingsActionGroup
   private val syncScrollable: MySyncScrollable
   private val syncScrollSupport: TwosideSyncScrollSupport
   private val alignedDiffModel: AlignedDiffModel
@@ -116,7 +132,7 @@ internal class SideBySidePatchDiffViewer(
     MyFocusOppositePaneAction(true).install(panel)
     MyFocusOppositePaneAction(false).install(panel)
 
-    editorSettingsAction = SetEditorSettingsAction(textSettings, editors)
+    editorSettingsAction = SetEditorSettingsActionGroup(textSettings, editors)
     editorSettingsAction.setSyncScrollSupport(syncScrollSupport)
     editorSettingsAction.applyDefaults()
 

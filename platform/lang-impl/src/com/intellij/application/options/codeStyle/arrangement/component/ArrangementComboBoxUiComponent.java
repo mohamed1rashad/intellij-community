@@ -5,12 +5,14 @@ import com.intellij.openapi.ui.ComboBox;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementAtomMatchCondition;
 import com.intellij.psi.codeStyle.arrangement.model.ArrangementMatchCondition;
 import com.intellij.psi.codeStyle.arrangement.std.ArrangementSettingsToken;
-import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.components.JBList;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 import java.util.Arrays;
@@ -26,7 +28,7 @@ public final class ArrangementComboBoxUiComponent extends AbstractArrangementUiC
     ArrangementSettingsToken[] tokensArray = tokens.toArray(new ArrangementSettingsToken[0]);
     Arrays.sort(tokensArray, Comparator.comparing(ArrangementSettingsToken::getRepresentationValue));
     myComboBox = new ComboBox<>(tokensArray);
-    myComboBox.setRenderer(SimpleListCellRenderer.create("", ArrangementSettingsToken::getRepresentationValue));
+    myComboBox.setRenderer(BuilderKt.textListCellRenderer("", ArrangementSettingsToken::getRepresentationValue));
     myComboBox.addItemListener(new ItemListener() {
       @Override
       public void itemStateChanged(ItemEvent e) {

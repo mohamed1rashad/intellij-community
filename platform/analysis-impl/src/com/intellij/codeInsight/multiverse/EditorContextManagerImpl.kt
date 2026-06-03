@@ -1,7 +1,8 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.multiverse
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.editor.Editor
@@ -48,11 +49,14 @@ internal class EditorContextManagerImpl(
   @RequiresReadLock
   @RequiresBackgroundThread
   private fun getCurrentContextStateWithPreferredDefault(editor: Editor): EditorSelectedContexts {
+    assert(editor.project?.equals(project)?:true) {
+      "called with wrong project: $project. editor project: ${editor.project}"
+    }
     if (!isSharedSourceSupportEnabled(project)) {
       return SingleEditorContext(defaultContext())
     }
 
-    return currentContextCache.computeIfAbsent(editor) {
+    val context = currentContextCache.computeIfAbsent(editor) {
       val file = FileDocumentManager.getInstance().getFile(editor.document)
       if (file == null) {
         log.trace { "editor context for $editor is set to default" }
@@ -67,16 +71,29 @@ internal class EditorContextManagerImpl(
 
       contexts
     }
+
+    if (ApplicationManager.getApplication().isUnitTestMode) {
+      val file = FileDocumentManager.getInstance().getFile(editor.document)
+      if (file != null) {
+        ensureContextRelevant(file, context.mainContext, project)
+      }
+    }
+
+    return context
   }
 
   //@RequiresWriteLock
   override fun setEditorContext(editor: Editor, contexts: EditorSelectedContexts) {
     //ThreadingAssertions.assertWriteAccess()
+    setEditorContextNoFire(editor, contexts)
+
+    fireEvent(editor, contexts)
+  }
+
+  override fun setEditorContextNoFire(editor: Editor, contexts: EditorSelectedContexts) {
     currentContextCache[editor] = contexts
 
     log.trace { "Editor context for $editor is set to $contexts" }
-
-    fireEvent(editor, contexts)
   }
 
   override val eventFlow: Flow<EditorContextManager.ChangeEvent>

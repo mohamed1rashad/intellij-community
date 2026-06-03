@@ -5,17 +5,18 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.platform.eel.EelApi
 import com.intellij.platform.eel.getOrNull
 import com.intellij.platform.eel.path.EelPath
+import com.intellij.platform.eel.path.EelPathException
 import com.intellij.platform.eel.provider.asNioPath
-import com.jetbrains.python.PyToolUIInfo
-import com.intellij.python.community.services.systemPython.icons.PythonCommunityServicesSystemPythonIcons
 import com.intellij.python.community.services.systemPython.SystemPythonProvider
+import com.intellij.python.community.services.systemPython.icons.PythonCommunityServicesSystemPythonIcons
+import com.jetbrains.python.PyToolUIInfo
 import com.jetbrains.python.PythonBinary
 import com.jetbrains.python.errorProcessing.PyResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 
-private class PyenvSystemPythonProvider : SystemPythonProvider {
+internal class PyenvSystemPythonProvider : SystemPythonProvider {
   private val LOGGER: Logger = Logger.getInstance(PyenvSystemPythonProvider::class.java)
 
   override suspend fun findSystemPythons(eelApi: EelApi): PyResult<Set<PythonBinary>> {
@@ -26,8 +27,15 @@ private class PyenvSystemPythonProvider : SystemPythonProvider {
     val pythons = withContext(Dispatchers.IO) {
       try {
         val env = eelApi.exec.fetchLoginShellEnvVariables()
-        val pyenvRoot = if ("PYENV_ROOT" in env) {
-          EelPath.parse(env["PYENV_ROOT"]!!, eelApi.descriptor)
+        val rawPyenvRoot = env["PYENV_ROOT"]?.takeIf { it.isNotBlank() }
+        val pyenvRoot = if (rawPyenvRoot != null) {
+          try {
+            EelPath.parse(rawPyenvRoot, eelApi.descriptor)
+          }
+          catch (e: EelPathException) {
+            LOGGER.warn("PYENV_ROOT='$rawPyenvRoot' is not a valid ${eelApi.descriptor.osFamily} absolute path; skipping pyenv discovery", e)
+            return@withContext emptySet()
+          }
         }
         else {
           eelApi.userInfo.home.resolve(".pyenv")
@@ -38,15 +46,16 @@ private class PyenvSystemPythonProvider : SystemPythonProvider {
           .getOrNull()
 
         if (entries == null) {
-          return@withContext emptySet<PythonBinary>()
+          return@withContext emptySet()
         }
 
         val paths = entries
           .map { versionsDir.resolve(it).resolve("bin").asNioPath() }
 
-        return@withContext collectPythonsInPaths(eelApi, paths, listOf(python3NamePattern))
+        return@withContext collectPythonsInPaths( paths, listOf(python3NamePattern))
       }
       catch (e: RuntimeException) {
+        if (Logger.shouldRethrow(e)) throw e
         LOGGER.error("failed to discover pyenv pythons", e)
       }
 

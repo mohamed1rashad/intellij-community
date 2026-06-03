@@ -12,8 +12,13 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.ui.TextFieldWithHistoryWithBrowseButton
 import com.intellij.ui.UIBundle
+import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.textFieldWithHistoryWithBrowseButton
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.bindText
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.layout.enteredTextSatisfies
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.idea.devkit.DevKitBundle
@@ -29,6 +34,7 @@ class UpdateFromSourcesDialog(private val project: Project,
                               private val showApplyButton: Boolean) : DialogWrapper(project, true) {
   private lateinit var panel: DialogPanel
   private lateinit var pathField: TextFieldWithHistoryWithBrowseButton
+  private lateinit var additionalVmOptionsField: JBTextField
   private val state = UpdateFromSourcesSettingsState().apply {
     copyFrom(UpdateFromSourcesSettings.getState())
   }
@@ -41,7 +47,9 @@ class UpdateFromSourcesDialog(private val project: Project,
 
   override fun createCenterPanel(): DialogPanel {
     panel = panel {
-      pathField = optionsPanel(project, state)
+      val optionsPanel = optionsPanel(project, state)
+      pathField = optionsPanel.first
+      additionalVmOptionsField = optionsPanel.second
       row {
         checkBox(DevKitBundle.message("action.UpdateIdeFromSourcesAction.settings.restart.automatically"))
           .bindSelected({ state.restartAutomatically }, { state.restartAutomatically = it })
@@ -90,20 +98,28 @@ class UpdateFromSourcesDialog(private val project: Project,
 }
 
 @ApiStatus.Internal
-fun Panel.optionsPanel(project: Project, state: UpdateFromSourcesSettingsState): TextFieldWithHistoryWithBrowseButton {
+fun Panel.optionsPanel(project: Project, state: UpdateFromSourcesSettingsState): Pair<TextFieldWithHistoryWithBrowseButton, JBTextField> {
   val pathField = textFieldWithHistoryWithBrowseButton(
     project,
     FileChooserDescriptorFactory.createSingleFolderDescriptor().withTitle(DevKitBundle.message("action.UpdateIdeFromSourcesAction.settings.installation.choose.ide.directory.title")),
     historyProvider = { state.workIdePathsHistory }
   )
+  val additionalJvmOptionsField = JBTextField()
   row(DevKitBundle.message("action.UpdateIdeFromSourcesAction.settings.row.ide.installation")) {
     cell(pathField)
       .align(AlignX.FILL)
       .bindText({ state.actualIdePath }, { state.workIdePath = it })
   }
   row {
+    cell(additionalJvmOptionsField)
+      .label(DevKitBundle.message("action.UpdateIdeFromSourcesAction.settings.row.additional.vm.options.for.build.scripts"))
+      .align(AlignX.FILL)
+      .bindText({ state.additionalVmOptionsForBuildScripts ?: "" }, { state.additionalVmOptionsForBuildScripts = it.trim().takeIf { it.isNotEmpty() } })
+      .component
+  }
+  row {
     checkBox(DevKitBundle.message("action.UpdateIdeFromSourcesAction.settings.enabled.plugins.only"))
       .bindSelected({ !state.buildDisabledPlugins }, { state.buildDisabledPlugins = !it })
   }
-  return pathField
+  return pathField to additionalJvmOptionsField
 }

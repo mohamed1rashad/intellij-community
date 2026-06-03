@@ -7,7 +7,6 @@ import java.io.IOException
 import java.io.InputStream
 
 class RawProductModules internal constructor(
-  val mainGroupModules: List<RawIncludedRuntimeModule>,
   val bundledPluginMainModules: List<RuntimeModuleId>,
   val includedFrom: List<RawIncludedFromData>,
 )

@@ -1,14 +1,27 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.find.impl;
 
-import com.intellij.find.*;
+import com.intellij.find.EditorSearchSession;
+import com.intellij.find.FindBundle;
+import com.intellij.find.FindInProjectSettings;
+import com.intellij.find.FindManager;
+import com.intellij.find.FindModel;
+import com.intellij.find.FindResult;
+import com.intellij.find.FindSettings;
+import com.intellij.find.FindUtil;
 import com.intellij.find.findInProject.FindInProjectManager;
 import com.intellij.find.findInProject.FindInProjectScopeService;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.lang.LangBundle;
 import com.intellij.navigation.ItemPresentation;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.KeyboardShortcut;
+import com.intellij.openapi.actionSystem.LangDataKeys;
+import com.intellij.openapi.actionSystem.UiDataProvider;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -35,15 +48,28 @@ import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
-import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.VirtualFileSystem;
 import com.intellij.openapi.vfs.impl.VirtualFileManagerImpl;
 import com.intellij.openapi.vfs.newvfs.ArchiveFileSystem;
 import com.intellij.openapi.vfs.newvfs.CacheAvoidingVirtualFile;
-import com.intellij.psi.*;
-import com.intellij.psi.search.*;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDirectoryContainer;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileFactory;
+import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.GlobalSearchScopeUtil;
+import com.intellij.psi.search.GlobalSearchScopesCore;
+import com.intellij.psi.search.LocalSearchScope;
+import com.intellij.psi.search.ProjectScope;
+import com.intellij.psi.search.SearchScope;
 import com.intellij.ui.content.Content;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usageView.UsageViewContentManager;
@@ -53,10 +79,22 @@ import com.intellij.usages.UsageView;
 import com.intellij.usages.UsageViewPresentation;
 import com.intellij.util.PatternUtil;
 import com.intellij.util.Processor;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.PropertyKey;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.Icon;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -65,9 +103,6 @@ import static org.jetbrains.annotations.Nls.Capitalization.Title;
 
 public final class FindInProjectUtil {
   private static final int USAGES_PER_READ_ACTION = 100;
-
-  @ApiStatus.Experimental
-  public static final Key<Boolean> FIND_IN_FILES_SEARCH_IN_NON_INDEXABLE = Key.create("find.in.files.non.indexable");
 
   private FindInProjectUtil() {}
 
@@ -265,10 +300,10 @@ public final class FindInProjectUtil {
                                      @NotNull FindModel findModel,
                                      @NotNull Processor<? super UsageInfo> consumer) {
     if (findModel.getStringToFind().isEmpty()) {
-      return ReadAction.compute(() -> consumer.process(new UsageInfo(psiFile)));
+      return ReadAction.computeBlocking(() -> consumer.process(new UsageInfo(psiFile)));
     }
     if (virtualFile.getFileType().isBinary()) return true; // do not decompile .class files
-    Document document = ReadAction.compute(() -> virtualFile.isValid() ? FileDocumentManager.getInstance().getDocument(virtualFile) : null);
+    Document document = ReadAction.computeBlocking(() -> virtualFile.isValid() ? FileDocumentManager.getInstance().getDocument(virtualFile) : null);
     if (document == null) return true;
     ProgressIndicator current = ProgressManager.getInstance().getProgressIndicator();
     if (current == null) throw new IllegalStateException("must find usages under progress");
@@ -277,10 +312,10 @@ public final class FindInProjectUtil {
     int before;
     int[] offsetRef = {0};
     do {
-      tooManyUsagesStatus.pauseProcessingIfTooManyUsages(); // wait for user out of read action
+      tooManyUsagesStatus.pauseProcessingIfTooManyUsages(); // wait for user out-of-read action
       before = offsetRef[0];
-      boolean success = ReadAction.compute(() -> !psiFile.isValid() ||
-                                             processSomeOccurrencesInFile(document, findModel, psiFile, offsetRef, consumer));
+      boolean success = ReadAction.computeBlocking(() -> !psiFile.isValid() ||
+                                                         processSomeOccurrencesInFile(document, findModel, psiFile, offsetRef, consumer));
       if (!success) {
         return false;
       }
@@ -303,6 +338,8 @@ public final class FindInProjectUtil {
     FindManager findManager = FindManager.getInstance(project);
     int count = 0;
     while (offset < textLength) {
+      ProgressManager.checkCanceled();
+
       FindResult result = findManager.findString(text, offset, findModel, psiFile.getVirtualFile());
       if (!result.isStringFound()) break;
 
@@ -414,15 +451,6 @@ public final class FindInProjectUtil {
     presentation.setReplaceMode(findModel.isReplaceState());
   }
 
-  /** @deprecated please use {@link #setupProcessPresentation(boolean, UsageViewPresentation)} instead */
-  @Deprecated(forRemoval = true)
-  @SuppressWarnings("unused")
-  public static @NotNull FindUsagesProcessPresentation setupProcessPresentation(@NotNull Project project,
-                                                                                boolean showPanelIfOnlyOneUsage,
-                                                                                @NotNull UsageViewPresentation presentation) {
-    return setupProcessPresentation(showPanelIfOnlyOneUsage, presentation);
-  }
-
   public static @NotNull FindUsagesProcessPresentation setupProcessPresentation(@NotNull UsageViewPresentation presentation) {
     return setupProcessPresentation(!FindSettings.getInstance().isSkipResultsWithOneUsage(), presentation);
   }
@@ -456,7 +484,7 @@ public final class FindInProjectUtil {
   }
 
   public static @NotNull String extractStringToFind(@NotNull String regexp, @NotNull Project project) {
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       List<PsiElement> topLevelRegExpChars = getTopLevelRegExpChars("a", project);
       if (topLevelRegExpChars.size() != 1) return " ";
 
@@ -643,7 +671,7 @@ public final class FindInProjectUtil {
     fileFilter.setEnabled(false);
 
     useFileFilter.addActionListener(
-      __ -> {
+      _ -> {
         if (useFileFilter.isSelected()) {
           fileFilter.setEnabled(true);
           fileFilter.getEditor().selectAll();

@@ -16,7 +16,11 @@ import com.intellij.util.indexing.FileBasedIndexExtension;
 import com.intellij.util.indexing.FileContent;
 import com.intellij.util.indexing.StorageException;
 import com.intellij.util.indexing.StorageUpdate;
-import com.intellij.util.indexing.containers.*;
+import com.intellij.util.indexing.containers.BitSetAsRAIntContainer;
+import com.intellij.util.indexing.containers.IntHashSetAsRAIntContainer;
+import com.intellij.util.indexing.containers.IntIdsIterator;
+import com.intellij.util.indexing.containers.RandomAccessIntContainer;
+import com.intellij.util.indexing.containers.UpgradableRandomAccessIntContainer;
 import com.intellij.util.indexing.impl.ValueContainerImpl;
 import com.intellij.util.io.ClosedStorageException;
 import com.intellij.util.system.OS;
@@ -67,7 +71,7 @@ public final class MappedFileTypeIndex extends FileTypeIndexImplBase {
     Int2ObjectMap<RandomAccessIntContainer> invertedIndex = new Int2ObjectOpenHashMap<>();
     forwardIndex.processEntries((inputId, data) -> {
       if (data != 0) {
-        invertedIndex.computeIfAbsent(data, __ -> createContainerForInvertedIndex()).add(inputId);
+        invertedIndex.computeIfAbsent(data, _ -> createContainerForInvertedIndex()).add(inputId);
       }
     });
     myDataController = new IndexDataController(invertedIndex, forwardIndex, id -> notifyInvertedIndexChangedForFileTypeId(id));
@@ -274,7 +278,7 @@ public final class MappedFileTypeIndex extends FileTypeIndexImplBase {
       }
       myForwardIndex.set(inputId, data);
       if (data != 0) {
-        myInvertedIndex.computeIfAbsent(data, __ -> createContainerForInvertedIndex()).add(inputId);
+        myInvertedIndex.computeIfAbsent(data, _ -> createContainerForInvertedIndex()).add(inputId);
       }
       //TODO RC: should we do the notification under the lock?
       triggerOnInvertedIndexChangeCallback(data, indexedData);

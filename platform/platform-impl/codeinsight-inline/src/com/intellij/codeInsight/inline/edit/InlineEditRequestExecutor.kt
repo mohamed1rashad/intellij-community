@@ -1,28 +1,42 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.inline.edit
 
+import com.intellij.codeInsight.inline.completion.exception.InlineCompletionTestExceptions
 import com.intellij.codeWithMe.ClientId
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.checkCanceled
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.annotations.TestOnly
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.coroutines.cancellation.CancellationException
 
 @JvmInline
 @ApiStatus.Internal
 value class InlineEditRequestJob(private val job: Job) : Disposable {
-  @RequiresEdt
+
   override fun dispose() {
     job.cancel()
   }
+
+  fun isCompleted(): Boolean = job.isCompleted
 }
 
 @ApiStatus.Internal
@@ -34,8 +48,6 @@ sealed interface InlineEditRequestExecutor : Disposable {
   @RequiresEdt
   fun cancelActiveRequest()
 
-  @TestOnly
-  @RequiresEdt
   suspend fun awaitActiveRequest()
 
   companion object {
@@ -47,13 +59,14 @@ sealed interface InlineEditRequestExecutor : Disposable {
 
 private class InlineEditRequestExecutorImpl(parentScope: CoroutineScope) : InlineEditRequestExecutor {
 
-  private val scope = parentScope.childScope(name = "Inline Edit Request Executor", supervisor = true)
+  private val scope = parentScope.childScope("Inline Edit Request Executor", supervisor = true) + ignoreExpectedTestExceptionsHandler()
 
   // Timestamps of jobs are required to understand whether we waited for all requests by some moment
   private val lastRequestedTimestamp = AtomicLong(0)
-  private val lastExecutedTimestamp = AtomicLong(0)
+  private val lastExecutedTimestamp = MutableStateFlow(0L)
 
-  private val nextTask = Channel<Request>(capacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+  private val nextTask = Channel<Request>(capacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST,
+                                          onUndeliveredElement = { request -> (request as? Request.Execute)?.job?.cancel() })
 
   init {
     scope.launch {
@@ -61,8 +74,7 @@ private class InlineEditRequestExecutorImpl(parentScope: CoroutineScope) : Inlin
       while (isActive) {
         val nextRequest = nextTask.receive()
         val nextTimestamp = nextRequest.timestamp
-        currentJob.get()?.cancelAndJoin()
-        currentJob.set(null)
+        currentJob.getAndSet(null)?.cancelAndJoin()
 
         // Workaround because there is some unexpected race with the Coroutine Completion Handler
         // Timestamps are only increasing, so nothing is broken
@@ -81,7 +93,7 @@ private class InlineEditRequestExecutorImpl(parentScope: CoroutineScope) : Inlin
           else -> {
             currentJob.set(nextJob)
             nextJob.invokeOnCompletion { _ ->
-              currentJob.set(null) // IJPL-159913
+              currentJob.compareAndSet(nextJob, null) // IJPL-159913
               setLastExecutedToAtLeast(nextTimestamp)
             }
             nextJob.start()
@@ -115,13 +127,9 @@ private class InlineEditRequestExecutorImpl(parentScope: CoroutineScope) : Inlin
     nextTask.trySend(Request.Cancel(lastRequestedTimestamp.incrementAndGet()))
   }
 
-  @TestOnly
   override suspend fun awaitActiveRequest() {
-    ThreadingAssertions.assertEventDispatchThread()
     val currentTimestamp = lastRequestedTimestamp.get()
-    while (lastExecutedTimestamp.get() < currentTimestamp) {
-      yield()
-    }
+    lastExecutedTimestamp.first { it >= currentTimestamp }
   }
 
   override fun dispose() {
@@ -134,7 +142,7 @@ private class InlineEditRequestExecutorImpl(parentScope: CoroutineScope) : Inlin
 
   private fun setLastExecutedToAtLeast(atLeastTimestamp: Long) {
     while (true) {
-      val currentTimestamp = lastExecutedTimestamp.get()
+      val currentTimestamp = lastExecutedTimestamp.value
       if (currentTimestamp >= atLeastTimestamp) {
         return
       }
@@ -150,6 +158,18 @@ private class InlineEditRequestExecutorImpl(parentScope: CoroutineScope) : Inlin
       LOG.error("[Inline Edit] Executor is already cancelled.")
     }
     return isCancelled
+  }
+
+  private fun ignoreExpectedTestExceptionsHandler(): CoroutineExceptionHandler = CoroutineExceptionHandler { _, throwable ->
+    if (throwable is CancellationException) {
+      throw throwable
+    }
+    if (InlineCompletionTestExceptions.isExpectedTestException(throwable)) {
+      LOG.debug(throwable) { "Caught EXPECTED test exception." }
+    }
+    else {
+      throw throwable
+    }
   }
 
   private sealed interface Request {

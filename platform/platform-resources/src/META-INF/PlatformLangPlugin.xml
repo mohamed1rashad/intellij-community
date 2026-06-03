@@ -9,12 +9,11 @@
   <module value="com.intellij.modules.externalSystem"/>
   <module value="com.intellij.platform.ide.impl.wsl"/>
 
-  <xi:include href="PlatformLangComponents.xml"/>
+  <xi:include href="/META-INF/PlatformLangComponents.xml"/>
   <xi:include href="/idea/PriorityEditorLangActions.xml"/>
   <xi:include href="/idea/PlatformActions.xml"/>
   <xi:include href="/META-INF/PlatformExecutionActions.xml"/>
   <xi:include href="/idea/ExecutionActions.xml"/>
-  <xi:include href="/idea/XDebuggerActions.xml"/>
   <xi:include href="/idea/LangActions.xml"/>
   <xi:include href="/idea/UsageViewActions.xml"/>
   <xi:include href="/idea/ProblemsViewActions.xml"/>
@@ -34,17 +33,12 @@
 
   <xi:include href="/META-INF/IdeCore.xml"/>
   <xi:include href="/META-INF/PlatformExtensionPoints.xml"/>
+  <xi:include href="/META-INF/MinimapExtensionPoints.xml"/>
   <xi:include href="/META-INF/Refactoring.xml"/>
   <xi:include href="/META-INF/LangExtensionPoints.xml"/>
 
   <xi:include href="/META-INF/PlatformExtensions.xml"/>
   <xi:include href="/META-INF/PlatformExecutionExtensions.xml"/>
-
-  <xi:include href="/META-INF/credential-store.xml">
-    <xi:fallback/>
-  </xi:include>
-
-  <xi:include href="/META-INF/ide-concurrency.xml"/>
 
   <xi:include href="/META-INF/LangExtensions.xml"/>
   <xi:include href="/META-INF/ProjectModelLangExtensions.xml"/>
@@ -53,56 +47,34 @@
 
   <xi:include href="/META-INF/WorkspaceModelExtensions.xml"/>
 
-  <xi:include href="intellij.platform.feedback.xml"/>
-
-  <xi:include href="/META-INF/IJent.xml"/>
-
-  <xi:include href="intellij.platform.bookmarks.xml"/>
-
-  <xi:include href="intellij.platform.todo.xml"/>
-
   <xi:include href="intellij.platform.syntax.psi.xml">
     <xi:fallback/>
   </xi:include>
 
   <extensions defaultExtensionNs="com.intellij">
-    <applicationService serviceInterface="com.intellij.ide.RecentProjectsManager"
+    <applicationService serviceInterface="com.intellij.ide.RecentProjectsManager" open="true"
                         serviceImplementation="com.intellij.ide.AttachedModuleAwareRecentProjectsManager" preload="notHeadless"/>
 
-    <applicationService serviceImplementation="com.intellij.ide.RecentProjectListActionProvider"/>
+    <applicationService serviceImplementation="com.intellij.ide.RecentProjectListActionProvider" open="true"/>
 
     <applicationService serviceInterface="com.intellij.profile.codeInspection.InspectionProfileManager"
                         serviceImplementation="com.intellij.codeInspection.ex.ApplicationInspectionProfileManager"/>
 
+    <projectOpenProcessor implementation="com.intellij.platform.FolderProjectOpenProcessor"/>
     <projectOpenProcessor implementation="com.intellij.platform.PlatformProjectOpenProcessor" order="last"/>
 
-    <projectService serviceImplementation="com.intellij.ide.projectView.impl.nodes.ProjectViewDirectoryHelper"/>
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.ProjectSettingsService"/>
-    <projectService serviceImplementation="com.intellij.usages.impl.rules.DirectoryGroupingRule"/>
-    <projectService serviceInterface="com.intellij.refactoring.RefactoringFactory"
+    <projectService serviceImplementation="com.intellij.ide.projectView.impl.nodes.ProjectViewDirectoryHelper" open="true"/>
+    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.ProjectSettingsService" open="true"/>
+    <projectService serviceImplementation="com.intellij.usages.impl.rules.DirectoryGroupingRule" open="true"/>
+    <projectService serviceInterface="com.intellij.refactoring.RefactoringFactory" open="true"
                     serviceImplementation="com.intellij.refactoring.openapi.impl.RefactoringFactoryImpl"/>
-    <projectService serviceImplementation="com.intellij.ide.bookmarks.BookmarkManager"/>
-    <projectService serviceInterface="com.intellij.ide.bookmark.BookmarksManager"
-                    serviceImplementation="com.intellij.ide.bookmark.BookmarksManagerImpl"/>
-    <bookmarkProvider implementation="com.intellij.ide.favoritesTreeView.AbstractUrlBookmarkProvider" order="first"/>
-    <bookmarkProvider implementation="com.intellij.ide.bookmark.providers.LineBookmarkProvider" order="last"/>
-    <bookmarkProvider implementation="com.intellij.ide.bookmark.providers.ModuleBookmarkProvider"/>
-    <bookmarkProvider implementation="com.intellij.ide.bookmark.providers.RootTypeBookmarkProvider"/>
-    <bookmarksListProvider implementation="com.intellij.ide.bookmark.ui.tree.BookmarkListProvider"/>
-    <bookmarksListProvider implementation="com.intellij.ide.bookmark.ui.tree.GroupListProvider"/>
-    <bookmarksListProvider implementation="com.intellij.xdebugger.impl.breakpoints.BreakpointListProvider"/>
-    <advancedSetting id="show.line.bookmarks.in.popup" default="true"
-                     bundle="messages.BookmarkBundle" groupKey="group.advanced.settings.bookmarks"/>
-    <advancedSetting id="tasks.enable.bookmark.context.on.branch.switch"
-                     default="true" groupKey="group.advanced.settings.bookmarks" bundle="messages.BookmarkBundle"/>
-
     <moduleRendererFactory implementation="com.intellij.ide.util.PlatformModuleRendererFactory" order="last" id="platform"/>
     <projectService serviceInterface="com.intellij.lang.injection.InjectedLanguageManager"
                     serviceImplementation="com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl"/>
     <applicationService serviceInterface="com.intellij.psi.impl.source.tree.injected.InjectedLanguageEditorUtil$ImplService"
                         serviceImplementation="com.intellij.psi.impl.source.tree.injected.InjectedLanguageUtil$ImplServiceImpl"/>
     <multiHostInjector id="adapter" implementation="com.intellij.psi.impl.source.tree.injected.LanguageInjectionPerformerAdapter" order="last"/>
-    <applicationService serviceInterface="com.intellij.openapi.roots.ModifiableModelsProvider"
+    <applicationService serviceInterface="com.intellij.openapi.roots.ModifiableModelsProvider" open="true"
                         serviceImplementation="com.intellij.openapi.roots.PlatformModifiableModelsProvider"/>
 
     <refactoring.copyHandler implementation="com.intellij.refactoring.copy.CopyFilesOrDirectoriesHandler" id="copyFilesOrDirectories"/>
@@ -139,40 +111,10 @@
 
     <registryKey key="ide.project.view.new.file.popup" defaultValue="false"
                  description="Switches submenu in File - New to popup step" />
+
+    <registryKey key="ide.allow.folder.as.project" defaultValue="false"
+                 description="Allow opening folder as project without modules" />
+    <applicationSettings service="com.intellij.codeInspection.ex.ApplicationInspectionProfileManager"/>
   </extensions>
 
-  <xi:include href="/META-INF/diff-impl.xml">
-    <xi:fallback/>
-  </xi:include>
-
-  <xi:include href="/META-INF/compose.xml">
-    <xi:fallback/>
-  </xi:include>
-
-  <xi:include href="/META-INF/xdebugger.xml">
-    <xi:fallback/>
-  </xi:include>
-  <xi:include href="/META-INF/GraphPlugin.xml">
-    <xi:fallback/>
-  </xi:include>
-
-  <xi:include href="/META-INF/builtInServer.xml">
-    <xi:fallback/>
-  </xi:include>
-  <xi:include href="/META-INF/smRunner.xml">
-    <xi:fallback/>
-  </xi:include>
-  <xi:include href="/META-INF/duplicates-analysis.xml">
-    <xi:fallback/>
-  </xi:include>
-
-  <xi:include href="/META-INF/ExternalProcessAuthHelper.xml">
-    <xi:fallback/>
-  </xi:include>
-  <xi:include href="/META-INF/ExternalSystem.xml">
-    <xi:fallback/>
-  </xi:include>
-  <xi:include href="/META-INF/ExternalSystemDependencyUpdater.xml">
-    <xi:fallback/>
-  </xi:include>
 </idea-plugin>

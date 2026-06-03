@@ -3,12 +3,21 @@ package com.jetbrains.python;
 
 import com.intellij.openapi.util.RecursionManager;
 import com.intellij.openapi.util.StackOverflowPreventedException;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiPolyVariantReference;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.ResolveResult;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.fixtures.PyResolveTestCase;
 import com.jetbrains.python.fixtures.PyTestCase;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyElement;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyParameter;
+import com.jetbrains.python.psi.PyTargetExpression;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.impl.PyNamedParameterImpl;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
@@ -615,8 +624,8 @@ public class Py3ResolveTest extends PyResolveTestCase {
     );
   }
 
-  // PY-32963
-  public void testProvidedPyiInsteadStubPackage() {
+  // PY-32963, PY-86147
+  public void testStubPackageInsteadProvidedPyi() {
     final String path = "resolve/" + getTestName(false);
     myFixture.configureByFile(path + "/main.py");
 
@@ -627,7 +636,7 @@ public class Py3ResolveTest extends PyResolveTestCase {
 
         final PsiFile file = element.getContainingFile();
         assertEquals("foo.pyi", file.getName());
-        assertEquals("pkg", file.getParent().getName());
+        assertEquals("pkg-stubs", file.getParent().getName());
       }
     );
   }
@@ -910,7 +919,7 @@ public class Py3ResolveTest extends PyResolveTestCase {
 
   // PY-82850
   public void testNonIdempotentComputation() {
-    PyTestCase.fixme("PY-83181", StackOverflowPreventedException.class, () -> {
+    PyTestCase.fixme("PY-83181", StackOverflowPreventedException.class, "", () -> {
       RecursionManager.assertOnRecursionPrevention(myFixture.getTestRootDisposable());
 
       myFixture.configureByFile("resolve/" + getTestName(false) + ".py");
@@ -924,16 +933,14 @@ public class Py3ResolveTest extends PyResolveTestCase {
 
   // PY-83803
   public void testNonIdempotentComputation2() {
-    PyTestCase.fixme("PY-83803", StackOverflowPreventedException.class, () -> {
-      RecursionManager.assertOnRecursionPrevention(myFixture.getTestRootDisposable());
+    RecursionManager.assertOnRecursionPrevention(myFixture.getTestRootDisposable());
 
-      myFixture.configureByFile("resolve/" + getTestName(false) + ".py");
-      PsiElement result1 = findReferenceByMarker(myFixture.getFile(), "<ref1>").resolve();
-      assertNotNull(result1);
+    myFixture.configureByFile("resolve/" + getTestName(false) + ".py");
+    PsiElement result1 = findReferenceByMarker(myFixture.getFile(), "<ref1>").resolve();
+    assertNotNull(result1);
 
-      PsiElement result2 = findReferenceByMarker(myFixture.getFile(), "<ref2>").resolve();
-      assertNotNull(result2);
-    });
+    PsiElement result2 = findReferenceByMarker(myFixture.getFile(), "<ref2>").resolve();
+    assertNotNull(result2);
   }
 
   private void assertResolvesToItself() {

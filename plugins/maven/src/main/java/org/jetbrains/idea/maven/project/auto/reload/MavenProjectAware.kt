@@ -12,6 +12,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.observable.properties.AtomicBooleanProperty
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.io.FileUtilRt.toSystemIndependentName
 import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.idea.maven.buildtool.MavenSyncSpec
@@ -76,7 +77,7 @@ class MavenProjectAware(
 
   private fun collectSettingsFiles(): Set<String> {
     val result = LinkedHashSet<String>()
-    result.addAll(manager.projectsTree.managedFilesPaths)
+    result.addAll(manager.state.originalFiles)
     result.addAll(manager.projectsTree.projectsFiles.map { it.path })
     for (mavenProject in manager.projectsTree.projects) {
       ProgressManager.checkCanceled()
@@ -87,7 +88,7 @@ class MavenProjectAware(
       result.add(rootDirectory + "/" + MavenConstants.MAVEN_CONFIG_RELATIVE_PATH)
       result.add(rootDirectory + "/" + MavenConstants.MAVEN_WRAPPER_RELATIVE_PATH)
     }
-    return result
+    return result.map { toSystemIndependentName(it) }.toSet()
   }
 
   init {

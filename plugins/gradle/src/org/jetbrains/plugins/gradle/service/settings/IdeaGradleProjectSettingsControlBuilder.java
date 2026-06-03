@@ -18,14 +18,18 @@ import com.intellij.openapi.projectRoots.SdkModificator;
 import com.intellij.openapi.roots.ui.configuration.SdkComboBox;
 import com.intellij.openapi.roots.ui.configuration.SdkLookupProvider;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectSdksModel;
-import com.intellij.openapi.roots.ui.util.CompositeAppearance;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.MessageType;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.*;
+import com.intellij.ui.CollectionComboBoxModel;
+import com.intellij.ui.TitledSeparator;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.util.Alarm;
@@ -36,6 +40,7 @@ import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import one.util.streamex.StreamEx;
+import org.gradle.util.GradleVersion;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -51,16 +56,30 @@ import org.jetbrains.plugins.gradle.util.GradleBundle;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
 import org.jetbrains.plugins.gradle.util.GradleUtil;
 
-import javax.swing.*;
+import javax.swing.Box;
+import javax.swing.JComboBox;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -68,7 +87,9 @@ import static com.intellij.openapi.externalSystem.util.ExternalSystemUiUtil.INSE
 import static com.intellij.openapi.projectRoots.impl.SdkConfigurationUtil.createUniqueSdkName;
 import static com.intellij.openapi.roots.ui.configuration.SdkComboBoxModel.createJdkComboBoxModel;
 import static com.intellij.openapi.roots.ui.configuration.SdkLookupProvider.SdkInfo;
-import static org.jetbrains.plugins.gradle.util.GradleJvmComboBoxUtil.*;
+import static org.jetbrains.plugins.gradle.util.GradleJvmComboBoxUtil.addUsefulGradleJvmReferences;
+import static org.jetbrains.plugins.gradle.util.GradleJvmComboBoxUtil.getSelectedGradleJvmReference;
+import static org.jetbrains.plugins.gradle.util.GradleJvmComboBoxUtil.setSelectedGradleJvmReference;
 import static org.jetbrains.plugins.gradle.util.GradleJvmResolutionUtil.getGradleJvmLookupProvider;
 import static org.jetbrains.plugins.gradle.util.GradleJvmUtil.nonblockingResolveGradleJvmInfo;
 
@@ -344,7 +365,7 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
     if (!dropUseBundledDistributionButton) availableDistributions.add(new DistributionTypeItem(DistributionType.BUNDLED));
 
     myGradleDistributionComboBox = new ComboBox<>();
-    myGradleDistributionComboBox.setRenderer(new MyItemCellRenderer<>());
+    myGradleDistributionComboBox.setRenderer(MyItemCellRendererKt.createItemCellRenderer());
 
     myGradleDistributionHint = new JBLabel();
     myGradleHomePathField = new TargetPathFieldWithBrowseButton();
@@ -488,7 +509,7 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
   public void apply(GradleProjectSettings settings) {
     settings.setCompositeBuild(myInitialSettings.getCompositeBuild());
     if (myGradleHomePathField != null) {
-      Path gradleHomePath = Path.of(FileUtil.toCanonicalPath(myGradleHomePathField.getText()));
+      Path gradleHomePath = Path.of(myGradleHomePathField.getText().trim());
       Path finalGradleHomePath;
       if (GradleInstallationManager.getInstance().isGradleSdkHome(myProjectRef.get(), gradleHomePath)) {
         finalGradleHomePath = gradleHomePath;
@@ -501,13 +522,9 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
           });
         }
       }
-      if (finalGradleHomePath == null) {
-        settings.setGradleHome(null);
-      }
-      else {
-        String finalGradleHome = finalGradleHomePath.toString();
-        settings.setGradleHome(finalGradleHome);
-        GradleUtil.storeLastUsedGradleHome(finalGradleHome);
+      settings.setGradleHomePath(finalGradleHomePath);
+      if (finalGradleHomePath != null) {
+        GradleUtil.storeLastUsedGradleHome(finalGradleHomePath.toString());
       }
     }
 
@@ -605,12 +622,12 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
     }
 
     if (myGradleHomePathField == null) return false;
-    String gradleHome = FileUtil.toCanonicalPath(myGradleHomePathField.getText());
+    String gradleHome = myGradleHomePathField.getText().trim();
     if (StringUtil.isEmpty(gradleHome)) {
-      return !StringUtil.isEmpty(myInitialSettings.getGradleHome());
+      return myInitialSettings.getGradleHomePath() != null;
     }
     else {
-      return !gradleHome.equals(myInitialSettings.getGradleHome());
+      return !Path.of(gradleHome).equals(myInitialSettings.getGradleHomePath());
     }
   }
 
@@ -626,11 +643,11 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
                     @Nullable WizardContext wizardContext) {
     updateProjectRef(project, wizardContext);
 
-    String gradleHome = settings.getGradleHome();
+    Path gradleHomePath = settings.getGradleHomePath();
     if (myGradleHomePathField != null) {
       GradleRuntimeTargetUI.installActionListener(myGradleHomePathField, myProjectRef.get(),
                                                   GradleBundle.message("gradle.settings.text.home.path"));
-      myGradleHomePathField.setText(gradleHome == null ? "" : gradleHome);
+      myGradleHomePathField.setText(gradleHomePath == null ? "" : gradleHomePath.toString());
       myGradleHomePathField.getTextField().setForeground(GradleLocationSettingType.EXPLICIT_CORRECT.getColor());
     }
     resetImportControls(settings);
@@ -640,12 +657,11 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
     resetWrapperControls(settings.getExternalProjectPath(), settings, isDefaultModuleCreation);
     resetGradleDelegationControls(wizardContext);
 
-    if (StringUtil.isEmpty(gradleHome)) {
+    if (gradleHomePath == null) {
       myGradleHomeSettingType = GradleLocationSettingType.UNKNOWN;
       deduceGradleHomeIfPossible();
     }
     else {
-      Path gradleHomePath = Path.of(gradleHome);
       if (GradleInstallationManager.getInstance().isGradleSdkHome(project, gradleHomePath)) {
         myGradleHomeSettingType = GradleLocationSettingType.EXPLICIT_CORRECT;
       }
@@ -735,8 +751,12 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
       }
 
       var projectPath = Path.of(gradleProjectSettings.getExternalProjectPath());
-      var gradleVersion = gradleProjectSettings.resolveGradleVersion();
-      myGradleDaemonJvmCriteriaView = GradleDaemonJvmCriteriaViewFactory.createView(projectPath, gradleVersion, myDisposable);
+      var gradleVersion = GradleInstallationManager.guessGradleVersion(gradleProjectSettings);
+      myGradleDaemonJvmCriteriaView = GradleDaemonJvmCriteriaViewFactory.createView(
+        projectPath,
+        gradleVersion == null ? GradleVersion.current() : gradleVersion,
+        myDisposable
+      );
       myGradleJvmWrapper.add(myGradleDaemonJvmCriteriaView, BorderLayout.CENTER);
     }
   }
@@ -787,7 +807,7 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
       if (!dropDelegateBuildCombobox) {
         BuildRunItem[] states = new BuildRunItem[]{new BuildRunItem(Boolean.TRUE), new BuildRunItem(Boolean.FALSE)};
         myDelegateBuildCombobox = new ComboBox<>(states);
-        myDelegateBuildCombobox.setRenderer(new MyItemCellRenderer<>());
+        myDelegateBuildCombobox.setRenderer(MyItemCellRendererKt.createItemCellRenderer());
         myDelegateBuildCombobox.setSelectedItem(new BuildRunItem(myInitialSettings.getDelegatedBuild()));
 
         myDelegateBuildLabel = new JBLabel(GradleBundle.message("gradle.settings.text.build.run"));
@@ -800,7 +820,7 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
       if (!dropTestRunnerCombobox) {
         TestRunnerItem[] testRunners = StreamEx.of(TestRunner.values()).map(TestRunnerItem::new).toArray(TestRunnerItem[]::new);
         myTestRunnerCombobox = new ComboBox<>(testRunners);
-        myTestRunnerCombobox.setRenderer(new MyItemCellRenderer<>());
+        myTestRunnerCombobox.setRenderer(MyItemCellRendererKt.createItemCellRenderer());
         myTestRunnerCombobox.setSelectedItem(new TestRunnerItem(myInitialSettings.getTestRunner()));
 
         // make sure that the two adjacent comboboxes have same size
@@ -942,38 +962,7 @@ public class IdeaGradleProjectSettingsControlBuilder implements GradleProjectSet
     return ApplicationNamesInfo.getInstance().getFullProductName();
   }
 
-  private static class MyItemCellRenderer<T> extends ColoredListCellRenderer<MyItem<T>> {
-
-    @Override
-    protected void customizeCellRenderer(@NotNull JList<? extends MyItem<T>> list,
-                                         MyItem<T> value,
-                                         int index,
-                                         boolean selected,
-                                         boolean hasFocus) {
-      if (value == null) return;
-      CompositeAppearance.DequeEnd ending = new CompositeAppearance().getEnding();
-      ending.addText(value.getText(), getTextAttributes(selected));
-      if (value.getComment() != null) {
-        SimpleTextAttributes commentAttributes = getCommentAttributes(selected);
-        ending.addComment(value.getComment(), commentAttributes);
-      }
-      ending.getAppearance().customize(this);
-    }
-
-    private static @NotNull SimpleTextAttributes getTextAttributes(boolean selected) {
-      return selected && !(SystemInfoRt.isWindows && UIManager.getLookAndFeel().getName().contains("Windows"))
-             ? SimpleTextAttributes.SELECTED_SIMPLE_CELL_ATTRIBUTES
-             : SimpleTextAttributes.SIMPLE_CELL_ATTRIBUTES;
-    }
-
-    private static @NotNull SimpleTextAttributes getCommentAttributes(boolean selected) {
-      return SystemInfo.isMac && selected
-             ? new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.WHITE)
-             : SimpleTextAttributes.GRAY_ATTRIBUTES;
-    }
-  }
-
-  private abstract static class MyItem<T> {
+  abstract static class MyItem<T> {
     protected final @Nullable T value;
 
     private MyItem(@Nullable T value) {

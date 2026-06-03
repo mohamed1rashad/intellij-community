@@ -1,6 +1,7 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.extractMethod.newImpl
 
+import com.intellij.codeInsight.AnnotationTargetUtil
 import com.intellij.codeInsight.Nullability
 import com.intellij.codeInsight.NullableNotNullManager
 import com.intellij.codeInsight.PsiEquivalenceUtil
@@ -18,7 +19,34 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.NlsContexts.Command
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.psi.*
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.JavaTokenType
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiCodeBlock
+import com.intellij.psi.PsiComment
+import com.intellij.psi.PsiDeclarationStatement
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiElementFactory
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiExpressionStatement
+import com.intellij.psi.PsiJavaCodeReferenceElement
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiModifierListOwner
+import com.intellij.psi.PsiNameHelper
+import com.intellij.psi.PsiNameValuePair
+import com.intellij.psi.PsiNewExpression
+import com.intellij.psi.PsiPrimitiveType
+import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiReturnStatement
+import com.intellij.psi.PsiStatement
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypeParameter
+import com.intellij.psi.PsiTypeParameterListOwner
+import com.intellij.psi.PsiTypes
+import com.intellij.psi.PsiVariable
+import com.intellij.psi.PsiYieldStatement
 import com.intellij.psi.codeStyle.JavaCodeStyleManager
 import com.intellij.psi.codeStyle.VariableKind
 import com.intellij.psi.impl.source.DummyHolder
@@ -29,7 +57,10 @@ import com.intellij.psi.util.PsiUtil
 import com.intellij.psi.util.parentOfType
 import com.intellij.refactoring.IntroduceVariableUtil
 import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput
-import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.*
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.ArtificialBooleanOutput
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.EmptyOutput
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.ExpressionOutput
+import com.intellij.refactoring.extractMethod.newImpl.structures.DataOutput.VariableOutput
 import com.intellij.refactoring.extractMethod.newImpl.structures.ExtractOptions
 import com.intellij.refactoring.extractMethod.newImpl.structures.InputParameter
 import com.intellij.refactoring.introduceField.ElementToWorkOn
@@ -119,16 +150,25 @@ object ExtractMethodHelper {
     return physicalParent ?: throw IllegalArgumentException()
   }
 
-  fun addNullabilityAnnotation(typeElement: PsiTypeElement?, nullability: Nullability) {
-    if (typeElement == null) return
-    if (nullability == Nullability.UNKNOWN) return
-    val nullabilityManager = NullableNotNullManager.getInstance(typeElement.project)
-    val annotation = nullabilityManager.getDefaultAnnotation(nullability, typeElement)
-    val annotationElement = AddAnnotationPsiFix.addPhysicalAnnotationIfAbsent(annotation, PsiNameValuePair.EMPTY_ARRAY, typeElement)
+  internal fun addNullabilityAnnotation(psiModifierListOwner: PsiModifierListOwner?, nullability: Nullability, targetClass: PsiClass) {
+    if (psiModifierListOwner == null) return
+    val project = psiModifierListOwner.project
+    val nullabilityManager = NullableNotNullManager.getInstance(project)
+    if (nullability == Nullability.UNKNOWN && containerNullability(targetClass) != Nullability.NOT_NULL) return
+    if (nullability == Nullability.NOT_NULL && containerNullability(targetClass) == Nullability.NOT_NULL) return
+    var annotation = nullabilityManager.getDefaultAnnotation(nullability, psiModifierListOwner)
+    if (nullability == Nullability.UNKNOWN && JavaPsiFacade.getInstance(project).findClass(annotation, targetClass.resolveScope) == null) {
+      annotation = nullabilityManager.getDefaultAnnotation(Nullability.NULLABLE, psiModifierListOwner)
+    }
+    val annotationOwner = AnnotationTargetUtil.getTarget(psiModifierListOwner, annotation) ?: return
+    val annotationElement = AddAnnotationPsiFix.addPhysicalAnnotationIfAbsent(annotation, PsiNameValuePair.EMPTY_ARRAY, annotationOwner)
     if (annotationElement != null) {
-      JavaCodeStyleManager.getInstance(typeElement.project).shortenClassReferences(annotationElement)
+      JavaCodeStyleManager.getInstance(project).shortenClassReferences(annotationElement)
     }
   }
+
+  internal fun containerNullability(targetClass: PsiModifierListOwner): Nullability? =
+    NullableNotNullManager.getInstance(targetClass.project).findContainerAnnotation(targetClass)?.nullability
 
   private fun findVariableReferences(element: PsiElement): Sequence<PsiVariable> {
     val references = PsiTreeUtil.findChildrenOfAnyType(element, PsiReferenceExpression::class.java)
@@ -228,31 +268,54 @@ object ExtractMethodHelper {
 
   fun guessMethodName(options: ExtractOptions): List<String> {
     val project = options.project
-    val variableNames: MutableSet<String> = LinkedHashSet()
+    val methodNames: MutableSet<String> = LinkedHashSet()
     val codeStyleManager = JavaCodeStyleManager.getInstance(project)
-    val returnType = options.dataOutput.type
 
-    val expression = options.elements.singleOrNull() as? PsiExpression
-    if (expression != null && PsiTypes.voidType() != expression.type || returnType !is PsiPrimitiveType) {
-      codeStyleManager.suggestVariableName(VariableKind.FIELD, null, expression, returnType).names
-        .forEach { name ->
-          variableNames += codeStyleManager.variableNameToPropertyName(name, VariableKind.FIELD)
-        }
+    val firstElement = options.elements.first()
+    val prevSibling = PsiTreeUtil.skipWhitespacesBackward(firstElement)
+    if (prevSibling is PsiComment) {
+      val text =
+        if (prevSibling.tokenType === JavaTokenType.END_OF_LINE_COMMENT) prevSibling.text.removePrefix("//")
+        else prevSibling.text.removePrefix("/*").removeSuffix("*/");
+      val name = StringUtil.decapitalize(StringUtil.capitalizeWords(text, true).replace(" ", ""))
+      if (name.length < 20) {
+        methodNames += name
+      }
     }
 
     val outVariable = (options.dataOutput as? VariableOutput)?.variable
     if (outVariable != null) {
       val outKind = codeStyleManager.getVariableKind(outVariable)
       val propertyName = codeStyleManager.variableNameToPropertyName(outVariable.name!!, outKind)
-      val names = codeStyleManager.suggestVariableName(VariableKind.FIELD, propertyName, null, outVariable.type).names
+      val names = codeStyleManager.suggestVariableName(VariableKind.FIELD, propertyName, null, outVariable.type, false).names
+      val prefix = if (isCreation(firstElement, outVariable)) "create" else if (outVariable.type == PsiTypes.booleanType()) "is" else "get"
       names.forEach { name ->
-        variableNames += codeStyleManager.variableNameToPropertyName(name, VariableKind.FIELD)
+        methodNames += prefix + StringUtil.capitalize(codeStyleManager.variableNameToPropertyName(name, VariableKind.FIELD))
       }
     }
 
-    val prefix = if (returnType == PsiTypes.booleanType()) "is" else "get"
-    return variableNames.filter { PsiNameHelper.getInstance(project).isIdentifier(it) }
-      .map { variableName -> "$prefix${StringUtil.capitalize(variableName)}" }
+    val returnType = options.dataOutput.type
+    val expression = options.elements.singleOrNull() as? PsiExpression
+    if (expression != null && PsiTypes.voidType() != expression.type || returnType !is PsiPrimitiveType) {
+      val prefix = if (expression is PsiNewExpression) "create" else if (returnType == PsiTypes.booleanType()) "is" else "get"
+      codeStyleManager.suggestVariableName(VariableKind.FIELD, null, expression, returnType, false).names
+        .forEach { name ->
+          methodNames += prefix + StringUtil.capitalize(codeStyleManager.variableNameToPropertyName(name, VariableKind.FIELD)) }
+    }
+    else {
+      if (expression is PsiMethodCallExpression) {
+        val names = codeStyleManager.suggestVariableName(VariableKind.FIELD, null, expression, null).names
+          .map { name -> codeStyleManager.variableNameToPropertyName(name, VariableKind.FIELD) }
+        methodNames.addAll(names)
+      }
+    }
+
+    return methodNames.filter { PsiNameHelper.getInstance(project).isIdentifier(it) }
+  }
+
+  private fun isCreation(element: PsiElement, variable: PsiVariable): Boolean {
+    if (variable.initializer !is PsiNewExpression || element !is PsiDeclarationStatement) return false
+    return element.declaredElements.size == 1 && element.declaredElements[0] == variable
   }
 
   fun replacePsiRange(source: List<PsiElement>, target: List<PsiElement>): List<PsiElement> {

@@ -5,7 +5,9 @@ import com.intellij.util.ui.EditableModel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JList;
+import javax.swing.ListModel;
 import javax.swing.event.ListDataEvent;
 import javax.swing.event.ListDataListener;
 
@@ -21,7 +23,7 @@ class ListToolbarDecorator<T> extends ToolbarDecorator {
     myEditableModel = editableModel;
     myAddActionEnabled = myRemoveActionEnabled = myUpActionEnabled = myDownActionEnabled = true;
     createActions();
-    myList.addListSelectionListener(__ -> updateButtons());
+    myList.addListSelectionListener(_ -> updateButtons());
     ListDataListener modelListener = new ListDataListener() {
       @Override
       public void intervalAdded(ListDataEvent e) {
@@ -47,19 +49,19 @@ class ListToolbarDecorator<T> extends ToolbarDecorator {
         ((ListModel<T>)evt.getNewValue()).addListDataListener(modelListener);
       }
     });
-    myList.addPropertyChangeListener("enabled", __ -> updateButtons());
+    myList.addPropertyChangeListener("enabled", _ -> updateButtons());
   }
 
   private void createActions() {
-    myRemoveAction = __ -> {
+    myRemoveAction = _ -> {
       ListUtil.removeSelectedItems(myList);
       updateButtons();
     };
-    myUpAction = __ -> {
+    myUpAction = _ -> {
       ListUtil.moveSelectedItemsUp(myList);
       updateButtons();
     };
-    myDownAction = __ -> {
+    myDownAction = _ -> {
       ListUtil.moveSelectedItemsDown(myList);
       updateButtons();
     };

@@ -7,9 +7,10 @@ import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.Getter
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.Setter
-import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.dsl.builder.Panel
-import org.jetbrains.annotations.NonNls
+import com.intellij.ui.dsl.builder.TopGap
+import com.intellij.ui.dsl.builder.panel
+import org.jetbrains.annotations.ApiStatus
 import java.util.function.Function
 import java.util.function.Supplier
 import javax.swing.JCheckBox
@@ -17,10 +18,13 @@ import javax.swing.JComponent
 import kotlin.reflect.KMutableProperty0
 
 abstract class BeanConfigurable<T : Any> protected constructor(protected val instance: T) : UnnamedConfigurable, ConfigurableWithOptionDescriptors, UiDslUnnamedConfigurable {
+
   var title: @NlsContexts.BorderTitle String? = null
     protected set
 
-  private val myFields: MutableList<CheckboxField> = ArrayList<CheckboxField>()
+  @ApiStatus.Internal
+  protected var groupTopGap: TopGap? = null
+  private val myFields = mutableListOf<CheckboxField>()
 
   protected constructor(beanInstance: T, title: @NlsContexts.BorderTitle String?) : this(beanInstance) {
     this.title = title
@@ -30,50 +34,6 @@ abstract class BeanConfigurable<T : Any> protected constructor(protected val ins
     abstract fun getBeanValue(instance: Any): Boolean
 
     abstract fun setBeanValue(instance: Any, value: Boolean)
-  }
-
-  private class BeanFieldAccessor(private val myFieldName: String) : BeanPropertyAccessor() {
-    fun getterName(): @NonNls String {
-      return "is" + StringUtil.capitalize(myFieldName)
-    }
-
-    override fun getBeanValue(instance: Any): Boolean {
-      try {
-        val field = instance.javaClass.getField(myFieldName)
-        return field.get(instance) as Boolean
-      }
-      catch (_: NoSuchFieldException) {
-        try {
-          val method = instance.javaClass.getMethod(getterName())
-          return method.invoke(instance) as Boolean
-        }
-        catch (e1: Exception) {
-          throw RuntimeException(e1)
-        }
-      }
-      catch (e: IllegalAccessException) {
-        throw RuntimeException(e)
-      }
-    }
-
-    override fun setBeanValue(instance: Any, value: Boolean) {
-      try {
-        val field = instance.javaClass.getField(myFieldName)
-        field.set(instance, value)
-      }
-      catch (_: NoSuchFieldException) {
-        try {
-          val method = instance.javaClass.getMethod("set" + StringUtil.capitalize(myFieldName), Boolean::class.java)
-          method.invoke(instance, value)
-        }
-        catch (e1: Exception) {
-          throw RuntimeException(e1)
-        }
-      }
-      catch (e: IllegalAccessException) {
-        throw RuntimeException(e)
-      }
-    }
   }
 
   private class BeanMethodAccessor(
@@ -99,19 +59,9 @@ abstract class BeanConfigurable<T : Any> protected constructor(protected val ins
     }
   }
 
-  private class CheckboxField {
-    private val myAccessor: BeanPropertyAccessor
-    val title: @NlsContexts.Checkbox String?
-
-    constructor(fieldName: String, title: @NlsContexts.Checkbox String?) {
-      myAccessor = BeanFieldAccessor(fieldName)
-      this.title = title
-    }
-
-    constructor(accessor: BeanPropertyAccessor, title: @NlsContexts.Checkbox String) {
-      myAccessor = accessor
-      this.title = title
-    }
+  private class CheckboxField(
+    private val myAccessor: BeanPropertyAccessor,
+    val title: @NlsContexts.Checkbox String) {
 
     fun setValue(settingsInstance: Any, value: Boolean) {
       myAccessor.setBeanValue(settingsInstance, value)
@@ -143,11 +93,6 @@ abstract class BeanConfigurable<T : Any> protected constructor(protected val ins
     var componentValue: Boolean
       get() = component.isSelected
       set(value) = component.setSelected(value)
-  }
-
-  @Deprecated("use {@link #checkBox(String, Getter, Setter)} instead", level = DeprecationLevel.ERROR)
-  protected fun checkBox(fieldName: @NonNls String, title: @NlsContexts.Checkbox String?) {
-    myFields.add(CheckboxField(fieldName, title))
   }
 
   /**
@@ -185,12 +130,27 @@ abstract class BeanConfigurable<T : Any> protected constructor(protected val ins
     }
   }
 
+  /**
+   * Content customization is not allowed. Use [UiDslUnnamedConfigurable.Simple] or similar classes
+   * for full UI customization instead. When converting [BeanConfigurable] to [UiDslUnnamedConfigurable], remember to implement
+   * [ConfigurableWithOptionDescriptors] (if applicable).
+   */
+  @Deprecated("Content customization is not allowed. Use [UiDslUnnamedConfigurable.Simple] or similar classes for full UI customization instead",
+              level = DeprecationLevel.WARNING)
+  @ApiStatus.ScheduledForRemoval
   override fun createComponent(): JComponent {
-    return ConfigurableBuilderHelper.createBeanPanel(this, components)
+    return panel {
+      appendBeanConfigurableContent(this@BeanConfigurable, components)
+    }
   }
 
-  override fun Panel.createContent() {
-    ConfigurableBuilderHelper.integrateBeanPanel(this, this@BeanConfigurable, this@BeanConfigurable.components)
+  /**
+   * Content customization is not allowed. Use [UiDslUnnamedConfigurable.Simple] or similar classes
+   * for full UI customization instead. When converting [BeanConfigurable] to [UiDslUnnamedConfigurable], remember to implement
+   * [ConfigurableWithOptionDescriptors] (if applicable).
+   */
+  final override fun Panel.createContent() {
+    integrateBeanPanel(this, this@BeanConfigurable, components, groupTopGap)
   }
 
   override fun isModified(): Boolean {
@@ -213,6 +173,41 @@ abstract class BeanConfigurable<T : Any> protected constructor(protected val ins
     }
   }
 
-  private val components: List<JComponent>
+  protected val components: List<JComponent>
+    @ApiStatus.Internal
     get() = myFields.map { it.component }
+}
+
+private fun integrateBeanPanel(rootPanel: Panel, beanConfigurable: BeanConfigurable<*>, components: List<JComponent>, groupTopGap: TopGap? = null) {
+  rootPanel.appendBeanConfigurableContent(beanConfigurable, components, groupTopGap)
+  rootPanel.onApply { beanConfigurable.apply() }
+  rootPanel.onIsModified { beanConfigurable.isModified() }
+  rootPanel.onReset { beanConfigurable.reset() }
+}
+
+private fun Panel.appendBeanConfigurableContent(
+  beanConfigurable: BeanConfigurable<*>, components: List<JComponent>,
+  groupTopGap: TopGap? = null,
+) {
+  val title = beanConfigurable.title
+
+  if (title != null) {
+    val group = group(title) {
+      appendBeanFields(components)
+    }
+    if (groupTopGap != null) {
+      group.topGap(groupTopGap)
+    }
+  }
+  else {
+    appendBeanFields(components)
+  }
+}
+
+private fun Panel.appendBeanFields(components: List<JComponent>) {
+  for (component in components) {
+    row {
+      cell(component)
+    }
+  }
 }

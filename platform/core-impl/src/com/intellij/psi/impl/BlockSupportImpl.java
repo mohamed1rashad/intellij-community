@@ -18,15 +18,35 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiCodeFragment;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.SingleRootFileViewProvider;
 import com.intellij.psi.impl.source.DummyHolder;
 import com.intellij.psi.impl.source.DummyHolderFactory;
 import com.intellij.psi.impl.source.PsiFileImpl;
-import com.intellij.psi.impl.source.tree.*;
+import com.intellij.psi.impl.source.tree.ASTShallowComparator;
+import com.intellij.psi.impl.source.tree.ASTStructure;
+import com.intellij.psi.impl.source.tree.CompositeElement;
+import com.intellij.psi.impl.source.tree.FileElement;
+import com.intellij.psi.impl.source.tree.SharedImplUtil;
+import com.intellij.psi.impl.source.tree.TreeElement;
+import com.intellij.psi.impl.source.tree.TreeUtil;
+import com.intellij.psi.impl.source.tree.mvcc.InternalPsiVersioning;
 import com.intellij.psi.templateLanguages.ITemplateDataElementType;
 import com.intellij.psi.text.BlockSupport;
-import com.intellij.psi.tree.*;
+import com.intellij.psi.tree.CustomLanguageASTComparator;
+import com.intellij.psi.tree.ICustomParsingType;
+import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.tree.ILazyParseableElementType;
+import com.intellij.psi.tree.IReparseableElementTypeBase;
+import com.intellij.psi.tree.IReparseableLeafElementType;
+import com.intellij.psi.tree.OuterLanguageElementType;
 import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.util.PsiVersioningService;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.CharTable;
 import com.intellij.util.IncorrectOperationException;
@@ -34,7 +54,11 @@ import com.intellij.util.diff.DiffTree;
 import com.intellij.util.diff.DiffTreeChangeBuilder;
 import com.intellij.util.diff.FlyweightCapableTreeStructure;
 import com.intellij.util.diff.ShallowNodeComparator;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.util.List;
 
@@ -190,8 +214,11 @@ public final class BlockSupportImpl extends BlockSupport {
     if (chameleon == null) {
       return null;
     }
-    DummyHolder holder = DummyHolderFactory.createHolder(manager, null, node.getPsi(), charTable);
-    holder.getTreeElement().rawAddChildren((TreeElement)chameleon);
+    InternalPsiVersioning.runModificationOfVersionedPsi(() -> {
+      DummyHolder holder = DummyHolderFactory.createHolder(manager, null, node.getPsi(), charTable);
+      holder.getTreeElement().rawAddChildren((TreeElement)chameleon);
+      return null;
+    });
     if (!reparseable.isValidReparse(node, chameleon)) {
       return null;
     }
@@ -250,7 +277,7 @@ public final class BlockSupportImpl extends BlockSupport {
                                                       viewProvider.getModificationStamp());
     lightFile.setOriginalFile(virtualFile);
 
-    FileViewProvider providerCopy = viewProvider.createCopy(lightFile);
+    FileViewProvider providerCopy = PsiVersioningService.createVersionedPsiElements(oldFileNode, () -> viewProvider.createCopy(lightFile));
     if (providerCopy.isEventSystemEnabled()) {
       throw new AssertionError("Copied view provider must be non-physical for reparse to deliver correct events: " + viewProvider);
     }
@@ -260,7 +287,7 @@ public final class BlockSupportImpl extends BlockSupport {
 
     newFile.setOriginalFile(fileImpl);
 
-    ASTNode newFileElement = newFile.getNode();
+    ASTNode newFileElement = PsiVersioningService.createVersionedPsiElements(oldFileNode, () -> newFile.getNode());
     if (lastCommittedText.length() != oldFileNode.getTextLength()) {
       throw new IncorrectOperationException(viewProvider.toString());
     }

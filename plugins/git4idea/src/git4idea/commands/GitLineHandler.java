@@ -5,6 +5,7 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.process.ProcessIOExecutorService;
+import com.intellij.execution.process.ProcessOutputType;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.externalProcessAuthHelper.AuthenticationGate;
 import com.intellij.externalProcessAuthHelper.AuthenticationMode;
@@ -15,6 +16,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.io.BaseDataReader;
 import git4idea.config.GitExecutable;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -22,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -43,8 +46,18 @@ public class GitLineHandler extends GitTextHandler {
   private @NotNull AuthenticationMode myIgnoreAuthenticationRequest = AuthenticationMode.FULL;
   private @Nullable AuthenticationGate myAuthenticationGate;
 
+  /**
+   * @apiNote Obsolete due to usage of {@link  java.io.File}, use the overloaded method using {@link java.nio.Path} instead.
+   */
+  @ApiStatus.Obsolete(since = "25.3")
   public GitLineHandler(@Nullable Project project,
                         @NotNull File directory,
+                        @NotNull GitCommand command) {
+    super(project, directory.toPath(), command);
+  }
+
+  public GitLineHandler(@Nullable Project project,
+                        @NotNull Path directory,
                         @NotNull GitCommand command) {
     super(project, directory, command);
   }
@@ -63,7 +76,7 @@ public class GitLineHandler extends GitTextHandler {
   }
 
   public GitLineHandler(@Nullable Project project,
-                        @NotNull File directory,
+                        @NotNull Path directory,
                         @NotNull GitExecutable executable,
                         @NotNull GitCommand command,
                         @NotNull List<String> configParameters) {
@@ -115,7 +128,7 @@ public class GitLineHandler extends GitTextHandler {
    * @param isCr whether this line is CR-only separated (typically, a progress message)
    */
   private void onLineAvailable(@NotNull String line, boolean isCr, @NotNull Key outputType) {
-    if (outputType == ProcessOutputTypes.SYSTEM) return;
+    if (ProcessOutputType.isSystem(outputType)) return;
 
     // do not log git remote progress
     if (!isCr) logOutput(line, outputType);
@@ -168,9 +181,9 @@ public class GitLineHandler extends GitTextHandler {
     private final @NotNull BufferingTextSplitter myOutputProcessor;
 
     LineReader(@NotNull Reader reader,
-                      @NotNull SleepingPolicy sleepingPolicy,
-                      @NotNull BufferingTextSplitter outputProcessor,
-                      @NotNull String presentableName) {
+               @NotNull SleepingPolicy sleepingPolicy,
+               @NotNull BufferingTextSplitter outputProcessor,
+               @NotNull String presentableName) {
       super(sleepingPolicy);
       myReader = reader;
       myOutputProcessor = outputProcessor;

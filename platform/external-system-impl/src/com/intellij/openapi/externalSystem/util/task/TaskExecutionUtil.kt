@@ -10,6 +10,13 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.util.concurrent.CompletableFuture
 
+/**
+ * Co-routine friendly wrapper over [ExternalSystemUtil.runTask]
+ *
+ * Simplifies error result handling
+ * Throws [java.util.concurrent.CancellationException] on external task cancellation
+ * Re-throws underlying exception in case of external task failure
+ */
 @ApiStatus.Experimental
 object TaskExecutionUtil {
 
@@ -48,7 +55,8 @@ object TaskExecutionUtil {
       callback = spec.callback,
       userData = spec.userData,
       activateToolWindowBeforeRun = spec.activateToolWindowBeforeRun,
-      activateToolWindowOnFailure = spec.activateToolWindowOnFailure
+      activateToolWindowOnFailure = spec.activateToolWindowOnFailure,
+      navigateToError = spec.navigateToError
     ))
 
     withContext(NonCancellable) {

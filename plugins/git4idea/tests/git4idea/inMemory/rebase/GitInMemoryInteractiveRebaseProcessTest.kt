@@ -1,6 +1,8 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package git4idea.inMemory.rebase
 
+import com.intellij.openapi.components.service
+import com.intellij.vcs.log.VcsFullCommitDetails
 import com.intellij.vcs.log.data.VcsLogData
 import git4idea.GitDisposable
 import git4idea.inMemory.MergeConflictException
@@ -8,14 +10,16 @@ import git4idea.inMemory.rebase.log.GitInMemoryOperationTest
 import git4idea.log.createLogDataIn
 import git4idea.log.refreshAndWait
 import git4idea.rebase.interactive.convertToModel
-import git4idea.rebase.interactive.getEntriesUsingLog
 import git4idea.rebase.log.GitCommitEditingOperationResult
+import git4idea.rebase.log.GitInteractiveRebaseEntriesProvider
+import git4idea.rebase.log.GitRebaseEntryGeneratedUsingLog
 import git4idea.test.assertCommitted
 import git4idea.test.assertLatestHistory
 import git4idea.test.commit
 import git4idea.test.getHash
 import git4idea.test.last
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.assertThrows
 
 internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTest() {
@@ -35,9 +39,10 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("c").create("content c").addCommit("Add c")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     val newMessageForSecond = "Reworded second commit"
@@ -45,7 +50,7 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     val newMessageForThird = "Reworded third commit"
     model.reword(2, newMessageForThird)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -65,14 +70,15 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("c").create("content c").addCommit("Add c")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     model.exchangeIndices(1, 2) // Move "Add b" down, making it after "Add c"
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
     repo.assertLatestHistory(
@@ -95,16 +101,17 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("d").create("content d").addCommit("Add d")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     model.drop(listOf(1)) // Drop "Add b"
     model.unite(listOf(2, 3)) // Fixup "Add d" into "Add c"
     model.reword(2, "Combined commit")
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -130,14 +137,15 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("conflict").write("B content").addCommit("Modify B")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     model.exchangeIndices(1, 2)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     assertThrows<MergeConflictException> {
       GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run()
@@ -164,9 +172,10 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     commit("Add service layer and config")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     // Original: initial -> config+docs -> remove+add -> service
@@ -174,7 +183,7 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     model.exchangeIndices(1, 3)
     model.exchangeIndices(1, 2)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -197,7 +206,7 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
       }
       assertCommitted(3) {
         added("src/main/java/service/UserService.java", "public class UserService {}")
-        added("src/main/java/model/User.java",  "public class User {}")
+        added("src/main/java/model/User.java", "public class User {}")
         added("config/application.yml", "server:\n  port: 8080")
       }
       assertCommitted(4) {
@@ -239,14 +248,15 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("config.txt").write(finalContent).addCommit("Modify line5")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     model.exchangeIndices(1, 2)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -280,9 +290,10 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("feature4.txt").create("feature 4 content").addCommit("Add feature 4")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     // Original: feature1 -> feature2 -> feature3 -> feature4
@@ -298,7 +309,7 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     model.reword(1, newMessageForFeature1)
     model.reword(0, newMessageForFeature3)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -324,13 +335,14 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     commit("Create file2.txt in dir")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
     model.drop(listOf(0))
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
     repo.assertLatestHistory(
@@ -358,16 +370,17 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     file("new/file.txt").write(finalContent).addCommit("Update file")
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     // Original: Add -> Modify -> Move -> Update
     // New: Add -> Move -> Modify -> Update
     model.exchangeIndices(1, 2)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -393,13 +406,14 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     val lastCommitHashBefore = repo.last()
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     // Don't modify the model - just pick all commits in the same order
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -419,15 +433,16 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
     val commitBHashBefore = secondCommit.id.asString()
 
     logData.refreshAndWait(repo, true)
+    refresh()
     updateChangeListManager()
 
-    val entries = getEntriesUsingLog(repo, firstCommit, logData)
+    val entries = getRebaseEntries(firstCommit)
     val model = convertToModel(entries)
 
     model.reword(2, "Modified: Add c")
     model.exchangeIndices(2, 3)
 
-    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
 
     GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
 
@@ -443,5 +458,139 @@ internal class GitInMemoryInteractiveRebaseProcessTest : GitInMemoryOperationTes
 
     assertEquals("Commit hashes should not change for commits that were not modified", listOf(commitAHashBefore, commitBHashBefore),
                  listOf(commitAHashAfter, commitBHashAfter))
+  }
+
+  fun `test drop commit that adds two files updates working tree and index`() {
+    file("a.txt").create("content a").add()
+    val firstCommit = commitDetails(commit("Add a"))
+
+    file("a.txt").write("local modified content")
+
+    file("b.txt").create("content b").add()
+    file("c.txt").create("content c").add()
+    commit("Add b, c")
+
+    file("a.txt").add()
+
+    logData.refreshAndWait(repo, true)
+    refresh()
+    updateChangeListManager()
+
+    val entries = getRebaseEntries(firstCommit)
+    val model = convertToModel(entries)
+
+    model.drop(listOf(1)) // drop "Add b, c" commit
+
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+
+    GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
+
+    repo.assertLatestHistory(
+      "Add a",
+      "initial"
+    )
+
+    refresh()
+    updateChangeListManager()
+
+    assertEquals("local modified content", file("a.txt").read())
+    file("b.txt").assertNotExists()
+    file("c.txt").assertNotExists()
+  }
+
+  fun `test drop commit cleanly applies local changes after rebase`() {
+    file("a.txt").create("content a").add()
+    file("b.txt").create("first line\n\nsecond line\n\nthird line").add()
+    val firstCommit = commitDetails(commit("Add a, b"))
+    file("b.txt").write("first line\n\nmodified second line\n\nthird line").addCommit("Modify b")
+
+    file("b.txt").append("\n\nadded fourth line")
+
+    logData.refreshAndWait(repo, true)
+    refresh()
+    updateChangeListManager()
+
+    val entries = getRebaseEntries(firstCommit)
+    val model = convertToModel(entries)
+
+    model.drop(listOf(1))
+
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, firstCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+    GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
+
+    file("b.txt").assertExists()
+    assertEquals("first line\n\nsecond line\n\nthird line\n\nadded fourth line", file("b.txt").read())
+  }
+
+  fun `test rebase initial commit`() {
+    val initialCommit = commitDetails(last())
+    file("a.txt").create("content a").addCommit("Add a")
+    file("b.txt").create("content b").addCommit("Add b")
+
+    logData.refreshAndWait(repo, true)
+    refresh()
+    updateChangeListManager()
+
+    val entries = getRebaseEntries(initialCommit)
+    val model = convertToModel(entries)
+
+    model.exchangeIndices(0, 1)
+
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(model, initialCommit.id, entries.last().commitDetails.id) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+
+    GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
+
+    repo.assertLatestHistory(
+      "Add b",
+      "initial",
+      "Add a"
+    )
+
+    with(repo) {
+      assertCommitted(1) { added("b.txt") }
+      assertCommitted(2) { added("initial.txt") }
+      assertCommitted(3) { added("a.txt") }
+    }
+  }
+
+  fun `test rebase skips empty commit when changes already applied`() {
+    file("a").create("X").add()
+    val firstCommit = commitDetails(commit("Add a X"))
+    file("a").write("Y").addCommit("Modify a Y")
+    file("a").write("X").addCommit("Modify a X")
+
+    logData.refreshAndWait(repo, true)
+    refresh()
+    updateChangeListManager()
+
+    val entries = getRebaseEntries(firstCommit)
+    val model = convertToModel(entries)
+
+    // Original: Add a X -> Modify a Y -> Modify a X
+    // After exchange(1, 2): Add a X -> Modify a X (becomes empty) -> Modify a Y
+    model.exchangeIndices(1, 2)
+
+    val validationResult = GitInMemoryRebaseData.createValidatedRebaseData(
+      model, firstCommit.id, entries.last().commitDetails.id
+    ) as GitInMemoryRebaseData.Companion.ValidationResult.Valid
+
+    GitInMemoryInteractiveRebaseProcess(objectRepo, validationResult.rebaseData).run() as GitCommitEditingOperationResult.Complete
+
+    // The empty "Modify a X" commit is skipped — only two commits remain on top of "initial"
+    repo.assertLatestHistory(
+      "Modify a Y",
+      "Add a X"
+    )
+
+    with(repo) {
+      assertCommitted(1) { modified("a", "X", "Y") }
+      assertCommitted(2) { added("a", "X") }
+    }
+  }
+
+  private fun getRebaseEntries(firstCommit: VcsFullCommitDetails): List<GitRebaseEntryGeneratedUsingLog> = runBlocking {
+    val entries = project.service<GitInteractiveRebaseEntriesProvider>().tryGetEntriesForDialog(repo, firstCommit, logData)
+    checkNotNull(entries)
+    entries
   }
 }

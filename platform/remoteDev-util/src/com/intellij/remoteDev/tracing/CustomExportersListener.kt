@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.remoteDev.tracing
 
 import com.intellij.ide.ApplicationInitializedListener
@@ -7,7 +7,7 @@ import com.intellij.platform.diagnostic.telemetry.MetricsExporterEntry
 import com.intellij.platform.diagnostic.telemetry.TelemetryManager
 import com.intellij.platform.diagnostic.telemetry.impl.OpenTelemetryExporterProvider
 
-private class CustomExportersListener : ApplicationInitializedListener {
+internal class CustomExportersListener : ApplicationInitializedListener {
   override suspend fun execute() {
     val ep = ExtensionPointName<OpenTelemetryExporterProvider>("com.intellij.openTelemetryExporterProvider")
     if (!ep.hasAnyExtensions()) {

@@ -4,6 +4,7 @@ package com.intellij.platform.ide.nonModalWelcomeScreen.rightTab
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.project.Project
@@ -28,10 +29,30 @@ interface WelcomeRightTabContentProvider {
   val title: Supplier<@Nls String>
   val secondaryTitle: Supplier<@Nls String>
 
-  fun shouldBeFocused(project: Project): Boolean = true
+  val isDisableOptionVisible: Boolean
+
+  val buttonsPerRow: Int
+    get() = 3
+
+  fun shouldBeFocused(project: Project): Boolean {
+    return project.service<WelcomeScreenPreventWelcomeTabFocusService>().isAllowedFocusOnWelcomeTab()
+  }
 
   @Composable
   fun getFeatureButtonModels(project: Project): List<FeatureButtonModel>
+
+  @Composable
+  fun getAdditionalInfoButtonModels(project: Project): List<InfoButtonModel> = emptyList()
+
+  /**
+   * Button model for additional buttons displayed at the bottom of the welcome screen.
+   * These will be displayed after the default theme and keymap buttons.
+   */
+  class InfoButtonModel(
+    val text: String,
+    val icon: IconKey,
+    val onClick: (Project, CoroutineScope) -> Unit,
+  )
 
   /**
    * Base feature button model. Use for frontend-only features.
@@ -50,6 +71,7 @@ interface WelcomeRightTabContentProvider {
    */
   class FeatureButtonModelWithBackend(
     val featureKey: String,
+    val isAlwaysAvailable: Boolean = false,
     text: String,
     icon: IconKey,
     tint: Color = Color.Unspecified,

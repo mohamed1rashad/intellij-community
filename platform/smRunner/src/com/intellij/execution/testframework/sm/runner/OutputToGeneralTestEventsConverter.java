@@ -1,17 +1,48 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.testframework.sm.runner;
 
 import com.intellij.execution.process.ColoredOutputTypeRegistry;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.execution.testframework.TestConsoleProperties;
 import com.intellij.execution.testframework.sm.ServiceMessageUtil;
-import com.intellij.execution.testframework.sm.runner.events.*;
+import com.intellij.execution.testframework.sm.runner.events.BaseStartedNodeEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestDurationStrategy;
+import com.intellij.execution.testframework.sm.runner.events.TestDurationStrategyKt;
+import com.intellij.execution.testframework.sm.runner.events.TestFailedEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestFinishedEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestIgnoredEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestOutputEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestSetNodePropertyEvent;
 import com.intellij.execution.testframework.sm.runner.events.TestSetNodePropertyEvent.NodePropertyKey;
+import com.intellij.execution.testframework.sm.runner.events.TestStartedEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestSuiteFinishedEvent;
+import com.intellij.execution.testframework.sm.runner.events.TestSuiteStartedEvent;
+import com.intellij.execution.testframework.sm.runner.events.TreeNodeEvent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import jetbrains.buildServer.messages.serviceMessages.*;
+import jetbrains.buildServer.messages.serviceMessages.BuildNumber;
+import jetbrains.buildServer.messages.serviceMessages.BuildStatisticValue;
+import jetbrains.buildServer.messages.serviceMessages.BuildStatus;
+import jetbrains.buildServer.messages.serviceMessages.DefaultServiceMessageVisitor;
+import jetbrains.buildServer.messages.serviceMessages.Message;
+import jetbrains.buildServer.messages.serviceMessages.ProgressFinish;
+import jetbrains.buildServer.messages.serviceMessages.ProgressMessage;
+import jetbrains.buildServer.messages.serviceMessages.ProgressStart;
+import jetbrains.buildServer.messages.serviceMessages.PublishArtifacts;
+import jetbrains.buildServer.messages.serviceMessages.ServiceMessage;
+import jetbrains.buildServer.messages.serviceMessages.ServiceMessageVisitor;
+import jetbrains.buildServer.messages.serviceMessages.ServiceMessagesParser;
+import jetbrains.buildServer.messages.serviceMessages.TestFailed;
+import jetbrains.buildServer.messages.serviceMessages.TestFinished;
+import jetbrains.buildServer.messages.serviceMessages.TestIgnored;
+import jetbrains.buildServer.messages.serviceMessages.TestStarted;
+import jetbrains.buildServer.messages.serviceMessages.TestStdErr;
+import jetbrains.buildServer.messages.serviceMessages.TestStdOut;
+import jetbrains.buildServer.messages.serviceMessages.TestSuiteFinished;
+import jetbrains.buildServer.messages.serviceMessages.TestSuiteStarted;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -98,7 +129,7 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
 
   protected void processConsistentText(@NotNull String text, final @NotNull Key<?> outputType) {
     try {
-      if (!processServiceMessages(text, outputType, myServiceMessageVisitor)) {
+      if (!processServiceMessages(text, outputType, myServiceMessageVisitor) || Registry.is("test.console.verbose", false)) {
         //fire current output
         fireOnUncapturedOutput(text, outputType);
       }
@@ -404,7 +435,8 @@ public class OutputToGeneralTestEventsConverter implements ProcessOutputConsumer
 
     @Override
     public void visitTestSuiteFinished(final @NotNull TestSuiteFinished suiteFinished) {
-      TestSuiteFinishedEvent finishedEvent = new TestSuiteFinishedEvent(suiteFinished);
+      String duration = suiteFinished.getAttributes().get(ATTR_KEY_TEST_DURATION);
+      TestSuiteFinishedEvent finishedEvent = new TestSuiteFinishedEvent(suiteFinished, duration);
       fireOnSuiteFinished(finishedEvent);
     }
 

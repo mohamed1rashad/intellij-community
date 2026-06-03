@@ -5,8 +5,9 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.Component;
+import java.awt.Graphics2D;
 import java.util.List;
 
 public abstract class AbstractPainter implements Painter {
@@ -65,5 +66,15 @@ public abstract class AbstractPainter implements Painter {
     executePaint(component, g);
   }
 
+  @Override
+  public final void paint(@NotNull Component component, @NotNull Component source, @NotNull Graphics2D g) {
+    isRepaintNeeded = false;
+    executePaint(component, source, g);
+  }
+
   public abstract void executePaint(@NotNull Component component, @NotNull Graphics2D g);
+
+  public void executePaint(@NotNull Component component, @NotNull Component source, @NotNull Graphics2D g) {
+    executePaint(component, g);
+  }
 }

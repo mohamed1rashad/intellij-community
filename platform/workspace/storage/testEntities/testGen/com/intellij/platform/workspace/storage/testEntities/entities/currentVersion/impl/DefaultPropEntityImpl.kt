@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -19,7 +20,7 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.DefaultPropEntity
-import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.ModifiableDefaultPropEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.DefaultPropEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
@@ -28,9 +29,7 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -39,13 +38,11 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
       readField("someString")
       return dataSource.someString
     }
-
   override val someList: List<Int>
     get() {
       readField("someList")
       return dataSource.someList
     }
-
   override val constInt: Int
     get() {
       readField("constInt")
@@ -63,8 +60,8 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
   }
 
 
-  internal class Builder(result: DefaultPropEntityData?) : ModifiableWorkspaceEntityBase<DefaultPropEntity, DefaultPropEntityData>(
-    result), ModifiableDefaultPropEntity {
+  internal class Builder(result: DefaultPropEntityData?) : ModifiableWorkspaceEntityBase<DefaultPropEntity, DefaultPropEntityData>(result),
+                                                           DefaultPropEntityBuilder {
     internal constructor() : this(DefaultPropEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -77,15 +74,13 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
           error("Entity DefaultPropEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -133,7 +128,6 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
         changedProperty.add("entitySource")
 
       }
-
     override var someString: String
       get() = getEntityData().someString
       set(value) {
@@ -141,7 +135,6 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
         getEntityData(true).someString = value
         changedProperty.add("someString")
       }
-
     private val someListUpdater: (value: List<Int>) -> Unit = { value ->
 
       changedProperty.add("someList")
@@ -163,7 +156,6 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
         getEntityData(true).someList = value
         someListUpdater.invoke(value)
       }
-
     override var constInt: Int
       get() = getEntityData().constInt
       set(value) {
@@ -174,6 +166,7 @@ internal class DefaultPropEntityImpl(private val dataSource: DefaultPropEntityDa
 
     override fun getEntityClass(): Class<DefaultPropEntity> = DefaultPropEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -186,14 +179,13 @@ internal class DefaultPropEntityData : WorkspaceEntityData<DefaultPropEntity>() 
   internal fun isSomeListInitialized(): Boolean = ::someList.isInitialized
 
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<DefaultPropEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<DefaultPropEntity> {
     val modifiable = DefaultPropEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): DefaultPropEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -205,8 +197,7 @@ internal class DefaultPropEntityData : WorkspaceEntityData<DefaultPropEntity>() 
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.DefaultPropEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.currentVersion.DefaultPropEntity") as EntityMetadata
   }
 
   override fun clone(): DefaultPropEntityData {
@@ -220,9 +211,8 @@ internal class DefaultPropEntityData : WorkspaceEntityData<DefaultPropEntity>() 
     return DefaultPropEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return DefaultPropEntity(someString, someList, constInt, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return DefaultPropEntity(someString, someList, constInt, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -233,9 +223,7 @@ internal class DefaultPropEntityData : WorkspaceEntityData<DefaultPropEntity>() 
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as DefaultPropEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.someString != other.someString) return false
     if (this.someList != other.someList) return false
@@ -246,9 +234,7 @@ internal class DefaultPropEntityData : WorkspaceEntityData<DefaultPropEntity>() 
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as DefaultPropEntityData
-
     if (this.someString != other.someString) return false
     if (this.someList != other.someList) return false
     if (this.constInt != other.constInt) return false

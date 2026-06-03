@@ -11,15 +11,23 @@ import org.gradle.util.GradleVersion;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.gradle.model.*;
+import org.jetbrains.plugins.gradle.model.ClasspathEntryModel;
+import org.jetbrains.plugins.gradle.model.ExternalDependency;
+import org.jetbrains.plugins.gradle.model.ExternalLibraryDependency;
+import org.jetbrains.plugins.gradle.model.ExternalMultiLibraryDependency;
+import org.jetbrains.plugins.gradle.model.ExternalProjectDependency;
+import org.jetbrains.plugins.gradle.model.FileCollectionDependency;
+import org.jetbrains.plugins.gradle.model.GradleBuildScriptClasspathModel;
 import org.jetbrains.plugins.gradle.tooling.AbstractModelBuilderService;
 import org.jetbrains.plugins.gradle.tooling.Message;
 import org.jetbrains.plugins.gradle.tooling.ModelBuilderContext;
 import org.jetbrains.plugins.gradle.tooling.internal.ClasspathEntryModelImpl;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * @author Vladislav.Soroka
@@ -39,14 +47,25 @@ public class GradleBuildScriptClasspathModelBuilder extends AbstractModelBuilder
     DefaultGradleBuildScriptClasspathModel buildScriptClasspath = new DefaultGradleBuildScriptClasspathModel();
     buildScriptClasspath.setGradleHomeDir(project.getGradle().getGradleHomeDir());
     buildScriptClasspath.setGradleVersion(GradleVersion.current().getVersion());
+    buildScriptClasspath.setClasspath(collectClasspathEntries(context, project));
+
+    GradleBuildScriptClasspathCache.getInstance(context)
+      .setBuildScriptClasspathModel(project, buildScriptClasspath);
+
+    return buildScriptClasspath;
+  }
+
+  private static @NotNull List<ClasspathEntryModel> collectClasspathEntries(
+    @NotNull ModelBuilderContext context,
+    @NotNull Project project
+  ) {
+    List<ClasspathEntryModel> classpathEntries = new ArrayList<>();
 
     Project parentProject = project.getParent();
     if (parentProject != null) {
       GradleBuildScriptClasspathModel parentBuildScriptClasspath = GradleBuildScriptClasspathCache.getInstance(context)
         .getBuildScriptClasspathModel(parentProject);
-      for (ClasspathEntryModel classpathEntryModel : parentBuildScriptClasspath.getClasspath()) {
-        buildScriptClasspath.add(classpathEntryModel);
-      }
+      classpathEntries.addAll(parentBuildScriptClasspath.getClasspath());
     }
 
     Configuration classpathConfiguration = project.getBuildscript().getConfigurations().findByName(CLASSPATH_CONFIGURATION_NAME);
@@ -59,7 +78,7 @@ public class GradleBuildScriptClasspathModelBuilder extends AbstractModelBuilder
           ExternalProjectDependency projectDependency = (ExternalProjectDependency)dependency;
           Collection<File> projectDependencyArtifacts = projectDependency.getProjectDependencyArtifacts();
           Collection<File> projectDependencyArtifactsSources = projectDependency.getProjectDependencyArtifactsSources();
-          buildScriptClasspath.add(new ClasspathEntryModelImpl(
+          classpathEntries.add(new ClasspathEntryModelImpl(
             projectDependencyArtifacts,
             projectDependencyArtifactsSources,
             Collections.emptySet()
@@ -67,7 +86,7 @@ public class GradleBuildScriptClasspathModelBuilder extends AbstractModelBuilder
         }
         else if (dependency instanceof ExternalLibraryDependency) {
           final ExternalLibraryDependency libraryDep = (ExternalLibraryDependency)dependency;
-          buildScriptClasspath.add(new ClasspathEntryModelImpl(
+          classpathEntries.add(new ClasspathEntryModelImpl(
             GradleCollections.createMaybeSingletonList(libraryDep.getFile()),
             GradleCollections.createMaybeSingletonList(libraryDep.getSource()),
             GradleCollections.createMaybeSingletonList(libraryDep.getJavadoc())
@@ -75,7 +94,7 @@ public class GradleBuildScriptClasspathModelBuilder extends AbstractModelBuilder
         }
         else if (dependency instanceof ExternalMultiLibraryDependency) {
           ExternalMultiLibraryDependency multiLibraryDependency = (ExternalMultiLibraryDependency)dependency;
-          buildScriptClasspath.add(new ClasspathEntryModelImpl(
+          classpathEntries.add(new ClasspathEntryModelImpl(
             multiLibraryDependency.getFiles(),
             multiLibraryDependency.getSources(),
             multiLibraryDependency.getJavadoc()
@@ -83,7 +102,7 @@ public class GradleBuildScriptClasspathModelBuilder extends AbstractModelBuilder
         }
         else if (dependency instanceof FileCollectionDependency) {
           FileCollectionDependency fileCollectionDependency = (FileCollectionDependency)dependency;
-          buildScriptClasspath.add(new ClasspathEntryModelImpl(
+          classpathEntries.add(new ClasspathEntryModelImpl(
             fileCollectionDependency.getFiles(),
             Collections.emptySet(),
             Collections.emptySet()
@@ -92,10 +111,7 @@ public class GradleBuildScriptClasspathModelBuilder extends AbstractModelBuilder
       }
     }
 
-    GradleBuildScriptClasspathCache.getInstance(context)
-      .setBuildScriptClasspathModel(project, buildScriptClasspath);
-
-    return buildScriptClasspath;
+    return classpathEntries;
   }
 
 

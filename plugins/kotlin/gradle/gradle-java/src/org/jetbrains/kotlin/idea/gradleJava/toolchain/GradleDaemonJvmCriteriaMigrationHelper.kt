@@ -18,8 +18,9 @@ import org.gradle.util.GradleVersion
 import org.jetbrains.jps.model.java.JdkVersionDetector
 import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.GradleBuildScriptSupport
 import org.jetbrains.kotlin.idea.gradleCodeInsightCommon.getTopLevelBuildScriptSettingsPsiFile
+import org.jetbrains.kotlin.tools.projectWizard.compatibility.GradleToPluginsCompatibilityStore
 import org.jetbrains.plugins.gradle.frameworkSupport.GradleDsl
-import org.jetbrains.plugins.gradle.frameworkSupport.settingsScript.GradleSettingScriptBuilder
+import org.jetbrains.plugins.gradle.frameworkSupport.GradleDsl.Companion.settingsScriptName
 import org.jetbrains.plugins.gradle.frameworkSupport.settingsScript.GradleSettingScriptBuilder.Companion.settingsScript
 import org.jetbrains.plugins.gradle.service.GradleInstallationManager
 import org.jetbrains.plugins.gradle.service.execution.GradleDaemonJvmCriteria
@@ -27,6 +28,7 @@ import org.jetbrains.plugins.gradle.service.execution.GradleDaemonJvmHelper
 import org.jetbrains.plugins.gradle.settings.GradleSettings
 import org.jetbrains.plugins.gradle.util.GradleBundle
 import org.jetbrains.plugins.gradle.util.GradleConstants.KOTLIN_DSL_SCRIPT_NAME
+import org.jetbrains.plugins.gradle.util.GradleUtil
 import org.jetbrains.plugins.gradle.util.toJvmCriteria
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
@@ -75,23 +77,26 @@ object GradleDaemonJvmCriteriaMigrationHelper {
 
     private suspend fun configureSettingsFileWithAppliedFoojayPlugin(project: Project, externalProjectPath: String): Boolean {
         return writeCommandAction(project, GradleBundle.message("gradle.notifications.daemon.toolchain.migration.apply.plugin.command.name")) {
+            val gradleVersion = GradleUtil.getGradleVersion(externalProjectPath, project) ?: return@writeCommandAction false
+
+            val gradleToPluginsCompatibilityStore = GradleToPluginsCompatibilityStore.getInstance()
+            val foojayVersion = gradleToPluginsCompatibilityStore.getFoojayVersion(gradleVersion) ?: return@writeCommandAction false
+
             val settingsFile = getTopLevelBuildScriptSettingsPsiFile(project, externalProjectPath) ?: return@writeCommandAction false
             val buildScriptSupport = GradleBuildScriptSupport.getManipulator(settingsFile)
-            buildScriptSupport.addFoojayPlugin(settingsFile)
+            buildScriptSupport.addFoojayPlugin(settingsFile, foojayVersion)
             return@writeCommandAction true
         }
     }
 
     private fun createSettingsFileWithAppliedFoojayPlugin(project: Project, externalProjectPath: String) {
-        val settings = GradleSettings.getInstance(project)
-        val projectSettings = settings.getLinkedProjectSettings(externalProjectPath) ?: return
-        val gradleVersion = GradleInstallationManager.guessGradleVersion(projectSettings) ?: return
+        val gradleVersion = GradleUtil.getGradleVersion(externalProjectPath, project) ?: return
         createSettingsFileWithAppliedFoojayPlugin(Path.of(externalProjectPath), gradleVersion)
     }
 
     private fun createSettingsFileWithAppliedFoojayPlugin(projectPath: Path, gradleVersion: GradleVersion) {
         val gradleDsl = GradleDsl.valueOf(projectPath.resolve(KOTLIN_DSL_SCRIPT_NAME).exists())
-        val settingsScriptName = GradleSettingScriptBuilder.getSettingsScriptName(gradleDsl)
+        val settingsScriptName = gradleDsl.settingsScriptName
         val settingsScriptPath = projectPath.resolve(settingsScriptName)
         val settingsScriptContent = settingsScript(gradleVersion, gradleDsl) {
             setProjectName(projectPath.name)

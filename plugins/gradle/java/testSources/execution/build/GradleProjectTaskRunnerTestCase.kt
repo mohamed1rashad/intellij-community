@@ -5,6 +5,7 @@ import com.intellij.execution.configurations.ConfigurationType
 import com.intellij.execution.configurations.ModuleBasedConfiguration
 import com.intellij.execution.configurations.RunConfiguration
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskNotificationListener
 import com.intellij.openapi.module.Module
@@ -59,25 +60,27 @@ abstract class GradleProjectTaskRunnerTestCase : GradleProjectTestCase() {
 
   fun assertGradleProjectTaskRunnerCanRun(
     configurationType: ConfigurationType,
-    shouldBuild: Boolean,
-    shouldRun: Boolean,
+    expectedShouldBuild: Boolean,
+    expectedShouldRun: Boolean,
   ) {
     val projectTaskRunner = ProjectTaskRunner.EP_NAME.findExtensionOrFail(GradleProjectTaskRunner::class.java)
 
-    val configuration = createTestConfiguration(configurationType, module)
+    val configuration = createTestConfiguration(configurationType, mainModule)
 
-    val buildTask = ModuleBuildTaskImpl(module)
+    val buildTask = ModuleBuildTaskImpl(mainModule)
     val buildTaskContext = ProjectTaskContext(Any(), configuration)
-    Assertions.assertEquals(shouldBuild, projectTaskRunner.canRun(project, buildTask, buildTaskContext)) {
-      when (shouldBuild) {
+    val actualShouldBuild = runReadAction { projectTaskRunner.canRun(project, buildTask, buildTaskContext) }
+    Assertions.assertEquals(expectedShouldBuild, actualShouldBuild) {
+      when (expectedShouldBuild) {
         true -> configurationType.displayName + " run configuration's module build task should run by Gradle."
         else -> configurationType.displayName + " run configuration's module build task shouldn't run by Gradle."
       }
     }
 
     val executeTask = ExecuteRunConfigurationTaskImpl(configuration)
-    Assertions.assertEquals(shouldRun, projectTaskRunner.canRun(project, executeTask, null)) {
-      when (shouldRun) {
+    val actualShouldRun = runReadAction { projectTaskRunner.canRun(project, executeTask, null) }
+    Assertions.assertEquals(expectedShouldRun, actualShouldRun) {
+      when (expectedShouldRun) {
         true -> configurationType.displayName + " run configuration task should run by Gradle."
         else -> configurationType.displayName + " run configuration task shouldn't run by Gradle."
       }
@@ -126,7 +129,8 @@ abstract class GradleProjectTaskRunnerTestCase : GradleProjectTestCase() {
     val buildEnvironment = DefaultBuildEnvironment(
       DefaultBuildIdentifier(Path.of(projectPath)),
       DefaultGradleEnvironment(null, gradleVersion),
-      DefaultJavaEnvironment(Path.of(gradleFixture.gradleJvmFixture.gradleJvmPath), emptyList())
+      DefaultJavaEnvironment(Path.of(gradleFixture.gradleJvmFixture.gradleJvmPath), emptyList()),
+      gradleVersion.version
     )
     val modelBuilder = mock<ModelBuilder<BuildEnvironment>>().apply {
       whenever(get()).thenReturn(buildEnvironment)
@@ -144,10 +148,13 @@ abstract class GradleProjectTaskRunnerTestCase : GradleProjectTestCase() {
     private val buildIdentifier: BuildIdentifier,
     private val gradle: GradleEnvironment,
     private val java: JavaEnvironment,
+    private val versionInfo: String,
   ) : BuildEnvironment {
     override fun getBuildIdentifier(): BuildIdentifier = buildIdentifier
     override fun getGradle(): GradleEnvironment = gradle
     override fun getJava(): JavaEnvironment = java
+
+    override fun getVersionInfo(): String = versionInfo
   }
 
   private class DefaultBuildIdentifier(

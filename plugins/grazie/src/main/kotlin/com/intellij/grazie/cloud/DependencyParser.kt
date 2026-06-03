@@ -9,15 +9,16 @@ import ai.grazie.rules.tree.Tree
 import ai.grazie.rules.tree.TreeSupport
 import ai.grazie.rules.uk.UkrainianTreeSupport
 import ai.grazie.text.exclusions.SentenceWithExclusions
+import com.github.benmanes.caffeine.cache.Caffeine
 import com.intellij.grazie.GrazieBundle
 import com.intellij.grazie.GrazieConfig
+import com.intellij.grazie.jlanguage.CACHE_SIZE
 import com.intellij.grazie.jlanguage.LazyCachingConcurrentDisambiguator
 import com.intellij.grazie.rule.CloudOrLocalBatchParser
 import com.intellij.grazie.rule.SentenceBatcher
 import com.intellij.grazie.rule.SentenceBatcher.AsyncBatchParser
 import com.intellij.grazie.text.TextChecker.ProofreadingContext
 import com.intellij.grazie.text.TextContent
-import com.intellij.grazie.utils.HighlightingUtil
 import com.intellij.grazie.utils.HunspellUtil
 import com.intellij.grazie.utils.getLanguageIfAvailable
 import com.intellij.openapi.Disposable
@@ -25,13 +26,13 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.Cancellation.ensureActive
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.platform.util.progress.RawProgressReporter
 import com.intellij.psi.PsiFile
 import com.intellij.util.application
 import com.intellij.util.containers.ContainerUtil
-import com.intellij.util.containers.ContainerUtil.createConcurrentSoftKeySoftValueMap
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -39,7 +40,10 @@ import org.languagetool.language.English
 
 object DependencyParser {
   private val LOG = Logger.getInstance(DependencyParser::class.java)
-  private val cachedTrees: MutableMap<String, Tree> = createConcurrentSoftKeySoftValueMap()
+  private val cachedTrees = Caffeine.newBuilder()
+    .softValues()
+    .maximumSize(CACHE_SIZE)
+    .build<SentenceWithLanguage, Tree>()
 
   @JvmStatic
   fun getParser(context: ProofreadingContext, minimal: Boolean): AsyncBatchParser<Tree>? {
@@ -49,8 +53,7 @@ object DependencyParser {
 
   @JvmStatic
   fun getParser(text: TextContent, minimal: Boolean): AsyncBatchParser<Tree>? {
-    val stripPrefixLength = HighlightingUtil.stripPrefix(text)
-    val language = getLanguageIfAvailable(text.toString().substring(stripPrefixLength)) ?: return null
+    val language = getLanguageIfAvailable(text) ?: return null
     return getParser(language, text.containingFile, minimal)
   }
 
@@ -76,10 +79,10 @@ object DependencyParser {
           val ltLanguage = SentenceBatcher.findInstalledLTLanguage(language)
           (ltLanguage?.disambiguator as? LazyCachingConcurrentDisambiguator)?.ensureInitializedAsync()
           @Suppress("UNCHECKED_CAST")
-          return sentences.associateWith {
-            cachedTrees.getOrPut(it.sentence) {
+          return sentences.associateWith { swe ->
+            cachedTrees.get(SentenceWithLanguage(swe.sentence, language)) { swl ->
               ensureActive()
-              Tree.createFlatTree(support, it.sentence)
+              Tree.createFlatTree(support, swl.sentence)
             }
           } as LinkedHashMap<SentenceWithExclusions, Tree?>
         }
@@ -163,7 +166,9 @@ object DependencyParser {
         LOG.debug("Parsing servers responded in ${System.currentTimeMillis() - start}ms for ${sentenceStrings.size} sentences")
 
         if (trees == null) emptyMap()
-        else sentences.zip(trees).associate { it.first to support.buildTree(it.second, labels[it.first.sentence]) }
+        else sentences.zip(trees).associate {
+          it.first to support.buildTree(it.second, labels[it.first.sentence]) { ProgressManager.checkCanceled() }
+        }
       }
     }
 
@@ -174,3 +179,5 @@ object DependencyParser {
     }
   }
 }
+
+private data class SentenceWithLanguage(val sentence: String, val language: Language)

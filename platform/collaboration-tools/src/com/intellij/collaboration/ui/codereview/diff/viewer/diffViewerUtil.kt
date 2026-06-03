@@ -5,7 +5,17 @@ import com.intellij.collaboration.async.cancelAndJoinSilently
 import com.intellij.collaboration.async.launchNow
 import com.intellij.collaboration.async.withInitial
 import com.intellij.collaboration.ui.codereview.diff.DiffLineLocation
-import com.intellij.collaboration.ui.codereview.editor.*
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewCommentableEditorModel
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewEditorGutterControlsRenderer
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewEditorModel
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewInlayModel
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewNavigableEditorViewModel
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewRendererFactory
+import com.intellij.collaboration.ui.codereview.editor.EditorMapped
+import com.intellij.collaboration.ui.codereview.editor.RendererFactory
+import com.intellij.collaboration.ui.codereview.editor.ReviewInEditorUtil
+import com.intellij.collaboration.ui.codereview.editor.controlInlaysIn
+import com.intellij.collaboration.ui.codereview.editor.renderInlays
 import com.intellij.collaboration.util.HashingUtil
 import com.intellij.diff.tools.fragmented.UnifiedDiffViewer
 import com.intellij.diff.tools.simple.SimpleOnesideDiffViewer
@@ -17,12 +27,23 @@ import com.intellij.diff.util.Side
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ex.EditorEx
-import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.component1
 import com.intellij.openapi.util.component2
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import javax.swing.JComponent
 
@@ -123,14 +144,18 @@ private fun <VM : DiffMapped> TwosideTextDiffViewer.controlInlaysIn(
  *
  * @param M editor inlays and controls model
  * @param I inlay model
- * @param modelKey will be used to store model in editor user data keys
  */
 @ApiStatus.Experimental
 suspend fun <M, I> DiffViewerBase.showCodeReview(
   modelFactory: CoroutineScope.(locationToLine: (DiffLineLocation) -> Int?, lineToLocation: (Int) -> DiffLineLocation?) -> M,
   rendererFactory: RendererFactory<I, JComponent>,
 ): Nothing where I : CodeReviewInlayModel, M : CodeReviewEditorModel<I> {
-  showCodeReview(modelFactory, rendererFactory)
+  showCodeReview { editor, _, locationToLine, lineToLocation, _ ->
+    coroutineScope {
+      val model = modelFactory(locationToLine, lineToLocation)
+      editor.showCodeReview(model, rendererFactory)
+    }
+  }
 }
 
 typealias EditorModelFactory<M> = CoroutineScope.(
@@ -141,11 +166,35 @@ typealias EditorModelFactory<M> = CoroutineScope.(
   lineToUnified: (Int) -> Pair<Int, Int>,
 ) -> M
 
+/**
+ * Create editor models for diff editors via [modelFactory] and show inlays and gutter controls
+ * Inlays are created via [rendererFactory]
+ *
+ * @param M editor inlays and controls model
+ * @param I inlay model
+ */
 @ApiStatus.Experimental
 suspend fun <M, I> DiffViewerBase.showCodeReview(
   modelFactory: EditorModelFactory<M>,
   rendererFactory: RendererFactory<I, JComponent>,
 ): Nothing where I : CodeReviewInlayModel, M : CodeReviewEditorModel<I> {
+  showCodeReview { editor, side, locationToLine, lineToLocation, lineToUnified ->
+    coroutineScope {
+      val model = modelFactory(editor, side, locationToLine, lineToLocation, lineToUnified)
+      editor.showCodeReview(model, rendererFactory)
+    }
+  }
+}
+
+typealias EditorCodeReviewRenderer = suspend (
+  editor: EditorEx,
+  side: Side?,
+  locationToLine: (DiffLineLocation) -> Int?,
+  lineToLocation: (Int) -> DiffLineLocation?,
+  lineToUnified: (Int) -> Pair<Int, Int>,
+) -> Nothing
+
+suspend fun DiffViewerBase.showCodeReview(editorRenderer: EditorCodeReviewRenderer): Nothing {
   val viewer = this
   withContext(Dispatchers.EDT + CoroutineName("Code review diff UI")) {
     supervisorScope {
@@ -157,55 +206,69 @@ suspend fun <M, I> DiffViewerBase.showCodeReview(
         when (viewer) {
           is SimpleOnesideDiffViewer -> {
             prevJob = launchNow {
-              val model = modelFactory(
+              editorRenderer(
                 viewer.editor,
                 viewer.side,
                 { loc -> loc.takeIf { it.first == viewer.side }?.second },
-                { lineIdx -> DiffLineLocation(viewer.side, lineIdx) },
+                { lineIdx ->
+                  DiffLineLocation(viewer.side, lineIdx).takeUnless {
+                    ReviewInEditorUtil.isLastBlankLine(editor.document,
+                                                       lineIdx)
+                  }
+                },
                 { line -> if (viewer.side == Side.LEFT) line to -1 else -1 to line }
               )
-              viewer.editor.showCodeReview(model, rendererFactory)
             }
           }
           is UnifiedDiffViewer -> {
             prevJob = launchNow {
-              val model = modelFactory(
+              editorRenderer(
                 viewer.editor,
                 null,
                 { (side, lineIdx) -> viewer.transferLineToOnesideStrict(side, lineIdx).takeIf { it >= 0 } },
                 { lineIdx ->
-                  val (indices, side) = viewer.transferLineFromOneside(lineIdx)
-                  side.select(indices).takeIf { it >= 0 }?.let { side to it }
+                  val (indices, side) = viewer.transferLineFromOnesideStrict(lineIdx) ?: return@editorRenderer null
+                  val sideLineIdx = side.select(indices).takeIf { it >= 0 } ?: return@editorRenderer null
+                  // Check line against the document of original side
+                  if (ReviewInEditorUtil.isLastBlankLine(viewer.getDocument(side), sideLineIdx)) return@editorRenderer null
+                  side to sideLineIdx
                 },
                 { line ->
                   val (leftLine, rightLine) = viewer.transferLineFromOneside(line).first
                   leftLine to rightLine
                 }
               )
-              viewer.editor.showCodeReview(model, rendererFactory)
             }
           }
           is TwosideTextDiffViewer -> {
             prevJob = launchNow {
               launchNow {
-                val model = modelFactory(
+                editorRenderer(
                   viewer.editor1,
                   Side.LEFT,
                   { (side, lineIdx) -> lineIdx.takeIf { side == Side.LEFT } },
-                  { lineIdx -> DiffLineLocation(Side.LEFT, lineIdx) },
+                  { lineIdx ->
+                    DiffLineLocation(Side.LEFT, lineIdx).takeUnless {
+                      ReviewInEditorUtil.isLastBlankLine(editor1.document,
+                                                         lineIdx)
+                    }
+                  },
                   { line -> line to viewer.transferPosition(Side.RIGHT, LineCol(line, 0)).line }
                 )
-                viewer.editor1.showCodeReview(model, rendererFactory)
               }
               launchNow {
-                val model = modelFactory(
+                editorRenderer(
                   viewer.editor2,
                   Side.RIGHT,
                   { (side, lineIdx) -> lineIdx.takeIf { side == Side.RIGHT } },
-                  { lineIdx -> DiffLineLocation(Side.RIGHT, lineIdx) },
+                  { lineIdx ->
+                    DiffLineLocation(Side.RIGHT, lineIdx).takeUnless {
+                      ReviewInEditorUtil.isLastBlankLine(editor2.document,
+                                                         lineIdx)
+                    }
+                  },
                   { line -> viewer.transferPosition(Side.LEFT, LineCol(line, 0)).line to line }
                 )
-                viewer.editor2.showCodeReview(model, rendererFactory)
               }
             }
           }
@@ -216,7 +279,7 @@ suspend fun <M, I> DiffViewerBase.showCodeReview(
   }
 }
 
-private suspend fun <I, M> EditorEx.showCodeReview(model: M, rendererFactory: RendererFactory<I, JComponent>): Nothing
+suspend fun <I, M> EditorEx.showCodeReview(model: M, rendererFactory: RendererFactory<I, JComponent>): Nothing
   where I : CodeReviewInlayModel, M : CodeReviewEditorModel<I> {
   val editor = this
   coroutineScope {

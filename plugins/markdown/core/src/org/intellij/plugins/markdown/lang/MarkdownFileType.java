@@ -1,12 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.intellij.plugins.markdown.lang;
 
+import com.intellij.icons.AllIcons;
 import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.util.NlsSafe;
-import org.intellij.plugins.markdown.MarkdownIcons;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.Icon;
 
 public final class MarkdownFileType extends LanguageFileType {
   public static final MarkdownFileType INSTANCE = new MarkdownFileType();
@@ -34,6 +34,6 @@ public final class MarkdownFileType extends LanguageFileType {
 
   @Override
   public Icon getIcon() {
-    return MarkdownIcons.MarkdownPlugin;
+    return AllIcons.FileTypes.Markdown;
   }
 }

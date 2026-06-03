@@ -12,7 +12,9 @@ import com.intellij.psi.search.GlobalSearchScope;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JPanel;
 import java.awt.event.ActionListener;
 
 /**
@@ -28,7 +30,7 @@ final class FileFilterPanel {
     myUseFileMask.setSelected(StringUtil.isNotEmpty(options.FILE_MASK));
     myFileMask.setEnabled(StringUtil.isNotEmpty(options.FILE_MASK));
     myFileMask.setSelectedItem(options.FILE_MASK);
-    ActionListener listener = __ -> options.FILE_MASK = myUseFileMask.isSelected() ? (String)myFileMask.getSelectedItem() : null;
+    ActionListener listener = _ -> options.FILE_MASK = myUseFileMask.isSelected() ? (String)myFileMask.getSelectedItem() : null;
     myUseFileMask.addActionListener(listener);
     myFileMask.addActionListener(listener);
   }

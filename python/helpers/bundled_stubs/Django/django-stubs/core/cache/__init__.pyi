@@ -1,6 +1,7 @@
 from typing import Any
 
 from django.utils.connection import BaseConnectionHandler
+from typing_extensions import override
 
 from .backends.base import BaseCache as BaseCache
 from .backends.base import CacheKeyWarning as CacheKeyWarning
@@ -12,7 +13,9 @@ DEFAULT_CACHE_ALIAS: str
 class CacheHandler(BaseConnectionHandler[BaseCache]):
     settings_name: str
     exception_class: type[Exception]
+    @override
     def create_connection(self, alias: str) -> BaseCache: ...
+    @override
     def all(self, initialized_only: bool = False) -> list[BaseCache]: ...
 
 def close_caches(**kwargs: Any) -> None: ...
@@ -22,11 +25,11 @@ caches: CacheHandler
 cache: BaseCache
 
 __all__ = [
+    "DEFAULT_CACHE_ALIAS",
+    "BaseCache",
+    "CacheKeyWarning",
+    "InvalidCacheBackendError",
+    "InvalidCacheKey",
     "cache",
     "caches",
-    "DEFAULT_CACHE_ALIAS",
-    "InvalidCacheBackendError",
-    "CacheKeyWarning",
-    "BaseCache",
-    "InvalidCacheKey",
 ]

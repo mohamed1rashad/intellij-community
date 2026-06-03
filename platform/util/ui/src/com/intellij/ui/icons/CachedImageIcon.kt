@@ -24,12 +24,17 @@ import kotlinx.serialization.protobuf.ProtoBuf
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
-import java.awt.*
+import java.awt.Component
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.GraphicsConfiguration
+import java.awt.Image
+import java.awt.Shape
 import java.awt.image.BufferedImage
 import java.awt.image.ImageFilter
 import java.net.URL
 import java.nio.file.Path
-import java.util.*
+import java.util.Objects
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Supplier
@@ -73,9 +78,10 @@ open class CachedImageIcon private constructor(
   // isDark is not defined in most cases, and we use a global state at the call moment.
   private val attributes: IconAttributes = IconAttributes(),
   private val iconCache: ScaledIconCache = ScaledIconCache(),
-) : CopyableIcon, ScalableIcon, DarkIconProvider, IconPathProvider, IconWithToolTip {
+) : CopyableIcon, ScalableIcon, DarkIconProvider, IconPathProvider, IconWithToolTip, IconWithShape {
   private var pathTransformModCount = -1
   private var loaderModCount = -1
+  private var shape: Shape? = null
 
   override val originalPath: String?
     get() = originalLoader.path
@@ -217,6 +223,20 @@ open class CachedImageIcon private constructor(
     }
   }
 
+  override fun getShape(): Shape? {
+    var result = this.shape
+    if (result != null) return result
+    val svg = loader.loadSvgDocument(getLoadIconParameters(getEffectiveAttributes()), getEffectiveScaleContext())
+    if (svg == null) return null
+    result = computeShape(svg)
+    this.shape = result
+    return result
+  }
+
+  private fun getEffectiveScaleContext(): ScaleContext {
+    return scaleContext ?: ScaleContext.create(ScaleType.SYS_SCALE.of(JBUIScale.sysScale()))
+  }
+
   override fun toString(): String {
     if (loader is EmptyImageDataLoader) {
       return originalPath ?: "unknown path"
@@ -287,6 +307,7 @@ open class CachedImageIcon private constructor(
     )
     result.pathTransformModCount = pathTransformModCount
     result.loaderModCount = loaderModCount
+    result.shape = shape
     return result
   }
 
@@ -360,16 +381,21 @@ open class CachedImageIcon private constructor(
     val loader = loader
     if (loader is EmptyImageDataLoader) return null
 
-    val image = loader.loadImage(parameters = LoadIconParameters(filters = getFilters(),
-                                                                 isDark = attributes.isDark,
-                                                                 colorPatcher = colorPatcher.colorPatcher,
-                                                                 isStroke = attributes.useStroke),
+    val image = loader.loadImage(parameters = getLoadIconParameters(attributes),
                                  scaleContext = scaleContext)
     if (start != -1L) {
       IconLoadMeasurer.findIconLoad.end(start)
     }
     return image
   }
+
+  private fun getLoadIconParameters(attributes: IconAttributes): LoadIconParameters =
+    LoadIconParameters(
+      filters = getFilters(),
+      isDark = attributes.isDark,
+      colorPatcher = colorPatcher.colorPatcher,
+      isStroke = attributes.useStroke
+    )
 
   internal fun detachClassLoader(classLoader: ClassLoader): Boolean {
     if (loader is EmptyImageDataLoader) {

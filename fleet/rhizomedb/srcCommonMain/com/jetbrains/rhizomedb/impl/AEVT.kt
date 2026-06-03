@@ -1,9 +1,20 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.rhizomedb.impl
 
-import com.jetbrains.rhizomedb.*
-import fleet.util.radixTrie.*
-import fleet.util.reducible.*
+import com.jetbrains.rhizomedb.Attribute
+import com.jetbrains.rhizomedb.Cardinality
+import com.jetbrains.rhizomedb.Datom
+import com.jetbrains.rhizomedb.EID
+import com.jetbrains.rhizomedb.Entity
+import com.jetbrains.rhizomedb.ReduceDecision
+import com.jetbrains.rhizomedb.TX
+import com.jetbrains.rhizomedb.Versioned
+import com.jetbrains.rhizomedb.VersionedEID
+import fleet.radixTrie.RadixTrie
+import fleet.radixTrie.RadixTrieLong
+import fleet.radixTrie.get
+import fleet.radixTrie.put
+import fleet.radixTrie.update
 import kotlin.jvm.JvmInline
 
 /**
@@ -39,7 +50,7 @@ internal value class AEVT(private val trie: IntMapWithEditor<RadixTrie<Any>>) {
         trie.get(attribute)?.get(eid)?.let { values ->
           when (attribute.schema.isRef) {
             true ->
-              (values as RadixTrieLong).reduce { v, t ->
+              (values as RadixTrieLong).reduceRhizome { v, t ->
                 sink(Datom(eid, attribute, v, t, true))
                 ReduceDecision.Continue
               }
@@ -81,12 +92,12 @@ internal value class AEVT(private val trie: IntMapWithEditor<RadixTrie<Any>>) {
         when (attr.schema.cardinality) {
           Cardinality.One ->
             when (attr.schema.isRef) {
-              true -> evt.reduce { e, vt ->
+              true -> evt.reduceRhizome { e, vt ->
                 vt as VersionedEID
                 add(Datom(e, attr, vt.eid, vt.tx))
                 ReduceDecision.Continue
               }
-              false -> evt.reduce { e, vt ->
+              false -> evt.reduceRhizome { e, vt ->
                 vt as Versioned<Any>
                 add(Datom(e, attr, vt.x, vt.tx))
                 ReduceDecision.Continue
@@ -94,13 +105,13 @@ internal value class AEVT(private val trie: IntMapWithEditor<RadixTrie<Any>>) {
             }
           Cardinality.Many ->
             when (attr.schema.isRef) {
-              true -> evt.reduce { e, vt ->
-                (vt as RadixTrieLong).reduce { v, t ->
+              true -> evt.reduceRhizome { e, vt ->
+                (vt as RadixTrieLong).reduceRhizome { v, t ->
                   add(Datom(e, attr, v, t))
                   ReduceDecision.Continue
                 }
               }
-              false -> evt.reduce { e, vt ->
+              false -> evt.reduceRhizome { e, vt ->
                 (vt as MapWithEditor<Any, TX>).map.forEach { (v, t) ->
                   add(Datom(e, attr, v, t))
                 }
@@ -146,12 +157,12 @@ internal value class AEVT(private val trie: IntMapWithEditor<RadixTrie<Any>>) {
       when (attribute.schema.cardinality) {
         Cardinality.One ->
           when (attribute.schema.isRef) {
-            true -> evt.reduce { e, vt ->
+            true -> evt.reduceRhizome { e, vt ->
               vt as VersionedEID
               sink(Datom(e, attribute, vt.eid, vt.tx))
               ReduceDecision.Continue
             }
-            false -> evt.reduce { e, vt ->
+            false -> evt.reduceRhizome { e, vt ->
               vt as Versioned<Any>
               sink(Datom(e, attribute, vt.x, vt.tx))
               ReduceDecision.Continue
@@ -159,14 +170,14 @@ internal value class AEVT(private val trie: IntMapWithEditor<RadixTrie<Any>>) {
           }
         Cardinality.Many ->
           when (attribute.schema.isRef) {
-            true -> evt.reduce { e, vt ->
+            true -> evt.reduceRhizome { e, vt ->
               vt as RadixTrieLong
-              vt.reduce { v, t ->
+              vt.reduceRhizome { v, t ->
                 sink(Datom(e, attribute, v, t))
                 ReduceDecision.Continue
               }
             }
-            false -> evt.reduce { e, vt ->
+            false -> evt.reduceRhizome { e, vt ->
               vt as MapWithEditor<Any, TX>
               for ((v, t) in vt.map) {
                 sink(Datom(e, attribute, v, t))

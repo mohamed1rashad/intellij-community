@@ -1,0 +1,23 @@
+<idea-plugin package="org.jetbrains.kotlin.idea.lombok">
+  <dependencies>
+    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+    <module name="intellij.java.impl"/>
+    <module name="intellij.java.psi"/>
+    <module name="intellij.kotlin.codeInsight.shared"/>
+    <!-- endregion -->
+  </dependencies>
+
+  <resource-bundle>messages.LombokKotlinBundle</resource-bundle>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <localInspection language="kotlin" implementationClass="org.jetbrains.kotlin.idea.lombok.inspections.LombokKotlinCompilerPluginInspection"
+                     shortName="LombokKotlinCompilerPlugin"
+                     key="lombok.kotlin.no.kotlin.lombok.compiler.plugin.inspection.problem.display.name"
+                     groupBundle="messages.KotlinBundle" groupKey="group.names.kotlin" groupPath="Lombok"
+                     level="WARNING" enabledByDefault="true"/>
+  </extensions>
+
+  <extensions defaultExtensionNs="org.jetbrains.kotlin">
+    <projectPostConfigurator implementation="org.jetbrains.kotlin.idea.lombok.configuration.LombokCompilerPluginProjectPostConfigurator"/>
+  </extensions>
+</idea-plugin>

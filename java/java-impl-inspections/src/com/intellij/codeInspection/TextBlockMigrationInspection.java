@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInspection;
 
 import com.intellij.codeInspection.options.OptPane;
@@ -8,10 +8,18 @@ import com.intellij.modcommand.PsiUpdateModCommandQuickFix;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.pom.java.JavaFeature;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
-import com.intellij.psi.*;
+import com.intellij.psi.ElementManipulators;
+import com.intellij.psi.JavaElementVisitor;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLiteralExpression;
+import com.intellij.psi.PsiPolyadicExpression;
 import com.intellij.psi.util.PsiLiteralUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.containers.ContainerUtil;
@@ -115,35 +123,21 @@ public final class TextBlockMigrationInspection extends AbstractBaseJavaLocalIns
       if (expression == null) return;
       Document document = expression.getContainingFile().getViewProvider().getDocument();
       if (document == null) return;
-      PsiLiteralExpression literalExpression = tryCast(expression, PsiLiteralExpression.class);
-      if (literalExpression != null) {
-        replaceWithTextBlock(new PsiExpression[]{literalExpression}, literalExpression);
-        return;
+      if (expression instanceof PsiLiteralExpression literalExpression) {
+        replaceWithTextBlock(literalExpression, new PsiExpression[]{literalExpression});
       }
-      PsiPolyadicExpression polyadicExpression = tryCast(expression, PsiPolyadicExpression.class);
-      if (polyadicExpression == null || !ExpressionUtils.hasStringType(polyadicExpression)) return;
-      replaceWithTextBlock(polyadicExpression.getOperands(), polyadicExpression);
+      else if (expression instanceof PsiPolyadicExpression polyadicExpression && ExpressionUtils.hasStringType(polyadicExpression)) {
+        replaceWithTextBlock(polyadicExpression, polyadicExpression.getOperands());
+      }
     }
 
-    private static void replaceWithTextBlock(PsiExpression @NotNull [] operands, @NotNull PsiExpression toReplace) {
+    private static void replaceWithTextBlock(@NotNull PsiExpression toReplace, PsiExpression @NotNull [] operands) {
       String[] lines = getContentLines(operands);
       if (lines == null) return;
-      CommentTracker tracker = new CommentTracker();
-      tracker.replaceAndRestoreComments(toReplace, getTextBlock(lines));
-    }
-
-    private static @NotNull String getTextBlock(String @NotNull [] lines) {
-      lines = PsiLiteralUtil.escapeTextBlockCharacters(StringUtil.join(lines), true, true, false).split("(?<=\n)");
-      int indent = PsiLiteralUtil.getTextBlockIndent(lines, true, true);
-      if (indent != 0 && lines.length > 0 && !lines[lines.length - 1].endsWith("\n")) {
-        // append \ + newline at the end of the last line, so we can use closing """ to indent
-        lines[lines.length - 1] += "\\\n";
-      }
-      String content = StringUtil.join(lines);
-      if (content.endsWith(" ")) {
-        content = content.substring(0, content.length() - 1) + "\\s";
-      }
-      return "\"\"\"\n" + content + "\"\"\"";
+      String content = String.join("", lines);
+      PsiExpression emptyTextBlock = JavaPsiFacade.getElementFactory(toReplace.getProject()).createExpressionFromText("\"\"\"\n\"\"\"", null);
+      PsiElement inDocument = new CommentTracker().replaceAndRestoreComments(toReplace, emptyTextBlock);
+      ElementManipulators.getManipulator(inDocument).handleContentChange(inDocument, content);
     }
 
     private static String @Nullable [] getContentLines(PsiExpression @NotNull [] operands) {

@@ -1,12 +1,14 @@
 <idea-plugin visibility="public">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <plugin id="com.intellij.modules.lang"/>
+    <module name="intellij.yaml"/>
     <module name="intellij.json.backend"/>
     <module name="intellij.platform.backend"/>
     <module name="intellij.platform.searchEverywhere.backend"/>
-    <module name="intellij.yaml"/>
+    <module name="intellij.platform.structureView.impl"/>
     <module name="intellij.spellchecker"/>
   </dependencies>
+  <!-- endregion -->
   
   <extensions defaultExtensionNs="com.intellij">
 
@@ -94,6 +96,7 @@
     <lang.floatingToolbar language="yaml" minimal="true"/>
 
     <pluginSuggestionProvider implementation="org.jetbrains.yaml.swagger.OpenApiSuggestionProvider"/>
+    <pluginSuggestionProvider implementation="org.jetbrains.yaml.openrewrite.OpenRewriteSuggestionProvider"/>
     <pluginSuggestionProvider implementation="org.jetbrains.yaml.helm.GoTemplatePluginSuggestionProvider"/>
     <intentionAction>
       <language>yaml</language>
@@ -133,7 +136,7 @@
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij.spellchecker">
-    <support language="yaml" implementationClass="org.jetbrains.yaml.YAMLSpellcheckerStrategy"/>
+    <support language="yaml" id="yaml" implementationClass="org.jetbrains.yaml.YAMLSpellcheckerStrategy"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij">

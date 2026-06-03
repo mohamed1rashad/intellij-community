@@ -36,7 +36,13 @@ import org.jetbrains.plugins.gradle.util.GradleConstants;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * @author Vladislav.Soroka
@@ -69,7 +75,11 @@ public final class BuildClasspathModuleGradleDataService extends AbstractProject
     final File gradleHomeDir = toImport.iterator().next().getData().getGradleHomeDir();
     final GradleLocalSettings gradleLocalSettings = GradleLocalSettings.getInstance(project);
     if (gradleHomeDir != null) {
-      gradleLocalSettings.setGradleHome(linkedExternalProjectPath, gradleHomeDir.getPath());
+      gradleLocalSettings.setGradleHome(
+        linkedExternalProjectPath,
+        gradleHomeDir.getPath(),
+        GradleInstallationManager.getGradleVersion(gradleHomeDir.toPath())
+      );
     }
     final GradleProjectSettings settings = GradleSettings.getInstance(project).getLinkedProjectSettings(linkedExternalProjectPath);
 

@@ -19,14 +19,19 @@ import com.intellij.ide.JavaUiBundle;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.LibrariesContainer;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.ui.CollectionComboBoxModel;
-import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.util.ui.FormBuilder;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.util.*;
+import javax.swing.JComboBox;
+import javax.swing.JTextField;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author Dmitry Avdeev
@@ -53,7 +58,7 @@ public class LibraryNameAndLevelPanel {
       levels.put(LibrariesContainer.LibraryLevel.GLOBAL, JavaUiBundle.message("combobox.item.global.library"));
       levels.put(LibrariesContainer.LibraryLevel.PROJECT, JavaUiBundle.message("combobox.item.project.library"));
       levels.put(LibrariesContainer.LibraryLevel.MODULE, JavaUiBundle.message("combobox.item.module.library"));
-      myLevelComboBox.setRenderer(SimpleListCellRenderer.create("", levels::get));
+      myLevelComboBox.setRenderer(BuilderKt.textListCellRenderer("", levels::get));
       myLevelComboBox.setModel(new CollectionComboBoxModel<>(availableLevels, level));
     }
   }

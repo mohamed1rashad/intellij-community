@@ -1,7 +1,13 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.k2.codeinsight.inspections.dfa
 
-import com.intellij.codeInspection.dataFlow.*
+import com.intellij.codeInspection.dataFlow.ContractReturnValue
+import com.intellij.codeInspection.dataFlow.CustomMethodHandlers
+import com.intellij.codeInspection.dataFlow.DfaCallArguments
+import com.intellij.codeInspection.dataFlow.DfaCallState
+import com.intellij.codeInspection.dataFlow.Mutability
+import com.intellij.codeInspection.dataFlow.MutationSignature
+import com.intellij.codeInspection.dataFlow.TypeConstraints
 import com.intellij.codeInspection.dataFlow.interpreter.DataFlowInterpreter
 import com.intellij.codeInspection.dataFlow.java.JavaDfaHelpers
 import com.intellij.codeInspection.dataFlow.jvm.JvmPsiRangeSetUtil
@@ -15,18 +21,44 @@ import com.intellij.codeInspection.dataFlow.types.DfJvmIntegralType
 import com.intellij.codeInspection.dataFlow.types.DfReferenceType
 import com.intellij.codeInspection.dataFlow.types.DfType
 import com.intellij.codeInspection.dataFlow.types.DfTypes
-import com.intellij.codeInspection.dataFlow.value.*
+import com.intellij.codeInspection.dataFlow.value.DfaCondition
+import com.intellij.codeInspection.dataFlow.value.DfaControlTransferValue
+import com.intellij.codeInspection.dataFlow.value.DfaTypeValue
+import com.intellij.codeInspection.dataFlow.value.DfaValue
+import com.intellij.codeInspection.dataFlow.value.DfaValueFactory
+import com.intellij.codeInspection.dataFlow.value.RelationType
 import com.intellij.psi.PsiMethod
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.containingDeclaration
 import org.jetbrains.kotlin.analysis.api.components.resolveToCall
-import org.jetbrains.kotlin.analysis.api.contracts.description.*
-import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractReturnsContractEffectDeclaration.*
-import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.*
-import org.jetbrains.kotlin.analysis.api.resolution.*
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractConditionalContractEffectDeclaration
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractConstantValue
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractEffectDeclaration
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractExplicitParameterValue
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractOwnerParameterValue
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractParameterValue
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractReturnsContractEffectDeclaration.KaContractReturnsNotNullEffectDeclaration
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractReturnsContractEffectDeclaration.KaContractReturnsSpecificValueEffectDeclaration
+import org.jetbrains.kotlin.analysis.api.contracts.description.KaContractReturnsContractEffectDeclaration.KaContractReturnsSuccessfullyEffectDeclaration
+import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.KaContractBooleanConstantExpression
+import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.KaContractBooleanExpression
+import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.KaContractBooleanValueParameterExpression
+import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.KaContractIsInstancePredicateExpression
+import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.KaContractIsNullPredicateExpression
+import org.jetbrains.kotlin.analysis.api.contracts.description.booleans.KaContractLogicalNotExpression
+import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
+import org.jetbrains.kotlin.analysis.api.resolution.KaSuccessCallInfo
+import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
+import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaContextParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaReceiverParameterSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
 import org.jetbrains.kotlin.asJava.toLightMethods
 import org.jetbrains.kotlin.idea.inspections.dfa.KotlinAnchor.KotlinExpressionAnchor
 import org.jetbrains.kotlin.idea.k2.codeinsight.inspections.dfa.KtClassDef.Companion.classDef
@@ -74,8 +106,8 @@ class KotlinFunctionCallInstruction(
         return result.toTypedArray()
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun processContracts(
         interpreter: DataFlowInterpreter,
         stateBefore: DfaMemoryState,
@@ -85,7 +117,7 @@ class KotlinFunctionCallInstruction(
     ): DfaValue {
         val factory = resultValue.factory
         val functionCall = call.resolveToCall()?.singleFunctionCallOrNull() ?: return resultValue
-        val functionSymbol = functionCall.partiallyAppliedSymbol.symbol as? KaNamedFunctionSymbol ?: return resultValue
+        val functionSymbol = functionCall.symbol as? KaNamedFunctionSymbol ?: return resultValue
         val callEffects = functionSymbol.contractEffects
         for (effect in callEffects) {
             if (effect !is KaContractConditionalContractEffectDeclaration) continue
@@ -113,8 +145,8 @@ class KotlinFunctionCallInstruction(
         return resultValue
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun KaContractBooleanExpression.toCondition(
         factory: DfaValueFactory,
         callDescriptor: KaFunctionCall<*>,
@@ -137,8 +169,8 @@ class KotlinFunctionCallInstruction(
         }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun KaContractParameterValue.findDfaValue(
         callDescriptor: KaFunctionCall<*>,
         arguments: DfaCallArguments
@@ -147,7 +179,7 @@ class KotlinFunctionCallInstruction(
             // TODO: KTIJ-33109 support context parameters
             is KaContextParameterSymbol -> null
             is KaValueParameterSymbol -> {
-                val parameterIndex = callDescriptor.argumentMapping.values.map { it.symbol }.indexOf(symbol)
+                val parameterIndex = callDescriptor.valueArgumentMapping.values.map { it.symbol }.indexOf(symbol)
                 if (parameterIndex >= 0 && parameterIndex < arguments.arguments.size) {
                     arguments.arguments[parameterIndex]
                 } else {
@@ -215,7 +247,7 @@ class KotlinFunctionCallInstruction(
     }
 
     private fun fromKnownDescriptor(call: KaFunctionCall<*>, arguments: DfaCallArguments, state: DfaMemoryState): DfType? {
-        val functionSymbol = call.partiallyAppliedSymbol.symbol as? KaNamedFunctionSymbol ?: return null
+        val functionSymbol = call.symbol as? KaNamedFunctionSymbol ?: return null
         val name = functionSymbol.name.asString()
         val containingPackage = functionSymbol.callableId?.packageName?.asString() ?: return null
         if (containingPackage == "kotlin.collections") {
@@ -274,9 +306,8 @@ class KotlinFunctionCallInstruction(
     }
 
     context(_: KaSession)
-    private fun getPsiMethod(): PsiMethod? {
-        return call.resolveToCall()?.singleFunctionCallOrNull()?.partiallyAppliedSymbol?.symbol?.psi?.toLightMethods()?.singleOrNull()
-    }
+    private fun getPsiMethod(): PsiMethod? =
+        call.resolveToCall()?.singleFunctionCallOrNull()?.symbol?.psi?.toLightMethods()?.singleOrNull()
 
     context(_: KaSession)
     private fun getExpressionDfType(expr: KtExpression): DfType {

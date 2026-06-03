@@ -6,6 +6,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiFile
 import org.gradle.util.GradleVersion
 import org.jetbrains.kotlin.idea.base.util.module
+import org.jetbrains.plugins.gradle.service.GradleInstallationManager
 import org.jetbrains.plugins.gradle.settings.GradleSettings
 
 interface GradleVersionInfo : Comparable<GradleVersionInfo>
@@ -25,11 +26,12 @@ object GradleVersionProvider {
 
     fun getCurrentVersion(project: Project, path: String): GradleVersionInfo? {
         val settings = GradleSettings.getInstance(project)
-        val raw = settings.getLinkedProjectSettings(path)?.resolveGradleVersion() ?: return null
+        val linkedProjectSettings = settings.getLinkedProjectSettings(path) ?: return null
+        val raw = GradleInstallationManager.guessGradleVersion(linkedProjectSettings) ?: GradleVersion.current()
         return OpaqueGradleVersion(raw)
     }
 
-    private class OpaqueGradleVersion(val raw: GradleVersion): GradleVersionInfo {
+    internal class OpaqueGradleVersion(val raw: GradleVersion): GradleVersionInfo {
         override fun compareTo(other: GradleVersionInfo): Int {
             other as? OpaqueGradleVersion ?: error("Can't compare versions from different version providers")
             return raw.compareTo(other.raw)

@@ -1,6 +1,6 @@
 ### auto-generated section `build intellij.kotlin.devkit.k2` start
 load("//build:compiler-options.bzl", "create_kotlinc_options")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 create_kotlinc_options(
   name = "custom_k2",
@@ -13,18 +13,13 @@ create_kotlinc_options(
   ]
 )
 
-resourcegroup(
-  name = "k2_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
-
 jvm_library(
   name = "k2",
   module_name = "intellij.kotlin.devkit.k2",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":k2_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_k2",
   deps = [
     "@lib//:kotlin-stdlib",
@@ -38,10 +33,42 @@ jvm_library(
     "//java/java-psi-api:psi",
     "//plugins/devkit/intellij.kotlin.devkit:kotlin-devkit",
     "//plugins/kotlin/refactorings/kotlin.refactorings.common:kotlin-refactorings-common",
-    "//plugins/kotlin/refactorings/kotlin.refactorings.move.k2:kotlin-refactorings-move",
+    "//plugins/kotlin/refactorings/kotlin.refactorings.k2:kotlin-refactorings",
     "//platform/core-impl",
     "//plugins/devkit/devkit-core:core",
     "//plugins/kotlin/code-insight/intentions-k2:kotlin-codeInsight-intentions",
   ]
 )
+
+jvm_library(
+  name = "k2_test_lib",
+  testonly = True,
+  module_name = "intellij.kotlin.devkit.k2",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_k2",
+  runtime_deps = [
+    ":k2",
+    "@lib//:kotlinc-kotlin-compiler-common-provided",
+    "@lib//:kotlinc-analysis-api-provided",
+    "//platform/analysis-api:analysis_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//platform/editor-ui-api:editor-ui_test_lib",
+    "//platform/refactoring:refactoring_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//java/java-psi-api:psi_test_lib",
+    "//plugins/devkit/intellij.kotlin.devkit:kotlin-devkit_test_lib",
+    "//plugins/kotlin/refactorings/kotlin.refactorings.common:kotlin-refactorings-common_test_lib",
+    "//plugins/kotlin/refactorings/kotlin.refactorings.k2:kotlin-refactorings_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+    "//plugins/devkit/devkit-core:core_test_lib",
+    "//plugins/kotlin/code-insight/intentions-k2:kotlin-codeInsight-intentions_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.kotlin.devkit.k2` end
+
+### auto-generated section `iml intellij.kotlin.devkit.k2` start
+exports_files([
+  "intellij.kotlin.devkit.k2.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.kotlin.devkit.k2` end

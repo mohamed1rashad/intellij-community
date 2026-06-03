@@ -32,8 +32,9 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import java.awt.Window;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -227,7 +228,7 @@ public abstract class SearchForTestsTask extends Task.Backgroundable {
 
       DialogWrapper dialog = new DialogWrapper(myProject) {
         {
-          setTitle(IndexingBundle.message("progress.indexing.updating"));
+          setTitle(IndexingBundle.message("progress.indexing.updating.title"));
           setOKButtonText(ExecutionBundle.message("test.button.run.with.partial.index"));
           init();
           LaterInvocator.markTransparent(ModalityState.stateForComponent(component));

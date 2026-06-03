@@ -5,7 +5,7 @@ import com.intellij.structuralsearch.NamedScriptableDefinition;
 import com.intellij.util.ui.table.JBTableRow;
 import com.intellij.util.ui.table.JBTableRowEditor;
 
-import javax.swing.*;
+import javax.swing.JTable;
 
 /**
  * @author Bas Leijdekkers
@@ -24,7 +24,7 @@ public abstract class FilterEditor<T extends NamedScriptableDefinition> extends 
   public final JBTableRow getValue() {
     saveValues();
     myConstraintChangedCallback.run();
-    return __ -> this;
+    return _ -> this;
   }
 
   @Override

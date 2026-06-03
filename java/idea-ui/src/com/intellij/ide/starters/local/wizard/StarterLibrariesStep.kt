@@ -3,10 +3,20 @@ package com.intellij.ide.starters.local.wizard
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.starters.JavaStartersBundle
-import com.intellij.ide.starters.local.*
-import com.intellij.ide.starters.shared.*
+import com.intellij.ide.starters.local.DependencyConfig
+import com.intellij.ide.starters.local.Library
+import com.intellij.ide.starters.local.LibraryCategory
+import com.intellij.ide.starters.local.Starter
+import com.intellij.ide.starters.local.StarterContext
+import com.intellij.ide.starters.local.StarterContextProvider
+import com.intellij.ide.starters.local.StarterModuleBuilder
+import com.intellij.ide.starters.shared.LibraryInfo
+import com.intellij.ide.starters.shared.StarterWizardSettings
+import com.intellij.ide.starters.shared.enableEnterKeyHandling
+import com.intellij.ide.starters.shared.gridConstraint
 import com.intellij.ide.starters.shared.ui.LibraryDescriptionPanel
 import com.intellij.ide.starters.shared.ui.SelectedLibrariesPanel
+import com.intellij.ide.starters.shared.walkCheckedTree
 import com.intellij.ide.util.projectWizard.ModuleWizardStep
 import com.intellij.ide.wizard.CommitStepException
 import com.intellij.ide.wizard.withVisualPadding
@@ -14,11 +24,18 @@ import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.ui.*
+import com.intellij.ui.CheckboxTree
+import com.intellij.ui.CheckboxTreeBase
+import com.intellij.ui.CheckboxTreeListener
+import com.intellij.ui.CheckedTreeNode
+import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.TreeSpeedSearch
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.BottomGap
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.components.BorderLayoutPanel
@@ -159,7 +176,7 @@ open class StarterLibrariesStep(contextProvider: StarterContextProvider) : Modul
 
   private fun createComponent(): DialogPanel {
     startersComboBox.setMinimumAndPreferredWidth(200)
-    startersComboBox.renderer = SimpleListCellRenderer.create("", Starter::title)
+    startersComboBox.renderer = textListCellRenderer("", Starter::title)
     startersComboBox.addItemListener { e ->
       if (e.stateChange == ItemEvent.SELECTED) {
         val newValue = e.item as? Starter

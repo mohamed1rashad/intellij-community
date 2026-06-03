@@ -10,8 +10,17 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.nls.NlsMessages.formatAndList
 import com.intellij.lang.annotation.HighlightSeverity
-import com.intellij.openapi.actionSystem.*
-import com.intellij.openapi.application.*
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.application.AccessToken
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.contextModality
+import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.runReadActionBlocking
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.ProcessCanceledException
@@ -179,7 +188,7 @@ class CodeAnalysisBeforeCheckinHandler(private val project: Project) :
 
     val psiFiles = mutableListOf<PsiFile>()
     for ((file, change) in changedFiles) {
-      val psiFile = runReadAction { if (file.isValid) PsiManager.getInstance(project).findFile(file) else null } ?: continue
+      val psiFile = runReadActionBlocking { if (file.isValid) PsiManager.getInstance(project).findFile(file) else null } ?: continue
       psiFile.putUserData(InspectionProfileWrapper.PSI_ELEMENTS_BEING_COMMITTED,
                           ConcurrentFactoryMap.createMap { clazz -> getBeingCommittedPsiElements(change, clazz, isPostCommit) })
       psiFiles += psiFile
@@ -198,7 +207,7 @@ class CodeAnalysisBeforeCheckinHandler(private val project: Project) :
    */
   private fun getBeingCommittedPsiElements(change: Change, clazz: Class<out PsiElement>, isPostCommit: Boolean): Set<PsiElement> {
     val elementExtractor = { virtualFile: VirtualFile ->
-      val psiFile = runReadAction {
+      val psiFile = runReadActionBlocking {
         PsiManager.getInstance(project).findFile(virtualFile)
       }
       PsiTreeUtil.findChildrenOfType(psiFile, clazz).toList()

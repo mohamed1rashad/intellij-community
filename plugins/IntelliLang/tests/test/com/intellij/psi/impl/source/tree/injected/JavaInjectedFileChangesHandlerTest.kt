@@ -19,7 +19,12 @@ import com.intellij.openapi.roots.ModuleRootModificationUtil
 import com.intellij.openapi.ui.TestDialog
 import com.intellij.openapi.ui.TestDialogManager
 import com.intellij.openapi.util.TextRange
-import com.intellij.psi.*
+import com.intellij.psi.ElementManipulators
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiLanguageInjectionHost
+import com.intellij.psi.PsiVariable
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.injection.Injectable
 import com.intellij.psi.util.parentOfType
@@ -367,28 +372,32 @@ class JavaInjectedFileChangesHandlerTest : JavaCodeInsightFixtureTestCase() {
                   "\"field2\": 1,\n" +
                   "  " +
                       "  \"field3\": \"brokenInnerMap\"\n" +
-                      "    : {\n" +
-                      "  \"broken1\": 1,\n" +
-                      "  \"broken2\": 2,\n" +
-                      "  \"broken3\": 3\n" +
-                      "}\n" +
-                      "}\n" +
-                      "}";
+                      "    :\n" +
+                      "    {\n" +
+                      "      \"broken1\": 1,\n" +
+                      "      \"broken2\": 2,\n" +
+                      "      \"broken3\": 3\n" +
+                      "    }\n" +
+                  "  " +
+                  "}\n" +
+                  "}";
             }
           }
       """.trimIndent(), true)
+
       TestCase.assertEquals("""
           {
             "field1": 1,
             "innerMap1": {
               "field2": 1,
               "field3": "brokenInnerMap"
-              : {
-            "broken1": 1,
-            "broken2": 2,
-            "broken3": 3
-          }
-          }
+              :
+              {
+                "broken1": 1,
+                "broken2": 2,
+                "broken3": 3
+              }
+            }
           }
       """.trimIndent(), fragmentFile.text)
 
@@ -985,6 +994,32 @@ class JavaInjectedFileChangesHandlerTest : JavaCodeInsightFixtureTestCase() {
       """.trimIndent())
     }
 
+  }
+
+  fun `test copy of physical single-root injection is nonphysical`() {
+    with(myFixture) {
+      configureByText("classA.java", """
+          import org.intellij.lang.annotations.Language;
+
+          class A {
+            void foo() {
+              @Language("JSON") String a = "{\"answer\": <caret>42}";
+            }
+          }
+      """.trimIndent())
+
+      val injectedFile = injectionTestFixture.getAllInjections().single().second
+      val injectedViewProvider = injectedFile.viewProvider
+      assertEquals("SingleRootInjectedFileViewProvider", injectedViewProvider.javaClass.simpleName)
+      assertTrue(injectedViewProvider.isPhysical)
+
+      val copy = injectedFile.copy() as PsiFile
+      val copyViewProvider = copy.viewProvider
+
+      assertEquals("SingleRootInjectedFileViewProvider", copyViewProvider.javaClass.simpleName)
+      assertEquals(injectedFile.text, copy.text)
+      assertFalse(copyViewProvider.isPhysical)
+    }
   }
 
   private fun injectAndOpenInFragmentEditor(language: String): PsiFile {

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.k2.codeInsight.intentions.shared;
 
@@ -847,9 +847,24 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
             runTest("../testData/intentions/convertOrdinaryPropertyToLazy/const.kt");
         }
 
+        @TestMetadata("isLazy.kt")
+        public void testIsLazy() throws Exception {
+            runTest("../testData/intentions/convertOrdinaryPropertyToLazy/isLazy.kt");
+        }
+
         @TestMetadata("noInitializer.kt")
         public void testNoInitializer() throws Exception {
             runTest("../testData/intentions/convertOrdinaryPropertyToLazy/noInitializer.kt");
+        }
+
+        @TestMetadata("qualifiedLazyFunction.kt")
+        public void testQualifiedLazyFunction() throws Exception {
+            runTest("../testData/intentions/convertOrdinaryPropertyToLazy/qualifiedLazyFunction.kt");
+        }
+
+        @TestMetadata("qualifiedLazyProperty.kt")
+        public void testQualifiedLazyProperty() throws Exception {
+            runTest("../testData/intentions/convertOrdinaryPropertyToLazy/qualifiedLazyProperty.kt");
         }
 
         @TestMetadata("run.kt")
@@ -1390,6 +1405,11 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
         @TestMetadata("expectClass.kt")
         public void testExpectClass() throws Exception {
             runTest("../testData/intentions/introduceBackingProperty/expectClass.kt");
+        }
+
+        @TestMetadata("explicitBackingField.kt")
+        public void testExplicitBackingField() throws Exception {
+            runTest("../testData/intentions/introduceBackingProperty/explicitBackingField.kt");
         }
 
         @TestMetadata("inapplicableAbstractProperty.kt")
@@ -2794,6 +2814,26 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/conflictingSignatures.kt");
         }
 
+        @TestMetadata("contextParameter.kt")
+        public void testContextParameter() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/contextParameter.kt");
+        }
+
+        @TestMetadata("contextParameterAlreadySpecified.kt")
+        public void testContextParameterAlreadySpecified() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/contextParameterAlreadySpecified.kt");
+        }
+
+        @TestMetadata("contextParameterOnly.kt")
+        public void testContextParameterOnly() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/contextParameterOnly.kt");
+        }
+
+        @TestMetadata("contextSpecifiedValueNot.kt")
+        public void testContextSpecifiedValueNot() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/contextSpecifiedValueNot.kt");
+        }
+
         @TestMetadata("existingNamedArguments.kt")
         public void testExistingNamedArguments() throws Exception {
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/existingNamedArguments.kt");
@@ -2839,6 +2879,11 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/multipleArguments.kt");
         }
 
+        @TestMetadata("multipleContextParameters.kt")
+        public void testMultipleContextParameters() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/multipleContextParameters.kt");
+        }
+
         @TestMetadata("multipleOverloads.kt")
         public void testMultipleOverloads() throws Exception {
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/multipleOverloads.kt");
@@ -2874,9 +2919,24 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/onlyVararg.kt");
         }
 
+        @TestMetadata("partialValueAndContextSpecified.kt")
+        public void testPartialValueAndContextSpecified() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/partialValueAndContextSpecified.kt");
+        }
+
+        @TestMetadata("partialValueAndContextSpecified2.kt")
+        public void testPartialValueAndContextSpecified2() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/partialValueAndContextSpecified2.kt");
+        }
+
         @TestMetadata("partiallySpecified.kt")
         public void testPartiallySpecified() throws Exception {
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/partiallySpecified.kt");
+        }
+
+        @TestMetadata("preserveComment.kt")
+        public void testPreserveComment() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/preserveComment.kt");
         }
 
         @TestMetadata("quotedName.kt")
@@ -2894,6 +2954,16 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/sameLineAsArgument.kt");
         }
 
+        @TestMetadata("severalContextSeveralValueArgs.kt")
+        public void testSeveralContextSeveralValueArgs() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/severalContextSeveralValueArgs.kt");
+        }
+
+        @TestMetadata("simpleArgumentContext.kt")
+        public void testSimpleArgumentContext() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/simpleArgumentContext.kt");
+        }
+
         @TestMetadata("simpleFunctionOverload.kt")
         public void testSimpleFunctionOverload() throws Exception {
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/simpleFunctionOverload.kt");
@@ -2907,6 +2977,21 @@ public abstract class SharedK2IntentionTestGenerated extends AbstractSharedK2Int
         @TestMetadata("trailingComma.kt")
         public void testTrailingComma() throws Exception {
             runTest("../testData/intentions/specifyAllRemainingArgumentsByName/trailingComma.kt");
+        }
+
+        @TestMetadata("trailingLambdaWithImplicitContextAndDefault.kt")
+        public void testTrailingLambdaWithImplicitContextAndDefault() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/trailingLambdaWithImplicitContextAndDefault.kt");
+        }
+
+        @TestMetadata("unusedContextParameter.kt")
+        public void testUnusedContextParameter() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/unusedContextParameter.kt");
+        }
+
+        @TestMetadata("valueSpecifiedContextNot.kt")
+        public void testValueSpecifiedContextNot() throws Exception {
+            runTest("../testData/intentions/specifyAllRemainingArgumentsByName/valueSpecifiedContextNot.kt");
         }
 
         @TestMetadata("vararg.kt")

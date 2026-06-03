@@ -4,7 +4,6 @@ package org.jetbrains.kotlin.idea.refactoring.rename
 import com.intellij.psi.PsiElement
 import com.intellij.psi.util.parents
 import com.intellij.util.IncorrectOperationException
-import org.jetbrains.kotlin.idea.base.analysis.withRootPrefixIfNeeded
 import org.jetbrains.kotlin.idea.base.psi.copied
 import org.jetbrains.kotlin.idea.base.psi.kotlinFqName
 import org.jetbrains.kotlin.idea.base.psi.replaced
@@ -13,7 +12,18 @@ import org.jetbrains.kotlin.idea.codeinsights.impl.base.inspections.OperatorToFu
 import org.jetbrains.kotlin.idea.kdoc.KDocElementFactory
 import org.jetbrains.kotlin.idea.refactoring.moveFunctionLiteralOutsideParentheses
 import org.jetbrains.kotlin.idea.refactoring.nameDeterminant
-import org.jetbrains.kotlin.idea.references.*
+import org.jetbrains.kotlin.idea.references.AbstractKtReference
+import org.jetbrains.kotlin.idea.references.KDocReference
+import org.jetbrains.kotlin.idea.references.KtArrayAccessReference
+import org.jetbrains.kotlin.idea.references.KtDefaultAnnotationArgumentReference
+import org.jetbrains.kotlin.idea.references.KtDestructuringDeclarationReference
+import org.jetbrains.kotlin.idea.references.KtInvokeFunctionReference
+import org.jetbrains.kotlin.idea.references.KtReference
+import org.jetbrains.kotlin.idea.references.KtReferenceMutateService
+import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
+import org.jetbrains.kotlin.idea.references.KtSimpleReference
+import org.jetbrains.kotlin.idea.references.mainReference
+import org.jetbrains.kotlin.idea.references.readWriteAccess
 import org.jetbrains.kotlin.lexer.KtSingleValueToken
 import org.jetbrains.kotlin.lexer.KtToken
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -23,8 +33,34 @@ import org.jetbrains.kotlin.load.java.propertyNameBySetMethodName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.SpecialNames
 import org.jetbrains.kotlin.plugin.references.SimpleNameReferenceExtension
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.*
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtDeclarationContainer
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtOperationExpression
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtPrefixExpression
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.KtUnaryExpression
+import org.jetbrains.kotlin.psi.KtUserType
+import org.jetbrains.kotlin.psi.KtValueArgument
+import org.jetbrains.kotlin.psi.buildExpression
+import org.jetbrains.kotlin.psi.createDeclarationByPattern
+import org.jetbrains.kotlin.psi.createExpressionByPattern
+import org.jetbrains.kotlin.psi.psiUtil.astReplace
+import org.jetbrains.kotlin.psi.psiUtil.getAssignmentByLHS
+import org.jetbrains.kotlin.psi.psiUtil.getPossiblyQualifiedCallExpression
+import org.jetbrains.kotlin.psi.psiUtil.getQualifiedElement
+import org.jetbrains.kotlin.psi.psiUtil.getQualifiedElementSelector
+import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelectorOrThis
+import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.quoteIfNeeded
 import org.jetbrains.kotlin.resolve.DataClassResolver
 import org.jetbrains.kotlin.resolve.references.ReferenceAccess
 import org.jetbrains.kotlin.types.expressions.OperatorConventions
@@ -40,7 +76,7 @@ abstract class KtReferenceMutateServiceBase : KtReferenceMutateService {
         return bindToFqName(simpleNameReference, fqName, shorteningMode, element)
     }
 
-    protected fun KtSimpleReference<KtNameReferenceExpression>.getAdjustedNewName(newElementName: String): Name? {
+    protected fun KtReference.getAdjustedNewName(newElementName: String): Name? {
         val newNameAsName = Name.identifier(newElementName)
         val newName = if (JvmAbi.isGetterName(newElementName)) {
             propertyNameByGetMethodName(newNameAsName)
@@ -50,24 +86,25 @@ abstract class KtReferenceMutateServiceBase : KtReferenceMutateService {
             //TODO: setIsY -> setIsIsY bug
             propertyNameBySetMethodName(
               newNameAsName,
-              withIsPrefix = expression.getReferencedName().startsWith("is")
+              withIsPrefix = element.text.startsWith("is")
             )
         }
         else null
         return newName
     }
 
-    protected fun KtSimpleReference<KtNameReferenceExpression>.renameToOrdinaryMethod(newElementName: String): KtElement? {
-        val psiFactory = KtPsiFactory(expression.project)
+    protected fun KtReference.renameToOrdinaryMethod(newElementName: String): KtElement? {
+        val psiFactory = KtPsiFactory(element.project)
+        val expression = element as? KtExpression ?: return null
         val isGetterRename = isKotlinAwareJavaGetterRename(this)
 
-        val newGetterName = if (isGetterRename) newElementName else JvmAbi.getterName(expression.getReferencedName())
+        val newGetterName = if (isGetterRename) newElementName else JvmAbi.getterName(expression.text)
 
         if (expression.readWriteAccess(false) == ReferenceAccess.READ) {
             return expression.replaced(expression.createCall(psiFactory, newGetterName))
         }
 
-        val newSetterName = if (isGetterRename) JvmAbi.setterName(expression.getReferencedName()) else newElementName
+        val newSetterName = if (isGetterRename) JvmAbi.setterName(expression.text) else newElementName
 
         val fullExpression = expression.getQualifiedExpressionForSelectorOrThis()
         fullExpression.getAssignmentByLHS()?.let { assignment ->
@@ -114,7 +151,7 @@ abstract class KtReferenceMutateServiceBase : KtReferenceMutateService {
         return expression
     }
 
-    abstract fun KtSimpleReference<KtNameReferenceExpression>.suggestVariableName(expr: KtExpression, context: PsiElement): String
+    abstract fun KtReference.suggestVariableName(expr: KtExpression, context: PsiElement): String
 
     private fun KtExpression.createCall(
         psiFactory: KtPsiFactory,
@@ -149,6 +186,7 @@ abstract class KtReferenceMutateServiceBase : KtReferenceMutateService {
             is KtInvokeFunctionReference -> ktReference.renameTo(newElementName)
             is KtSimpleNameReference -> ktReference.renameTo(newElementName)
             is KtDefaultAnnotationArgumentReference -> ktReference.renameTo(newElementName)
+            is KtDestructuringDeclarationReference -> ktReference.renameTo(newElementName)
             else -> throw IncorrectOperationException()
         }
     }
@@ -181,6 +219,18 @@ abstract class KtReferenceMutateServiceBase : KtReferenceMutateService {
             return fullCallExpression.replace(arrayAccessExpression)
         }
         return renameImplicitConventionalCall(newElementName)
+    }
+
+    private fun KtDestructuringDeclarationReference.renameTo(newElementName: String): PsiElement {
+        val refToProperty = element.initializer?.reference
+        if (refToProperty is KtSimpleNameReference) {
+            return refToProperty.renameTo(newElementName)
+        }
+        val entryName = element.nameIdentifier
+        if (entryName != null) {
+            return entryName.replace(KtPsiFactory(element.project).createIdentifier(newElementName.quoteIfNeeded()))
+        }
+        throw IncorrectOperationException()
     }
 
     private fun KtSimpleNameReference.renameTo(newElementName: String): KtExpression {

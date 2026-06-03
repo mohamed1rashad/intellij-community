@@ -1,20 +1,8 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.inspections;
 
+import com.intellij.idea.TestFor;
+import com.intellij.lang.FileASTNode;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiFile;
@@ -28,6 +16,7 @@ import com.jetbrains.python.psi.PyFile;
 import com.jetbrains.python.psi.stubs.PyClassNameIndex;
 import org.jetbrains.annotations.NotNull;
 
+import java.lang.ref.Reference;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -490,5 +479,179 @@ public class Py3UnresolvedReferencesInspectionTest extends PyInspectionTestCase 
   // PY-24834
   public void testStrictUnionMemberExtendingAny() {
     doTest();
+  }
+
+  // PY-50642
+  public void testTypeChecking() {
+    doTestByText("""
+                   import typing
+                   
+                   if not typing.TYPE_CHECKING:
+                       x: str = 'ab'
+                   
+                   class A:
+                       if not typing.TYPE_CHECKING:
+                           foo: int = -1
+                       ...
+                   
+                   if not typing.TYPE_CHECKING:
+                       _ = x
+                       _ = A.foo
+                   """);
+  }
+
+  // PY-83529
+  public void testPackageAttributeInPresenceOfBinarySkeleton() {
+    runWithAdditionalClassEntryInSdkRoots(getTestDirectoryPath() + "/site-packages", () -> {
+      runWithAdditionalClassEntryInSdkRoots(getTestDirectoryPath() + "/python_stubs", () -> {
+        final PsiFile currentFile = myFixture.configureByFile(getTestDirectoryPath() + "/main.py");
+        configureInspection();
+        assertSdkRootsNotParsed(currentFile);
+      });
+    });
+  }
+
+  // PY-85880
+  public void testLiteralUnionInTuple() {
+    doTestByText("""
+                   from typing import Literal
+                   
+                   
+                   def f(e: Literal[1, 2]):
+                       _ = e in ()
+                   """);
+  }
+
+  // PY-85880
+  public void testLiteralInUnionTupleNone() {
+    doTestByText("""
+                   from typing import Literal
+                   
+                   
+                   def f(e: Literal[1, 2]):
+                       a: tuple | None = None
+                       _ = e <weak_warning descr="Member 'None' of 'tuple[Any, ...] | None' does not have attribute '__contains__'">in</weak_warning> a
+                   """);
+  }
+
+  // PY-85941
+  public void testSuperCallResultAttributes() {
+    doTestByText("""
+                   from abc import ABC
+                   
+                   class A:
+                       def do_smth(self):
+                           print("Something from", self)
+                   
+                   class B(A, ABC):
+                       def do_smth(self):
+                           print("Something more from", self)
+                           super().do_smth()
+                           super().<warning descr="Cannot find reference 'non_existing' in 'A | ABC'">non_existing</warning>()
+                   """);
+  }
+
+  // PY-76922
+  public void testIntersectionMemberAttributeAccess() {
+    doTest();
+  }
+
+  // PY-86608
+  public void testFromImportComprehensionVariableLeak() {
+    doMultiFileTest();
+  }
+
+  // PY-86608
+  public void testFromImportComprehensionVariableLeakUnstubbed() {
+    String testDir = getTestCaseDirectory() + "FromImportComprehensionVariableLeak";
+    myFixture.copyDirectoryToProject(testDir, "");
+    PsiFile cPy = myFixture.configureFromTempProjectFile("c.py");
+
+    FileASTNode cPyNode = cPy.getNode();
+    assertTrue(cPyNode.isParsed());
+
+    PsiFile aPy = myFixture.configureFromTempProjectFile("a.py");
+
+    configureInspection();
+
+    assertSdkRootsNotParsed(aPy);
+    Reference.reachabilityFence(cPyNode);
+  }
+
+  // PY-87343
+  public void testNewTypeUnion() {
+    doTestByText("""
+                   from typing import NewType
+                   
+                   MyId = NewType("MyId", int)
+                   
+                   val: MyId | None = None
+                   """);
+  }
+
+  // PY-89245
+  public void testFlakyLoop() {
+    doTestByText("""
+                   class ListNode:
+                       def __init__(self, val=0, next=None):
+                           self.val = val
+                           self.next = next
+                   
+                   
+                   def find_by_value(node: ListNode | None, val: int) -> ListNode | None:
+                       while node is not None and node.val != val:
+                           node = node.next
+                       return node
+                   """);
+  }
+
+  // PY-40883
+  public void testStrictClassAttributes() {
+    doTest();
+  }
+
+  // PY-40883
+  public void testStrictClassAttributesOff() {
+    final PyUnresolvedReferencesInspection inspection = new PyUnresolvedReferencesInspection();
+    inspection.strictClassAttributes = false;
+    myFixture.enableInspections(inspection);
+    myFixture.configureByFile(getTestCaseDirectory() + getTestName(true) + ".py");
+    myFixture.checkHighlighting(isWarning(), isInfo(), isWeakWarning());
+  }
+
+  @TestFor(issues="PY-82245")
+  public void testStringInAnnotated() {
+    doTestByText(
+      """
+        from typing import Annotated
+        
+        type A = Annotated[str, print(end="foo")]
+        """
+    );
+  }
+
+  @TestFor(issues = "PY-80622")
+  public void testAugAssignmentRaddDefinedButIaddMissingOnTarget() {
+    doTestByText("""
+                   class A: pass
+                   class B:
+                       def __radd__(self, other: A) -> str: ...
+                   
+                   a = A()
+                   a += B()  # ok
+                   
+                   b = B()
+                   b <warning descr="Class 'B' does not define '__iadd__', so the '+=' operator cannot be used on its instances">+=</warning> A()
+                   """);
+  }
+
+  @TestFor(issues = "PY-80622")
+  public void testAugAssignmentIaddNotDefinedOnClass(){
+    doTestByText("""
+                   class A: pass
+                   
+                   a = A()
+                   a <warning descr="Class 'A' does not define '__iadd__', so the '+=' operator cannot be used on its instances">+=</warning> a
+                   """);
   }
 }

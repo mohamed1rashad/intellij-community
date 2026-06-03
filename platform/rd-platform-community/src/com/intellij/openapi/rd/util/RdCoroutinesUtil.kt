@@ -11,9 +11,19 @@ import com.jetbrains.rd.framework.util.withContext
 import com.jetbrains.rd.util.lifetime.Lifetime
 import com.jetbrains.rd.util.threading.coroutines.async
 import com.jetbrains.rd.util.threading.coroutines.launch
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExecutorCoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.concurrency.Promise
+import org.jetbrains.concurrency.toPromiseWithoutLogError
 import java.util.concurrent.CompletableFuture
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
@@ -252,14 +262,6 @@ fun <T> Lifetime.startBackgroundAsync(
   action: suspend CoroutineScope.() -> T
 ): Deferred<T> = async(applicationThreadPool + ModalityState.defaultModalityState().asContextElement() + context, start, action)
 
-@ApiStatus.ScheduledForRemoval
-@Deprecated("Use launch with a specific dispatcher for your purposes")
-fun <T> Lifetime.startNonUrgentBackgroundAsync(
-  context: CoroutineContext = EmptyCoroutineContext,
-  start: CoroutineStart = CoroutineStart.DEFAULT,
-  action: suspend CoroutineScope.() -> T
-): Deferred<T> = async(nonUrgentDispatcher + context, start, action)
-
 @Deprecated("Use launch(Dispatchers.EDT)", ReplaceWith("launch(Dispatchers.EDT, start, action)", "kotlinx.coroutines.launch", "kotlinx.coroutines.Dispatchers",
                                                       "com.intellij.openapi.application.EDT"))
 fun CoroutineScope.launchChildOnUi(
@@ -273,26 +275,11 @@ fun CoroutineScope.launchChildBackground(
   action: suspend CoroutineScope.() -> Unit
 ): Job = launch(applicationThreadPool, start, action)
 
-@ApiStatus.ScheduledForRemoval
-@Deprecated("Use async(Dispatchers.EDT)", ReplaceWith("async(Dispatchers.EDT, start, action)", "kotlinx.coroutines.async", "kotlinx.coroutines.Dispatchers",
-                                                      "com.intellij.openapi.application.EDT"))
-fun <T> CoroutineScope.startChildOnUiAsync(
-  start: CoroutineStart = CoroutineStart.DEFAULT,
-  action: suspend CoroutineScope.() -> T
-): Deferred<T> = async(uiDispatcher, start, action)
-
 @Deprecated("For CPU-bound tasks, use async(Dispatchers.Default, action). For IO-bound tasks, use async(Dispatchers.IO, action)")
 fun <T> CoroutineScope.startChildBackgroundAsync(
   start: CoroutineStart = CoroutineStart.DEFAULT,
   action: suspend CoroutineScope.() -> T
 ) = async(applicationThreadPool, start, action)
-
-@ApiStatus.ScheduledForRemoval
-@Deprecated("Use async with a specific dispatcher for your purposes")
-fun <T> CoroutineScope.startChildNonUrgentBackgroundAsync(
-  start: CoroutineStart = CoroutineStart.DEFAULT,
-  action: suspend CoroutineScope.() -> T
-): Deferred<T> = async(nonUrgentDispatcher, start, action)
 
 @Deprecated("Use withContext(Dispatchers.EDT)", ReplaceWith("withContext(Dispatchers.EDT, action)", "kotlinx.coroutines.withContext", "kotlinx.coroutines.Dispatchers",
                                                             "com.intellij.openapi.application.EDT"))
@@ -326,17 +313,12 @@ suspend fun <T> lifetimedCoroutineScope(lifetime: Lifetime, action: suspend Coro
 
 
 // See IJPL-157034
-@ExperimentalCoroutinesApi
-fun <T> Deferred<T>.toPromise(): Promise<T> = AsyncPromiseWithoutLogError<T>().also { promise ->
-  invokeOnCompletion { throwable ->
-    if (throwable != null) {
-      promise.setError(throwable)
-    }
-    else {
-      promise.setResult(getCompleted())
-    }
-  }
-}
+@ApiStatus.ScheduledForRemoval
+@Deprecated(
+  "Use org.jetbrains.concurrency.toPromise(logErrors) instead",
+  ReplaceWith("toPromise(logErrors = false)", "org.jetbrains.concurrency.toPromise"),
+)
+fun <T> Deferred<T>.toPromise(): Promise<T> = toPromiseWithoutLogError()
 
 // See IJPL-157034
 fun <T> CompletableFuture<T>.toPromise(): Promise<T> = AsyncPromiseWithoutLogError<T>().also { promise ->

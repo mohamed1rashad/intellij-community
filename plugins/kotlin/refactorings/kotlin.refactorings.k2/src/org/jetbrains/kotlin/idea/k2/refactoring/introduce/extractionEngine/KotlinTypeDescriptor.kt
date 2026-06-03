@@ -15,9 +15,19 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaAnonymousObjectSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.typeParameters
-import org.jetbrains.kotlin.analysis.api.types.*
+import org.jetbrains.kotlin.analysis.api.types.KaClassType
+import org.jetbrains.kotlin.analysis.api.types.KaDefinitelyNotNullType
+import org.jetbrains.kotlin.analysis.api.types.KaErrorType
+import org.jetbrains.kotlin.analysis.api.types.KaIntersectionType
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.idea.k2.refactoring.extractFunction.Parameter
-import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.*
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IExtractionData
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.IParameter
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.OutputValue
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.TypeDescriptor
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.TypeParameter
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractionEngine.collectRelevantConstraints
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
@@ -46,9 +56,11 @@ class KotlinTypeDescriptor(private val data: IExtractionData) : TypeDescriptor<K
 
     override fun createListType(argTypes: List<KaType>): KaType {
         return analyze(data.commonParent) {
-            buildClassType(StandardClassIds.List) {
-                val commonSupertype = if (argTypes.isNotEmpty()) argTypes.commonSupertype else builtinTypes.nullableAny
-                argument(commonSupertype)
+            @OptIn(KaExperimentalApi::class)
+            typeCreator.classType(StandardClassIds.List) {
+                invariantTypeArgument {
+                    if (argTypes.isNotEmpty()) argTypes.commonSupertype else builtinTypes.nullableAny
+                }
             }
         }
     }
@@ -62,9 +74,10 @@ class KotlinTypeDescriptor(private val data: IExtractionData) : TypeDescriptor<K
                 3 -> findClass(ClassId(StandardClassIds.BASE_KOTLIN_PACKAGE, Name.identifier("Triple")))!!
                 else -> return builtinTypes.unit
             }
-            return buildClassType(boxingClass) {
-                boxingClass.typeParameters.forEachIndexed { idx, s ->
-                    argument(outputValues[idx].valueType)
+            return typeCreator.classType(boxingClass) {
+                // All excessive type arguments are ignored, so it's safe to directly pass all elements of [outputValues]
+                outputValues.forEach { value ->
+                    invariantTypeArgument(value.valueType)
                 }
             }
         }
@@ -126,7 +139,6 @@ class KotlinTypeDescriptor(private val data: IExtractionData) : TypeDescriptor<K
  * @return true if [typeToCheck] doesn't contain unresolved components in the scope of [scope] and is "denotable"
  */
 context(_: KaSession)
-@OptIn(KaExperimentalApi::class)
 fun isResolvableInScope(
     typeToCheck: KaType,
     scope: PsiElement,
@@ -135,8 +147,8 @@ fun isResolvableInScope(
    return getUnResolvableInScope(typeToCheck, scope, typeParameters) == null
 }
 
-context(_: KaSession)
 @OptIn(KaExperimentalApi::class)
+context(_: KaSession)
 fun getUnResolvableInScope(
     typeToCheck: KaType,
     scope: PsiElement,

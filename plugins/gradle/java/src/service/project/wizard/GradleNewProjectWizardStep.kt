@@ -6,6 +6,7 @@ import com.intellij.ide.JavaUiBundle
 import com.intellij.ide.projectWizard.NewProjectWizardCollector.BuildSystem.logSdkChanged
 import com.intellij.ide.projectWizard.NewProjectWizardCollector.BuildSystem.logSdkFinished
 import com.intellij.ide.projectWizard.ProjectWizardJdkIntent
+import com.intellij.ide.projectWizard.ProjectWizardJdkPredicate
 import com.intellij.ide.projectWizard.generators.JdkDownloadService
 import com.intellij.ide.projectWizard.projectWizardJdkComboBox
 import com.intellij.ide.wizard.NewProjectWizardBaseData
@@ -23,23 +24,37 @@ import com.intellij.openapi.externalSystem.service.ui.completion.TextCompletionC
 import com.intellij.openapi.externalSystem.util.ExternalSystemBundle
 import com.intellij.openapi.externalSystem.util.ui.DataView
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
-import com.intellij.openapi.module.Module
 import com.intellij.openapi.observable.properties.GraphProperty
 import com.intellij.openapi.observable.util.bindEnumStorage
 import com.intellij.openapi.observable.util.not
 import com.intellij.openapi.observable.util.toUiPathProperty
 import com.intellij.openapi.observable.util.transform
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.projectRoots.impl.jdkDownloader.JdkDownloadTask
-import com.intellij.openapi.ui.*
+import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.ui.BrowseFolderDescriptor.Companion.withPathToTextConvertor
 import com.intellij.openapi.ui.BrowseFolderDescriptor.Companion.withTextToPathConvertor
+import com.intellij.openapi.ui.MessageDialogBuilder
+import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.openapi.ui.getCanonicalPath
+import com.intellij.openapi.ui.getPresentablePath
+import com.intellij.openapi.ui.setEmptyState
 import com.intellij.openapi.ui.validation.CHECK_NON_EMPTY
 import com.intellij.openapi.ui.validation.CHECK_READABLE_DIRECTORY
 import com.intellij.openapi.ui.validation.WHEN_GRAPH_PROPAGATION_FINISHED
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.registry.Registry
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.COLUMNS_SHORT
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.SegmentedButton
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.bindText
+import com.intellij.ui.dsl.builder.columns
+import com.intellij.ui.dsl.builder.trimmedTextValidation
+import com.intellij.ui.dsl.builder.whenItemSelectedFromUi
 import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.ui.layout.ValidationInfoBuilder
 import com.intellij.ui.util.minimumWidth
@@ -117,11 +132,24 @@ abstract class GradleNewProjectWizardStep<ParentStep>(parent: ParentStep) :
     return GradleDataView(data)
   }
 
-  protected fun setupJavaSdkUI(builder: Panel) {
+  protected fun setupJavaSdkUI(
+    builder: Panel,
+    sdkFilter: (Sdk) -> Boolean = { true },
+    jdkPredicate: ProjectWizardJdkPredicate? = null,
+    kotlinVersion: String? = null,
+    maxKotlinJvmTarget: String? = null,
+  ) {
     builder.row(JavaUiBundle.message("label.project.wizard.new.project.jdk")) {
-      projectWizardJdkComboBox(this, jdkIntentProperty)
+      projectWizardJdkComboBox(this, jdkIntentProperty, sdkFilter, jdkPredicate)
         .validationOnInput { validateJavaSdk(withDialog = false) }
         .validationOnApply { validateJavaSdk(withDialog = true) }
+        .validationOnApply {
+          if (validateGradleVersion(gradleVersion, withDialog = false) == null
+              && (kotlinVersion != null && maxKotlinJvmTarget != null)) validateKotlinJdkCompatibility(withDialog = true,
+                                                                                                       sdkFilter,
+                                                                                                       maxKotlinJvmTarget, kotlinVersion)
+          else null
+        }
         .whenItemSelectedFromUi { jdkIntent.javaVersion?.let { logSdkChanged(it.feature) } }
         .onApply { jdkIntent.javaVersion?.let { logSdkFinished(it.feature) } }
     }.bottomGap(BottomGap.SMALL)
@@ -162,7 +190,7 @@ abstract class GradleNewProjectWizardStep<ParentStep>(parent: ParentStep) :
               label(GradleBundle.message("gradle.project.settings.distribution.wrapper.version.npw"))
                 .applyToComponent { minimumWidth = MINIMUM_LABEL_WIDTH }
               cell(TextCompletionComboBox(context.project, TextCompletionComboBoxConverter.Default()))
-                .columns(8)
+                .columns(COLUMNS_SHORT)
                 .applyToComponent { bindSelectedItem(gradleVersionProperty) }
                 .applyToComponent { bindCompletionVariants(gradleVersionsProperty) }
                 .trimmedTextValidation(CHECK_NON_EMPTY)
@@ -303,6 +331,37 @@ abstract class GradleNewProjectWizardStep<ParentStep>(parent: ParentStep) :
         "gradle.settings.wizard.gradle.unsupported.message",
         ApplicationNamesInfo.getInstance().fullProductName,
         oldestSupportedGradleVersion.version,
+      )
+    )
+  }
+
+  /**
+   * For Kotlin, we don't filter out detected but incompatible JDKs, so it's still possible to choose them.
+   * In this case, we want to warn a user if there's an incompatibility with such a version.
+   */
+  private fun ValidationInfoBuilder.validateKotlinJdkCompatibility(
+    withDialog: Boolean,
+    sdkFilter: (Sdk) -> Boolean,
+    maxKotlinJvmTarget: String,
+    kotlinVersion: String,
+  ): ValidationInfo? {
+    val sdk = jdkIntent.prepareJdk() ?: return null
+    if (sdkFilter(sdk)) {
+      return null
+    }
+    val javaVersion = jdkIntent.javaVersion ?: return null
+    return validationWithDialog(
+      withDialog = withDialog,
+      message = GradleBundle.message(
+        "gradle.settings.wizard.kotlin.unsupported.message",
+        maxKotlinJvmTarget
+      ),
+      dialogTitle = GradleBundle.message(
+        "gradle.settings.wizard.java.unsupported.title"
+      ),
+      dialogMessage = GradleBundle.message(
+        "gradle.settings.wizard.kotlin.unsupported.dialog.message",
+        maxKotlinJvmTarget, kotlinVersion, javaVersion.toFeatureString(),
       )
     )
   }
@@ -455,14 +514,6 @@ abstract class GradleNewProjectWizardStep<ParentStep>(parent: ParentStep) :
     return suggestGradleHome(context.project) ?: ""
   }
 
-  private fun startJdkDownloadIfNeeded(module: Module) {
-    val sdkDownloadTask = jdkIntent.downloadTask
-    if (sdkDownloadTask is JdkDownloadTask) {
-      // Download the SDK on project creation
-      module.project.service<JdkDownloadService>().scheduleDownloadJdk(sdkDownloadTask, module, context.isCreatingNewProject)
-    }
-  }
-
   val gradleVersionToUse: GradleVersion by lazy {
     val rawGradleVersion = when (distributionType) {
       WRAPPER -> gradleVersion
@@ -493,8 +544,7 @@ abstract class GradleNewProjectWizardStep<ParentStep>(parent: ParentStep) :
   fun setupProjectFromBuilder(project: Project) {
     val builder = object : AbstractGradleModuleBuilder() {}
 
-    val sdk = if (context.isCreatingNewProject) { context.projectJdk } else { jdkIntent.prepareJdk() }
-    builder.moduleJdk = sdk
+    builder.moduleJdk = context.projectJdk
     builder.sdkDownloadTask = jdkIntent.downloadTask
 
     builder.name = parentStep.name
@@ -518,8 +568,9 @@ abstract class GradleNewProjectWizardStep<ParentStep>(parent: ParentStep) :
     builder.setGradleDistributionType(distributionType.value)
     builder.setGradleHome(gradleHome)
 
+    project.service<JdkDownloadService>().scheduleDownloadSdk(context.projectJdk)
+
     setupProjectFromBuilder(project, builder)
-      ?.also { startJdkDownloadIfNeeded(it) }
   }
 
   class GradleDataView(override val data: ProjectData) : DataView<ProjectData>() {

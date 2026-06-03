@@ -5,8 +5,8 @@ import com.intellij.notebooks.ui.visualization.markerRenderers.NotebookLineMarke
 import com.intellij.notebooks.visualization.context.EditorCellDataContext
 import com.intellij.notebooks.visualization.controllers.selfUpdate.SelfManagedCellController
 import com.intellij.notebooks.visualization.ui.EditorCell
-import com.intellij.notebooks.visualization.ui.addComponentInlay
-import com.intellij.notebooks.visualization.ui.updateManager
+import com.intellij.notebooks.visualization.ui.addNotebookCellComponentInlay
+import com.intellij.notebooks.visualization.ui.notebookViewUpdater
 import com.intellij.openapi.editor.Inlay
 import com.intellij.openapi.editor.ex.RangeHighlighterEx
 import com.intellij.openapi.util.Disposer
@@ -35,15 +35,15 @@ abstract class NotebookCellSelfInlayController(
   private val highlighterController = object : NotebookCellSelfHighlighterController(editorCell) {
     override fun getHighlighterLayer(): Int = gutterHighlighterLayer
 
-    override fun createLineMarkerRender(rangeHighlighter: RangeHighlighterEx): NotebookLineMarkerRenderer? {
+    override fun createLineMarkerRender(rangeHighlighter: RangeHighlighterEx): NotebookLineMarkerRenderer {
       return this@NotebookCellSelfInlayController.createLineMarkerRender(rangeHighlighter)
     }
   }.also { Disposer.register(this, it) }
 
-  abstract fun createLineMarkerRender(createdHighlighter: RangeHighlighterEx): NotebookLineMarkerRenderer?
+  abstract fun createLineMarkerRender(createdHighlighter: RangeHighlighterEx): NotebookLineMarkerRenderer
 
   override fun checkAndRebuildInlays() {
-    editor.updateManager.update { updater ->
+    editor.notebookViewUpdater.update { updater ->
       updater.addInlayOperation {
         editorCell.intervalOrNull ?: return@addInlayOperation
         if (isInlayCorrect()) {
@@ -65,7 +65,7 @@ abstract class NotebookCellSelfInlayController(
 
   private fun createInlay(): Inlay<*> {
     val offset = inlayOffset
-    return editor.addComponentInlay(
+    return editor.addNotebookCellComponentInlay(
       EditorCellDataContext.createContextProvider(editorCell, component),
       isRelatedToPrecedingText = true,
       showAbove = showAbove,
@@ -73,7 +73,6 @@ abstract class NotebookCellSelfInlayController(
       offset = offset
     )
   }
-
 
   internal fun isInlayCorrect(): Boolean {
     return inlay?.isValid == true && inlay?.offset == inlayOffset

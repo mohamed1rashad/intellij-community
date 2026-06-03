@@ -1,8 +1,8 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.pycharm.community.ide.impl.miscProject.impl
 
-import com.intellij.ide.GeneralLocalSettings
 import com.intellij.ide.impl.OpenProjectTask
+import com.intellij.ide.impl.ProjectUtil
 import com.intellij.ide.trustedProjects.TrustedProjects
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
@@ -14,9 +14,6 @@ import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ex.WelcomeScreenProjectProvider
-import com.intellij.platform.ide.progress.ModalTaskOwner
-import com.intellij.platform.ide.progress.TaskCancellation
-import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
@@ -24,15 +21,23 @@ import com.intellij.pycharm.community.ide.impl.PyCharmCommunityCustomizationBund
 import com.intellij.pycharm.community.ide.impl.miscProject.MiscFileType
 import com.intellij.pycharm.community.ide.impl.miscProject.TemplateFileName
 import com.intellij.python.community.services.systemPython.SystemPythonService
-import com.intellij.util.SystemProperties
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.Result
 import com.jetbrains.python.errorProcessing.MessageError
 import com.jetbrains.python.errorProcessing.PyResult
 import com.jetbrains.python.errorProcessing.getOr
 import com.jetbrains.python.mapResult
+import com.jetbrains.python.projectCreation.SystemPythonRequirements
 import com.jetbrains.python.projectCreation.createVenvAndSdk
-import kotlinx.coroutines.*
+import com.jetbrains.python.sdk.ModuleOrProject
+import com.jetbrains.python.sdk.pythonSdk
+import com.jetbrains.python.sdk.runWithSdkConfigurationLock
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.io.IOException
 import java.nio.file.FileAlreadyExistsException
@@ -42,14 +47,10 @@ import kotlin.io.path.createFile
 import kotlin.time.Duration.Companion.milliseconds
 
 internal const val MISC_PROJECT_WITH_WELCOME_NAME: String = "Welcome"
-internal const val MISC_PROJECT_NAME = "PyCharmMiscProject"
+internal const val MISC_PROJECT_NAME: String = "WelcomeScreen"
 
 internal val miscProjectDefaultPath: Path
-  get() {
-    val default = GeneralLocalSettings.getInstance().defaultProjectDirectory
-    val directory = if (default.isEmpty()) Path.of(SystemProperties.getUserHome()) else Path.of(default)
-    return directory.resolve(MISC_PROJECT_NAME)
-  }
+  get() = Path.of(ProjectUtil.getBaseDir()).resolve(MISC_PROJECT_NAME)
 
 /**
  * Creates a project in [projectPath] in a modal window.
@@ -67,10 +68,11 @@ suspend fun createMiscProject(
   systemPythonService: SystemPythonService = SystemPythonService(),
   currentProject: Project? = null,
 ): PyResult<Job> {
-  return createProjectAndSdk(projectPath,
-                             confirmInstallation = confirmInstallation,
-                             systemPythonService = systemPythonService,
-                             currentProject = currentProject,
+  return createOrOpenProjectAndSdk(
+    projectPath,
+    confirmInstallation = confirmInstallation,
+    systemPythonService = systemPythonService,
+    currentProject = currentProject,
   ).mapResult { (project, sdk) ->
     Result.Success(scopeProvider(project).launch {
       withBackgroundProgress(project, PyCharmCommunityCustomizationBundle.message("misc.project.filling.file")) {
@@ -139,7 +141,7 @@ private suspend fun generateFile(where: Path, templateFileName: TemplateFileName
  * Pythons are searched using [systemPythonService].
  * If no Python found and [confirmInstallation] we install it using [SystemPythonService.getInstaller]
  */
-private suspend fun createProjectAndSdk(
+private suspend fun createOrOpenProjectAndSdk(
   projectPath: Path,
   confirmInstallation: suspend () -> Boolean,
   systemPythonService: SystemPythonService,
@@ -148,19 +150,22 @@ private suspend fun createProjectAndSdk(
   val isAlreadyMiscOrWelcomeScreenProject = currentProject != null && WelcomeScreenProjectProvider.isWelcomeScreenProject(currentProject)
   val project = if (isAlreadyMiscOrWelcomeScreenProject) {
     currentProject
-  } else {
+  }
+  else {
     openProject(projectPath)
+  }
+
+  val existingSdk = project.pythonSdk
+  if (isAlreadyMiscOrWelcomeScreenProject && existingSdk != null) {
+    return PyResult.success(project to existingSdk)
   }
 
   val vfsProjectPath = createProjectDir(projectPath).getOr { return it }
   // Even if the misc project might be already opened, it might not have sdk (if it was opened as a welcome project)
   val sdkResult = withContext(Dispatchers.EDT) {
-    runWithModalProgressBlocking(
-      owner = ModalTaskOwner.guess(),
-      title = PyCharmCommunityCustomizationBundle.message("misc.project.generating.env"),
-      cancellation = TaskCancellation.cancellable()
-    ) {
-      createVenvAndSdk(project, confirmInstallation, systemPythonService, vfsProjectPath)
+    runWithSdkConfigurationLock(project) {
+      val systemPythonRequirements = SystemPythonRequirements.ByVersionSpecifier(systemPythonService, confirmInstallation = confirmInstallation)
+      createVenvAndSdk(ModuleOrProject.ProjectOnly(project), systemPythonRequirements, vfsProjectPath)
     }
   }
   val sdk = sdkResult.getOr(PyBundle.message("project.error.cant.venv")) { return it }

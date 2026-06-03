@@ -2,7 +2,11 @@
 package com.intellij.codeInsight.editorActions.moveUpDown;
 
 import com.intellij.lang.ASTNode;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.RangeMarker;
+import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.UserDataHolderBase;
@@ -71,13 +75,12 @@ public abstract class StatementUpDownMover {
       startLine = editor.offsetToLogicalPosition(selectionModel.getSelectionStart()).line;
       LogicalPosition endPos = editor.offsetToLogicalPosition(selectionModel.getSelectionEnd());
       endLine = endPos.column == 0 ? endPos.line : endPos.line+1;
-      range = new LineRange(startLine, endLine);
     }
     else {
       startLine = editor.getCaretModel().getLogicalPosition().line;
       endLine = startLine+1;
-      range = new LineRange(startLine, endLine);
     }
+    range = new LineRange(startLine, endLine);
     return range;
   }
 

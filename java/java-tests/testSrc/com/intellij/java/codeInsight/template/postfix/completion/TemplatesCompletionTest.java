@@ -2,6 +2,7 @@
 package com.intellij.java.codeInsight.template.postfix.completion;
 
 import com.intellij.JavaTestUtil;
+import com.intellij.codeInsight.completion.CompletionItemLookupElement;
 import com.intellij.codeInsight.completion.CompletionType;
 import com.intellij.codeInsight.completion.JavaCompletionAutoPopupTestCase;
 import com.intellij.codeInsight.lookup.LookupElement;
@@ -9,7 +10,13 @@ import com.intellij.codeInsight.lookup.impl.LookupImpl;
 import com.intellij.codeInsight.template.impl.LiveTemplateCompletionContributor;
 import com.intellij.codeInsight.template.postfix.completion.PostfixTemplateLookupElement;
 import com.intellij.codeInsight.template.postfix.settings.PostfixTemplatesSettings;
-import com.intellij.codeInsight.template.postfix.templates.*;
+import com.intellij.codeInsight.template.postfix.templates.ForAscendingPostfixTemplate;
+import com.intellij.codeInsight.template.postfix.templates.InstanceofExpressionPostfixTemplate;
+import com.intellij.codeInsight.template.postfix.templates.JavaPostfixTemplateProvider;
+import com.intellij.codeInsight.template.postfix.templates.NotNullCheckPostfixTemplate;
+import com.intellij.codeInsight.template.postfix.templates.PostfixTemplate;
+import com.intellij.codeInsight.template.postfix.templates.SwitchStatementPostfixTemplate;
+import com.intellij.idea.TestFor;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.testFramework.EdtTestUtil;
 import com.intellij.testFramework.NeedsIndex;
@@ -176,6 +183,18 @@ public class TemplatesCompletionTest extends JavaCompletionAutoPopupTestCase {
 
     type("r");
     myFixture.assertPreferredCompletionItems(selectedIndex, ".par", "parents");
+  }
+
+  @TestFor(issues = "IDEA-388573")
+  public void testInvalidRangeAfterDeletingPostfixDot() {
+    Registry.get("postfix.template.mod.completion.enabled").setValue(true, myFixture.getTestRootDisposable());
+    configureByFile();
+    type(".");
+    LookupImpl lookup = getLookup();
+    assertNotNull(lookup);
+    LookupElement currentItem = lookup.getCurrentItem();
+    assertInstanceOf(currentItem, CompletionItemLookupElement.class);
+    type("\b");
   }
 
   public void testTabCompletionWithTemplatesInAutopopup() {

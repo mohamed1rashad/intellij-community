@@ -6,6 +6,7 @@ import com.intellij.openapi.application.PathManager
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.rules.TempDirectory
 import com.intellij.util.io.Compressor
+import com.intellij.util.io.createDirectories
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.After
@@ -13,8 +14,8 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.io.IOException
+import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.listDirectoryEntries
 
@@ -147,4 +148,141 @@ class StartupActionScriptManagerTest {
     assertThat(source).exists()
     assertThat(scriptFile).doesNotExist()
   }
+
+  @Test fun `executing MP commands only`() {
+    val marketplaceSource = tempDir.newFileNio("marketplace-1.0.zip")
+    Compressor.Zip(marketplaceSource).use { it.addFile("marketplace/content.txt", byteArrayOf()) }
+    val marketplaceDestination = tempDir.newDirectoryPath("marketplace")
+    val unpacked = marketplaceDestination.resolve("marketplace/content.txt")
+
+    StartupActionScriptManager.addActionCommand(StartupActionScriptManager.UnzipCommand(marketplaceSource, marketplaceDestination))
+    StartupActionScriptManager.executeMarketplaceCommandsFromActionScript()
+
+    assertThat(unpacked).exists()
+    assertThat(scriptFile).doesNotExist()
+  }
+
+  @Test fun `preserving non-MP commands`() {
+    val regularFile = tempDir.newFileNio("temp.txt")
+    assertThat(regularFile).exists()
+
+    StartupActionScriptManager.addActionCommand(StartupActionScriptManager.DeleteCommand(regularFile))
+    StartupActionScriptManager.executeMarketplaceCommandsFromActionScript()
+
+    assertThat(regularFile).exists()
+    assertThat(scriptFile).exists()
+    assertThat(StartupActionScriptManager.loadActionScript(scriptFile)).hasSize(1)
+  }
+
+  @Test fun `executing mixed MP and non-MP commands`() {
+    val pluginsDir = tempDir.newDirectoryPath("plugins")
+    val downloadsDir = tempDir.newDirectoryPath("downloads")
+    
+    // Create plugins/marketplace directory with previous.txt
+    val marketplaceDir = pluginsDir.resolve("marketplace")
+    val previousFile = marketplaceDir.resolve("previous.txt")
+    previousFile.parent.createDirectories()
+    Files.writeString(previousFile, "previous content")
+    
+    // Create downloads/marketplace-1.0.zip with marketplace/new.txt
+    val marketplaceZip = downloadsDir.resolve("marketplace-1.0.zip")
+    marketplaceZip.parent.createDirectories()
+    Compressor.Zip(marketplaceZip).use { it.addFile("marketplace/new.txt", "new content".toByteArray()) }
+    
+    // Create downloads/other-marketplace-1.0.zip with other/something.txt
+    val otherMarketplaceZip = downloadsDir.resolve("other-marketplace-1.0.zip")
+    Compressor.Zip(otherMarketplaceZip).use { it.addFile("other/something.txt", "something content".toByteArray()) }
+    
+    // Create downloads/other2-marketplace-2.0.jar with other2/test.txt
+    val other2MarketplaceJar = downloadsDir.resolve("other2-marketplace-2.0.jar")
+    Compressor.Zip(other2MarketplaceJar).use { it.addFile("other2/test.txt", "test content".toByteArray()) }
+    
+    // Create downloads/marketplace/plugin.zip with marketplace-plugin/secret.txt
+    val marketplacePluginZip = downloadsDir.resolve("marketplace/plugin.zip")
+    marketplacePluginZip.parent.createDirectories()
+    Compressor.Zip(marketplacePluginZip).use { it.addFile("marketplace-plugin/secret.txt", "secret content".toByteArray()) }
+    
+    val otherDir = pluginsDir.resolve("other")
+    val other2Dir = pluginsDir.resolve("other2")
+    val marketplacePluginDir = pluginsDir.resolve("marketplace-plugin")
+    
+    // Setup commands
+    StartupActionScriptManager.addActionCommands(listOf(
+      StartupActionScriptManager.DeleteCommand(marketplaceDir),
+      StartupActionScriptManager.UnzipCommand(marketplaceZip, pluginsDir),
+      StartupActionScriptManager.DeleteCommand(marketplaceZip),
+      StartupActionScriptManager.DeleteCommand(otherDir),
+      StartupActionScriptManager.UnzipCommand(otherMarketplaceZip, pluginsDir),
+      StartupActionScriptManager.DeleteCommand(otherMarketplaceZip),
+      StartupActionScriptManager.DeleteCommand(other2Dir),
+      StartupActionScriptManager.CopyCommand(other2MarketplaceJar, pluginsDir),
+      StartupActionScriptManager.DeleteCommand(other2MarketplaceJar),
+      StartupActionScriptManager.DeleteCommand(marketplacePluginDir),
+      StartupActionScriptManager.UnzipCommand(marketplacePluginZip, pluginsDir),
+      StartupActionScriptManager.DeleteCommand(marketplacePluginZip)
+    ))
+    
+    // Execute marketplace commands only
+    StartupActionScriptManager.executeMarketplaceCommandsFromActionScript()
+    
+    // Verify only marketplace commands were executed
+    val newFile = marketplaceDir.resolve("new.txt")
+    assertThat(previousFile).doesNotExist()
+    assertThat(newFile).exists()
+    assertThat(marketplaceZip).exists() // source zip will be deleted after system dir lock
+    
+    // Verify other commands were NOT executed
+    assertThat(otherDir).doesNotExist()
+    assertThat(other2Dir).doesNotExist()
+    assertThat(marketplacePluginDir).doesNotExist()
+    assertThat(otherMarketplaceZip).exists()
+    assertThat(other2MarketplaceJar).exists()
+    assertThat(marketplacePluginZip).exists()
+    
+    // Verify remaining commands are still in script (10 non-marketplace commands)
+    assertThat(scriptFile).exists()
+    assertThat(StartupActionScriptManager.loadActionScript(scriptFile)).hasSize(10)
+  }
+
+  @Test fun `executing MP commands from empty script`() {
+    assertThatCode { StartupActionScriptManager.executeMarketplaceCommandsFromActionScript() }.doesNotThrowAnyException()
+    assertThat(scriptFile).doesNotExist()
+  }
+
+  @Test fun `updating MP plugin`() {
+    val pluginsDir = tempDir.newDirectoryPath("plugins")
+    val oldMarketplaceDir = pluginsDir.resolve("marketplace")
+    val oldFile = oldMarketplaceDir.resolve("old-version.txt")
+    oldFile.parent.createDirectories()
+    Files.writeString(oldFile, "old content")
+
+    val marketplaceZip = tempDir.newFileNio("marketplace-1.2.3.zip")
+    Compressor.Zip(marketplaceZip).use { zip ->
+      zip.addFile("marketplace/new-version.txt", "new content".toByteArray())
+      zip.addFile("marketplace/plugin.xml", "<plugin></plugin>".toByteArray())
+    }
+
+    val newFile = oldMarketplaceDir.resolve("new-version.txt")
+    val pluginXml = oldMarketplaceDir.resolve("plugin.xml")
+
+    assertThat(oldFile).exists()
+    assertThat(newFile).doesNotExist()
+    assertThat(pluginXml).doesNotExist()
+    assertThat(marketplaceZip).exists()
+
+    StartupActionScriptManager.addActionCommands(listOf(
+      StartupActionScriptManager.DeleteCommand(oldMarketplaceDir),
+      StartupActionScriptManager.UnzipCommand(marketplaceZip, pluginsDir),
+      StartupActionScriptManager.DeleteCommand(marketplaceZip)
+    ))
+
+    StartupActionScriptManager.executeMarketplaceCommandsFromActionScript()
+
+    assertThat(oldFile).doesNotExist()
+    assertThat(newFile).exists()
+    assertThat(pluginXml).exists()
+    assertThat(marketplaceZip).exists() // source zip will be deleted after system dir lock
+    assertThat(scriptFile).exists()
+  }
+
 }

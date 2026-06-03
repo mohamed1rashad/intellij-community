@@ -1,10 +1,14 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.java.codeserver.highlighting;
 
 import com.intellij.codeInsight.ExceptionUtil;
 import com.intellij.core.JavaPsiBundle;
 import com.intellij.java.codeserver.core.JavaPsiReferenceUtil;
-import com.intellij.java.codeserver.highlighting.errors.*;
+import com.intellij.java.codeserver.highlighting.errors.JavaAmbiguousCallContext;
+import com.intellij.java.codeserver.highlighting.errors.JavaErrorKind;
+import com.intellij.java.codeserver.highlighting.errors.JavaErrorKinds;
+import com.intellij.java.codeserver.highlighting.errors.JavaIncompatibleTypeErrorContext;
+import com.intellij.java.codeserver.highlighting.errors.JavaMismatchedCallContext;
 import com.intellij.java.syntax.parser.JavaKeywords;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
@@ -14,7 +18,95 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.pom.java.JavaFeature;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.GenericsUtil;
+import com.intellij.psi.ImplicitVariable;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaResolveResult;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.LambdaUtil;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiArrayAccessExpression;
+import com.intellij.psi.PsiArrayInitializerExpression;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiBreakStatement;
+import com.intellij.psi.PsiCall;
+import com.intellij.psi.PsiCallExpression;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassObjectAccessExpression;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiConditionalExpression;
+import com.intellij.psi.PsiConditionalLoopStatement;
+import com.intellij.psi.PsiConstructorCall;
+import com.intellij.psi.PsiDeclarationStatement;
+import com.intellij.psi.PsiDeconstructionPattern;
+import com.intellij.psi.PsiDiamondType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiEllipsisType;
+import com.intellij.psi.PsiEnumConstant;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFunctionalExpression;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiIfStatement;
+import com.intellij.psi.PsiImportStatement;
+import com.intellij.psi.PsiImportStatementBase;
+import com.intellij.psi.PsiImportStaticStatement;
+import com.intellij.psi.PsiInstanceOfExpression;
+import com.intellij.psi.PsiIntersectionType;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaToken;
+import com.intellij.psi.PsiKeyword;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLambdaParameterType;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiMethodReferenceExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiPackageAccessibilityStatement;
+import com.intellij.psi.PsiPackageStatement;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParenthesizedExpression;
+import com.intellij.psi.PsiPatternVariable;
+import com.intellij.psi.PsiPolyadicExpression;
+import com.intellij.psi.PsiPrimaryPattern;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiQualifiedExpression;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReferenceParameterList;
+import com.intellij.psi.PsiResolveHelper;
+import com.intellij.psi.PsiResourceExpression;
+import com.intellij.psi.PsiResourceListElement;
+import com.intellij.psi.PsiResourceVariable;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiSuperExpression;
+import com.intellij.psi.PsiSwitchLabelStatementBase;
+import com.intellij.psi.PsiSyntheticClass;
+import com.intellij.psi.PsiTemplateExpression;
+import com.intellij.psi.PsiThisExpression;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeCastExpression;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterListOwner;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiUnaryExpression;
+import com.intellij.psi.PsiUnnamedPattern;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.SyntheticElement;
 import com.intellij.psi.controlFlow.ControlFlowUtil;
 import com.intellij.psi.impl.IncompleteModelUtil;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceSession;
@@ -23,7 +115,18 @@ import com.intellij.psi.infos.MethodCandidateInfo;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.ImplicitClassSearch;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.FileTypeUtils;
+import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.JavaPsiPatternUtil;
+import com.intellij.psi.util.JavaPsiRecordUtil;
+import com.intellij.psi.util.MethodSignatureUtil;
+import com.intellij.psi.util.PsiFormatUtil;
+import com.intellij.psi.util.PsiFormatUtilBase;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiTypesUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.psi.util.TypesDistinctProver;
 import com.intellij.refactoring.util.RefactoringChangeUtil;
 import com.intellij.util.JavaPsiConstructorUtil;
 import com.intellij.util.ObjectUtils;
@@ -32,7 +135,13 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static java.util.Objects.requireNonNull;
 import static java.util.Objects.requireNonNullElse;
@@ -149,7 +258,7 @@ final class ExpressionChecker {
     if (rType == null) {
       rType = expression.getType();
     }
-    if (lType == null || lType == PsiTypes.nullType()) {
+    if (lType == null || lType.equals(PsiTypes.nullType())) {
       return true;
     }
     if (expression != null && myVisitor.isIncompleteModel() && IncompleteModelUtil.isPotentiallyConvertible(lType, expression)) {
@@ -316,7 +425,7 @@ final class ExpressionChecker {
   }
 
   void checkInferredTypeArguments(@NotNull PsiTypeParameterListOwner listOwner,
-                                  @NotNull PsiMethodCallExpression call,
+                                  @NotNull PsiCallExpression call,
                                   @NotNull PsiSubstitutor substitutor) {
     PsiTypeParameter[] typeParameters = listOwner.getTypeParameters();
     Pair<PsiTypeParameter, PsiType> inferredTypeArgument = GenericsUtil.findTypeParameterWithBoundError(
@@ -708,20 +817,23 @@ final class ExpressionChecker {
 
   void checkVariableExpected(@NotNull PsiExpression expression) {
     PsiExpression lValue;
+    JavaErrorKind.Simple<PsiExpression> errorKind;
     if (expression instanceof PsiAssignmentExpression assignment) {
       lValue = assignment.getLExpression();
+      errorKind = JavaErrorKinds.LVALUE_VARIABLE_EXPECTED;
     }
     else if (PsiUtil.isIncrementDecrementOperation(expression)) {
       lValue = ((PsiUnaryExpression)expression).getOperand();
+      errorKind = JavaErrorKinds.UNARY_OPERATION_VARIABLE_EXPECTED;
     }
     else {
-      lValue = null;
+      return;
     }
     if (lValue != null && !TypeConversionUtil.isLValue(lValue) && !PsiTreeUtil.hasErrorElements(expression) &&
         !(myVisitor.isIncompleteModel() &&
           PsiUtil.skipParenthesizedExprDown(lValue) instanceof PsiReferenceExpression ref &&
           IncompleteModelUtil.canBePendingReference(ref))) {
-      myVisitor.report(JavaErrorKinds.LVALUE_VARIABLE_EXPECTED.create(lValue));
+      myVisitor.report(errorKind.create(lValue));
     }
   }
 
@@ -1096,7 +1208,8 @@ final class ExpressionChecker {
       if (classes.size() == 1 && classes.contains(containingClass)) return;
     }
 
-    myVisitor.report(JavaErrorKinds.CALL_STATIC_INTERFACE_METHOD_QUALIFIER.create(referenceToMethod));
+    PsiElement nameElement = referenceToMethod.getReferenceNameElement();
+    if (nameElement != null) myVisitor.report(JavaErrorKinds.CALL_STATIC_INTERFACE_METHOD_QUALIFIER.create(nameElement));
   }
 
   private static boolean shouldHighlightUnhandledException(@NotNull PsiElement element) {
@@ -1160,24 +1273,15 @@ final class ExpressionChecker {
 
     PsiMethod constructor = result == null ? null : result.getElement();
 
-    boolean applicable = true;
     try {
       PsiDiamondType diamondType =
         constructorCall instanceof PsiNewExpression newExpression ? PsiDiamondType.getDiamondType(newExpression) : null;
       JavaResolveResult staticFactory = diamondType != null ? diamondType.getStaticFactory() : null;
-      if (staticFactory instanceof MethodCandidateInfo info) {
-        if (info.isApplicable()) {
-          result = info;
-          if (constructor == null) {
-            constructor = info.getElement();
-          }
+      if (staticFactory instanceof MethodCandidateInfo info && info.isApplicable()) {
+        result = info;
+        if (constructor == null) {
+          constructor = info.getElement();
         }
-        else {
-          applicable = false;
-        }
-      }
-      else {
-        applicable = result != null && result.isApplicable();
       }
     }
     catch (IndexNotReadyException ignored) {
@@ -1192,24 +1296,39 @@ final class ExpressionChecker {
         constructorCall, new JavaErrorKinds.UnresolvedConstructorContext(aClass, results)));
       return;
     }
+
+    if (constructorCall instanceof PsiNewExpression newExpression) {
+      PsiReferenceParameterList typeArgumentList = newExpression.getTypeArgumentList();
+      myVisitor.myGenericsChecker.checkReferenceTypeArgumentList(constructor, typeArgumentList, result.getSubstitutor());
+    }
+
     if (classReference != null && !constructor.isDefaultConstructor() &&
         (!result.isAccessible() ||
          constructor.hasModifierProperty(PsiModifier.PROTECTED) && callingProtectedConstructorFromDerivedClass(constructorCall, aClass))) {
       myVisitor.myModifierChecker.reportAccessProblem(classReference, constructor, result);
       return;
     }
-    if (!applicable) {
-      checkIncompatibleCall(list, result);
+    if (myVisitor.hasErrorResults()) return;
+
+    if (result.isApplicable()) {
+      checkVarargParameterErasureToBeAccessible(result, constructorCall);
       if (myVisitor.hasErrorResults()) return;
+      checkIncompatibleType(constructorCall, result, constructorCall);
+    }
+    else if (result.isTypeArgumentsApplicable()) {
+      checkIncompatibleCall(list, result);
     }
     else if (constructorCall instanceof PsiNewExpression newExpression) {
+
       PsiReferenceParameterList typeArgumentList = newExpression.getTypeArgumentList();
-      myVisitor.myGenericsChecker.checkReferenceTypeArgumentList(constructor, typeArgumentList, result.getSubstitutor());
-      if (myVisitor.hasErrorResults()) return;
+      PsiSubstitutor applicabilitySubstitutor = result.getSubstitutor(false);
+      if (typeArgumentList.getTypeArguments().length == 0 && constructor.hasTypeParameters()) {
+        checkInferredTypeArguments(constructor, newExpression, applicabilitySubstitutor);
+      }
+      else {
+        myVisitor.myGenericsChecker.checkReferenceTypeArgumentList(constructor, typeArgumentList, applicabilitySubstitutor);
+      }
     }
-    checkVarargParameterErasureToBeAccessible(result, constructorCall);
-    if (myVisitor.hasErrorResults()) return;
-    checkIncompatibleType(constructorCall, result, constructorCall);
   }
 
   private static boolean callingProtectedConstructorFromDerivedClass(@NotNull PsiConstructorCall place,
@@ -1560,9 +1679,12 @@ final class ExpressionChecker {
     PsiClass parentClass = constructor.getContainingClass();
     if (parentClass == null) return;
 
-    // references to private methods from the outer class are not calls to super methods
+    // references to private methods and fields from the outer class are not calls to super methods
     // even if the outer class is the superclass
-    if (resolved instanceof PsiMember member && member.hasModifierProperty(PsiModifier.PRIVATE) && referencedClass != parentClass) return;
+    if (resolved instanceof PsiMember member && member.hasModifierProperty(PsiModifier.PRIVATE) && 
+        referencedClass != parentClass && !(member instanceof PsiClass)) {
+      return;
+    }
     // field or method should be declared in this class or super
     if (!InheritanceUtil.isInheritorOrSelf(parentClass, referencedClass, true)) return;
     // and point to our instance
@@ -1587,6 +1709,10 @@ final class ExpressionChecker {
       if (parent instanceof PsiNewExpression newExpression &&
           newExpression.isArrayCreation() &&
           newExpression.getClassOrAnonymousClassReference() == expression) {
+        return;
+      }
+      if (parent instanceof PsiNewExpression newExpression && newExpression.getQualifier() != null) {
+        // The qualifier will be checked instead
         return;
       }
       if (parent instanceof PsiThisExpression || parent instanceof PsiSuperExpression) return;

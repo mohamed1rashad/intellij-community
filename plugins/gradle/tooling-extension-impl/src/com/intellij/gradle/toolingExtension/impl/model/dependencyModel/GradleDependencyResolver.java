@@ -13,8 +13,22 @@ import com.intellij.gradle.toolingExtension.util.GradleVersionUtil;
 import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.api.Project;
-import org.gradle.api.artifacts.*;
-import org.gradle.api.artifacts.component.*;
+import org.gradle.api.artifacts.ArtifactView;
+import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.LenientConfiguration;
+import org.gradle.api.artifacts.ModuleVersionIdentifier;
+import org.gradle.api.artifacts.ModuleVersionSelector;
+import org.gradle.api.artifacts.ResolvedArtifact;
+import org.gradle.api.artifacts.ResolvedDependency;
+import org.gradle.api.artifacts.UnresolvedDependency;
+import org.gradle.api.artifacts.component.BuildIdentifier;
+import org.gradle.api.artifacts.component.ComponentIdentifier;
+import org.gradle.api.artifacts.component.ComponentSelector;
+import org.gradle.api.artifacts.component.LibraryBinaryIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentSelector;
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier;
+import org.gradle.api.artifacts.component.ProjectComponentSelector;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.IvyArtifactRepository;
 import org.gradle.api.artifacts.result.DependencyResult;
@@ -26,13 +40,27 @@ import org.gradle.internal.resolve.ModuleVersionResolveException;
 import org.gradle.util.Path;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.gradle.model.*;
+import org.jetbrains.plugins.gradle.model.AbstractExternalDependency;
+import org.jetbrains.plugins.gradle.model.DefaultExternalLibraryDependency;
+import org.jetbrains.plugins.gradle.model.DefaultExternalProjectDependency;
+import org.jetbrains.plugins.gradle.model.DefaultFileCollectionDependency;
+import org.jetbrains.plugins.gradle.model.DefaultUnresolvedExternalDependency;
 import org.jetbrains.plugins.gradle.model.ExternalDependency;
+import org.jetbrains.plugins.gradle.model.ExternalProjectDependency;
 import org.jetbrains.plugins.gradle.model.FileCollectionDependency;
 import org.jetbrains.plugins.gradle.tooling.ModelBuilderContext;
 
 import java.io.File;
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 /**
  * @author Vladislav.Soroka
@@ -40,6 +68,22 @@ import java.util.*;
 public final class GradleDependencyResolver {
 
   private static final boolean IS_83_OR_BETTER = GradleVersionUtil.isCurrentGradleAtLeast("8.3");
+
+  // Gradle 6.4+
+  private static final Predicate<String> UNRESOLVED_DEPENDENCY_JVM_PREDICATE = Pattern.compile(
+    // Gradle 8.8+
+    "(Dependency resolution is looking for a library compatible with JVM runtime version (\\d+), " +
+    "but '(.+?)' is only compatible with JVM runtime version (\\d+) or newer\\.)" +
+    "|" +
+    // Gradle 6.4-8.7
+    "(No matching variant of (.+?) was found\\. " +
+    "The consumer was configured to find (?:a library for use during (?:compile-time|runtime),|an API of a library) compatible with Java)"
+  ).asPredicate();
+
+  // Gradle 6.0-6.3
+  private static final Predicate<String> UNRESOLVED_DEPENDENCY_JVM_6_0_PREDICATE = Pattern.compile(
+    "Required org.gradle.jvm.version '(\\d+)' (?:but no value provided|and found incompatible value '(\\d+)')\\."
+  ).asPredicate();
 
   private final @NotNull Project myProject;
   private final @NotNull GradleDependencyDownloadPolicy myDownloadPolicy;
@@ -390,26 +434,11 @@ public final class GradleDependencyResolver {
       if (!allowedDependencyGroups.isEmpty() && !allowedDependencyGroups.contains(unresolvedDependency.getSelector().getGroup())) {
         continue;
       }
-      MyModuleVersionSelector moduleVersionSelector = null;
       Throwable problem = unresolvedDependency.getProblem();
       if (problem.getCause() != null) {
         problem = problem.getCause();
       }
-      try {
-        if (problem instanceof ModuleVersionResolveException) {
-          ComponentSelector componentSelector = ((ModuleVersionResolveException)problem).getSelector();
-          if (componentSelector instanceof ModuleComponentSelector) {
-            ModuleComponentSelector moduleComponentSelector = (ModuleComponentSelector)componentSelector;
-            moduleVersionSelector = new MyModuleVersionSelector(
-              moduleComponentSelector.getModule(),
-              moduleComponentSelector.getGroup(),
-              moduleComponentSelector.getVersion()
-            );
-          }
-        }
-      }
-      catch (Throwable ignore) {
-      }
+      MyModuleVersionSelector moduleVersionSelector = extractModuleVersionSelector(unresolvedDependency, problem);
       if (moduleVersionSelector == null) {
         problem = unresolvedDependency.getProblem();
         ModuleVersionSelector selector = unresolvedDependency.getSelector();
@@ -423,6 +452,39 @@ public final class GradleDependencyResolver {
       result.add(dependency);
     }
     return result;
+  }
+
+  private static @Nullable MyModuleVersionSelector extractModuleVersionSelector(
+    @NotNull UnresolvedDependency unresolvedDependency,
+    @NotNull Throwable problem
+  ) {
+    try {
+      // instanceof may throw an exception if the class is no longer available in some new Gradle version
+      if (problem instanceof ModuleVersionResolveException) {
+        ComponentSelector componentSelector = ((ModuleVersionResolveException)problem).getSelector();
+        if (componentSelector instanceof ModuleComponentSelector) {
+          ModuleComponentSelector moduleComponentSelector = (ModuleComponentSelector)componentSelector;
+          return new MyModuleVersionSelector(
+            moduleComponentSelector.getModule(),
+            moduleComponentSelector.getGroup(),
+            moduleComponentSelector.getVersion()
+          );
+        }
+      }
+    }
+    catch (Throwable ignore) {
+    }
+    if (UNRESOLVED_DEPENDENCY_JVM_PREDICATE.test(problem.getMessage())) {
+      ModuleVersionSelector selector = unresolvedDependency.getSelector();
+      return new MyModuleVersionSelector(selector.getName(), selector.getGroup(), selector.getVersion());
+    }
+    else if ((problem.getMessage().startsWith("Cannot choose between the following variants of") ||
+              problem.getMessage().startsWith("Unable to find a matching variant of")) &&
+             UNRESOLVED_DEPENDENCY_JVM_6_0_PREDICATE.test(problem.getMessage())) {
+      ModuleVersionSelector selector = unresolvedDependency.getSelector();
+      return new MyModuleVersionSelector(selector.getName(), selector.getGroup(), selector.getVersion());
+    }
+    return null;
   }
 
   private static @NotNull String getBuildName(@NotNull ProjectComponentIdentifier projectComponentIdentifier) {

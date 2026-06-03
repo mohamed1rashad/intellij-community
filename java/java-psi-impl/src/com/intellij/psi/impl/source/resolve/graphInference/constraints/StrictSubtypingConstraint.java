@@ -1,8 +1,20 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.source.resolve.graphInference.constraints;
 
+import com.intellij.codeInsight.Nullability;
+import com.intellij.codeInsight.TypeNullability;
 import com.intellij.core.JavaPsiBundle;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiCapturedWildcardType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiIntersectionType;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypes;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceBound;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceSession;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceVariable;
@@ -10,8 +22,13 @@ import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.ArrayUtil;
+import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class StrictSubtypingConstraint implements ConstraintFormula {
   private PsiType myS;
@@ -72,12 +89,14 @@ public class StrictSubtypingConstraint implements ConstraintFormula {
 
     InferenceVariable inferenceVariable = session.getInferenceVariable(myS);
     if (inferenceVariable != null) {
-      InferenceVariable.addBound(myS, myT, InferenceBound.UPPER, session);
+      PsiType bound = adjustBoundNullity(myT, myS);
+      InferenceVariable.addBound(myS, bound, InferenceBound.UPPER, session);
       return true;
     }
     inferenceVariable = session.getInferenceVariable(myT);
     if (inferenceVariable != null) {
-      InferenceVariable.addBound(myT, myS, InferenceBound.LOWER, session);
+      PsiType bound = adjustBoundNullity(myS, myT);
+      InferenceVariable.addBound(myT, bound, InferenceBound.LOWER, session);
       return true;
     }
     if (myT instanceof PsiArrayType) {
@@ -170,6 +189,13 @@ public class StrictSubtypingConstraint implements ConstraintFormula {
     }
 
     return true;
+  }
+
+  private static @NotNull PsiType adjustBoundNullity(@NotNull PsiType bound, @NotNull PsiType other) {
+    return bound.getNullability().nullability() == Nullability.NULLABLE &&
+           other.getNullability().nullability() == Nullability.NULLABLE
+           ? bound.withNullability(TypeNullability.UNKNOWN)
+           : bound;
   }
 
   public static PsiClassType getSubclassType(PsiClass containingClass, PsiType sType, boolean capture) {

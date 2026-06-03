@@ -71,7 +71,7 @@ a:com.intellij.diff.DiffManager
 - a:showDiff(com.intellij.openapi.project.Project,com.intellij.diff.requests.DiffRequest):V
 - a:showDiff(com.intellij.openapi.project.Project,com.intellij.diff.requests.DiffRequest,com.intellij.diff.DiffDialogHints):V
 - a:showMerge(com.intellij.openapi.project.Project,com.intellij.diff.merge.MergeRequest):V
-a:com.intellij.diff.DiffManagerEx
+Fa:com.intellij.diff.DiffManagerEx
 - com.intellij.diff.DiffManager
 - <init>():V
 - a:getDiffTools():java.util.List
@@ -139,6 +139,7 @@ com.intellij.diff.FocusableContext
 com.intellij.diff.FrameDiffTool
 - com.intellij.diff.DiffTool
 - a:createComponent(com.intellij.diff.DiffContext,com.intellij.diff.requests.DiffRequest):com.intellij.diff.FrameDiffTool$DiffViewer
+- getIcon():javax.swing.Icon
 - getToolType():com.intellij.diff.DiffToolType
 com.intellij.diff.FrameDiffTool$DiffViewer
 - com.intellij.openapi.Disposable
@@ -238,7 +239,6 @@ com.intellij.diff.contents.DiffContent
 - com.intellij.openapi.util.UserDataHolder
 - a:getContentType():com.intellij.openapi.fileTypes.FileType
 - getNavigatable():com.intellij.pom.Navigatable
-- getOpenFileDescriptor():com.intellij.openapi.fileEditor.OpenFileDescriptor
 - onAssigned(Z):V
 a:com.intellij.diff.contents.DiffContentBase
 - com.intellij.openapi.util.UserDataHolderBase
@@ -254,7 +254,6 @@ com.intellij.diff.contents.DocumentContent
 - getHighlightFile():com.intellij.openapi.vfs.VirtualFile
 - getLineSeparator():com.intellij.util.LineSeparator
 - getNavigatable(com.intellij.diff.util.LineCol):com.intellij.pom.Navigatable
-- getOpenFileDescriptor(I):com.intellij.openapi.fileEditor.OpenFileDescriptor
 - hasBom():java.lang.Boolean
 c:com.intellij.diff.contents.EmptyContent
 - com.intellij.diff.contents.DiffContentBase
@@ -263,6 +262,17 @@ c:com.intellij.diff.contents.EmptyContent
 com.intellij.diff.contents.FileContent
 - com.intellij.diff.contents.DiffContent
 - a:getFile():com.intellij.openapi.vfs.VirtualFile
+c:com.intellij.diff.impl.AssignmentTracker
+- sf:Companion:com.intellij.diff.impl.AssignmentTracker$Companion
+- <init>():V
+- f:onAssigned(Z):V
+- sf:onContentsAssigned(java.util.List,Z):V
+- onEachAssignment():V
+- onEachUnassignment():V
+- onFirstAssignment():V
+- onLastUnassignment():V
+f:com.intellij.diff.impl.AssignmentTracker$Companion
+- f:onContentsAssigned(java.util.List,Z):V
 a:com.intellij.diff.merge.BinaryMergeRequest
 - com.intellij.diff.merge.ThreesideMergeRequest
 - <init>():V
@@ -319,9 +329,11 @@ e:com.intellij.diff.merge.MergeResult
 - s:valueOf(java.lang.String):com.intellij.diff.merge.MergeResult
 - s:values():com.intellij.diff.merge.MergeResult[]
 com.intellij.diff.merge.MergeTool
+- sf:Companion:com.intellij.diff.merge.MergeTool$Companion
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - a:canShow(com.intellij.diff.merge.MergeContext,com.intellij.diff.merge.MergeRequest):Z
 - a:createComponent(com.intellij.diff.merge.MergeContext,com.intellij.diff.merge.MergeRequest):com.intellij.diff.merge.MergeTool$MergeViewer
+f:com.intellij.diff.merge.MergeTool$Companion
 com.intellij.diff.merge.MergeTool$MergeViewer
 - com.intellij.openapi.Disposable
 - a:dispose():V
@@ -329,8 +341,8 @@ com.intellij.diff.merge.MergeTool$MergeViewer
 - a:getPreferredFocusedComponent():javax.swing.JComponent
 - a:getResolveAction(com.intellij.diff.merge.MergeResult):javax.swing.Action
 - a:init():com.intellij.diff.merge.MergeTool$ToolbarComponents
-c:com.intellij.diff.merge.MergeTool$ToolbarComponents
-- closeHandler:com.intellij.openapi.util.BooleanGetter
+f:com.intellij.diff.merge.MergeTool$ToolbarComponents
+- closeHandler:kotlin.jvm.functions.Function0
 - statusPanel:javax.swing.JComponent
 - toolbarActions:java.util.List
 - <init>():V

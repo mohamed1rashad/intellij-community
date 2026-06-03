@@ -1,8 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.eel
 
-import com.intellij.platform.eel.*
+import com.intellij.platform.eel.EelConnectionError
+import com.intellij.platform.eel.EelProcess
+import com.intellij.platform.eel.EelTunnelsApi
+import com.intellij.platform.eel.ReadResult
 import com.intellij.platform.eel.channels.sendWholeBuffer
+import com.intellij.platform.eel.getAcceptorForRemotePort
+import com.intellij.platform.eel.getConnectionToRemotePort
+import com.intellij.platform.eel.listenOnUnixSocket
+import com.intellij.platform.eel.provider.LocalEelDescriptor
 import com.intellij.platform.eel.provider.asEelPath
 import com.intellij.platform.eel.provider.localEel
 import com.intellij.platform.eel.provider.utils.consumeAsInputStream
@@ -46,6 +53,11 @@ class EelLocalTunnelApiTest {
   }
 
   @Test
+  fun testDescriptor() {
+    Assertions.assertEquals(LocalEelDescriptor, localEel.tunnels.descriptor)
+  }
+
+  @Test
   fun testCheckFailureConnection(): Unit = timeoutRunBlocking(5.minutes) {
     try {
       localEel.tunnels.getConnectionToRemotePort().port(22U).hostname("google.com").timeout(5.seconds).eelIt()
@@ -70,16 +82,21 @@ class EelLocalTunnelApiTest {
   fun testServerListensForConnection(): Unit = timeoutRunBlocking(1.minutes) {
     val helper = clientExecutor.createBuilderToExecuteMain(localEel.exec).eelIt()
     val acceptor = localEel.tunnels.getAcceptorForRemotePort().eelIt()
-    helper.stdin.sendWholeText(acceptor.boundAddress.port.toString() + "\n")
-    val conn = acceptor.incomingConnections.receive()
     try {
-      val buff = ByteBuffer.allocate(1024)
-      conn.receiveChannel.receive(buff)
-      val fromServer = NetworkConstants.fromByteBuffer(buff.flip())
-      assertEquals(NetworkConstants.HELLO_FROM_CLIENT, fromServer)
+      helper.stdin.sendWholeText(acceptor.boundAddress.port.toString() + "\n")
+      val conn = acceptor.incomingConnections.receive()
+      try {
+        val buff = ByteBuffer.allocate(1024)
+        conn.receiveChannel.receive(buff)
+        val fromServer = NetworkConstants.fromByteBuffer(buff.flip())
+        assertEquals(NetworkConstants.HELLO_FROM_CLIENT, fromServer)
+      }
+      finally {
+        conn.close()
+      }
     }
     finally {
-      conn.close()
+        acceptor.close()
     }
   }
 
@@ -119,7 +136,7 @@ class EelLocalTunnelApiTest {
       Assertions.assertEquals(helloFromClient.decodeToString(), bufferRecv.flip().decodeString())
       client.join()
       rx.closeForReceive()
-      tx.close()
+      tx.close(null)
     }
   }
 

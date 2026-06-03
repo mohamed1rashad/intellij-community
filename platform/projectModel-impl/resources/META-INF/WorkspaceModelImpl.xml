@@ -7,7 +7,7 @@
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
-    <projectService serviceInterface="com.intellij.platform.backend.workspace.WorkspaceModel"
+    <projectService serviceInterface="com.intellij.platform.backend.workspace.WorkspaceModel" open="true"
                     serviceImplementation="com.intellij.workspaceModel.ide.impl.WorkspaceModelImpl"/>
 
     <postStartupActivity implementation="com.intellij.workspaceModel.ide.impl.WorkspaceEntitiesLifecycleActivity"/>
@@ -29,8 +29,6 @@
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
-    <projectService serviceInterface="com.intellij.openapi.roots.SingleFileSourcesTracker"
-                    serviceImplementation="com.intellij.openapi.roots.DefaultSingleFileSourcesTracker"/>
     <projectService serviceInterface="com.intellij.workspaceModel.core.fileIndex.WorkspaceFileIndex"
                     serviceImplementation="com.intellij.workspaceModel.core.fileIndex.impl.WorkspaceFileIndexImpl"/>
     <projectPreInit id="workspaceFileIndexInitializer" implementation="com.intellij.workspaceModel.ide.impl.WorkspaceFileIndexInitializer"/>
@@ -45,6 +43,8 @@
                  description="Enable workspace model checking for accessing bridges from WSM listeners"/>
     <registryKey key="ide.workspace.model.per.environment.model.separation" defaultValue="true" restartRequired="true"
                  description="Enable existence of multiple workspace models, one per each isolated environment"/>
+    <registryKey key="ide.workspace.model.dump.on.every.wsm.update" defaultValue="false" restartRequired="false"
+                 description="Dump workspace model to log directory on every WSM update"/>
     <registryKey key="use.workspace.file.index.for.partial.scanning" defaultValue="true" restartRequired="true"
                  description="If enabled, relies on events from WorkspaceFileIndex for partial scanning"/>
 

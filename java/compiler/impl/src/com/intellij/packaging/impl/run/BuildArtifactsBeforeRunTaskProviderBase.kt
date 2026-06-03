@@ -10,8 +10,8 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.ide.DataManager
 import com.intellij.java.workspace.entities.ArtifactEntity
 import com.intellij.openapi.actionSystem.DataContext
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.edtWriteAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.compiler.JavaCompilerBundle
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -20,7 +20,11 @@ import com.intellij.openapi.ui.DialogBuilder
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.packaging.artifacts.*
+import com.intellij.packaging.artifacts.Artifact
+import com.intellij.packaging.artifacts.ArtifactListener
+import com.intellij.packaging.artifacts.ArtifactManager
+import com.intellij.packaging.artifacts.ArtifactPointer
+import com.intellij.packaging.artifacts.ArtifactPointerManager
 import com.intellij.platform.backend.workspace.impl.WorkspaceModelInternal
 import com.intellij.platform.backend.workspace.useReactiveWorkspaceModelApi
 import com.intellij.platform.backend.workspace.workspaceModel
@@ -111,7 +115,7 @@ abstract class BuildArtifactsBeforeRunTaskProviderBase<T : BuildArtifactsBeforeR
 
   override fun executeTask(context: DataContext, configuration: RunConfiguration, env: ExecutionEnvironment, task: T): Boolean {
     val artifacts = ArrayList<Artifact>()
-    ApplicationManager.getApplication().runReadAction {
+    runReadActionBlocking {
       for (pointer in task.artifactPointers) {
         pointer.artifact?.let(artifacts::add)
       }

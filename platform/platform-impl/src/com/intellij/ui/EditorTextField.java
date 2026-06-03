@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
@@ -18,7 +18,13 @@ import com.intellij.openapi.command.UndoConfirmationPolicy;
 import com.intellij.openapi.command.impl.UndoManagerImpl;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.EditorSettings;
+import com.intellij.openapi.editor.EditorThreading;
+import com.intellij.openapi.editor.ScrollType;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
@@ -51,6 +57,9 @@ import com.intellij.toolWindow.InternalDecoratorImpl;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.dsl.builder.DslComponentProperty;
 import com.intellij.ui.dsl.builder.VerticalComponentGap;
+import com.intellij.ui.dsl.gridLayout.GridLayout;
+import com.intellij.ui.dsl.gridLayout.GridLayoutKt;
+import com.intellij.ui.dsl.gridLayout.UnscaledGaps;
 import com.intellij.ui.dsl.gridLayout.UnscaledGapsKt;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.IJSwingUtilities;
@@ -67,9 +76,25 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.accessibility.Accessible;
 import javax.accessibility.AccessibleContext;
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.CellRendererPane;
+import javax.swing.JComponent;
+import javax.swing.JTable;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+import java.awt.AWTEvent;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.HierarchyEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -161,7 +186,7 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
         if (myEditor == null) initEditor();
       }
     });
-    putClientProperty(DslComponentProperty.VISUAL_PADDINGS, UnscaledGapsKt.UnscaledGaps(3));
+    putClientProperty(DslComponentProperty.VISUAL_PADDINGS, UnscaledGaps.EMPTY);
     putClientProperty(DslComponentProperty.VERTICAL_COMPONENT_GAP, VerticalComponentGap.BOTH);
   }
 
@@ -175,6 +200,13 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
     Disposer.register(disposable, () -> {
       myManualDisposable = null;
       deInitEditor();
+      // This is a part of the manual dispose process, but not the automatic one
+      // (when deInitEditor is called from removeNotify).
+      // This is intentional, as in the automatic mode the component lifecycle is not determined:
+      // it can be disposed and un-disposed ad infinitum.
+      // Moreover, the document can still be modified while it's not showing, and the listeners should continue to work.
+      // With the manual mode, however, it is expected that once the manual disposable is disposed, the whole thing is gone forever.
+      uninstallDocumentListener(true);
     });
     myManualDisposable = disposable;
   }
@@ -329,7 +361,7 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
 
   @Override
   public void setText(final @Nullable String text) {
-    WriteIntentReadAction.run((Runnable)() ->
+    WriteIntentReadAction.run(() ->
       CommandProcessor.getInstance().executeCommand(getProject(), () ->
         ApplicationManager.getApplication().runWriteAction(() -> {
           LineSeparator separator = LINE_SEPARATOR_KEY.get(myDocument);
@@ -516,7 +548,7 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
       });
     }
     Disposer.register(myDisposable, () -> {
-      WriteIntentReadAction.run((Runnable)() -> {
+      WriteIntentReadAction.run(() -> {
         // remove traces of this editor from UndoManager to avoid leaks
         Document document = myDocument;
         if (document != null) {
@@ -529,7 +561,7 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
     });
   }
 
-  private EditorEx initEditor() {
+  private @NotNull EditorEx initEditor() {
     if (myDisposable == null) {
       initEditorDisposables();
     }
@@ -716,7 +748,7 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
       if (highlighter != null) editor.setHighlighter(highlighter);
     }
 
-    WriteIntentReadAction.run((Runnable)() -> {
+    WriteIntentReadAction.run(() -> {
       editor.getSettings().setCaretRowShown(false);
 
       editor.setOneLineMode(myOneLineMode);
@@ -724,6 +756,7 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
 
       if (!shouldHaveBorder()) {
         editor.setBorder(null);
+        updateVisualPaddings(UnscaledGaps.EMPTY);
       }
 
       if (myIsViewer) {
@@ -810,6 +843,17 @@ public class EditorTextField extends NonOpaquePanel implements EditorTextCompone
 
   protected void setupBorder(@NotNull EditorEx editor) {
     editor.setBorder(new DarculaEditorTextFieldBorder(this, editor));
+    updateVisualPaddings(UnscaledGapsKt.UnscaledGaps(3));
+  }
+
+  private void updateVisualPaddings(@NotNull UnscaledGaps visualPaddings) {
+    putClientProperty(DslComponentProperty.VISUAL_PADDINGS, visualPaddings);
+
+    var parent = getParent();
+    if (parent != null && parent.getLayout() instanceof GridLayout) {
+      // Update padding if the editor text field is already in the view hierarchy
+      GridLayoutKt.setVisualPadding(this, visualPaddings);
+    }
   }
 
   private void setupEditorFont(final EditorEx editor) {

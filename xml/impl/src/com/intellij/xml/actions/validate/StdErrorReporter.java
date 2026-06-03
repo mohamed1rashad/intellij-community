@@ -3,6 +3,7 @@ package com.intellij.xml.actions.validate;
 
 import com.intellij.ide.errorTreeView.NewErrorTreeViewPanel;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -14,7 +15,13 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.psi.PsiFile;
-import com.intellij.ui.content.*;
+import com.intellij.ui.content.Content;
+import com.intellij.ui.content.ContentFactory;
+import com.intellij.ui.content.ContentManager;
+import com.intellij.ui.content.ContentManagerEvent;
+import com.intellij.ui.content.ContentManagerListener;
+import com.intellij.ui.content.ContentManagerUtil;
+import com.intellij.ui.content.MessageView;
 import com.intellij.util.ui.MessageCategory;
 import com.intellij.xml.XmlBundle;
 import org.jetbrains.annotations.NotNull;
@@ -44,7 +51,7 @@ public final class StdErrorReporter extends ErrorReporter {
     myErrorsView.setProcessController(processController);
     openMessageView();
     processController.setFuture(ApplicationManager.getApplication().executeOnPooledThread(
-      () -> ApplicationManager.getApplication().runReadAction(() -> super.startProcessing())));
+      () -> ReadAction.runBlocking(() -> super.startProcessing())));
 
     ToolWindowManager.getInstance(myProject).getToolWindow(ToolWindowId.MESSAGES_WINDOW).activate(null);
   }

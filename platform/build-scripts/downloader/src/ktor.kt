@@ -6,7 +6,7 @@ package org.jetbrains.intellij.build
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
 import io.ktor.client.call.body
-import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.engine.java.Java
 import io.ktor.client.plugins.HttpRequestRetry
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.UserAgent
@@ -19,20 +19,15 @@ import io.ktor.client.plugins.auth.providers.basic
 import io.ktor.client.plugins.auth.providers.bearer
 import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.request.get
-import io.ktor.client.request.post
+import io.ktor.client.request.head
 import io.ktor.client.request.prepareGet
-import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.utils.io.ByteWriteChannel
-import io.ktor.utils.io.copyAndClose
 import io.ktor.utils.io.copyTo
-import io.ktor.utils.io.core.use
 import io.ktor.utils.io.jvm.nio.writeSuspendSession
-import io.ktor.utils.io.reader
 import io.ktor.utils.io.writer
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.common.Attributes
@@ -44,8 +39,8 @@ import io.opentelemetry.extension.kotlin.asContextElement
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jetbrains.intellij.build.dependencies.BuildDependenciesCommunityRoot
 import org.jetbrains.intellij.build.dependencies.BuildDependenciesDownloader
@@ -70,12 +65,8 @@ const val SPACE_REPO_HOST: String = "packages.jetbrains.team"
 
 private val httpClient = SynchronizedClearableLazy {
   // HttpTimeout is not used - CIO engine handles that
-  HttpClient(OkHttp) {
+  HttpClient(Java) {
     expectSuccess = true
-
-    engine {
-      clientCacheSize = 0
-    }
 
     install(HttpTimeout) {
       requestTimeoutMillis = 2.hours.inWholeMilliseconds
@@ -185,9 +176,9 @@ suspend fun downloadAsBytes(url: String): ByteArray = spanBuilder("download").se
   }
 }
 
-suspend fun postData(url: String, data: ByteArray): Unit = withContext(Dispatchers.IO) {
-  httpClient.value.post(url) {
-    setBody(data)
+suspend fun lastModifiedFromHeadRequest(url: String): String? = spanBuilder("last-modified").setAttribute("url", url).useWithScope {
+  withContext(Dispatchers.IO) {
+    httpClient.value.head(url).headers["Last-Modified"]
   }
 }
 
@@ -200,12 +191,12 @@ suspend fun downloadAsText(url: String): String {
 }
 
 fun downloadFileToCacheLocationSync(url: String, communityRoot: BuildDependenciesCommunityRoot): Path {
-  return runBlocking(Dispatchers.IO) {
+  return runBlocking {
     downloadFileToCacheLocation(url, communityRoot)
   }
 }
 
-fun downloadFileToCacheLocationSync(url: String, communityRoot: BuildDependenciesCommunityRoot, credentialsProvider: () -> Credentials): Path = runBlocking(Dispatchers.IO) {
+fun downloadFileToCacheLocationSync(url: String, communityRoot: BuildDependenciesCommunityRoot, credentialsProvider: () -> Credentials): Path = runBlocking {
   downloadFileToCacheLocation(url, communityRoot, credentialsProvider)
 }
 
@@ -245,49 +236,50 @@ suspend fun downloadFileToCacheLocation(url: String, communityRoot: BuildDepende
   })
 }
 
-private fun downloadFileIsRetryAllowed(e: Exception): Boolean =
-  when (e) {
+private fun downloadFileIsRetryAllowed(e: Exception): Boolean {
+  return when (e) {
     is SocketException if e.message?.contains("Operation not permitted") == true -> {
       // Most likely, in a Bazel sandbox where network access was disabled, retry is useless
       false
     }
     else -> true
   }
+}
 
 private suspend fun downloadFileToCacheLocation(
   url: String,
   communityRoot: BuildDependenciesCommunityRoot,
   authConfigSettings: (AuthConfig.() -> Unit)?,
-): Path {
+): Path = withContext(Dispatchers.IO) {
   BuildDependenciesDownloader.cleanUpIfRequired(communityRoot)
 
   val target = BuildDependenciesDownloader.getTargetFile(communityRoot, url)
   val targetPath = target.toString()
-  val lock = fileLocks.getLock(targetPath)
-  lock.lock()
-  try {
+  fileLocks.getLock(targetPath).withLock {
     if (Files.exists(target)) {
-      Span.current().addEvent("use asset from cache", Attributes.of(
-        AttributeKey.stringKey("url"), url,
-        AttributeKey.stringKey("target"), targetPath,
-      ))
+      Span.current().addEvent(
+        "use asset from cache", Attributes.of(
+          AttributeKey.stringKey("url"), url,
+          AttributeKey.stringKey("target"), targetPath,
+        )
+      )
 
       // update file modification time to maintain FIFO caches, i.e., in a persistent cache dir on TeamCity agent
       try {
         Files.setLastModifiedTime(target, FileTime.from(Instant.now()))
-      } catch (e: IOException) {
+      }
+      catch (e: IOException) {
         Span.current().addEvent("update asset file modification time failed: $e")
       }
-      return target
+      return@withLock target
     }
 
-    println(" * Downloading $url")
+    System.err.println(" * Downloading $url")
 
-    return spanBuilder("download").setAttribute("url", url).setAttribute("target", targetPath).useWithScope {
+    spanBuilder("download").setAttribute("url", url).setAttribute("target", targetPath).useWithScope {
       retryWithExponentialBackOff(isRetryAllowed = { e -> downloadFileIsRetryAllowed(e) }) {
         // save to the same disk to ensure that move will be atomic and not as a copy
-        val tempFile = target.parent
-          .resolve("${target.fileName}-${(Instant.now().epochSecond - 1634886185).toString(36)}-${Instant.now().nano.toString(36)}".take(255))
+        val tempFile = target.parent.resolve("${target.fileName}-${(Instant.now().epochSecond - 1634886185).toString(36)}-${Instant.now().nano.toString(36)}".take(255))
         Files.deleteIfExists(tempFile)
         try {
           // each io.ktor.client.HttpClient.config call creates a new client
@@ -360,19 +352,20 @@ private suspend fun downloadFileToCacheLocation(
       target
     }
   }
-  finally {
-    lock.unlock()
-  }
 }
 
 suspend fun downloadFileWithoutCaching(url: String, tempFile: Path) {
-  doDownloadFileWithoutCaching(httpClient.get(), url, tempFile)
+  doDownloadFileWithoutCaching(client = httpClient.get(), url = url, file = tempFile)
 }
 
+// https://github.com/ktorio/ktor/issues/5127
+// https://github.com/ktorio/ktor/pull/5128
 private suspend fun doDownloadFileWithoutCaching(client: HttpClient, url: String, file: Path): HttpResponse {
   return client.prepareGet(url).execute {
-    coroutineScope {
-      it.bodyAsChannel().copyAndClose(writeChannel(file))
+    withContext(Dispatchers.IO) {
+      FileChannel.open(file, WRITE_NEW_OPERATION).use { fileChannel ->
+        it.bodyAsChannel().copyTo(fileChannel)
+      }
     }
     it
   }
@@ -403,11 +396,3 @@ fun CoroutineScope.readChannel(file: Path): ByteReadChannel {
 }
 
 private val WRITE_NEW_OPERATION = EnumSet.of(StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW)
-
-private fun CoroutineScope.writeChannel(file: Path): ByteWriteChannel {
-  return reader(CoroutineName("file-writer") + Dispatchers.IO, autoFlush = true) {
-    FileChannel.open(file, WRITE_NEW_OPERATION).use { fileChannel ->
-      channel.copyTo(fileChannel)
-    }
-  }.channel
-}

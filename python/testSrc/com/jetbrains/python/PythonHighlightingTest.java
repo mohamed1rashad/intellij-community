@@ -14,7 +14,8 @@ import com.jetbrains.python.psi.LanguageLevel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Font;
 
 /**
  * Test highlighting added by annotators.
@@ -95,6 +96,26 @@ public class PythonHighlightingTest extends PyTestCase {
   // PY-36003
   public void testContinueInFinallyBlock() {
     doTest(LanguageLevel.PYTHON38, false, false);
+  }
+
+  // PY-80237
+  public void testBreakInFinallyBlockBefore314() {
+    doTest(LanguageLevel.PYTHON313, false, false);
+  }
+
+  // PY-80237
+  public void testBreakInFinallyBlock() {
+    doTest(LanguageLevel.PYTHON314, false, false);
+  }
+
+  // PY-80237
+  public void testReturnInFinallyBlockBefore314() {
+    doTest(LanguageLevel.PYTHON313, false, false);
+  }
+
+  // PY-80237
+  public void testReturnInFinallyBlock() {
+    doTest(LanguageLevel.PYTHON314, false, false);
   }
 
   public void testReturnWithArgumentsInGenerator() {
@@ -587,6 +608,11 @@ public class PythonHighlightingTest extends PyTestCase {
 
   // PY-20401
   public void testAnnotations() {
+    runWithLanguageLevel(LanguageLevel.PYTHON36, this::doTest);
+  }
+
+  // PY-48749
+  public void testCommentInsideMultilineAnnotation() {
     runWithLanguageLevel(LanguageLevel.PYTHON36, this::doTest);
   }
 

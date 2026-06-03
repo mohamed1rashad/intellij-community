@@ -1,10 +1,15 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.intellij.plugins.markdown.lang.formatter.blocks.special
 
-import com.intellij.formatting.*
+import com.intellij.formatting.Alignment
+import com.intellij.formatting.Block
+import com.intellij.formatting.SpacingBuilder
+import com.intellij.formatting.Wrap
+import com.intellij.formatting.WrapType
 import com.intellij.lang.ASTNode
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.codeStyle.CodeStyleSettings
+import org.intellij.plugins.markdown.lang.MarkdownTokenTypeSets
 import org.intellij.plugins.markdown.lang.MarkdownTokenTypes
 import org.intellij.plugins.markdown.lang.formatter.blocks.MarkdownBlocks
 import org.intellij.plugins.markdown.lang.formatter.blocks.MarkdownFormattingBlock
@@ -28,13 +33,29 @@ internal open class MarkdownWrappingFormattingBlock(
     get() = node.text.count { it == '\n' }
 
   override fun buildChildren(): List<Block> {
-    val filtered = MarkdownBlocks.filterFromWhitespaces(node.children())
+    val filtered = MarkdownBlocks.filterFromWhitespaces(node.children()).toList()
     val childWrap = createWrapForChildren()
-    val result = ArrayList<Block>()
-    for (node in filtered) {
-      when (node.elementType) {
-        MarkdownTokenTypes.TEXT -> processTextElement(result, node, childWrap, wrapFirstElement = true)
-        else -> result.add(MarkdownBlocks.create(node, settings, spacing) { alignment })
+    val result = ArrayList<Block>(filtered.size)
+
+    filtered.forEachIndexed { index, child ->
+      val isAfterOpeningParenthesis = filtered.getOrNull(index - 1)?.elementType == MarkdownTokenTypes.LPAREN
+      when (child.elementType) {
+        MarkdownTokenTypes.LPAREN -> {
+          result.add(MarkdownFormattingBlock(child, settings, spacing, alignment, childWrap))
+        }
+
+        MarkdownTokenTypes.TEXT -> {
+          processTextElement(result, child, childWrap, !isAfterOpeningParenthesis)
+        }
+
+        in MarkdownTokenTypeSets.WHITE_SPACES -> {
+          result.add(MarkdownFormattingBlock(child, settings, spacing, alignment, Wrap.createWrap(WrapType.NONE, false)))
+        }
+
+        else -> {
+          val wrap = if (isAfterOpeningParenthesis) Wrap.createWrap(WrapType.NONE, false) else null
+          result.add(MarkdownBlocks.create(child, settings, spacing, wrap) { alignment })
+        }
       }
     }
     return result
@@ -70,6 +91,7 @@ internal open class MarkdownWrappingFormattingBlock(
       result.add(block)
     }
   }
+
 }
 
 private fun splitTextForWrapping(text: String): Sequence<TextRange> {

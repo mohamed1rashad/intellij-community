@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.intentions.declarations;
 
@@ -19,10 +19,10 @@ import org.junit.runner.RunWith;
 @TestDataPath("$CONTENT_ROOT")
 @RunWith(JUnit3RunnerWithInners.class)
 @TestMetadata("testData/joinLines")
-public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
+public abstract class JoinLinesTestGenerated extends AbstractK1JoinLinesTest {
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/addSemicolon")
-    public static class AddSemicolon extends AbstractJoinLinesTest {
+    public static class AddSemicolon extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -161,7 +161,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/declarationAndAssignment")
-    public static class DeclarationAndAssignment extends AbstractJoinLinesTest {
+    public static class DeclarationAndAssignment extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -260,7 +260,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/initializerAndIfToElvis")
-    public static class InitializerAndIfToElvis extends AbstractJoinLinesTest {
+    public static class InitializerAndIfToElvis extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -279,7 +279,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/nestedIfs")
-    public static class NestedIfs extends AbstractJoinLinesTest {
+    public static class NestedIfs extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -323,7 +323,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/removeBraces")
-    public static class RemoveBraces extends AbstractJoinLinesTest {
+    public static class RemoveBraces extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -432,7 +432,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/removeTrailingComma")
-    public static class RemoveTrailingComma extends AbstractJoinLinesTest {
+    public static class RemoveTrailingComma extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -516,7 +516,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/stringTemplate")
-    public static class StringTemplate extends AbstractJoinLinesTest {
+    public static class StringTemplate extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -565,7 +565,7 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/joinLines/whenEntry")
-    public static class WhenEntry extends AbstractJoinLinesTest {
+    public static class WhenEntry extends AbstractK1JoinLinesTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -609,6 +609,11 @@ public abstract class JoinLinesTestGenerated extends AbstractJoinLinesTest {
         @TestMetadata("hasComment6.kt")
         public void testHasComment6() throws Exception {
             runTest("testData/joinLines/whenEntry/hasComment6.kt");
+        }
+
+        @TestMetadata("hasKDoc.kt")
+        public void testHasKDoc() throws Exception {
+            runTest("testData/joinLines/whenEntry/hasKDoc.kt");
         }
 
         @TestMetadata("in.kt")

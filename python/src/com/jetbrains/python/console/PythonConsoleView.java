@@ -6,6 +6,7 @@ import com.intellij.execution.console.LanguageConsoleImpl;
 import com.intellij.execution.filters.OpenFileHyperlinkInfo;
 import com.intellij.execution.impl.ConsoleViewUtil;
 import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessOutputType;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.execution.target.TargetEnvironment;
 import com.intellij.execution.ui.ConsoleViewContentType;
@@ -82,8 +83,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -469,7 +473,7 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
     if (attributes == ProcessOutputTypes.STDERR) {
       outputType = ConsoleViewContentType.ERROR_OUTPUT;
     }
-    else if (attributes == ProcessOutputTypes.SYSTEM) {
+    else if (ProcessOutputType.isSystem(attributes)) {
       outputType = ConsoleViewContentType.SYSTEM_OUTPUT;
     }
     else {

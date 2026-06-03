@@ -10,9 +10,8 @@ import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.codeInsight.lookup.LookupElementDecorator
 import com.intellij.lang.LanguageNamesValidation
-import com.intellij.openapi.application.ex.ApplicationUtil
 import com.intellij.openapi.application.invokeLater
-import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.psi.PsiElement
@@ -35,10 +34,19 @@ import com.jetbrains.python.debugger.PyXValueGroup
 import com.jetbrains.python.debugger.pydev.ProcessDebugger
 import com.jetbrains.python.debugger.state.PyRuntime
 import com.jetbrains.python.debugger.values.DataFrameDebugValue
-import com.jetbrains.python.psi.*
+import com.jetbrains.python.psi.PyCallExpression
+import com.jetbrains.python.psi.PyElementType
+import com.jetbrains.python.psi.PyExpression
+import com.jetbrains.python.psi.PyFunction
+import com.jetbrains.python.psi.PyLambdaExpression
+import com.jetbrains.python.psi.PyParenthesizedExpression
+import com.jetbrains.python.psi.PyQualifiedExpression
+import com.jetbrains.python.psi.PyReferenceExpression
+import com.jetbrains.python.psi.PyStringElement
+import com.jetbrains.python.psi.PyStringLiteralExpression
+import com.jetbrains.python.psi.PySubscriptionExpression
 import com.jetbrains.python.psi.impl.PyPsiUtils
 import com.jetbrains.python.psi.impl.PyStringLiteralExpressionImpl
-import java.util.concurrent.Callable
 import java.util.concurrent.CompletableFuture
 import javax.swing.tree.TreeNode
 
@@ -208,8 +216,8 @@ internal object PyRuntimeCompletionUtils {
                        ?: return emptyList()
     val pyObjectCandidates = getCompleteAttribute(parameters)
 
-    return ApplicationUtil.runWithCheckCanceled(Callable {
-      return@Callable pyObjectCandidates.flatMap { candidate ->
+    return runBlockingMaybeCancellable {
+      pyObjectCandidates.flatMap { candidate ->
         if (candidate.psiName.delimiter == null) {
           return@flatMap getNodesByPrefix(treeNodeList, candidate.psiName.pyQualifiedName,
                                           parameters.completionType).flatMap { proceedPyValueChildrenNames(setOf(it), null) }
@@ -230,7 +238,7 @@ internal object PyRuntimeCompletionUtils {
           ?.let { postProcessingChildren(it, candidate, parameters) }
         ?: emptyList()
       }
-    }, ProgressManager.getInstance().progressIndicator)
+    }
   }
 
   private fun postProcessingChildren(

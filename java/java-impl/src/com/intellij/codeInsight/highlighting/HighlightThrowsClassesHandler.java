@@ -15,7 +15,8 @@ import com.intellij.psi.PsiFile;
 import com.intellij.ui.SimpleListCellRenderer;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.JList;
+import javax.swing.ListSelectionModel;
 import java.util.Arrays;
 
 /**
@@ -36,7 +37,7 @@ class HighlightThrowsClassesHandler extends HighlightExceptionsHandler {
                                 @NotNull PsiClassType type,
                                 @NotNull PsiElement block,
                                 @NotNull PsiElement resolved) {
-    super(editor, file, target, new PsiClassType[]{type}, block, null, __->true);
+    super(editor, file, target, new PsiClassType[]{type}, block, null, _->true);
     myResolved = resolved;
   }
 

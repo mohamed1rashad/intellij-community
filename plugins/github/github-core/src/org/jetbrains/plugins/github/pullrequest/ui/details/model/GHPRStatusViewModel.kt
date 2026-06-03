@@ -9,10 +9,16 @@ import com.intellij.collaboration.ui.codereview.details.model.CodeReviewStatusVi
 import com.intellij.collaboration.util.getOrNull
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
-import git4idea.repo.GitRepository
+import git4idea.remote.GitRemoteUrlCoordinates
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.*
-import org.jetbrains.plugins.github.api.GithubServerPath
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequest
 import org.jetbrains.plugins.github.pullrequest.GHPRStatisticsCollector
 import org.jetbrains.plugins.github.pullrequest.data.GHPRMergeabilityState
@@ -35,8 +41,7 @@ private val LOG = logger<GHPRStatusViewModel>()
 class GHPRStatusViewModelImpl(
   parentCs: CoroutineScope,
   private val project: Project,
-  server: GithubServerPath,
-  gitRepository: GitRepository,
+  remoteUrlCoordinates: GitRemoteUrlCoordinates,
   detailsData: GHPRDetailsDataProvider,
   detailsState: StateFlow<GHPullRequest>,
 ) : GHPRStatusViewModel {
@@ -81,5 +86,5 @@ class GHPRStatusViewModelImpl(
   }
 
   override val resolveConflictsVm: GHPRResolveConflictsLocallyViewModel =
-    GHPRResolveConflictsLocallyViewModel(cs, project, server, gitRepository, detailsData)
+    GHPRResolveConflictsLocallyViewModel(cs, project, remoteUrlCoordinates, detailsData)
 }

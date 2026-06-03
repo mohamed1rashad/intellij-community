@@ -6,6 +6,7 @@ import com.intellij.openapi.projectRoots.SdkType;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.SystemInfoRt;
 import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.platform.eel.EelDescriptor;
 import com.intellij.platform.eel.EelPlatform;
 import com.intellij.platform.eel.path.EelPath;
@@ -36,6 +37,10 @@ import static com.intellij.platform.eel.provider.EelProviderUtil.toEelApiBlockin
 @ApiStatus.Internal
 public abstract class JavaHomeFinder {
   public static class SystemInfoProvider {
+    public @NotNull String getPathEnvVar() {
+      return StringUtil.notNullize(getEnvironmentVariable("PATH"));
+    }
+
     public @Nullable String getEnvironmentVariable(@NotNull String name) {
       return EnvironmentUtil.getValue(name);
     }
@@ -147,21 +152,11 @@ public abstract class JavaHomeFinder {
 
   @ApiStatus.Internal
   public static @NotNull JavaHomeFinderBasic getFinder(@NotNull EelDescriptor descriptor) {
-    if (Registry.is("java.home.finder.use.eel")) {
-      return javaHomeFinderEel(descriptor);
-    }
-
-    var systemInfoProvider = new SystemInfoProvider();
-    return switch (OS.CURRENT) {
-      case Windows -> new JavaHomeFinderWindows(true, true, systemInfoProvider);
-      case macOS -> new JavaHomeFinderMac(systemInfoProvider);
-      case Linux -> new JavaHomeFinderBasic(systemInfoProvider).checkSpecifiedPaths(DEFAULT_JAVA_LINUX_PATHS);
-      default -> new JavaHomeFinderBasic(systemInfoProvider);
-    };
+    return javaHomeFinderEel(descriptor);
   }
 
   public static @Nullable String defaultJavaLocation(@Nullable Path path) {
-    if (path != null && Registry.is("java.home.finder.use.eel")) {
+    if (path != null) {
       var location = defaultJavaLocationUsingEel(path);
       return location != null ? location.toString() : null;
     }

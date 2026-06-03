@@ -2,6 +2,7 @@
 package com.intellij.java.codeInspection;
 
 import com.intellij.JavaTestUtil;
+import com.intellij.idea.TestFor;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.testFramework.LightProjectDescriptor;
@@ -163,6 +164,12 @@ public class DataFlowInspection21Test extends DataFlowInspectionTestCase {
     doTest();
   }
 
+  public void testJSpecifyLocalWithGenericsWithVar() {
+    addJSpecifyNullMarked(myFixture);
+    setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
+    doTest();
+  }
+
   public void testJSpecifyCallExplicitTypeParameters() {
     addJSpecifyNullMarked(myFixture);
     setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
@@ -243,4 +250,60 @@ public class DataFlowInspection21Test extends DataFlowInspectionTestCase {
     doTest();
   }
 
+  public void testJSpecifyArrayNullability() {
+    addJSpecifyNullMarked(myFixture);
+    setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
+    doTest();
+  }
+
+  public void testMatchExceptionNestedDeconstruction() { doTest(); }
+
+  public void testMatchExceptionSealedClass() { doTest(); }
+
+  public void testMatchExceptionSealedClassOnlyNull() {
+    doTestWith((insp, _) -> insp.REPORT_UNSOUND_WARNINGS = false);
+  }
+
+  public void testNoMatchExceptionSealedClassDataFlow() { doTest(); }
+
+  public void testMatchExceptionDoubleNestedDeconstruction() { doTest(); }
+
+  public void testNoMatchExceptionMostNestedDeconstruction() { doTest(); }
+
+  public void testMatchExceptionNestedSealedClass() { doTest(); }
+
+  public void testNoMatchExceptionNestedDeconstructionWithDefault() { doTest(); }
+
+  public void testNoMatchExceptionSealedClassWithNullDefault() { doTest(); }
+
+  public void testNoMatchExceptionDoubleNestedDeconstructionWithDominated() { doTest(); }
+
+  public void testNoMatchExceptionSealedClassWithDominated() { doTest(); }
+
+  public void testOptionalInference() {
+    doTestWith((dfi, cvi) -> dfi.SUGGEST_NULLABLE_ANNOTATIONS = false);
+  }
+  
+  public void testJSpecifyNullableFieldInLambda() {
+    addJSpecifyNullMarked(myFixture);
+    setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
+    doTest(); 
+  }
+  
+  public void testJSpecifyNullableTypeParameterInheritance() {
+    addJSpecifyNullMarked(myFixture);
+    setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
+    doTest();
+  }
+
+  public void testNullableArrayLocalVariable() {
+    addJSpecifyNullMarked(myFixture);
+    setupTypeUseAnnotations("org.jspecify.annotations", myFixture);
+    doTest();
+  }
+  
+  @TestFor(issues = "IDEA-389723")
+  public void testOptionalInsideLambda() {
+    doTest();
+  }
 }

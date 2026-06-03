@@ -3,17 +3,18 @@ package com.intellij.collaboration.async
 
 import com.intellij.collaboration.util.ProgressIndicatorsProvider
 import com.intellij.execution.process.ProcessIOExecutorService
-import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.runInEdt
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.util.Computable
-import com.intellij.openapi.util.Disposer
 import org.jetbrains.annotations.ApiStatus
-import java.util.concurrent.*
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CancellationException
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executor
 import java.util.function.BiFunction
 import java.util.function.Supplier
 
@@ -93,29 +94,6 @@ object CompletableFutureUtil {
   /**
    * Handle the result of async computation on EDT
    *
-   * To allow proper GC the handler is cleaned up when [disposable] is disposed
-   *
-   * @param handler invoked when computation completes
-   */
-  @ApiStatus.Internal
-  @ApiStatus.ScheduledForRemoval
-  @Deprecated("Deprecated with migration to coroutines")
-  fun <T> CompletableFuture<T>.handleOnEdt(disposable: Disposable,
-                                           handler: (T?, Throwable?) -> Unit): CompletableFuture<Unit> {
-    val handlerReference = AtomicReference(handler)
-    Disposer.register(disposable, Disposable {
-      handlerReference.set(null)
-    })
-
-    return handleAsync(BiFunction<T?, Throwable?, Unit> { result: T?, error: Throwable? ->
-      val handlerFromRef = handlerReference.get() ?: throw ProcessCanceledException()
-      handlerFromRef(result, error?.let { extractError(it) })
-    }, getEDTExecutor(null))
-  }
-
-  /**
-   * Handle the result of async computation on EDT
-   *
    * @see [CompletableFuture.handle]
    * @param handler invoked when computation completes
    */
@@ -160,50 +138,6 @@ object CompletableFutureUtil {
       }
       @Suppress("UNCHECKED_CAST")
       result as T
-    }
-
-  /**
-   * Handle the cancellation on EDT
-   *
-   * @see [CompletableFuture.exceptionally]
-   * @param handler invoked when computation throws an exception which IS [isCancellation]
-   */
-  @ApiStatus.Internal
-  @ApiStatus.ScheduledForRemoval
-  @Deprecated("Deprecated with migration to coroutines")
-  fun <T> CompletableFuture<T>.cancellationOnEdt(modalityState: ModalityState? = null,
-                                                 handler: (ProcessCanceledException) -> Unit): CompletableFuture<T> =
-    handleOnEdt(modalityState) { result, error ->
-      if (error != null) {
-        val actualError = extractError(error)
-        if (isCancellation(actualError)) handler(ProcessCanceledException())
-        throw actualError
-      }
-      @Suppress("UNCHECKED_CAST")
-      result as T
-    }
-
-  /**
-   * Handled the completion of async computation on EDT
-   *
-   * @see [CompletableFuture.whenComplete]
-   * @param handler invoked when computation completes successfully or throws an exception which IS NOT [isCancellation]
-   */
-  @ApiStatus.Internal
-  @ApiStatus.ScheduledForRemoval
-  @Deprecated("Deprecated with migration to coroutines")
-  fun <T> CompletableFuture<T>.completionOnEdt(modalityState: ModalityState? = null,
-                                               handler: () -> Unit): CompletableFuture<T> =
-    handleOnEdt(modalityState) { result, error ->
-      @Suppress("UNCHECKED_CAST")
-      if (error != null) {
-        if (!isCancellation(error)) handler()
-        throw extractError(error)
-      }
-      else {
-        handler()
-        result as T
-      }
     }
 
   private fun getEDTExecutor(modalityState: ModalityState? = null) = Executor { runnable -> runInEdt(modalityState) { runnable.run() } }

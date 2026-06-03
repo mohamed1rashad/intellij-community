@@ -1,25 +1,29 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.toolbar.floating
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.UI
-import com.intellij.openapi.application.UiWithModelAccess
-import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.diagnostic.getOrLogException
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.event.EditorMouseEvent
 import com.intellij.openapi.editor.event.EditorMouseMotionListener
 import com.intellij.openapi.editor.impl.EditorImpl
-import com.intellij.openapi.extensions.ExtensionPointListener
-import com.intellij.openapi.extensions.PluginDescriptor
+import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.extensions.createExtensionDisposable
+import com.intellij.openapi.extensions.impl.ExtensionPointImpl
+import com.intellij.openapi.extensions.withEachExtensionSafe
 import com.intellij.openapi.observable.util.addComponent
 import com.intellij.openapi.observable.util.whenKeyPressed
 import com.intellij.openapi.rd.createLifetime
 import com.intellij.openapi.ui.isComponentUnderMouse
 import com.intellij.openapi.ui.isFocusAncestor
-import com.jetbrains.rd.util.threading.coroutines.launch
+import com.intellij.util.asDisposable
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.jetbrains.annotations.ApiStatus
 import java.awt.FlowLayout
 import java.awt.Point
 import java.awt.Rectangle
@@ -27,49 +31,32 @@ import java.awt.event.KeyEvent
 import javax.swing.BorderFactory
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
-class EditorFloatingToolbar(editor: EditorImpl) : JPanel() {
+@ApiStatus.Internal
+class EditorFloatingToolbar(editor: EditorImpl) :
+  JPanel(),
+  Disposable.Default {
+
+  private val coroutineScope = createLifetime().coroutineScope
+
   init {
     layout = FlowLayout(FlowLayout.RIGHT, 20, 20)
     border = BorderFactory.createEmptyBorder()
     isOpaque = false
 
-    FloatingToolbarProvider.EP_NAME.forEachExtensionSafe { provider ->
-      addFloatingToolbarComponent(editor, provider)
-    }
-    FloatingToolbarProvider.EP_NAME.addExtensionPointListener(object : ExtensionPointListener<FloatingToolbarProvider> {
-      override fun extensionAdded(extension: FloatingToolbarProvider, pluginDescriptor: PluginDescriptor) {
-        addFloatingToolbarComponent(editor, extension)
-      }
-    }, editor.disposable)
-  }
-
-  private fun addFloatingToolbarComponent(
-    editor: EditorImpl,
-    provider: FloatingToolbarProvider,
-  ) {
-    editor.disposable.createLifetime().launch {
-      val dataContext = withContext(Dispatchers.UiWithModelAccess) {
-        editor.dataContext
-      }
-      val providerApplicable = readAction {
-        provider.isApplicable(dataContext)
-      }
+    FloatingToolbarProvider.EP_NAME.launchEachExtensionSafe(
+      coroutineScope = coroutineScope,
+      context = Dispatchers.EDT,
+    ) { providerScope, provider ->
+      val dataContext = editor.dataContext
+      val providerApplicable = provider.isApplicableAsync(dataContext)
       if (providerApplicable) {
-        withContext(Dispatchers.UiWithModelAccess) {
-          coroutineContext.ensureActive()
-          val disposable = FloatingToolbarProvider.EP_NAME.createExtensionDisposable(
-            extension = provider,
-            parentDisposable = editor.disposable,
-          )
-          val component = EditorFloatingToolbarComponent(
-            editor = editor,
-            provider = provider,
-            parentDisposable = disposable,
-          )
-          addComponent(component, disposable)
-          provider.register(dataContext, component, disposable)
-        }
+        val providerDisposable = providerScope.asDisposable()
+        val component = EditorFloatingToolbarComponent(editor, provider, providerDisposable)
+        addComponent(component, providerDisposable)
+        provider.register(dataContext, component, providerDisposable)
       }
     }
   }
@@ -120,6 +107,34 @@ class EditorFloatingToolbar(editor: EditorImpl) : JPanel() {
           provider.onHiddenByEsc(editor.dataContext)
         }
       }
+    }
+  }
+
+  companion object {
+
+    fun <Extension : Any> ExtensionPointName<Extension>.launchEachExtensionSafe(
+      coroutineScope: CoroutineScope,
+      context: CoroutineContext = EmptyCoroutineContext,
+      start: CoroutineStart = CoroutineStart.DEFAULT,
+      handler: suspend CoroutineScope.(CoroutineScope, Extension) -> Unit,
+    ) {
+      withEachExtensionSafe(coroutineScope) { extension ->
+        val extensionScope = createExtensionScope(coroutineScope, extension)
+        extensionScope.launch(context, start) {
+          runCatching { handler(extensionScope, extension) }
+            .onFailure { extensionScope.cancel() }
+            .getOrLogException(logger<ExtensionPointImpl<*>>())
+        }
+      }
+    }
+
+    private fun <T : Any> ExtensionPointName<T>.createExtensionScope(
+      coroutineScope: CoroutineScope,
+      extension: T,
+    ): CoroutineScope {
+      return createExtensionDisposable(extension, coroutineScope.asDisposable())
+        .createLifetime()
+        .coroutineScope
     }
   }
 }

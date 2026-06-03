@@ -2,8 +2,8 @@
 load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library")
 
 jvm_provided_library(
-  name = "platform_syntax_multiplatformSupport_provided",
-  lib = "//platform/syntax/syntax-multiplatformSupport:multiplatformSupport"
+  name = "platform_multiplatformSupport_provided",
+  lib = "//platform/multiplatformSupport"
 )
 
 jvm_library(
@@ -15,7 +15,27 @@ jvm_library(
   deps = [
     "@lib//:jetbrains-annotations",
     "@lib//:kotlin-stdlib",
-    ":platform_syntax_multiplatformSupport_provided",
+    ":platform_multiplatformSupport_provided",
+  ]
+)
+
+jvm_library(
+  name = "multiplatform_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.util.multiplatform",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = "@community//:k8",
+  runtime_deps = [
+    ":multiplatform",
+    "//platform/multiplatformSupport",
+    "//platform/multiplatformSupport:multiplatformSupport_test_lib",
   ]
 )
 ### auto-generated section `build intellij.platform.util.multiplatform` end
+
+### auto-generated section `iml intellij.platform.util.multiplatform` start
+exports_files([
+  "intellij.platform.util.multiplatform.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.util.multiplatform` end

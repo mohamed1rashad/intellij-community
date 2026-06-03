@@ -17,16 +17,23 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.impl.content.ToolWindowContentUi
 import com.intellij.platform.util.coroutines.childScope
+import com.intellij.toolWindow.StripeButtonUi
 import com.intellij.ui.IconManager
 import com.intellij.ui.JBColor
 import com.intellij.util.cancelOnDispose
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.JBUI
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.plugins.github.GithubIcons
 import org.jetbrains.plugins.github.i18n.GithubBundle
 import org.jetbrains.plugins.github.pullrequest.action.GHPRActionKeys
@@ -34,7 +41,6 @@ import org.jetbrains.plugins.github.pullrequest.action.GHPRSelectPullRequestForF
 import org.jetbrains.plugins.github.pullrequest.action.GHPRSwitchRemoteAction
 import org.jetbrains.plugins.github.pullrequest.ui.GHPRProjectViewModel
 import org.jetbrains.plugins.github.pullrequest.ui.toolwindow.model.GHPRToolWindowViewModel
-import javax.swing.UIManager
 
 internal class GHPRToolWindowFactory : ToolWindowFactory, DumbAware {
   override fun init(toolWindow: ToolWindow) {
@@ -75,7 +81,7 @@ private class GHPRToolWindowController(private val project: Project, parentCs: C
         }
       }
 
-      val focusColor = UIManager.getColor("ToolWindow.Button.selectedForeground")
+      val focusColor = StripeButtonUi.SELECTED_FOREGROUND_COLOR
       launch {
         vm.connectedProjectVm
           .filterNotNull().flatMapLatest { it.listVm.hasUpdates }
@@ -84,7 +90,7 @@ private class GHPRToolWindowController(private val project: Project, parentCs: C
             withContext(Dispatchers.EDT) {
               toolWindow.setIcon(
                 if (it == null || !it) GithubIcons.PullRequestsToolWindow
-                else IconManager.getInstance().withIconBadge(GithubIcons.PullRequestsToolWindow, JBColor {
+                else IconManager.getInstance().withIconBadge(GithubIcons.PullRequestsToolWindow, JBColor.lazy {
                   if (toolWindow.isActive) focusColor else JBUI.CurrentTheme.IconBadge.INFORMATION
                 }))
             }

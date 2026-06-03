@@ -1,32 +1,64 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gitlab.mergerequest.ui.review
 
-import com.intellij.collaboration.async.*
+import com.intellij.collaboration.async.cancelAndJoinSilently
+import com.intellij.collaboration.async.mapFiltered
+import com.intellij.collaboration.async.mapState
+import com.intellij.collaboration.async.mapStatefulToStateful
+import com.intellij.collaboration.async.stateInNow
+import com.intellij.collaboration.async.transformConsecutiveSuccesses
+import com.intellij.collaboration.ui.codereview.diff.DiffLineLocation
 import com.intellij.collaboration.ui.codereview.diff.UnifiedCodeReviewItemPosition
 import com.intellij.collaboration.util.ComputedResult
 import com.intellij.collaboration.util.RefComparisonChange
 import com.intellij.collaboration.util.ResultUtil.runCatchingUser
 import com.intellij.collaboration.util.getOrNull
 import com.intellij.diff.util.Side
-import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.platform.util.coroutines.childScope
 import git4idea.changes.GitBranchComparisonResult
+import git4idea.changes.GitTextFilePatchWithHistory
 import git4idea.changes.findCumulativeChange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import org.jetbrains.plugins.gitlab.api.dto.GitLabUserDTO
-import org.jetbrains.plugins.gitlab.mergerequest.data.*
-import org.jetbrains.plugins.gitlab.ui.comment.*
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequest
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabMergeRequestNewDiscussionPosition
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabNoteLocation
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabNotePosition
+import org.jetbrains.plugins.gitlab.mergerequest.data.GitLabProject
+import org.jetbrains.plugins.gitlab.mergerequest.data.filePath
+import org.jetbrains.plugins.gitlab.mergerequest.data.mapToLeftSideLine
+import org.jetbrains.plugins.gitlab.mergerequest.data.mapToLocation
+import org.jetbrains.plugins.gitlab.mergerequest.data.mapToRightSideLine
+import org.jetbrains.plugins.gitlab.ui.GitLabMarkdownToHtmlConverter
+import org.jetbrains.plugins.gitlab.ui.GitLabViewModelWithTextCompletion
+import org.jetbrains.plugins.gitlab.ui.comment.GitLabMergeRequestDiscussionViewModel
+import org.jetbrains.plugins.gitlab.ui.comment.GitLabMergeRequestDiscussionViewModelBase
+import org.jetbrains.plugins.gitlab.ui.comment.GitLabMergeRequestStandaloneDraftNoteViewModelBase
+import org.jetbrains.plugins.gitlab.ui.comment.GitLabNoteEditingViewModel
+import org.jetbrains.plugins.gitlab.ui.comment.NewGitLabNoteViewModelWithAdjustablePosition
+import org.jetbrains.plugins.gitlab.ui.comment.onDoneIn
 import java.time.Instant.EPOCH
-import java.util.*
+import java.util.Date
+import java.util.TreeSet
 
 private typealias DiscussionsFlow = StateFlow<ComputedResult<Collection<GitLabMergeRequestDiscussionViewModel>>>
 private typealias DraftNotesFlow = StateFlow<ComputedResult<Collection<GitLabMergeRequestStandaloneDraftNoteViewModelBase>>>
-private typealias NewDiscussionsFlow = Flow<Map<GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition, NewGitLabNoteViewModel>>
+private typealias NewDiscussionsFlow = StateFlow<List<NewGitLabNoteViewModelWithAdjustablePosition>>
 
 /**
  * Represents the discussions and notes in a merge request at a conceptual level.
@@ -48,7 +80,7 @@ interface GitLabMergeRequestDiscussionsViewModels {
   fun lookupPreviousComment(currentThreadId: String, isVisible: (String) -> Boolean): String?
 
   fun requestNewDiscussion(position: NewDiscussionPosition, focus: Boolean)
-  fun cancelNewDiscussion(position: NewDiscussionPosition)
+  fun cancelNewDiscussion(lineLocation: DiffLineLocation)
 
   class NewDiscussionPosition(val position: GitLabMergeRequestNewDiscussionPosition, val side: Side) {
     override fun equals(other: Any?): Boolean {
@@ -64,21 +96,26 @@ interface GitLabMergeRequestDiscussionsViewModels {
   }
 }
 
-private val LOG = logger<GitLabMergeRequestDiscussionsViewModelsImpl>()
+fun GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition.mapToLocation(diffData: GitTextFilePatchWithHistory): GitLabNoteLocation? =
+  position.mapToLocation(diffData, side)
 
 internal class GitLabMergeRequestDiscussionsViewModelsImpl(
   private val project: Project,
   parentCs: CoroutineScope,
-  projectData: GitLabProject,
+  private val projectData: GitLabProject,
   private val currentUser: GitLabUserDTO,
-  private val mergeRequest: GitLabMergeRequest
+  private val mergeRequest: GitLabMergeRequest,
+  htmlConverter: GitLabMarkdownToHtmlConverter,
+  private val textCompletionViewModel: GitLabViewModelWithTextCompletion,
 ) : GitLabMergeRequestDiscussionsViewModels {
   private val cs = parentCs.childScope("GitLab Merge Request Review Discussions", Dispatchers.Default)
 
   override val discussions: DiscussionsFlow = mergeRequest.discussions
     .map { ComputedResult.fromResult(it) }
     .transformConsecutiveSuccesses {
-      mapStatefulToStateful { GitLabMergeRequestDiscussionViewModelBase(project, this, projectData, currentUser, it) }
+      mapStatefulToStateful {
+        GitLabMergeRequestDiscussionViewModelBase(project, this, projectData, currentUser, it, htmlConverter, textCompletionViewModel)
+      }
     }
     .stateInNow(cs, ComputedResult.loading())
 
@@ -86,12 +123,13 @@ internal class GitLabMergeRequestDiscussionsViewModelsImpl(
     .map { ComputedResult.fromResult(it) }
     .transformConsecutiveSuccesses {
       mapFiltered { it.discussionId == null }
-        .mapStatefulToStateful { GitLabMergeRequestStandaloneDraftNoteViewModelBase(project, this, it, mergeRequest) }
+        .mapStatefulToStateful {
+          GitLabMergeRequestStandaloneDraftNoteViewModelBase(project, this, it, mergeRequest, projectData, htmlConverter, textCompletionViewModel)
+        }
     }
     .stateInNow(cs, ComputedResult.loading())
 
-  private val _newDiscussions =
-    MutableStateFlow<Map<GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition, NewGitLabNoteViewModel>>(emptyMap())
+  private val _newDiscussions = MutableStateFlow<List<NewGitLabNoteViewModelWithAdjustablePosition>>(emptyList())
   override val newDiscussions: NewDiscussionsFlow = _newDiscussions.asStateFlow()
 
   @OptIn(ExperimentalCoroutinesApi::class)
@@ -109,9 +147,8 @@ internal class GitLabMergeRequestDiscussionsViewModelsImpl(
     }
 
     val newDiscussionsData = _newDiscussions
-      .mapState { it.entries }
-      .mapStatefulToStateful { (position, note) ->
-        IntermediateDiscussionData(note.trackingId, Date(), 0, MutableStateFlow(position.position))
+      .mapStatefulToStateful { note ->
+        IntermediateDiscussionData(note.trackingId, Date(), 0, MutableStateFlow(note.position.value.position))
       }
 
     val allDiscussions =
@@ -140,32 +177,49 @@ internal class GitLabMergeRequestDiscussionsViewModelsImpl(
 
   override fun requestNewDiscussion(position: GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition, focus: Boolean) {
     _newDiscussions.updateAndGet { currentNewDiscussions ->
-      if (!currentNewDiscussions.containsKey(position) && mergeRequest.canAddNotes) {
-        val vm = GitLabNoteEditingViewModel.forNewDiffNote(cs, project, mergeRequest, currentUser, position.position).apply {
+      if (!currentNewDiscussions.any { it.position.value == position.position } && mergeRequest.canAddNotes) {
+        val vm = GitLabNoteEditingViewModel.forNewDiffNote(cs, project, projectData, mergeRequest, currentUser, position, textCompletionViewModel).apply {
           onDoneIn(cs) {
-            cancelNewDiscussion(position)
+            cancelNewDiscussion(this)
           }
         }
-        currentNewDiscussions + (position to vm)
+        currentNewDiscussions + (vm)
       }
       else {
         currentNewDiscussions
       }
     }.apply {
       if (focus) {
-        get(position)?.requestFocus()
+        find { it.position.value == position }?.requestFocus()
       }
     }
   }
 
-  override fun cancelNewDiscussion(position: GitLabMergeRequestDiscussionsViewModels.NewDiscussionPosition) {
+  private fun cancelNewDiscussion(oldVm: NewGitLabNoteViewModelWithAdjustablePosition) {
     _newDiscussions.update {
-      val oldVm = it[position]
-      val newMap = it - position
+      val newList = it - oldVm
       cs.launch {
-        oldVm?.destroy()
+        oldVm.destroy()
       }
-      newMap
+      newList
+    }
+  }
+
+  override fun cancelNewDiscussion(lineLocation: DiffLineLocation) {
+    _newDiscussions.update {
+      val oldVm = it.find { vm ->
+        val position = vm.position.value
+        val loc = position.side to if (position.side == Side.LEFT)
+          position.position.endLineIndexLeft
+        else
+          position.position.endLineIndexRight
+        loc == lineLocation
+      } ?: return@update it
+      val newList = it - oldVm
+      cs.launch {
+        oldVm.destroy()
+      }
+      newList
     }
   }
 
@@ -236,7 +290,8 @@ internal class GitLabMergeRequestDiscussionsViewModelsImpl(
       val changeIndices = allChanges.changes.mapIndexed { idx, change -> change to idx }.toMap()
       val comparator = positionComparator(changeIndices::get)
 
-      return combine(allDiscussions.map { threadData ->
+      return if (allDiscussions.isEmpty()) flowOf(TreeSet())
+      else combine(allDiscussions.map { threadData ->
         threadData.position.mapState { position ->
           val commitOid = position?.sha ?: return@mapState null
           val change = allChanges.findCumulativeChange(commitOid, position.filePath) ?: return@mapState null

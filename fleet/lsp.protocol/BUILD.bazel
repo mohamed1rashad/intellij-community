@@ -18,7 +18,9 @@ jvm_library(
   name = "lsp.protocol",
   module_name = "fleet.lsp.protocol",
   visibility = ["//visibility:public"],
-  srcs = glob(["srcCommonMain/**/*.kt", "srcCommonMain/**/*.java", "srcCommonMain/**/*.form", "srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form"], allow_empty = True, exclude = ["**/module-info.java"]),
+  srcs = glob(["srcCommonMain/**/*.kt", "srcCommonMain/**/*.java", "srcCommonMain/**/*.form", "srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form"], allow_empty = True),
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_lsp.protocol",
   deps = [
     "@lib//:kotlin-stdlib",
@@ -27,8 +29,26 @@ jvm_library(
     "@lib//:kotlinx-serialization-json",
     "//fleet/util/core",
     "@lib//:jetbrains-annotations",
-    "//fleet/ktor/network/tls",
     "@lib//:kotlinx-io-core",
   ]
 )
+
+jvm_library(
+  name = "lsp.protocol_test_lib",
+  testonly = True,
+  module_name = "fleet.lsp.protocol",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_lsp.protocol",
+  runtime_deps = [
+    ":lsp.protocol",
+    "//fleet/util/core:core_test_lib",
+  ]
+)
 ### auto-generated section `build fleet.lsp.protocol` end
+
+### auto-generated section `iml fleet.lsp.protocol` start
+exports_files([
+  "fleet.lsp.protocol.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml fleet.lsp.protocol` end

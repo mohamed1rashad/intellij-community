@@ -27,6 +27,23 @@ class MarkdownListEnterHandlerDelegateTest: LightPlatformCodeInsightTestCase() {
   @Test
   fun testNewItemTwoSpacesInMarkerAndDocumentEnd() = doTest()
 
+  @Test
+  fun testHardLineBreakDoesNotCreateNewItem() {
+    configureFromFileText("some.md", "- item 1  <caret>")
+    executeAction(IdeActions.ACTION_EDITOR_ENTER)
+    checkResultByText("- item 1  \n<caret>")
+  }
+
+  @Test
+  fun testEnterBeforeItem() = doTest()
+
+  @Test
+  fun testSplitLineInsideItem() {
+    configureByFile("splitLineInsideItem.md")
+    executeAction(IdeActions.ACTION_EDITOR_SPLIT)
+    checkResultByFile("splitLineInsideItem-after.md")
+  }
+
   private fun doTest() {
     val testName = getTestName(true)
     configureByFile("$testName.md")

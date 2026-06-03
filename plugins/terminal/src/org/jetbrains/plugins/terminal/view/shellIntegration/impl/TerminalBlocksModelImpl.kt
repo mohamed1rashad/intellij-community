@@ -2,13 +2,26 @@
 package org.jetbrains.plugins.terminal.view.shellIntegration.impl
 
 import com.intellij.openapi.Disposable
-import com.intellij.util.EventDispatcher
-import com.intellij.util.text.nullize
+import com.intellij.openapi.diagnostic.logger
+import com.intellij.util.containers.DisposableWrapperList
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.VisibleForTesting
-import org.jetbrains.plugins.terminal.block.reworked.*
+import org.jetbrains.plugins.terminal.block.reworked.TerminalSessionModel
 import org.jetbrains.plugins.terminal.session.impl.TerminalBlocksModelState
-import org.jetbrains.plugins.terminal.view.shellIntegration.*
+import org.jetbrains.plugins.terminal.util.fireListenersAndLogAllExceptions
+import org.jetbrains.plugins.terminal.view.TerminalContentChangeEvent
+import org.jetbrains.plugins.terminal.view.TerminalOffset
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.TerminalOutputModelListener
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlockAddedEvent
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlockBase
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlockIdImpl
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlockRemovedEvent
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlocksModel
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlocksModelEvent
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlocksModelListener
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalBlocksReplacedEvent
+import org.jetbrains.plugins.terminal.view.shellIntegration.TerminalCommandBlock
 
 @ApiStatus.Internal
 class TerminalBlocksModelImpl(
@@ -27,7 +40,7 @@ class TerminalBlocksModelImpl(
       blocks[blocks.lastIndex] = value
     }
 
-  private val dispatcher = EventDispatcher.create(TerminalBlocksModelListener::class.java)
+  private val listeners = DisposableWrapperList<TerminalBlocksModelListener>()
 
   init {
     outputModel.addListener(parentDisposable, object : TerminalOutputModelListener {
@@ -37,6 +50,7 @@ class TerminalBlocksModelImpl(
         trimBlocksAfter(outputModel.endOffset)
         if (!event.isTrimming) {
           trimBlocksAfter(event.offset)
+          adjustActiveBlockOffsets(event)
         }
       }
     })
@@ -45,14 +59,14 @@ class TerminalBlocksModelImpl(
   }
 
   override fun addListener(parentDisposable: Disposable, listener: TerminalBlocksModelListener) {
-    dispatcher.addListener(listener, parentDisposable)
+    listeners.add(listener, parentDisposable)
   }
 
   fun startNewBlock(offset: TerminalOffset) {
     val active = activeBlock as TerminalCommandBlockImpl
     if (offset == active.startOffset) {
       blocks.removeLast()
-      dispatcher.multicaster.blockRemoved(TerminalBlockRemovedEventImpl(this, active))
+      fireListeners(TerminalBlockRemovedEventImpl(this, active))
     }
     else {
       activeBlock = active.copy(endOffset = offset)
@@ -80,14 +94,14 @@ class TerminalBlocksModelImpl(
   }
 
   /**
-   * Removes all blocks that end before the [offset] (inclusive), and adjusts all left blocks offsets.
+   * Removes all blocks that end before the [offset] (inclusive).
    */
   private fun trimBlocksBefore(offset: TerminalOffset) {
     val firstNotRemovedBlockIndex = blocks.indexOfFirst { it.endOffset > offset || (it.startOffset == it.endOffset && it.endOffset == offset) }
     if (firstNotRemovedBlockIndex != -1) {
       repeat(firstNotRemovedBlockIndex) {
         val block = blocks.removeFirst()
-        dispatcher.multicaster.blockRemoved(TerminalBlockRemovedEventImpl(this, block))
+        fireListeners(TerminalBlockRemovedEventImpl(this, block))
       }
     }
     else {
@@ -98,37 +112,62 @@ class TerminalBlocksModelImpl(
   }
 
   /**
-   * Removes all blocks that start after [offset] and adjusts the end offset of the last block.
+   * Removes all blocks that start after [offset].
    */
   private fun trimBlocksAfter(offset: TerminalOffset) {
     val firstBlockToRemoveIndex = blocks.indexOfFirst { it.startOffset > offset }
     if (firstBlockToRemoveIndex != -1) {
       repeat(blocks.size - firstBlockToRemoveIndex) {
         val block = blocks.removeLast()
-        dispatcher.multicaster.blockRemoved(TerminalBlockRemovedEventImpl(this, block))
+        fireListeners(TerminalBlockRemovedEventImpl(this, block))
       }
     }
 
     if (blocks.isEmpty()) {
       addNewBlock(outputModel.startOffset)
     }
-    else {
-      val active = activeBlock as TerminalCommandBlockImpl
-      activeBlock = active.copy(endOffset = outputModel.endOffset)
+  }
+
+  private fun adjustActiveBlockOffsets(event: TerminalContentChangeEvent) {
+    var block = activeBlock as TerminalCommandBlockImpl
+
+    val delta = event.newText.length.toLong() - event.oldText.length
+    if (block.commandStartOffset != null
+        && event.offset >= block.startOffset
+        && event.offset + event.oldText.length.toLong() < block.commandStartOffset) {
+      // Text changed inside the prompt after the command start offset was already set, let's update further offsets.
+      block = block.copy(
+        commandStartOffset = block.commandStartOffset + delta,
+        outputStartOffset = block.outputStartOffset?.let { it + delta },
+      )
     }
+    else if (block.commandStartOffset != null && block.outputStartOffset != null
+             && event.offset >= block.commandStartOffset
+             && event.offset + event.oldText.length.toLong() < block.outputStartOffset) {
+      // Text changed inside the command text after command was started, let's update further offsets.
+      // Shouldn't be the case, because command text shouldn't be changed after command is started,
+      // but let's consider this case as well.
+      block = block.copy(outputStartOffset = block.outputStartOffset + delta)
+    }
+    // Else:
+    // Command text or output was changed - updating block end offset is enough.
+    // 2+ parts (prompt/command/output) were changed in a single event, can't predict how to change the offsets.
+
+    // Always set the active block end offset to the end of the output.
+    activeBlock = block.copy(endOffset = outputModel.endOffset)
   }
 
   private fun replaceBlocks(newBlocks: List<TerminalBlockBase>) {
     val oldBlocks = blocks.toList()
     blocks.clear()
     blocks.addAll(newBlocks)
-    dispatcher.multicaster.blocksReplaced(TerminalBlocksReplacedEventImpl(this, oldBlocks, newBlocks))
+    fireListeners(TerminalBlocksReplacedEventImpl(this, oldBlocks, newBlocks))
   }
 
   private fun addNewBlock(startOffset: TerminalOffset) {
     val newBlock = createNewBlock(startOffset)
     blocks.add(newBlock)
-    dispatcher.multicaster.blockAdded(TerminalBlockAddedEventImpl(this, newBlock))
+    fireListeners(TerminalBlockAddedEventImpl(this, newBlock))
   }
 
   private fun createNewBlock(startOffset: TerminalOffset): TerminalCommandBlock {
@@ -138,14 +177,29 @@ class TerminalBlocksModelImpl(
       endOffset = outputModel.endOffset,
       commandStartOffset = null,
       outputStartOffset = null,
-      workingDirectory = sessionModel.terminalState.value.currentDirectory.nullize(), // it can be empty string, so use nullize()
+      workingDirectory = sessionModel.terminalState.value.currentDirectory,
       executedCommand = null,
       exitCode = null,
     )
   }
 
+  private fun fireListeners(event: TerminalBlocksModelEvent) {
+    fireListenersAndLogAllExceptions(listeners, LOG, "Exception during handling $event") {
+      when (event) {
+        is TerminalBlockAddedEvent -> it.blockAdded(event)
+        is TerminalBlockRemovedEvent -> it.blockRemoved(event)
+        is TerminalBlocksReplacedEvent -> it.blocksReplaced(event)
+        else -> error("Unexpected event: $event")
+      }
+    }
+  }
+
   override fun toString(): String {
     return "TerminalBlocksModelImpl(blocks=$blocks)"
+  }
+
+  companion object {
+    private val LOG = logger<TerminalBlocksModelImpl>()
   }
 }
 

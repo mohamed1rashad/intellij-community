@@ -1,9 +1,19 @@
 package com.intellij.database.run.actions;
 
 import com.intellij.database.DataGridBundle;
-import com.intellij.database.datagrid.*;
-import com.intellij.database.run.ui.DataAccessType;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.database.datagrid.DataGrid;
+import com.intellij.database.datagrid.GridCellRequest;
+import com.intellij.database.datagrid.GridCellRequestKt;
+import com.intellij.database.datagrid.GridColumn;
+import com.intellij.database.datagrid.GridRow;
+import com.intellij.database.datagrid.GridUtil;
+import com.intellij.database.datagrid.ModelIndexSet;
+import com.intellij.database.datagrid.SelectionModel;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDialog;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
@@ -53,20 +63,17 @@ public class LoadFileAction extends AnAction implements DumbAware {
   }
 
   private static @Nullable LoadFileActionHandler getViewModeHandler(final @NotNull DataGrid grid) {
+    GridCellRequest<GridRow, GridColumn> request = GridCellRequestKt.selectedCellRequest(grid);
     SelectionModel<GridRow, GridColumn> selectionModel = grid.getSelectionModel();
-    GridModel<GridRow, GridColumn> model = grid.getDataModel(DataAccessType.DATA_WITH_MUTATIONS);
-    ModelIndex<GridColumn> column = selectionModel.getSelectedColumn();
-    GridColumn selectedColumn = model.getColumn(column);
-    ModelIndex<GridRow> row = selectionModel.getSelectedRow();
-    if (!grid.isEditable() || selectedColumn == null ||
+    if (!grid.isEditable() || request.getColumn() == null ||
         selectionModel.getSelectedRowCount() != 1 || selectionModel.getSelectedColumnCount() != 1 ||
-        !GridUtil.canInsertBlob(grid, row, column) && !GridUtil.canInsertClob(grid, row, column)) {
+        !GridUtil.canInsertBlob(request) && !GridUtil.canInsertClob(request)) {
       return null;
     }
 
     final ModelIndexSet<GridRow> selectedRows = selectionModel.getSelectedRows();
     final ModelIndexSet<GridColumn> selectedColumns = selectionModel.getSelectedColumns();
-    final boolean fileAsClob = GridUtil.canInsertClob(grid, row, column);
+    final boolean fileAsClob = GridUtil.canInsertClob(request);
 
     return new LoadFileActionHandler() {
       @Override

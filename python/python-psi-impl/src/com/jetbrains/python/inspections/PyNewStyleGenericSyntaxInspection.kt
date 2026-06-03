@@ -12,7 +12,21 @@ import com.jetbrains.python.PyPsiBundle
 import com.jetbrains.python.ast.PyAstTypeParameter
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider
-import com.jetbrains.python.psi.*
+import com.jetbrains.python.psi.PyAssignmentExpression
+import com.jetbrains.python.psi.PyClass
+import com.jetbrains.python.psi.PyElement
+import com.jetbrains.python.psi.PyFunction
+import com.jetbrains.python.psi.PyListLiteralExpression
+import com.jetbrains.python.psi.PyNamedParameter
+import com.jetbrains.python.psi.PyParenthesizedExpression
+import com.jetbrains.python.psi.PyRecursiveElementVisitor
+import com.jetbrains.python.psi.PyReferenceExpression
+import com.jetbrains.python.psi.PySubscriptionExpression
+import com.jetbrains.python.psi.PyTargetExpression
+import com.jetbrains.python.psi.PyTupleExpression
+import com.jetbrains.python.psi.PyTypeAliasStatement
+import com.jetbrains.python.psi.PyTypeParameter
+import com.jetbrains.python.psi.PyTypeParameterList
 import com.jetbrains.python.psi.types.PyClassLikeType
 import com.jetbrains.python.psi.types.PyTypeParameterType
 import com.jetbrains.python.psi.types.TypeEvalContext
@@ -23,33 +37,31 @@ class PyNewStyleGenericSyntaxInspection : PyInspection() {
     holder: ProblemsHolder,
     isOnTheFly: Boolean,
     session: LocalInspectionToolSession,
-  ): PsiElementVisitor = Visitor(holder,
-                                 PyInspectionVisitor.getContext(session))
+  ): PsiElementVisitor {
+    val context = PyInspectionVisitor.getContext(session)
+    if (context.usesExternalTypeEngine) {
+      return PsiElementVisitor.EMPTY_VISITOR
+    }
+
+    return Visitor(holder, context)
+  }
 
   private class Visitor(holder: ProblemsHolder, context: TypeEvalContext) : PyInspectionVisitor(holder, context) {
 
     override fun visitPyTypeParameter(typeParameter: PyTypeParameter) {
-      val boundExpression =  typeParameter.boundExpression
+      val boundExpression = typeParameter.boundExpression
       val defaultExpression = typeParameter.defaultExpression
 
       boundExpression?.accept(object : PyRecursiveElementVisitor() {
         override fun visitPyElement(node: PyElement) {
           if (!(node is PyParenthesizedExpression && node === boundExpression) &&
-              !(node is PyTupleExpression && node.parent === boundExpression)) {
-            if (node is PyExpression) {
-              if (!PyTypeHintsInspection.isValidTypeHint(node, myTypeEvalContext)) {
-                registerProblem(
-                  node,
-                  PyPsiBundle.message("INSP.type.hints.invalid.type.expression"),
-                )
-              }
-              if (node is PyReferenceExpression) {
-                node.getTypeParameterType()?.let {
-                  registerProblem(node,
-                                  PyPsiBundle.message("INSP.new.style.generics.are.not.allowed.inside.type.param.bounds"),
-                                  ProblemHighlightType.GENERIC_ERROR)
-                }
-              }
+              !(node is PyTupleExpression && node.parent === boundExpression) &&
+              node is PyReferenceExpression
+          ) {
+            node.getTypeParameterType()?.let {
+              registerProblem(node,
+                              PyPsiBundle.message("INSP.new.style.generics.are.not.allowed.inside.type.param.bounds"),
+                              ProblemHighlightType.GENERIC_ERROR)
             }
           }
           super.visitPyElement(node)
@@ -167,7 +179,8 @@ class PyNewStyleGenericSyntaxInspection : PyInspection() {
         override fun visitPyReferenceExpression(node: PyReferenceExpression) {
           node.getTypeParameterType()?.let {
             if (it.declarationElement is PyTargetExpression
-                && ScopeUtil.getScopeOwner(it.declarationElement) !is PyTypeAliasStatement) {
+                && ScopeUtil.getScopeOwner(it.declarationElement) !is PyTypeAliasStatement
+            ) {
               registerProblem(node, message, ProblemHighlightType.GENERIC_ERROR)
             }
           }

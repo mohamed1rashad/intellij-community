@@ -1,10 +1,10 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.testFramework.fixtures.impl
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.application.runWriteActionAndWait
 import com.intellij.openapi.application.edtWriteAction
+import com.intellij.openapi.application.runWriteActionAndWait
 import com.intellij.openapi.externalSystem.autoimport.changes.vfs.VirtualFileChangesListener
 import com.intellij.openapi.externalSystem.autoimport.changes.vfs.VirtualFileChangesListener.Companion.installBulkVirtualFileListener
 import com.intellij.openapi.externalSystem.util.runReadAction
@@ -12,10 +12,20 @@ import com.intellij.openapi.externalSystem.util.runWriteActionAndGet
 import com.intellij.openapi.observable.operation.core.onFailureCatching
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.JDOMUtil
-import com.intellij.openapi.util.io.*
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.util.io.findOrCreateDirectory
+import com.intellij.openapi.util.io.findOrCreateFile
+import com.intellij.openapi.util.io.getResolvedPath
+import com.intellij.openapi.util.io.toCanonicalPath
+import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.findDocument
+import com.intellij.openapi.vfs.findOrCreateDirectory
+import com.intellij.openapi.vfs.findOrCreateFile
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.vfs.newvfs.impl.VfsRootAccess
+import com.intellij.openapi.vfs.readText
+import com.intellij.openapi.vfs.refreshAndFindVirtualFile
+import com.intellij.openapi.vfs.writeText
 import com.intellij.testFramework.common.runAll
 import com.intellij.testFramework.utils.editor.reloadFromDisk
 import com.intellij.testFramework.utils.vfs.deleteChildrenRecursively
@@ -29,24 +39,30 @@ import kotlinx.coroutines.runBlocking
 import org.jetbrains.plugins.gradle.testFramework.configuration.TestFilesConfigurationImpl
 import org.jetbrains.plugins.gradle.testFramework.fixtures.FileTestFixture
 import org.jetbrains.plugins.gradle.testFramework.util.refreshAndAwait
+import java.nio.file.FileSystems
 import java.nio.file.Path
-import java.util.*
+import java.nio.file.PathMatcher
+import java.util.Optional
 
 internal class FileTestFixtureImpl(
   private val relativePath: String,
-  private val configure: FileTestFixture.Builder.() -> Unit
+  private val relativeProjectPath: String,
+  private val configure: FileTestFixture.Builder.() -> Unit,
 ) : FileTestFixture {
 
   private var isInitialized: Boolean = false
   private lateinit var errors: MutableList<Throwable>
   private lateinit var snapshots: MutableMap<Path, Optional<String>>
   private lateinit var excludedFiles: Set<Path>
+  private lateinit var excludedFilePatterns: Set<PathMatcher>
 
   private lateinit var testRootDisposable: Disposable
   private lateinit var fixtureRoot: VirtualFile
+  private lateinit var fixtureProjectRoot: VirtualFile
   private lateinit var fixtureStateFile: VirtualFile
 
   override val root: VirtualFile get() = fixtureRoot
+  override val projectRoot: VirtualFile get() = fixtureProjectRoot
 
   override fun setUp() {
     isInitialized = false
@@ -57,12 +73,14 @@ internal class FileTestFixtureImpl(
 
     fixtureRoot = createFixtureRoot(relativePath)
     fixtureStateFile = createFixtureStateFile()
+    fixtureProjectRoot = createProjectRoot()
 
     val configuration = createFixtureConfiguration()
 
     excludedFiles = configuration.excludedFiles
-      .map { root.toNioPath().getResolvedPath(it) }
+      .map { projectRoot.toNioPath().getResolvedPath(it) }
       .toSet()
+    excludedFilePatterns = configuration.excludedFilePatterns
 
     val oldState = readFixtureState()
     dumpFixtureState()
@@ -100,6 +118,12 @@ internal class FileTestFixtureImpl(
   private fun createFixtureStateFile(): VirtualFile {
     return runWriteActionAndGet {
       root.findOrCreateFile("_FileTestFixture.xml")
+    }
+  }
+
+  private fun createProjectRoot(): VirtualFile {
+    return runWriteActionAndGet {
+      root.findOrCreateDirectory(relativeProjectPath)
     }
   }
 
@@ -148,9 +172,10 @@ internal class FileTestFixtureImpl(
 
   private suspend fun configureFixtureCaches(configuration: Configuration) {
     runCatching {
-      if (!configuration.areContentsEqual(root)) {
+      if (!configuration.areContentsEqual(projectRoot)) {
         invalidateFixtureCaches()
-        configuration.createFiles(root)
+        fixtureProjectRoot = createProjectRoot()
+        configuration.createFiles(projectRoot)
       }
       root.refreshAndAwait()
     }
@@ -172,7 +197,7 @@ internal class FileTestFixtureImpl(
   }
 
   override fun snapshot(relativePath: String) {
-    snapshot(root.toNioPath().getResolvedPath(relativePath))
+    snapshot(projectRoot.toNioPath().getResolvedPath(relativePath))
   }
 
   private fun snapshot(path: Path) {
@@ -189,7 +214,7 @@ internal class FileTestFixtureImpl(
   }
 
   override fun rollback(relativePath: String) {
-    rollback(root.toNioPath().getResolvedPath(relativePath))
+    rollback(projectRoot.toNioPath().getResolvedPath(relativePath))
   }
 
   private fun rollback(path: Path) {
@@ -237,7 +262,8 @@ internal class FileTestFixtureImpl(
 
                  path !in snapshots &&
                  path !in excludedFiles &&
-                 excludedFiles.none(path::startsWith)
+                 excludedFiles.none(path::startsWith) &&
+                 excludedFilePatterns.none { it.matches(path) }
                }
       }
 
@@ -253,9 +279,19 @@ internal class FileTestFixtureImpl(
       FileTestFixture.Builder {
 
     val excludedFiles = HashSet<String>()
+    val excludedFilePatterns = HashSet<PathMatcher>()
 
     override fun excludeFiles(vararg relativePath: String) {
       excludedFiles.addAll(relativePath)
+    }
+
+    /**
+     * Excludes files matching the given glob or regexp [syntaxAndPatterns].
+     * @see java.nio.file.FileSystem.getPathMatcher
+     */
+    override fun excludeFilePatterns(vararg syntaxAndPatterns: String) {
+      val fileSystem = FileSystems.getDefault()
+      excludedFilePatterns.addAll(syntaxAndPatterns.map(fileSystem::getPathMatcher))
     }
   }
 

@@ -4,12 +4,20 @@ package com.intellij.psi.impl.search;
 import com.intellij.JavaTestUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFunctionalExpression;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiReference;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.searches.FunctionalExpressionSearch;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.testFramework.DumbModeTestUtils;
 import com.intellij.testFramework.LeakHunter;
 import com.intellij.testFramework.LightProjectDescriptor;
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase;
@@ -265,6 +273,17 @@ public class FindFunctionalInterfaceTest extends LightJavaCodeInsightFixtureTest
     configure();
     // whatever, but it shouldn't throw
     assertEmpty(FunctionalExpressionSearch.search(findClass("I")).findAll());
+  }
+
+  public void testNoCrashInDumbMode() {
+    PsiClass sam = myFixture.addClass("interface I { void foo(); }");
+    myFixture.addClass("class Some {{ I i = () -> {}; }}");
+
+    assertSize(1, FunctionalExpressionSearch.search(sam).findAll());
+
+    DumbModeTestUtils.runInDumbModeSynchronously(getProject(), () -> {
+      assertEmpty(FunctionalExpressionSearch.search(sam).findAll());
+    });
   }
 
   @Override

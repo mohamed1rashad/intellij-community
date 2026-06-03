@@ -13,7 +13,13 @@ import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Pair
 import com.intellij.ui.HyperlinkLabel
 import com.intellij.ui.components.JBRadioButton
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.Row
+import com.intellij.ui.dsl.builder.bind
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.builder.selected
 import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import org.jetbrains.kotlin.idea.configuration.KotlinProjectConfigurator
 import org.jetbrains.kotlin.idea.configuration.getCanBeConfiguredModules
@@ -42,9 +48,9 @@ class ChooseModulePanel(
             project,
             message("lookup.kotlin.modules.configurations.progress.text"),
             Computable {
-                val modules = getCanBeConfiguredModules(project, configurator)
+                val modules = getCanBeConfiguredModules(project, configurator).filterNot { it in excludedModule }
                 val modulesWithKtFiles =
-                    getCanBeConfiguredModulesWithKotlinFiles(project, configurator)
+                    getCanBeConfiguredModulesWithKotlinFiles(project, configurator).filterNot { it in excludedModule }
                 Pair.create(
                     modules,
                     modulesWithKtFiles
@@ -53,11 +59,20 @@ class ChooseModulePanel(
 
         modules = modulesPair.first
         modulesWithKtFiles = modulesPair.second
-        chosenModuleType = if (modulesWithKtFiles.isEmpty()) {
-            AtomicProperty(ChoseModuleType.ALL)
-        } else {
-            AtomicProperty(ChoseModuleType.CONTAINING_KT)
+
+        val type = when {
+            modulesWithKtFiles.isEmpty() -> {
+                if (modules.isEmpty()) {
+                    ChoseModuleType.ALL
+                } else {
+                    ChoseModuleType.SINGLE
+                }
+            }
+            else -> {
+                ChoseModuleType.CONTAINING_KT
+            }
         }
+        chosenModuleType = AtomicProperty(type)
         selectedModule = AtomicProperty(modules.firstOrNull())
     }
 
@@ -131,6 +146,7 @@ class ChooseModulePanel(
                         val comboBox = comboBox(modules.naturalSorted() as List<Module?>, textListCellRenderer { it?.name })
                             .bindItem(selectedModule)
                             .align(AlignX.FILL)
+                        comboBox.component.isSwingPopup = false
                         comboBox.enabledIf(singleModuleButton.selected)
                     }
                 )

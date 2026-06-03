@@ -7,8 +7,10 @@ import com.intellij.psi.PsiFile;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.JTree;
 import java.util.function.Consumer;
+
+import static com.intellij.ide.todo.TodoImplementationChooserKt.shouldUseSplitTodo;
 
 @ApiStatus.Internal
 public final class CurrentFileTodosTreeBuilder extends TodoTreeBuilder {
@@ -27,8 +29,15 @@ public final class CurrentFileTodosTreeBuilder extends TodoTreeBuilder {
   protected void collectFiles(@NotNull Consumer<? super @NotNull PsiFile> consumer) {
     CurrentFileTodosTreeStructure treeStructure = (CurrentFileTodosTreeStructure)getTodoTreeStructure();
     PsiFile psiFile = treeStructure.getFile();
-    if (psiFile != null && treeStructure.accept(psiFile)) {
-      consumer.accept(psiFile);
+
+    if (psiFile != null) {
+      if (shouldUseSplitTodo()) {
+        getCoroutineHelper().collectCurrentFileWithCachedTodos(psiFile, treeStructure.getTodoFilter(), consumer);
+      } else {
+        if (treeStructure.accept(psiFile)) {
+          consumer.accept(psiFile);
+        }
+      }
     }
   }
 

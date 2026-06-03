@@ -3,7 +3,9 @@ package com.intellij.ide.util.scopeChooser
 
 import com.intellij.find.FindBundle
 import com.intellij.find.impl.FindAndReplaceExecutor
+import com.intellij.ide.DataManager
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.impl.Utils
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.observable.util.whenItemSelected
@@ -17,7 +19,7 @@ import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import java.awt.BorderLayout
 import java.awt.Dimension
-import java.util.*
+import java.util.UUID
 import javax.swing.JPanel
 import kotlin.math.min
 
@@ -36,6 +38,7 @@ class FrontendScopeChooser(private val project: Project, private val preselected
   private val scopeToSeparator: MutableMap<ScopeDescriptor, ListSeparator> = mutableMapOf()
 
   private val comboBox = ComboBox<ScopeDescriptor>(300)
+  private var initialSelection: ScopeDescriptor? = null
   private var selectedItem: ScopeDescriptor?
     get() = comboBox.selectedItem as? ScopeDescriptor
     set(value) {
@@ -45,6 +48,7 @@ class FrontendScopeChooser(private val project: Project, private val preselected
 
   private val editScopesButton = FixedSizeButton(comboBox).apply {
     addActionListener { editScopes() }
+    accessibleContext.accessibleName = FindBundle.message("find.usages.edit.scopes.button.accessible.name")
   }
 
   init {
@@ -56,9 +60,11 @@ class FrontendScopeChooser(private val project: Project, private val preselected
         FindAndReplaceExecutor.getInstance().performScopeSelection(scopeId, project)
       }
     }
+    comboBox.accessibleContext.accessibleName = FindBundle.message("find.usages.scope.combobox.accessible.name")
 
     val cachedScopes = ScopesStateService.getInstance(project).getCachedScopeDescriptors()
     initItems(cachedScopes)
+    initialSelection = selectedItem
     loadItemsAsync()
 
     add(comboBox, BorderLayout.CENTER)
@@ -66,7 +72,11 @@ class FrontendScopeChooser(private val project: Project, private val preselected
   }
 
   private fun loadItemsAsync() {
-    scopeService.loadItemsAsync(modelId, filterConditionType, onScopesUpdate = { scopeIdToScopeDescriptor, selectedScopeId ->
+    // loadItemsAsync will be executed on asynchronously on background,
+    // it's important to collect data context now,
+    // because it's going to change with opening Find in Files dialog
+    val dataContextPromise = DataManager.getInstance().dataContextFromFocusAsync.then { Utils.createAsyncDataContext(it) }
+    scopeService.loadItemsAsync(modelId, filterConditionType, dataContextPromise, onScopesUpdate = { scopeIdToScopeDescriptor, selectedScopeId ->
       scopesMap = scopeIdToScopeDescriptor ?: emptyMap()
       val items = scopesMap.values.toList()
       withContext(Dispatchers.EDT) {
@@ -78,7 +88,10 @@ class FrontendScopeChooser(private val project: Project, private val preselected
   fun getComboBox(): ComboBox<ScopeDescriptor> = comboBox
 
   private fun initItems(items: List<ScopeDescriptor>, selectedScopeId: String? = null) {
-    val previousSelection = selectedScopeId?.let { scopesMap[it] } ?: selectedItem
+    // Avoid using initial selection as a previous selection
+    // it blocks setting a correct one after receiving data from backend for the first time
+    val previousSelection = selectedScopeId?.let { scopesMap[it] } ?: selectedItem.takeIf { it != initialSelection }
+    initialSelection = null
     comboBox.removeAllItems()
     items.filterOutSeparators().forEach { comboBox.addItem(it) }
     tryToSelectItem(items, previousSelection)

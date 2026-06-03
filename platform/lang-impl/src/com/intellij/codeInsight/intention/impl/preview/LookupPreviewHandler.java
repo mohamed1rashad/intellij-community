@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.intention.impl.preview;
 
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
@@ -16,7 +16,7 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,12 +29,11 @@ import java.util.function.Function;
  * @param <T> type of the elements in the list, for which the preview is supported.
  */
 @ApiStatus.Internal
-@ApiStatus.Experimental
 public final class LookupPreviewHandler<T> implements LookupListener {
   private final IntentionPreviewPopupUpdateProcessor myProcessor;
   private final LookupImpl myLookup;
-  private final Function<Object, @Nullable T> myMapper;
-  private final Map<T, Integer> counterHolder = new HashMap<>();
+  private final Function<@Nullable Object, @Nullable T> myMapper;
+  private final Map<@Nullable T, Integer> counterHolder = new HashMap<>();
   private final AtomicInteger counterValue = new AtomicInteger(0);
   private final AtomicBoolean shown = new AtomicBoolean(false);
   private final IntentionPreviewComponentHolder myPopup;
@@ -50,11 +49,12 @@ public final class LookupPreviewHandler<T> implements LookupListener {
    */
   public LookupPreviewHandler(@NotNull Project project,
                               @NotNull LookupImpl lookup,
-                              @NotNull Function<Object, @Nullable T> mapper,
+                              @NotNull Function<@Nullable Object, @Nullable T> mapper,
                               @NotNull Function<? super @NotNull T, ? extends @NotNull IntentionPreviewInfo> previewGenerator) {
     myLookup = lookup;
     myMapper = mapper;
-    myProcessor = new IntentionPreviewPopupUpdateProcessor(project, obj -> {
+    myProcessor = new IntentionPreviewPopupUpdateProcessor(project, (@Nullable Object obj) -> {
+      if (obj == null) return IntentionPreviewInfo.EMPTY;
       T target = mapper.apply(obj);
       if (target == null) return IntentionPreviewInfo.EMPTY;
       return previewGenerator.apply(target);
@@ -103,11 +103,9 @@ public final class LookupPreviewHandler<T> implements LookupListener {
   }
 
   private void update(@NotNull LookupImpl list) {
-    Object selectedItem = list.getCurrentItem();
+    LookupElement selectedItem = list.getCurrentItem();
     T item = myMapper.apply(selectedItem);
-    if (item != null) {
-      update(item);
-    }
+    update(item);
   }
 
   /**
@@ -120,11 +118,11 @@ public final class LookupPreviewHandler<T> implements LookupListener {
   }
 
   @RequiresEdt
-  private void update(T action) {
+  private void update(@Nullable T action) {
     if (!shown.get()) {
       return;
     }
-    Integer index = counterHolder.computeIfAbsent(action, k -> counterValue.getAndIncrement());
+    Integer index = counterHolder.computeIfAbsent(action, _ -> counterValue.getAndIncrement());
     myProcessor.setup(myPopup, index);
     myProcessor.updatePopup(action);
   }

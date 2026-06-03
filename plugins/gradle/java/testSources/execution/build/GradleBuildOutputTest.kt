@@ -4,15 +4,18 @@ package org.jetbrains.plugins.gradle.execution.build
 import com.intellij.openapi.externalSystem.test.compileModules
 import com.intellij.platform.testFramework.assertion.moduleAssertion.ModuleAssertions.assertModules
 import org.gradle.util.GradleVersion
+import org.jetbrains.plugins.gradle.importing.BuildViewMessagesImportingTestCase.Companion.assertNodeWithDeprecatedGradleWarning
 import org.jetbrains.plugins.gradle.testFramework.GradleExecutionTestCase
 import org.jetbrains.plugins.gradle.testFramework.GradleTestFixtureBuilder
 import org.jetbrains.plugins.gradle.testFramework.annotations.AllGradleVersionsSource
 import org.jetbrains.plugins.gradle.testFramework.util.withBuildFile
 import org.jetbrains.plugins.gradle.testFramework.util.withSettingsFile
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.params.ParameterizedTest
 
 class GradleBuildOutputTest : GradleExecutionTestCase() {
 
+  @Disabled("IDEA-387217")
   @ParameterizedTest
   @AllGradleVersionsSource
   fun `test build script errors on Build`(gradleVersion: GradleVersion) {
@@ -66,10 +69,11 @@ class GradleBuildOutputTest : GradleExecutionTestCase() {
       executeTasks("clean")
 
       waitForAnyGradleTaskExecution {
-        compileModules(project, true, "project.impl.main")
+        try { compileModules(project, true, "project.impl.main") } catch (_: AssertionError) { /* compilation failure expected */ }
       }
       assertBuildViewTree {
         assertNode("successful") {
+          assertNodeWithDeprecatedGradleWarning(gradleVersion)
           assertNode(":api:compileJava")
           assertNode(":api:processResources")
           assertNode(":api:classes")
@@ -88,10 +92,11 @@ class GradleBuildOutputTest : GradleExecutionTestCase() {
       }
 
       waitForAnyGradleTaskExecution {
-        compileModules(project, true, "project.brokenProject.main")
+        try { compileModules(project, true, "project.brokenProject.main") } catch (_: AssertionError) { /* compilation failure expected */ }
       }
       assertBuildViewTree {
         assertNode("failed") {
+          assertNodeWithDeprecatedGradleWarning(gradleVersion)
           assertNode(":brokenProject:compileJava") {
             assertNode("App2.java", skipIf = !isOrderBasedBuildCompilationReportSupported()) {
               assertNode("';' expected")

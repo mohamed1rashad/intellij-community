@@ -5,20 +5,26 @@ import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.LabeledComponent;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiParameter;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.refactoring.IntroduceParameterRefactoring;
 import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.introduce.inplace.KeyboardComboSwitcher;
 import com.intellij.refactoring.ui.TypeSelectorManager;
-import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import it.unimi.dsi.fastutil.ints.IntList;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComboBox;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
+
+import static com.intellij.ui.dsl.listCellRenderer.BuilderKt.textListCellRenderer;
 
 public abstract class InplaceIntroduceParameterUI extends IntroduceParameterSettingsUI {
   private JComboBox<Integer> myReplaceFieldsCb;
@@ -55,14 +61,14 @@ public abstract class InplaceIntroduceParameterUI extends IntroduceParameterSett
     myReplaceFieldsCb = new ComboBox<>(new Integer[]{IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_ALL,
       IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_INACCESSIBLE,
       IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE});
-    myReplaceFieldsCb.setRenderer(SimpleListCellRenderer.create((label, value, index) -> {
+    myReplaceFieldsCb.setRenderer(textListCellRenderer("", value -> {
       String message = switch (value) {
         case IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_NONE -> JavaRefactoringBundle.message("do.not.replace");
         case IntroduceParameterRefactoring.REPLACE_FIELDS_WITH_GETTERS_INACCESSIBLE ->
           JavaRefactoringBundle.message("replace.fields.inaccessible.in.usage.context");
         default -> JavaRefactoringBundle.message("replace.all.fields");
       };
-      label.setText(UIUtil.removeMnemonic(message));
+      return UIUtil.removeMnemonic(message);
     }));
     myReplaceFieldsCb.setSelectedItem(JavaRefactoringSettings.getInstance().INTRODUCE_PARAMETER_REPLACE_FIELDS_WITH_GETTERS);
     KeyboardComboSwitcher.setupActions(myReplaceFieldsCb, myProject);

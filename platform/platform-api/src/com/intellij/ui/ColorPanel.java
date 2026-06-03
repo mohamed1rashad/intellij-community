@@ -7,13 +7,23 @@ import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.dsl.builder.DslComponentProperty;
 import com.intellij.ui.dsl.gridLayout.UnscaledGapsKt;
 import com.intellij.ui.picker.ColorListener;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.JComponent;
+import javax.swing.JTextField;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
+import java.awt.event.MouseListener;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -21,7 +31,7 @@ import static java.beans.EventHandler.create;
 
 public class ColorPanel extends JComponent {
   private static final RelativeFont MONOSPACED_FONT = RelativeFont.SMALL.family(Font.MONOSPACED);
-  private final List<ActionListener> myListeners = new CopyOnWriteArrayList<>();
+  private final List<ActionListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   private final JTextField myTextField = new JBTextField(9);
   private boolean myEditable;
   private ActionEvent myEvent;
@@ -57,7 +67,7 @@ public class ColorPanel extends JComponent {
           setSelectedColor(color);
           if (!myListeners.isEmpty() && (myEvent == null)) {
             try {
-              myEvent = new ActionEvent(this, ActionEvent.ACTION_PERFORMED, "colorPanelChanged");
+              myEvent = new ActionEvent(ColorPanel.this, ActionEvent.ACTION_PERFORMED, "colorPanelChanged");
               for (ActionListener listener : myListeners) {
                 listener.actionPerformed(myEvent);
               }
@@ -97,6 +107,16 @@ public class ColorPanel extends JComponent {
     myListeners.remove(actionlistener);
   }
 
+  /**
+   * Adds a listener that reacts to color selection changes.
+   * <p>
+   *   The given listener will be invoked when the popup for selecting a new color closes.
+   *   The event source will be {@code this} instance,
+   *   the event ID will be {@link ActionEvent#ACTION_PERFORMED}
+   *   and the command will be {@code "colorPanelChanged"}.
+   * </p>
+   * @param actionlistener the listener to register
+   */
   public void addActionListener(ActionListener actionlistener) {
     myListeners.add(actionlistener);
   }
@@ -123,7 +143,7 @@ public class ColorPanel extends JComponent {
     }
     Color color = enabled ? myColor : null;
     if (color != null) {
-      myTextField.setText(StringUtil.toUpperCase(ColorUtil.toHex(color)));
+      myTextField.setText(StringUtil.toUpperCase(ColorUtil.toHex(color, mySupportTransparency)));
     }
     else {
       myTextField.setText(null);

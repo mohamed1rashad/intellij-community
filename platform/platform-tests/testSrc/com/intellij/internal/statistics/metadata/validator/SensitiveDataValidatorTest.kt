@@ -1,19 +1,29 @@
 // Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.internal.statistics.metadata.validator
 
+import com.intellij.internal.statistic.eventLog.EventLogBuild
 import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.FeatureUsageData
-import com.intellij.internal.statistic.eventLog.validator.ValidationResultType
+import com.jetbrains.fus.reporting.api.IGroupValidators
+import com.jetbrains.fus.reporting.api.ValidationResultType
+import com.jetbrains.fus.reporting.api.emptyGroupValidators
 import com.intellij.internal.statistic.eventLog.validator.rules.EventContext
 import com.intellij.internal.statistic.eventLog.validator.rules.impl.CustomValidationRule
 import com.intellij.internal.statistic.eventLog.validator.rules.impl.LocalEnumCustomValidationRule
-import com.intellij.internal.statistic.eventLog.validator.storage.ValidationRulesPersistedStorage
+import com.jetbrains.fus.reporting.api.RecorderDataValidationRule
+import com.intellij.internal.statistic.eventLog.validator.storage.FusComponentProvider
 import com.intellij.openapi.extensions.Extensions
 import com.intellij.openapi.util.Disposer
+import com.jetbrains.fus.reporting.FileHandle
+import com.jetbrains.fus.reporting.FileStorage
+import com.jetbrains.fus.reporting.FileStorageMode
+import com.jetbrains.fus.reporting.MetadataStorage
 import junit.framework.TestCase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import org.junit.Assert
 import org.junit.Test
-import java.util.*
+import java.util.Collections
 
 @Suppress("SameParameterValue")
 class SensitiveDataValidatorTest : BaseSensitiveDataValidatorTest() {
@@ -560,12 +570,30 @@ class SensitiveDataValidatorTest : BaseSensitiveDataValidatorTest() {
   }
 
   internal fun createUnreachableValidator(): TestSensitiveDataValidator {
-    val storage = object : ValidationRulesPersistedStorage("TEST", TestEventLogMetadataPersistence(""), TestEventLogMetadataLoader("")) {
-      override fun isUnreachable(): Boolean {
-        return true
-      }
+    val unreachableStorage = object : MetadataStorage<EventLogBuild> {
+      override fun getClientDataRulesRevisions(): RecorderDataValidationRule = throw NotImplementedError()
+      override fun getFieldsToAnonymize(groupId: String, eventId: String): Set<String> = throw NotImplementedError()
+      override fun getGroupValidators(groupId: String): IGroupValidators<EventLogBuild> = emptyGroupValidators()
+      override fun getIdsRulesRevisions(): RecorderDataValidationRule = throw NotImplementedError()
+      override fun getSkipAnonymizationIds(): Set<String> = throw NotImplementedError()
+      override fun getSystemDataRulesRevisions(): RecorderDataValidationRule = throw NotImplementedError()
+      override fun isUnreachable(): Boolean = true
+      override fun reload() = Unit
+      override fun update(): Boolean = false
+      override suspend fun update(scope: CoroutineScope): Job = throw NotImplementedError()
     }
-    return TestSensitiveDataValidator(storage, "TEST")
+
+    val components = createFusComponents(object : FileStorage {
+      override fun exists(path: String): Boolean = false
+      override fun openFileHandle(path: String, mode: FileStorageMode): FileHandle = throw NotImplementedError()
+      override fun read(path: String): ByteArray = ByteArray(0)
+      override fun write(path: String, content: ByteArray) = throw NotImplementedError()
+    })
+
+    return TestSensitiveDataValidator(
+      FusComponentProvider.FusComponents(unreachableStorage, components.messageBus, components.remoteConfig),
+      "TEST"
+    )
   }
 
   private fun doTestWithRuleList(fileName: String, func: (TestSensitiveDataValidator) -> Unit) {
@@ -635,8 +663,8 @@ class SensitiveDataValidatorTest : BaseSensitiveDataValidatorTest() {
   internal inner class TestThirdPartyValidationRule : CustomValidationRule() {
     override fun getRuleId(): String = "third_party_rule"
 
-    override fun doValidate(data: String, context: EventContext): ValidationResultType {
-      return if (data == "FIRST") ValidationResultType.ACCEPTED else ValidationResultType.THIRD_PARTY
+    override fun doValidate(data: String, context: EventContext): com.intellij.internal.statistic.eventLog.validator.ValidationResultType {
+      return if (data == "FIRST") com.intellij.internal.statistic.eventLog.validator.ValidationResultType.ACCEPTED else com.intellij.internal.statistic.eventLog.validator.ValidationResultType.THIRD_PARTY
     }
   }
 }

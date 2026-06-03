@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -17,20 +18,18 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedEnumNameEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedEnumNameEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedEnumNameEnum
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableChangedEnumNameEntity
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ChangedEnumNameEntityImpl(private val dataSource: ChangedEnumNameEntityData) : ChangedEnumNameEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ChangedEnumNameEntityImpl(private val dataSource: ChangedEnumNameEntityData) : ChangedEnumNameEntity,
+                                                                                              WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -51,8 +50,8 @@ internal class ChangedEnumNameEntityImpl(private val dataSource: ChangedEnumName
   }
 
 
-  internal class Builder(result: ChangedEnumNameEntityData?) : ModifiableWorkspaceEntityBase<ChangedEnumNameEntity, ChangedEnumNameEntityData>(
-    result), ModifiableChangedEnumNameEntity {
+  internal class Builder(result: ChangedEnumNameEntityData?) :
+    ModifiableWorkspaceEntityBase<ChangedEnumNameEntity, ChangedEnumNameEntityData>(result), ChangedEnumNameEntityBuilder {
     internal constructor() : this(ChangedEnumNameEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -65,15 +64,13 @@ internal class ChangedEnumNameEntityImpl(private val dataSource: ChangedEnumName
           error("Entity ChangedEnumNameEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -109,7 +106,6 @@ internal class ChangedEnumNameEntityImpl(private val dataSource: ChangedEnumName
         changedProperty.add("entitySource")
 
       }
-
     override var someEnum: ChangedEnumNameEnum
       get() = getEntityData().someEnum
       set(value) {
@@ -121,6 +117,7 @@ internal class ChangedEnumNameEntityImpl(private val dataSource: ChangedEnumName
 
     override fun getEntityClass(): Class<ChangedEnumNameEntity> = ChangedEnumNameEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -129,14 +126,13 @@ internal class ChangedEnumNameEntityData : WorkspaceEntityData<ChangedEnumNameEn
 
   internal fun isSomeEnumInitialized(): Boolean = ::someEnum.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ChangedEnumNameEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ChangedEnumNameEntity> {
     val modifiable = ChangedEnumNameEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ChangedEnumNameEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -148,17 +144,15 @@ internal class ChangedEnumNameEntityData : WorkspaceEntityData<ChangedEnumNameEn
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedEnumNameEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ChangedEnumNameEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return ChangedEnumNameEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ChangedEnumNameEntity(someEnum, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ChangedEnumNameEntity(someEnum, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -169,9 +163,7 @@ internal class ChangedEnumNameEntityData : WorkspaceEntityData<ChangedEnumNameEn
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ChangedEnumNameEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.someEnum != other.someEnum) return false
     return true
@@ -180,9 +172,7 @@ internal class ChangedEnumNameEntityData : WorkspaceEntityData<ChangedEnumNameEn
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ChangedEnumNameEntityData
-
     if (this.someEnum != other.someEnum) return false
     return true
   }

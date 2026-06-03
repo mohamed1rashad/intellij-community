@@ -11,7 +11,11 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.SystemInfoRt
-import com.intellij.ui.*
+import com.intellij.ui.ColorChooserService
+import com.intellij.ui.ColorUtil
+import com.intellij.ui.ComponentUtil
+import com.intellij.ui.JBColor
+import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -22,18 +26,43 @@ import com.intellij.ui.components.panels.HorizontalLayout
 import com.intellij.ui.components.panels.OpaquePanel
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.ui.components.panels.Wrapper
-import com.intellij.ui.dsl.builder.*
 import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.bindIntValue
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.builder.toNullableProperty
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.ui.hover.HoverStateListener
 import com.intellij.util.Alarm
-import com.intellij.util.animation.*
+import com.intellij.util.animation.Animation
+import com.intellij.util.animation.AnimationContext
+import com.intellij.util.animation.CubicBezierEasing
+import com.intellij.util.animation.DoubleArrayFunction
+import com.intellij.util.animation.DoubleColorFunction
+import com.intellij.util.animation.Easing
+import com.intellij.util.animation.JBAnimator
+import com.intellij.util.animation.JBAnimatorHelper
+import com.intellij.util.animation.ShowHideAnimator
+import com.intellij.util.animation.animation
 import com.intellij.util.animation.components.BezierPainter
+import com.intellij.util.animation.makeSequent
+import com.intellij.util.animation.transparent
 import com.intellij.util.ui.EmptyIcon
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.NamedColorUtil
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.components.BorderLayoutPanel
-import java.awt.*
+import java.awt.BasicStroke
+import java.awt.Color
+import java.awt.Component
+import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.GridLayout
+import java.awt.Rectangle
 import java.awt.event.ActionEvent
 import java.awt.event.ActionListener
 import java.awt.event.WindowAdapter
@@ -44,7 +73,12 @@ import java.lang.Math.PI
 import java.text.NumberFormat
 import java.util.Locale
 import java.util.function.Consumer
-import javax.swing.*
+import javax.swing.Action
+import javax.swing.JButton
+import javax.swing.JComponent
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.SwingConstants
 import javax.swing.border.CompoundBorder
 import kotlin.math.absoluteValue
 import kotlin.math.pow
@@ -486,8 +520,8 @@ internal class AnimationPanelTestAction : DumbAwareAction("Show Animation Panel"
           spinner(0..100, 5).bindIntValue(options::coerceMax)
         }
         row {
-          comboBox(JBAnimator.Type.entries, SimpleListCellRenderer.create { label, value, _ ->
-            label.text = value.toString().split("_").joinToString(" ") {
+          comboBox(JBAnimator.Type.entries, textListCellRenderer("") { value ->
+            value.toString().split("_").joinToString(" ") {
               it.lowercase(Locale.getDefault()).capitalize()
             }
           }).bindItem(options::type.toNullableProperty())

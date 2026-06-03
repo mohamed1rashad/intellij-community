@@ -1,6 +1,6 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
-package org.jetbrains.kotlin.idea.completion.lookups
+package org.jetbrains.kotlin.idea.completion.impl.k2.lookups
 
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
@@ -8,7 +8,6 @@ import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.components.render
 import org.jetbrains.kotlin.analysis.api.renderer.types.KaExpandedTypeRenderingMode
 import org.jetbrains.kotlin.analysis.api.renderer.types.impl.KaTypeRendererForSource
-import org.jetbrains.kotlin.analysis.api.renderer.types.renderers.KaFunctionalTypeRenderer
 import org.jetbrains.kotlin.analysis.api.signatures.KaVariableSignature
 import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
 import org.jetbrains.kotlin.analysis.api.types.KaErrorType
@@ -20,8 +19,8 @@ import org.jetbrains.kotlin.types.Variance
 
 internal object CompletionShortNamesRenderer {
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     fun renderFunctionalTypeParameters(functionalType: KaFunctionType): String = functionalType.parameterTypes.joinToString(
         prefix = "(",
         postfix = ")",
@@ -32,8 +31,8 @@ internal object CompletionShortNamesRenderer {
         return renderReceiver(variable)
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun renderReceiver(variable: KaVariableSignature<*>): String {
         val receiverType = variable.receiverType ?: return ""
         return receiverType.renderVerbose() + "."
@@ -80,8 +79,8 @@ internal object CompletionShortNamesRenderer {
         }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun <A : Appendable> A.appendParameter(
         parameterName: Name,
         parameterType: KaType,
@@ -100,8 +99,8 @@ internal object CompletionShortNamesRenderer {
     }
 }
 
-context(_: KaSession)
 @KaExperimentalApi
+context(_: KaSession)
 internal fun KaType.renderVerbose(): @NonNls String = render(
     renderer = CompletionShortNamesRenderer.rendererVerbose,
     position = Variance.INVARIANT,

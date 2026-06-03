@@ -4,8 +4,14 @@ package com.intellij.sh;
 import com.intellij.codeInsight.editorActions.SimpleTokenSetQuoteHandler;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
 import com.intellij.psi.tree.IElementType;
+import org.jetbrains.annotations.NotNull;
 
-import static com.intellij.sh.lexer.ShTokenTypes.*;
+import static com.intellij.sh.lexer.ShTokenTypes.BAD_CHARACTER;
+import static com.intellij.sh.lexer.ShTokenTypes.CLOSE_BACKQUOTE;
+import static com.intellij.sh.lexer.ShTokenTypes.CLOSE_QUOTE;
+import static com.intellij.sh.lexer.ShTokenTypes.OPEN_BACKQUOTE;
+import static com.intellij.sh.lexer.ShTokenTypes.OPEN_QUOTE;
+import static com.intellij.sh.lexer.ShTokenTypes.RAW_STRING;
 
 final class ShQuoteHandler extends SimpleTokenSetQuoteHandler {
   public ShQuoteHandler() {
@@ -13,13 +19,13 @@ final class ShQuoteHandler extends SimpleTokenSetQuoteHandler {
   }
 
   @Override
-  public boolean isClosingQuote(HighlighterIterator iterator, int offset) {
+  public boolean isClosingQuote(@NotNull HighlighterIterator iterator, int offset) {
     final IElementType tokenType = iterator.getTokenType();
     return tokenType != OPEN_QUOTE && tokenType != OPEN_BACKQUOTE && super.isClosingQuote(iterator, offset);
   }
 
   @Override
-  public boolean isOpeningQuote(HighlighterIterator iterator, int offset) {
+  public boolean isOpeningQuote(@NotNull HighlighterIterator iterator, int offset) {
     final IElementType tokenType = iterator.getTokenType();
     return tokenType != CLOSE_QUOTE && tokenType != CLOSE_BACKQUOTE && super.isOpeningQuote(iterator, offset);
   }

@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.testframework;
 
 import com.intellij.execution.DefaultExecutionTarget;
@@ -7,10 +7,10 @@ import com.intellij.execution.ExecutionTarget;
 import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.ModuleRunProfile;
 import com.intellij.execution.configurations.RunProfile;
-import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.testframework.ui.TestsConsoleBuilderImpl;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ExecutionConsole;
+import com.intellij.execution.ui.ExecutionConsolePauseStateProvider;
 import com.intellij.execution.util.StoringPropertyContainer;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnAction;
@@ -19,16 +19,18 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.psi.search.GlobalSearchScope;
-import com.intellij.util.config.*;
+import com.intellij.util.config.AbstractProperty;
+import com.intellij.util.config.BooleanProperty;
+import com.intellij.util.config.DumbAwareToggleBooleanProperty;
+import com.intellij.util.config.Storage;
+import com.intellij.util.config.ToggleBooleanProperty;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.xdebugger.XDebugSession;
-import com.intellij.xdebugger.XDebuggerManager;
-import org.intellij.lang.annotations.JdkConstants;
+import com.intellij.util.ui.JdkConstants;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import javax.swing.tree.TreeSelectionModel;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +41,7 @@ import java.util.Map;
  */
 public abstract class TestConsoleProperties extends StoringPropertyContainer implements Disposable {
   public static final BooleanProperty SCROLL_TO_STACK_TRACE = new BooleanProperty("scrollToStackTrace", false);
+  public static final BooleanProperty SCROLL_TO_BOTTOM = new BooleanProperty("scrollToBottom", false);
   public static final BooleanProperty SORT_ALPHABETICALLY = new BooleanProperty("sortTestsAlphabetically", false);
   public static final BooleanProperty SORT_BY_DURATION = new BooleanProperty("sortTestsByDuration", false);
   public static final BooleanProperty SORT_BY_DECLARATION_ORDER = new BooleanProperty("sortTestsByDeclarationOrder", false);
@@ -111,7 +114,7 @@ public abstract class TestConsoleProperties extends StoringPropertyContainer imp
 
   public <T> void addListener(@NotNull AbstractProperty<T> property, @NotNull TestFrameworkPropertyListener<T> listener) {
     List<TestFrameworkPropertyListener> listeners =
-      myListeners.computeIfAbsent(property, __ -> ContainerUtil.createLockFreeCopyOnWriteList());
+      myListeners.computeIfAbsent(property, _ -> ContainerUtil.createLockFreeCopyOnWriteList());
     listeners.add(listener);
   }
 
@@ -132,12 +135,20 @@ public abstract class TestConsoleProperties extends StoringPropertyContainer imp
   }
 
   public boolean isDebug() {
-    return myExecutor.getId().equals(DefaultDebugExecutor.EXECUTOR_ID);
+    return ToolWindowId.DEBUG.equals(myExecutor.getId());
   }
 
   public boolean isPaused() {
-    XDebugSession debuggerSession = XDebuggerManager.getInstance(myProject).getDebugSession(getConsole());
-    return debuggerSession != null && debuggerSession.isPaused();
+    ExecutionConsole console = getConsole();
+    if (console == null) {
+      return false;
+    }
+    for (ExecutionConsolePauseStateProvider provider : ExecutionConsolePauseStateProvider.EP_NAME.getExtensionList()) {
+      if (provider.isPaused(myProject, console)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @Override
@@ -245,7 +256,8 @@ public abstract class TestConsoleProperties extends StoringPropertyContainer imp
 
   /**
    * Override to customize presentation of comparison difference visible before link to open diff window
-   * @param printer {@code Printer} to write on 
+   *
+   * @param printer  {@code Printer} to write on
    * @param expected text to be shown on the left of the diff window
    * @param actual   text to be shown on the right of the diff window
    */

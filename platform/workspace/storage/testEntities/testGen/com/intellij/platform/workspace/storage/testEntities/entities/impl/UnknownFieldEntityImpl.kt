@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -16,21 +17,19 @@ import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.testEntities.entities.ModifiableUnknownFieldEntity
 import com.intellij.platform.workspace.storage.testEntities.entities.UnknownFieldEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.UnknownFieldEntityBuilder
 import java.util.Date
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class UnknownFieldEntityImpl(private val dataSource: UnknownFieldEntityData) : UnknownFieldEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class UnknownFieldEntityImpl(private val dataSource: UnknownFieldEntityData) : UnknownFieldEntity,
+                                                                                        WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -51,8 +50,8 @@ internal class UnknownFieldEntityImpl(private val dataSource: UnknownFieldEntity
   }
 
 
-  internal class Builder(result: UnknownFieldEntityData?) : ModifiableWorkspaceEntityBase<UnknownFieldEntity, UnknownFieldEntityData>(
-    result), ModifiableUnknownFieldEntity {
+  internal class Builder(result: UnknownFieldEntityData?) :
+    ModifiableWorkspaceEntityBase<UnknownFieldEntity, UnknownFieldEntityData>(result), UnknownFieldEntityBuilder {
     internal constructor() : this(UnknownFieldEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -65,15 +64,13 @@ internal class UnknownFieldEntityImpl(private val dataSource: UnknownFieldEntity
           error("Entity UnknownFieldEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -109,7 +106,6 @@ internal class UnknownFieldEntityImpl(private val dataSource: UnknownFieldEntity
         changedProperty.add("entitySource")
 
       }
-
     override var data: Date
       get() = getEntityData().data
       set(value) {
@@ -121,6 +117,7 @@ internal class UnknownFieldEntityImpl(private val dataSource: UnknownFieldEntity
 
     override fun getEntityClass(): Class<UnknownFieldEntity> = UnknownFieldEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -129,14 +126,13 @@ internal class UnknownFieldEntityData : WorkspaceEntityData<UnknownFieldEntity>(
 
   internal fun isDataInitialized(): Boolean = ::data.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<UnknownFieldEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<UnknownFieldEntity> {
     val modifiable = UnknownFieldEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): UnknownFieldEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -148,17 +144,15 @@ internal class UnknownFieldEntityData : WorkspaceEntityData<UnknownFieldEntity>(
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.UnknownFieldEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.UnknownFieldEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return UnknownFieldEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return UnknownFieldEntity(data, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return UnknownFieldEntity(data, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -169,9 +163,7 @@ internal class UnknownFieldEntityData : WorkspaceEntityData<UnknownFieldEntity>(
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as UnknownFieldEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.data != other.data) return false
     return true
@@ -180,9 +172,7 @@ internal class UnknownFieldEntityData : WorkspaceEntityData<UnknownFieldEntity>(
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as UnknownFieldEntityData
-
     if (this.data != other.data) return false
     return true
   }

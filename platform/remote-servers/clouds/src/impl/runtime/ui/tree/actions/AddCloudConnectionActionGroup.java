@@ -1,7 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.clouds.impl.runtime.ui.tree.actions;
 
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.execution.services.ServiceViewAddActionContributor;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.platform.clouds.impl.runtime.ui.DefaultRemoteServersServiceViewContributor;
@@ -15,16 +20,21 @@ import java.util.List;
 
 import static com.intellij.remoteServer.impl.runtime.ui.RemoteServersServiceViewContributor.addNewRemoteServer;
 
-public class AddCloudConnectionActionGroup extends ActionGroup {
+public class AddCloudConnectionActionGroup extends ActionGroup implements ServiceViewAddActionContributor {
   public AddCloudConnectionActionGroup() {
     getTemplatePresentation().setHideGroupIfEmpty(true);
   }
 
   @Override
+  public @NotNull Class<?> getContributorClass() {
+    return DefaultRemoteServersServiceViewContributor.class;
+  }
+
+  @Override
   public AnAction @NotNull [] getChildren(@Nullable AnActionEvent e) {
-    List<ServerType> serverTypes = ContainerUtil.filter(ServerType.EP_NAME.getExtensionList(),
-                                                        type -> type.getCustomToolWindowId() == null &&
-                                                                type.createDefaultConfiguration().getCustomToolWindowId() == null);
+    List<ServerType<?>> serverTypes = ContainerUtil.filter(ServerType.EP_NAME.getExtensionList(),
+                                                           type -> type.getCustomToolWindowId() == null &&
+                                                                   type.createDefaultConfiguration().getCustomToolWindowId() == null);
     AnAction[] actions = new AnAction[serverTypes.size()];
     for (int i = 0; i < serverTypes.size(); i++) {
       actions[i] = new AddCloudConnectionAction(serverTypes.get(i));

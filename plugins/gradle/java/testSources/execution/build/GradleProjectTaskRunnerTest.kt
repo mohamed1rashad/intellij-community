@@ -4,15 +4,19 @@ package org.jetbrains.plugins.gradle.execution.build
 import com.intellij.execution.application.ApplicationConfigurationType
 import com.intellij.execution.scratch.JavaScratchConfigurationType
 import com.intellij.openapi.concurrency.awaitPromise
-import com.intellij.openapi.externalSystem.util.DEFAULT_SYNC_TIMEOUT
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.use
+import com.intellij.platform.externalSystem.testFramework.DEFAULT_EXTERNAL_SYSTEM_TEST_TIMEOUT
 import com.intellij.task.ProjectTaskContext
 import com.intellij.task.ProjectTaskRunner
 import com.intellij.task.TaskRunnerResults
 import com.intellij.task.impl.ModuleBuildTaskImpl
 import com.intellij.util.asDisposable
-import kotlinx.coroutines.*
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.testFramework.annotations.BaseGradleVersionSource
 import org.junit.jupiter.api.Assertions
@@ -32,7 +36,7 @@ class GradleProjectTaskRunnerTest : GradleProjectTaskRunnerTestCase() {
     delegatedBuild: Boolean, delegatedRun: Boolean,
     shouldBuild: Boolean, shouldRun: Boolean,
   ) {
-    testEmptyProject(gradleVersion) {
+    testJavaProject(gradleVersion) {
       Disposer.newDisposable().use { testDisposable ->
         val configurationType = ApplicationConfigurationType.getInstance()
         setupGradleDelegationMode(delegatedBuild, delegatedRun, testDisposable)
@@ -47,11 +51,11 @@ class GradleProjectTaskRunnerTest : GradleProjectTaskRunnerTestCase() {
     gradleVersion: GradleVersion,
     delegatedBuild: Boolean, delegatedRun: Boolean,
   ) {
-    testEmptyProject(gradleVersion) {
+    testJavaProject(gradleVersion) {
       Disposer.newDisposable().use { testDisposable ->
         val configurationType = JavaScratchConfigurationType.getInstance()
         setupGradleDelegationMode(delegatedBuild, delegatedRun, testDisposable)
-        assertGradleProjectTaskRunnerCanRun(configurationType, shouldBuild = false, shouldRun = false)
+        assertGradleProjectTaskRunnerCanRun(configurationType, expectedShouldBuild = false, expectedShouldRun = false)
       }
     }
   }
@@ -85,7 +89,7 @@ class GradleProjectTaskRunnerTest : GradleProjectTaskRunnerTestCase() {
 
               val buildPromise = projectTaskRunner.run(project, buildTaskContext, buildTask)
               val buildResult = withContext(NonCancellable) {
-                buildPromise.awaitPromise(DEFAULT_SYNC_TIMEOUT)
+                buildPromise.awaitPromise(DEFAULT_EXTERNAL_SYSTEM_TEST_TIMEOUT)
               }
 
               Assertions.assertEquals(TaskRunnerResults.SUCCESS, buildResult)
@@ -96,6 +100,34 @@ class GradleProjectTaskRunnerTest : GradleProjectTaskRunnerTestCase() {
         Assertions.assertEquals(numAttempts, unsafeExecutionCounter) {
           "The Gradle executions should be synchronised by the IDE Gradle integration."
         }
+      }
+    }
+  }
+
+  @ParameterizedTest
+  @BaseGradleVersionSource
+  fun `test GradleProjectTaskRunner#run returns FAILURE when build task fails`(
+    gradleVersion: GradleVersion,
+  ) {
+    testJavaProject(gradleVersion) {
+      runBlocking {
+        setupGradleDelegationMode(delegatedBuild = true, delegatedRun = false, asDisposable())
+
+        mockGradleConnectionService(asDisposable()) {
+          throw RuntimeException("Simulated Gradle build failure")
+        }
+
+        val projectTaskRunner = ProjectTaskRunner.EP_NAME.findExtensionOrFail(GradleProjectTaskRunner::class.java)
+
+        val buildTask = ModuleBuildTaskImpl(module)
+        val buildTaskContext = ProjectTaskContext()
+
+        val buildPromise = projectTaskRunner.run(project, buildTaskContext, buildTask)
+        val buildResult = withContext(NonCancellable) {
+          buildPromise.awaitPromise(DEFAULT_EXTERNAL_SYSTEM_TEST_TIMEOUT)
+        }
+
+        Assertions.assertEquals(TaskRunnerResults.FAILURE, buildResult)
       }
     }
   }

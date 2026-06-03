@@ -4,10 +4,38 @@ package com.intellij.platform.workspace.storage.tests.propertyBased
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.createEntityTreeCopy
-import com.intellij.platform.workspace.storage.impl.*
+import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
+import com.intellij.platform.workspace.storage.impl.MutableEntityStorageImpl
+import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
+import com.intellij.platform.workspace.storage.impl.asString
+import com.intellij.platform.workspace.storage.impl.assertConsistency
 import com.intellij.platform.workspace.storage.impl.exceptions.SymbolicIdAlreadyExistsException
+import com.intellij.platform.workspace.storage.impl.toClassId
 import com.intellij.platform.workspace.storage.impl.url.VirtualFileUrlManagerImpl
-import com.intellij.platform.workspace.storage.testEntities.entities.*
+import com.intellij.platform.workspace.storage.testEntities.entities.BaseEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.LeftEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.LeftEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.MiddleEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.MiddleEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.NameId
+import com.intellij.platform.workspace.storage.testEntities.entities.NamedEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.NamedEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.OoChildEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.OoChildEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.OoChildWithNullableParentEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.OoChildWithNullableParentEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.OoParentEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.OoParentEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.RightEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.RightEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.SampleEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.SampleEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.XChildEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.XChildEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.XChildWithOptionalParentEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.XChildWithOptionalParentEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.XParentEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.XParentEntityBuilder
 import com.intellij.platform.workspace.storage.tests.builderFrom
 import org.jetbrains.jetCheck.Generator
 import org.jetbrains.jetCheck.ImperativeCommand
@@ -217,7 +245,7 @@ internal abstract class ModifyEntity<E : WorkspaceEntity, M : WorkspaceEntity.Bu
 }
 
 private fun Class<*>.toBuilderClass(): Class<*> {
-  return Class.forName("$packageName.Modifiable$simpleName", true, classLoader)
+  return Class.forName("$packageName.${simpleName}Builder", true, classLoader)
 }
 
 private object NamedEntityManipulation : EntityManipulation {
@@ -241,9 +269,9 @@ private object NamedEntityManipulation : EntityManipulation {
   }
 
   override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-    return object : ModifyEntity<NamedEntity, ModifiableNamedEntity>(NamedEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableNamedEntity.() -> Unit> {
-        return listOf(modifyStringProperty(ModifiableNamedEntity::myName, env))
+    return object : ModifyEntity<NamedEntity, NamedEntityBuilder>(NamedEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<NamedEntityBuilder.() -> Unit> {
+        return listOf(modifyStringProperty(NamedEntityBuilder::myName, env))
       }
     }
   }
@@ -268,13 +296,13 @@ private object ChildWithOptionalParentManipulation : EntityManipulation {
     }
   }
 
-  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<XChildWithOptionalParentEntity, ModifiableXChildWithOptionalParentEntity> {
-    return object : ModifyEntity<XChildWithOptionalParentEntity, ModifiableXChildWithOptionalParentEntity>(
+  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<XChildWithOptionalParentEntity, XChildWithOptionalParentEntityBuilder> {
+    return object : ModifyEntity<XChildWithOptionalParentEntity, XChildWithOptionalParentEntityBuilder>(
       XChildWithOptionalParentEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableXChildWithOptionalParentEntity.() -> Unit> {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<XChildWithOptionalParentEntityBuilder.() -> Unit> {
         return listOf(
-          modifyStringProperty(ModifiableXChildWithOptionalParentEntity::childProperty, env),
-          modifyNullableProperty(ModifiableXChildWithOptionalParentEntity::optionalParent, parentGenerator(storage), env)
+          modifyStringProperty(XChildWithOptionalParentEntityBuilder::childProperty, env),
+          modifyNullableProperty(XChildWithOptionalParentEntityBuilder::optionalParent, parentGenerator(storage), env)
         )
       }
     }
@@ -293,11 +321,11 @@ private object OoParentManipulation : EntityManipulation {
   }
 
   override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-    return object : ModifyEntity<OoParentEntity, ModifiableOoParentEntity>(OoParentEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableOoParentEntity.() -> Unit> {
+    return object : ModifyEntity<OoParentEntity, OoParentEntityBuilder>(OoParentEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<OoParentEntityBuilder.() -> Unit> {
         return listOf(
-          modifyStringProperty(ModifiableOoParentEntity::parentProperty, env),
-          modifyNullableProperty(ModifiableOoParentEntity::child,
+          modifyStringProperty(OoParentEntityBuilder::parentProperty, env),
+          modifyNullableProperty(OoParentEntityBuilder::child,
                                  Generator.sampledFrom(
                                    OoChildEntity(env.generateValue(randomNames, null), env.generateValue(sources, null))
                                  ),
@@ -324,9 +352,9 @@ private object OoChildManipulation : EntityManipulation {
   }
 
   override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-    return object : ModifyEntity<OoChildEntity, ModifiableOoChildEntity>(OoChildEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableOoChildEntity.() -> Unit> {
-        return listOf(modifyStringProperty(ModifiableOoChildEntity::childProperty, env))
+    return object : ModifyEntity<OoChildEntity, OoChildEntityBuilder>(OoChildEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<OoChildEntityBuilder.() -> Unit> {
+        return listOf(modifyStringProperty(OoChildEntityBuilder::childProperty, env))
       }
     }
   }
@@ -354,9 +382,9 @@ private object OoChildWithNullableParentManipulation : EntityManipulation {
   }
 
   override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-    return object : ModifyEntity<OoChildWithNullableParentEntity, ModifiableOoChildWithNullableParentEntity>(
+    return object : ModifyEntity<OoChildWithNullableParentEntity, OoChildWithNullableParentEntityBuilder>(
       OoChildWithNullableParentEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableOoChildWithNullableParentEntity.() -> Unit> {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<OoChildWithNullableParentEntityBuilder.() -> Unit> {
         return emptyList()
       }
     }
@@ -382,9 +410,9 @@ private object MiddleEntityManipulation : EntityManipulation {
   }
 
   override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-    return object : ModifyEntity<MiddleEntity, ModifiableMiddleEntity>(MiddleEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableMiddleEntity.() -> Unit> {
-        return listOf(modifyStringProperty(ModifiableMiddleEntity::property, env))
+    return object : ModifyEntity<MiddleEntity, MiddleEntityBuilder>(MiddleEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<MiddleEntityBuilder.() -> Unit> {
+        return listOf(modifyStringProperty(MiddleEntityBuilder::property, env))
       }
     }
   }
@@ -406,11 +434,11 @@ private object AbstractEntities {
     }
 
     override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-      return object : ModifyEntity<LeftEntity, ModifiableLeftEntity>(LeftEntity::class, storage) {
-        override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableLeftEntity.() -> Unit> {
+      return object : ModifyEntity<LeftEntity, LeftEntityBuilder>(LeftEntity::class, storage) {
+        override fun modifyEntity(env: ImperativeCommand.Environment): List<LeftEntityBuilder.() -> Unit> {
           return listOf(
-            swapElementsInList(ModifiableLeftEntity::children, env),
-            removeInList(ModifiableLeftEntity::children, env)
+            swapElementsInList(LeftEntityBuilder::children, env),
+            removeInList(LeftEntityBuilder::children, env)
           )
         }
       }
@@ -432,11 +460,11 @@ private object AbstractEntities {
     }
 
     override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<out WorkspaceEntity, out WorkspaceEntity.Builder<out WorkspaceEntity>> {
-      return object : ModifyEntity<RightEntity, ModifiableRightEntity>(RightEntity::class, storage) {
-        override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableRightEntity.() -> Unit> {
+      return object : ModifyEntity<RightEntity,RightEntityBuilder>(RightEntity::class, storage) {
+        override fun modifyEntity(env: ImperativeCommand.Environment): List<RightEntityBuilder.() -> Unit> {
           return listOf(
-            swapElementsInList(ModifiableRightEntity::children, env),
-            removeInList(ModifiableRightEntity::children, env)
+            swapElementsInList(RightEntityBuilder::children, env),
+            removeInList(RightEntityBuilder::children, env)
           )
         }
       }
@@ -473,12 +501,12 @@ private object ChildEntityManipulation : EntityManipulation {
     }
   }
 
-  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<XChildEntity, ModifiableXChildEntity> {
-    return object : ModifyEntity<XChildEntity, ModifiableXChildEntity>(XChildEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableXChildEntity.() -> Unit> {
+  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<XChildEntity, XChildEntityBuilder> {
+    return object : ModifyEntity<XChildEntity, XChildEntityBuilder>(XChildEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<XChildEntityBuilder.() -> Unit> {
         return listOf(
-          modifyStringProperty(ModifiableXChildEntity::childProperty, env),
-          modifyNotNullProperty(ModifiableXChildEntity::parentEntity, parentGenerator(storage), env)
+          modifyStringProperty(XChildEntityBuilder::childProperty, env),
+          modifyNotNullProperty(XChildEntityBuilder::parentEntity, parentGenerator(storage), env)
         )
       }
     }
@@ -502,13 +530,13 @@ private object ParentEntityManipulation : EntityManipulation {
     }
   }
 
-  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<XParentEntity, ModifiableXParentEntity> {
-    return object : ModifyEntity<XParentEntity, ModifiableXParentEntity>(XParentEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableXParentEntity.() -> Unit> {
+  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<XParentEntity, XParentEntityBuilder> {
+    return object : ModifyEntity<XParentEntity, XParentEntityBuilder>(XParentEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<XParentEntityBuilder.() -> Unit> {
         return listOf(
-          modifyStringProperty(ModifiableXParentEntity::parentProperty, env),
-          swapElementsInList(ModifiableXParentEntity::children, env),
-          removeInList(ModifiableXParentEntity::optionalChildren, env)
+          modifyStringProperty(XParentEntityBuilder::parentProperty, env),
+          swapElementsInList(XParentEntityBuilder::children, env),
+          removeInList(XParentEntityBuilder::optionalChildren, env)
         )
       }
     }
@@ -528,13 +556,13 @@ private object SampleEntityManipulation : EntityManipulation {
     }
   }
 
-  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<SampleEntity, ModifiableSampleEntity> {
-    return object : ModifyEntity<SampleEntity, ModifiableSampleEntity>(SampleEntity::class, storage) {
-      override fun modifyEntity(env: ImperativeCommand.Environment): List<ModifiableSampleEntity.() -> Unit> {
+  override fun modifyManipulation(storage: MutableEntityStorageImpl): ModifyEntity<SampleEntity, SampleEntityBuilder> {
+    return object : ModifyEntity<SampleEntity, SampleEntityBuilder>(SampleEntity::class, storage) {
+      override fun modifyEntity(env: ImperativeCommand.Environment): List<SampleEntityBuilder.() -> Unit> {
         return listOf(
-          modifyBooleanProperty(ModifiableSampleEntity::booleanProperty, env),
-          modifyStringProperty(ModifiableSampleEntity::stringProperty, env),
-          addOrRemoveInList(ModifiableSampleEntity::stringListProperty, randomNames, env)
+          modifyBooleanProperty(SampleEntityBuilder::booleanProperty, env),
+          modifyStringProperty(SampleEntityBuilder::stringProperty, env),
+          addOrRemoveInList(SampleEntityBuilder::stringListProperty, randomNames, env)
         )
       }
     }

@@ -6,17 +6,17 @@ from .handler import InvalidStorageError, StorageHandler
 from .memory import InMemoryStorage
 
 __all__ = (
+    "DefaultStorage",
     "FileSystemStorage",
     "InMemoryStorage",
-    "Storage",
-    "DefaultStorage",
-    "default_storage",
     "InvalidStorageError",
+    "Storage",
     "StorageHandler",
+    "default_storage",
     "storages",
 )
 
-class DefaultStorage(LazyObject): ...
+class DefaultStorage(LazyObject[Storage]): ...
 
 storages: StorageHandler
 # default_storage is actually an instance of DefaultStorage, but it proxies through to a Storage

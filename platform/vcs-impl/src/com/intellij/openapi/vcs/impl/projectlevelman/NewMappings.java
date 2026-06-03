@@ -17,7 +17,14 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vcs.*;
+import com.intellij.openapi.vcs.AbstractVcs;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vcs.VcsDirectoryMapping;
+import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsRootChecker;
+import com.intellij.openapi.vcs.VcsRootErrorFilter;
 import com.intellij.openapi.vcs.ex.ProjectLevelVcsManagerEx;
 import com.intellij.openapi.vcs.impl.DefaultVcsRootPolicy;
 import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl;
@@ -39,13 +46,28 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.ui.update.DisposableUpdate;
 import com.intellij.util.ui.update.MergingUpdateQueue;
-import com.intellij.vcsUtil.VcsUtil;
 import kotlinx.coroutines.CoroutineScope;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
+/**
+ * A project-level holder of VCS mappings
+ */
 @ApiStatus.Internal
 public final class NewMappings implements Disposable {
   private static final Comparator<MappedRoot> ROOT_COMPARATOR = Comparator.comparing(it -> it.root.getPath());
@@ -54,9 +76,9 @@ public final class NewMappings implements Disposable {
   private static final Logger LOG = Logger.getInstance(NewMappings.class);
   private final Object myUpdateLock = new Object();
 
-  private FileWatchRequestsManager myFileWatchRequestsManager;
+  private VcsMappingsFileWatchesManager myFileWatchRequestsManager;
 
-  private final ProjectLevelVcsManager myVcsManager;
+  private final ProjectLevelVcsManagerImpl myVcsManager;
   private final Project myProject;
 
   private volatile List<VcsDirectoryMapping> myMappings = Collections.emptyList(); // sorted by MAPPINGS_COMPARATOR
@@ -75,7 +97,7 @@ public final class NewMappings implements Disposable {
   public NewMappings(@NotNull Project project, @NotNull ProjectLevelVcsManagerImpl vcsManager, @NotNull CoroutineScope coroutineScope) {
     myProject = project;
     myVcsManager = vcsManager;
-    myFileWatchRequestsManager = new FileWatchRequestsManager(myProject, this);
+    myFileWatchRequestsManager = new VcsMappingsFileWatchesManager(myProject, this);
 
     myRootUpdateQueue = MergingUpdateQueue.Companion.mergingUpdateQueue("NewMappings", 1000, coroutineScope).usePassThroughInUnitTestMode();
 
@@ -89,7 +111,7 @@ public final class NewMappings implements Disposable {
   }
 
   @TestOnly
-  public void setFileWatchRequestsManager(FileWatchRequestsManager fileWatchRequestsManager) {
+  public void setFileWatchRequestsManager(VcsMappingsFileWatchesManager fileWatchRequestsManager) {
     assert ApplicationManager.getApplication().isUnitTestMode();
     myFileWatchRequestsManager = fileWatchRequestsManager;
   }
@@ -395,7 +417,7 @@ public final class NewMappings implements Disposable {
     Map<VirtualFile, MappedRoot> mappedRoots = new HashMap<>();
     Disposable pointerDisposable = Disposer.newDisposable();
 
-    if (!TrustedProjects.isProjectTrusted(myProject)) {
+    if (!TrustedProjects.isProjectTrusted(myProject) || myProject.isDefault()) {
       return new Mappings(Collections.emptyList(), pointerDisposable);
     }
 
@@ -445,7 +467,7 @@ public final class NewMappings implements Disposable {
       List<MappedRoot> result = ContainerUtil.sorted(mappedRoots.values(), ROOT_COMPARATOR);
 
       for (MappedRoot root : result) {
-        if (myVcsManager.isIgnored(VcsUtil.getFilePath(root.root))) {
+        if (myVcsManager.isIgnoredFileRoot(root.root)) {
           LOG.warn("Root mapping is under ignored root: " + root.root);
         }
       }
@@ -464,7 +486,7 @@ public final class NewMappings implements Disposable {
     AbstractVcs vcs = getMappingsVcs(mapping);
     String rootPath = mapping.getDirectory();
 
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       VirtualFilePointerManager.getInstance().create(VfsUtilCore.pathToUrl(rootPath), pointerDisposable, myFilePointerListener);
 
       VirtualFile vcsRoot = LocalFileSystem.getInstance().findFileByPath(rootPath);
@@ -494,7 +516,7 @@ public final class NewMappings implements Disposable {
                                                                  directMappingDirs);
 
     List<MappedRoot> result = new ArrayList<>();
-    ReadAction.run(() -> {
+    ReadAction.runBlocking(() -> {
       for (VirtualFile vcsRoot : defaultRoots) {
         if (vcsRoot != null && vcsRoot.isDirectory()) {
           VirtualFilePointerManager.getInstance().create(vcsRoot, pointerDisposable, myFilePointerListener);
@@ -516,7 +538,7 @@ public final class NewMappings implements Disposable {
     // For example, if a "$PROJECT_DIR$" was replaced with a "<Project>" mapping as a part of shelve-unshelve operation.
 
     List<MappedRoot> result = new ArrayList<>();
-    ReadAction.run(() -> {
+    ReadAction.runBlocking(() -> {
       List<MappedRoot> oldMappings = ContainerUtil.filter(oldMappedRoots, root -> root.mapping.getVcs().equals(mapping.getVcs()));
       for (MappedRoot root : oldMappings) {
         VirtualFilePointerManager.getInstance().create(root.root, pointerDisposable, myFilePointerListener);
@@ -614,7 +636,6 @@ public final class NewMappings implements Disposable {
   public @Nullable MappedRoot getMappedRootFor(@Nullable VirtualFile file) {
     if (file == null || !file.isInLocalFileSystem()) return null;
     if (myMappedRoots.isEmpty()) return null;
-    if (myVcsManager.isIgnored(file)) return null;
 
     return myMappedRootsMapping.getRootFor(file);
   }
@@ -622,7 +643,6 @@ public final class NewMappings implements Disposable {
   public @Nullable MappedRoot getMappedRootFor(@Nullable FilePath file) {
     if (file == null || file.isNonLocal()) return null;
     if (myMappedRoots.isEmpty()) return null;
-    if (myVcsManager.isIgnored(file)) return null;
 
     return myMappedRootsMapping.getRootFor(file);
   }

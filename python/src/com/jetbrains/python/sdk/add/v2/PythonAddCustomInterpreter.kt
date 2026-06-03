@@ -9,6 +9,10 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.validation.DialogValidationRequestor
 import com.intellij.openapi.ui.validation.WHEN_PROPERTY_CHANGED
 import com.intellij.openapi.ui.validation.and
+import com.intellij.openapi.util.registry.RegistryManager
+import com.intellij.platform.ide.progress.ModalTaskOwner
+import com.intellij.platform.ide.progress.TaskCancellation
+import com.intellij.platform.ide.progress.withModalProgress
 import com.intellij.ui.dsl.builder.Panel
 import com.intellij.ui.dsl.builder.bind
 import com.intellij.ui.dsl.builder.bindItem
@@ -17,7 +21,13 @@ import com.jetbrains.python.errorProcessing.ErrorSink
 import com.jetbrains.python.errorProcessing.MessageError
 import com.jetbrains.python.newProject.collector.InterpreterStatisticsInfo
 import com.jetbrains.python.run.PythonInterpreterTargetEnvironmentFactory.Companion.findPanelExtension
-import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.*
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.CONDA
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.HATCH
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.PIPENV
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.POETRY
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.PYTHON
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.UV
+import com.jetbrains.python.sdk.add.v2.PythonSupportedEnvironmentManagers.VIRTUALENV
 import com.jetbrains.python.sdk.add.v2.conda.CondaExistingEnvironmentSelector
 import com.jetbrains.python.sdk.add.v2.conda.CondaNewEnvironmentCreator
 import com.jetbrains.python.sdk.add.v2.hatch.HatchExistingEnvironmentSelector
@@ -29,8 +39,17 @@ import com.jetbrains.python.sdk.add.v2.uv.EnvironmentCreatorUv
 import com.jetbrains.python.sdk.add.v2.uv.UvExistingEnvironmentSelector
 import com.jetbrains.python.sdk.add.v2.venv.EnvironmentCreatorVenv
 import com.jetbrains.python.sdk.add.v2.venv.PythonExistingEnvironmentSelector
+import com.jetbrains.python.sdk.configuration.CreateSdkInfo
+import com.jetbrains.python.sdk.configuration.CreateSdkInfoWithTool
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.annotations.ApiStatus.Internal
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 class ValidationInfoError(val validationInfo: ValidationInfo) : MessageError(validationInfo.message)
 
@@ -39,6 +58,7 @@ internal class PythonAddCustomInterpreter<P : PathHolder>(
   val module: Module?,
   private val errorSink: ErrorSink,
   private val limitExistingEnvironments: Boolean,
+  private val bestGuessCreateSdkInfo: Deferred<CreateSdkInfoWithTool?>,
 ) {
 
   private val propertyGraph = model.propertyGraph
@@ -59,7 +79,7 @@ internal class PythonAddCustomInterpreter<P : PathHolder>(
   private val newInterpreterCreators = if (model.fileSystem.isReadOnly) emptyMap()
   else mapOf(
     VIRTUALENV to { EnvironmentCreatorVenv(model) },
-    CONDA to { CondaNewEnvironmentCreator(model, errorSink) },
+    CONDA to { CondaNewEnvironmentCreator(model) },
     PIPENV to { EnvironmentCreatorPip(model, errorSink) },
     POETRY to { EnvironmentCreatorPoetry(model, module, errorSink) },
     UV to { EnvironmentCreatorUv(model, module, errorSink) },
@@ -68,7 +88,7 @@ internal class PythonAddCustomInterpreter<P : PathHolder>(
 
   private val existingInterpreterSelectors = buildMap {
     put(PYTHON) { PythonExistingEnvironmentSelector(model, module) }
-    put(CONDA) { CondaExistingEnvironmentSelector(model, errorSink) }
+    put(CONDA) { CondaExistingEnvironmentSelector(model) }
     if (!limitExistingEnvironments) {
       put(POETRY) { PoetryExistingEnvironmentSelector(model, module) }
       put(UV) { UvExistingEnvironmentSelector(model, module) }
@@ -146,12 +166,24 @@ internal class PythonAddCustomInterpreter<P : PathHolder>(
       }
 
       module?.project?.let { project ->
-        (model.fileSystem as? FileSystem.Target)?.targetEnvironmentConfiguration?.let { configuration ->
+        (model.fileSystem as? TargetFileSystem)?.targetEnvironmentConfiguration?.let { configuration ->
           findPanelExtension(project, configuration)?.let { extension ->
             collapsibleGroup(message("sdk.create.custom.target.specific.properties"), indent = false) {
               extension.extendDialogPanelWithOptionalFields(this)
               model.state.targetPanelExtension.set(extension)
             }
+
+            fun updateAutoUploadRequired() {
+              val autoUploadRequired = when (selectionMethod.get()) {
+                PythonInterpreterSelectionMethod.CREATE_NEW -> newInterpreterManager.get().sshAutoUploadRequired
+                PythonInterpreterSelectionMethod.SELECT_EXISTING -> existingInterpreterManager.get().sshAutoUploadRequired
+              }
+              extension.setAutoUploadRequired(autoUploadRequired)
+            }
+            selectionMethod.afterChange { updateAutoUploadRequired() }
+            newInterpreterManager.afterChange { updateAutoUploadRequired() }
+            existingInterpreterManager.afterChange { updateAutoUploadRequired() }
+            updateAutoUploadRequired()
           }
         }
       }
@@ -159,12 +191,51 @@ internal class PythonAddCustomInterpreter<P : PathHolder>(
   }
 
 
+  @OptIn(ExperimentalCoroutinesApi::class)
   fun onShown(scope: CoroutineScope) {
     newInterpreterCreators.values.forEach { it.onShown(scope) }
     existingInterpreterSelectors.values.forEach { it.onShown(scope) }
+
+    if (!model.fileSystem.isLocal) return
+
+    if (bestGuessCreateSdkInfo.isCompleted) {
+      bestGuessCreateSdkInfo.getCompleted()?.let { selectBestTool(it) }
+    }
+    else scope.launch(Dispatchers.Default) {
+      val createSdkInfoWithTool = withModalProgress(ModalTaskOwner.guess(), message("sdk.create.check.environments"), TaskCancellation.cancellable()) {
+        withTimeoutOrNull(getGuessSdkTimeout()) { bestGuessCreateSdkInfo.await() }
+      } ?: return@launch
+      selectBestTool(createSdkInfoWithTool)
+    }
   }
 
   fun createStatisticsInfo(): InterpreterStatisticsInfo {
     return currentSdkManager.createStatisticsInfo(PythonInterpreterCreationTargets.LOCAL_MACHINE)
+  }
+
+  private fun getGuessSdkTimeout(): Duration = RegistryManager.getInstance().intValue("python.guess.sdk.timeout.seconds").let { i ->
+    (if (i > 0) i else 3).seconds
+  }
+
+  private fun selectBestTool(createSdkInfoWithTool: CreateSdkInfoWithTool) {
+    val (manager, configurators) = when (createSdkInfoWithTool.createSdkInfo) {
+      is CreateSdkInfo.WillCreateEnv, is CreateSdkInfo.WillInstallTool -> {
+        selectionMethod.set(PythonInterpreterSelectionMethod.CREATE_NEW)
+        newInterpreterManager to newInterpreterCreators
+      }
+      is CreateSdkInfo.ExistingEnv -> {
+        selectionMethod.set(PythonInterpreterSelectionMethod.SELECT_EXISTING)
+        existingInterpreterManager to existingInterpreterSelectors
+      }
+    }
+
+    val tool = PythonSupportedEnvironmentManagers.entries.singleOrNull { it.toolId == createSdkInfoWithTool.toolId } ?: return
+    if (tool in configurators) {
+      manager.set(tool)
+    }
+    else {
+      selectionMethod.set(PythonInterpreterSelectionMethod.CREATE_NEW)
+      newInterpreterManager.set(tool)
+    }
   }
 }

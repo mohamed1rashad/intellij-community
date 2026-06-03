@@ -1,9 +1,17 @@
 <idea-plugin package="org.jetbrains.idea.devkit.debugger">
   <dependencies>
-    <plugin id="com.intellij.java"/>
+    <module name="intellij.java.backend"/>
+    <module name="intellij.platform.debugger.impl"/>
+    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+    <module name="intellij.java.debugger.impl"/>
+    <!-- endregion -->
   </dependencies>
   <resource-bundle>messages.DevKitDebuggerBundle</resource-bundle>
   <extensions defaultExtensionNs="com.intellij">
+    <debugger.compoundRendererProvider implementation="org.jetbrains.idea.devkit.debugger.HiDpiImageObjectRenderer"
+                                        order="before defaultImageObjectRenderer"/>
+    <debugger.compoundRendererProvider implementation="org.jetbrains.idea.devkit.debugger.HiDpiIconObjectRenderer"
+                                        order="before defaultIconObjectRenderer"/>
     <debugger.extraDebugNodesProvider implementation="org.jetbrains.idea.devkit.debugger.DebugeeIdeStateRenderer"/>
     <registryKey defaultValue="true" description="Show details of a debugee IDE in the variables view" key="devkit.debugger.show.ide.state"/>
     <registryKey defaultValue="true" description="Do not throw PCE during stepping and pause" key="devkit.debugger.prevent.pce.while.stepping"/>

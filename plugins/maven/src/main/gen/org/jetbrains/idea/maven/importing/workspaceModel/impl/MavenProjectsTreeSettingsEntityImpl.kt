@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package org.jetbrains.idea.maven.importing.workspaceModel.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -19,19 +20,17 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import org.jetbrains.idea.maven.importing.workspaceModel.MavenProjectsTreeSettingsEntity
-import org.jetbrains.idea.maven.importing.workspaceModel.ModifiableMavenProjectsTreeSettingsEntity
+import org.jetbrains.idea.maven.importing.workspaceModel.MavenProjectsTreeSettingsEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class MavenProjectsTreeSettingsEntityImpl(private val dataSource: MavenProjectsTreeSettingsEntityData) : MavenProjectsTreeSettingsEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class MavenProjectsTreeSettingsEntityImpl(private val dataSource: MavenProjectsTreeSettingsEntityData) :
+  MavenProjectsTreeSettingsEntity, WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -52,8 +51,9 @@ internal class MavenProjectsTreeSettingsEntityImpl(private val dataSource: Maven
   }
 
 
-  internal class Builder(result: MavenProjectsTreeSettingsEntityData?) : ModifiableWorkspaceEntityBase<MavenProjectsTreeSettingsEntity, MavenProjectsTreeSettingsEntityData>(
-    result), ModifiableMavenProjectsTreeSettingsEntity {
+  internal class Builder(result: MavenProjectsTreeSettingsEntityData?) :
+    ModifiableWorkspaceEntityBase<MavenProjectsTreeSettingsEntity, MavenProjectsTreeSettingsEntityData>(result),
+    MavenProjectsTreeSettingsEntityBuilder {
     internal constructor() : this(MavenProjectsTreeSettingsEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -66,15 +66,13 @@ internal class MavenProjectsTreeSettingsEntityImpl(private val dataSource: Maven
           error("Entity MavenProjectsTreeSettingsEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -117,7 +115,6 @@ internal class MavenProjectsTreeSettingsEntityImpl(private val dataSource: Maven
         changedProperty.add("entitySource")
 
       }
-
     private val importedFilePathsUpdater: (value: List<String>) -> Unit = { value ->
 
       changedProperty.add("importedFilePaths")
@@ -142,6 +139,7 @@ internal class MavenProjectsTreeSettingsEntityImpl(private val dataSource: Maven
 
     override fun getEntityClass(): Class<MavenProjectsTreeSettingsEntity> = MavenProjectsTreeSettingsEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -150,14 +148,13 @@ internal class MavenProjectsTreeSettingsEntityData : WorkspaceEntityData<MavenPr
 
   internal fun isImportedFilePathsInitialized(): Boolean = ::importedFilePaths.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<MavenProjectsTreeSettingsEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<MavenProjectsTreeSettingsEntity> {
     val modifiable = MavenProjectsTreeSettingsEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): MavenProjectsTreeSettingsEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -169,8 +166,7 @@ internal class MavenProjectsTreeSettingsEntityData : WorkspaceEntityData<MavenPr
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "org.jetbrains.idea.maven.importing.workspaceModel.MavenProjectsTreeSettingsEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("org.jetbrains.idea.maven.importing.workspaceModel.MavenProjectsTreeSettingsEntity") as EntityMetadata
   }
 
   override fun clone(): MavenProjectsTreeSettingsEntityData {
@@ -184,9 +180,8 @@ internal class MavenProjectsTreeSettingsEntityData : WorkspaceEntityData<MavenPr
     return MavenProjectsTreeSettingsEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return MavenProjectsTreeSettingsEntity(importedFilePaths, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return MavenProjectsTreeSettingsEntity(importedFilePaths, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -197,9 +192,7 @@ internal class MavenProjectsTreeSettingsEntityData : WorkspaceEntityData<MavenPr
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as MavenProjectsTreeSettingsEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.importedFilePaths != other.importedFilePaths) return false
     return true
@@ -208,9 +201,7 @@ internal class MavenProjectsTreeSettingsEntityData : WorkspaceEntityData<MavenPr
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as MavenProjectsTreeSettingsEntityData
-
     if (this.importedFilePaths != other.importedFilePaths) return false
     return true
   }

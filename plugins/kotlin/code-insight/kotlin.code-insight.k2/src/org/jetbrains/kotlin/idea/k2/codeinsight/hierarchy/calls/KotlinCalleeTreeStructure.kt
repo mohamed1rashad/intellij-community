@@ -13,7 +13,17 @@ import com.intellij.psi.PsiMethod
 import com.intellij.util.ArrayUtil
 import org.jetbrains.kotlin.asJava.unwrapped
 import org.jetbrains.kotlin.idea.findUsages.KotlinFindUsagesSupport
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.idea.references.mainReference
+import org.jetbrains.kotlin.psi.KtCallElement
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 
 class KotlinCalleeTreeStructure(
@@ -52,7 +62,7 @@ class KotlinCalleeTreeStructure(
                     override fun processDeclaration(reference: KtSimpleNameExpression, declaration: PsiElement) {
                         if (!isInScope(baseClass, declaration, scopeType)) return
                         result += (getOrCreateNodeDescriptor(
-                            parent = nodeDescriptor, originalElement = declaration, reference = null,
+                            parent = nodeDescriptor, originalElement = declaration, reference = reference.mainReference,
                             navigateToReference = false,
                             elementToDescriptorMap = calleeToDescriptorMap,
                             isJavaMap = false

@@ -1,11 +1,15 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi;
 
 import com.intellij.codeInsight.multiverse.CodeInsightContextUtil;
 import com.intellij.codeInsight.multiverse.CodeInsightContexts;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.injected.editor.VirtualFileWindow;
-import com.intellij.lang.*;
+import com.intellij.lang.ASTNode;
+import com.intellij.lang.FileASTNode;
+import com.intellij.lang.Language;
+import com.intellij.lang.LanguageParserDefinitions;
+import com.intellij.lang.ParserDefinition;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.command.undo.UndoUtil;
@@ -24,12 +28,16 @@ import com.intellij.openapi.vfs.NonPhysicalFileSystem;
 import com.intellij.openapi.vfs.VFileProperty;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileWithId;
-import com.intellij.psi.impl.*;
+import com.intellij.psi.impl.FreeThreadedFileViewProvider;
+import com.intellij.psi.impl.PsiDocumentManagerEx;
+import com.intellij.psi.impl.PsiFileEx;
+import com.intellij.psi.impl.PsiManagerEx;
+import com.intellij.psi.impl.PsiTreeChangeEventImpl;
 import com.intellij.psi.impl.file.PsiBinaryFileImpl;
 import com.intellij.psi.impl.file.PsiLargeBinaryFileImpl;
 import com.intellij.psi.impl.file.PsiLargeTextFileImpl;
 import com.intellij.psi.impl.file.impl.FileManager;
-import com.intellij.psi.impl.file.impl.FileManagerImpl;
+import com.intellij.psi.impl.file.impl.PossibleInvalidationKt;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.impl.source.PsiPlainTextFileImpl;
 import com.intellij.psi.impl.source.SourceTreeToPsiMap;
@@ -41,6 +49,7 @@ import com.intellij.util.LocalTimeCounter;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBTreeTraverser;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -73,7 +82,7 @@ public abstract class AbstractFileViewProvider extends UserDataHolderBase implem
     myVirtualFile = virtualFile;
     myEventSystemEnabled = eventSystemEnabled;
     setContent(new VirtualFileContent());
-    myPhysical = isEventSystemEnabled() &&
+    myPhysical = eventSystemEnabled &&
                  !(virtualFile instanceof LightVirtualFile) &&
                  !(virtualFile.getFileSystem() instanceof NonPhysicalFileSystem);
     virtualFile.putUserData(FREE_THREADED, isFreeThreaded(this));
@@ -160,7 +169,7 @@ public abstract class AbstractFileViewProvider extends UserDataHolderBase implem
     return myVirtualFile;
   }
 
-  private @Nullable Document getCachedDocument() {
+  @Nullable Document getCachedDocument() {
     Document document = com.intellij.reference.SoftReference.dereference(myDocument);
     if (document != null) return document;
     return FileDocumentManager.getInstance().getCachedDocument(getVirtualFile());
@@ -337,7 +346,7 @@ public abstract class AbstractFileViewProvider extends UserDataHolderBase implem
       return;
     }
     if (document != null &&
-        ((PsiDocumentManagerBase)PsiDocumentManager.getInstance(myManager.getProject())).getSynchronizer().isInSynchronization(document)) {
+        ((PsiDocumentManagerEx)PsiDocumentManager.getInstance(myManager.getProject())).getSynchronizer().isInSynchronization(document)) {
       return;
     }
 
@@ -357,10 +366,7 @@ public abstract class AbstractFileViewProvider extends UserDataHolderBase implem
         String message =
           "Inconsistent " + fileElement.getElementType() + " tree in " + this + "; nodeLength=" + nodeLength + "; fileLength=" + fileLength;
 
-        if (ApplicationManager.getApplication().isUnitTestMode()
-            && !ApplicationManagerEx.isInStressTest() &&
-            CodeInsightContexts.isSharedSourceSupportEnabled(getManager().getProject())
-        ) {
+        if (CodeInsightContexts.isSharedSourceSupportEnabled(getManager().getProject())) {
           message += "; context: " + CodeInsightContextUtil.getCodeInsightContext(this);
 
           FileManager fileManager = PsiManagerEx.getInstanceEx(getManager().getProject()).getFileManager();
@@ -393,7 +399,7 @@ public abstract class AbstractFileViewProvider extends UserDataHolderBase implem
            + ", content=" + getContent() + ", eventSystemEnabled=" + isEventSystemEnabled() + '}';
   }
 
-  public abstract PsiFile getCachedPsi(@NotNull Language target);
+  public abstract @Nullable PsiFile getCachedPsi(@NotNull Language target);
 
   public abstract @Unmodifiable @NotNull List<PsiFile> getCachedPsiFiles();
 
@@ -406,10 +412,11 @@ public abstract class AbstractFileViewProvider extends UserDataHolderBase implem
     }
   }
 
+  @ApiStatus.Internal
   public final void markPossiblyInvalidated() {
     invalidateCachedPsi();
     for (AbstractFileViewProvider copy : getKnownCopies()) {
-      FileManagerImpl.markPossiblyInvalidated(copy);
+      PossibleInvalidationKt.markPossiblyInvalidated(copy);
     }
   }
 

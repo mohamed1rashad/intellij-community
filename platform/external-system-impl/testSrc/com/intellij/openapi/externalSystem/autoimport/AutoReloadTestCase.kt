@@ -9,7 +9,9 @@ import com.intellij.openapi.components.ComponentManager
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.externalSystem.autoimport.ExternalSystemModificationType.INTERNAL
 import com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTrackerSettings.AutoReloadType
-import com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTrackerSettings.AutoReloadType.*
+import com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTrackerSettings.AutoReloadType.ALL
+import com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTrackerSettings.AutoReloadType.NONE
+import com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTrackerSettings.AutoReloadType.SELECTIVE
 import com.intellij.openapi.externalSystem.autoimport.MockProjectAware.ReloadCollisionPassType
 import com.intellij.openapi.externalSystem.model.ProjectSystemId
 import com.intellij.openapi.externalSystem.util.AbstractCrcCalculator
@@ -19,7 +21,12 @@ import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.io.getResolvedPath
 import com.intellij.openapi.util.use
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.findOrCreateDirectory
+import com.intellij.openapi.vfs.findOrCreateFile
+import com.intellij.openapi.vfs.readText
+import com.intellij.openapi.vfs.writeBytes
+import com.intellij.openapi.vfs.writeText
 import com.intellij.platform.externalSystem.testFramework.ExternalSystemTestCase
 import com.intellij.psi.tree.IElementType
 import com.intellij.psi.tree.TokenSet
@@ -215,11 +222,6 @@ abstract class AutoReloadTestCase : ExternalSystemTestCase() {
 
   protected fun markDirty(projectId: ExternalSystemProjectId) = projectTracker.markDirty(projectId)
 
-  @Suppress("SameParameterValue")
-  protected fun setDispatcherMergingSpan(delay: Int) {
-    projectTracker.setDispatcherMergingSpan(delay)
-  }
-
   protected fun setAutoReloadType(type: AutoReloadType) {
     projectTrackerSettings.autoReloadType = type
   }
@@ -365,7 +367,7 @@ abstract class AutoReloadTestCase : ExternalSystemTestCase() {
     }
   }
 
-  protected fun test(relativePath: String = SETTINGS_FILE, test: SimpleTestBench.(VirtualFile) -> Unit) {
+  protected open fun test(relativePath: String = SETTINGS_FILE, test: SimpleTestBench.(VirtualFile) -> Unit) {
     withProjectTracker {
       val projectAware = mockProjectAware()
 

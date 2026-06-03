@@ -1,19 +1,15 @@
-<idea-plugin visibility="internal" package="com.intellij.terminal.backend">
+<idea-plugin visibility="public">
   <dependencies>
     <module name="intellij.platform.backend"/>
     <module name="intellij.platform.kernel.backend"/>
+    <module name="intellij.platform.ide.impl.wsl"/>
   </dependencies>
 
   <extensions defaultExtensionNs="com.intellij">
     <platform.rpc.backend.remoteApiProvider implementation="com.intellij.terminal.backend.rpc.TerminalRemoteApiProvider"/>
+  </extensions>
 
-    <projectService serviceInterface="com.intellij.terminal.backend.TerminalPortForwardingManager"
-                    serviceImplementation="com.intellij.terminal.backend.TerminalNoPortForwardingManager"/>
-    <applicationService serviceInterface="org.jetbrains.plugins.terminal.hyperlinks.BackendHyperlinkInfoService"
-      serviceImplementation="com.intellij.terminal.backend.hyperlinks.BackendHyperlinkInfoServiceImpl" />
-    <applicationService serviceImplementation="com.intellij.terminal.backend.rpc.TerminalInputChannelsManager"
-                        client="remote"/>
-    <applicationService serviceInterface="com.intellij.terminal.backend.TerminalActivityTracker"
-                        serviceImplementation="com.intellij.terminal.backend.TerminalNoOpActivityTracker"/>
+  <extensions defaultExtensionNs="org.jetbrains.plugins.terminal">
+    <shellsDetector implementation="com.intellij.terminal.backend.WslProjectShellsDetector"/>
   </extensions>
 </idea-plugin>

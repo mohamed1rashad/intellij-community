@@ -17,19 +17,37 @@ import com.intellij.openapi.editor.markup.RangeHighlighter
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.terminal.TerminalUiSettingsManager
 import com.intellij.ui.scale.JBUIScale
+import com.intellij.util.AwaitCancellationAndInvoke
 import com.intellij.util.asDisposable
+import com.intellij.util.awaitCancellationAndInvoke
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.jediterm.terminal.CursorShape
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.jetbrains.plugins.terminal.TerminalOptionsProvider
 import org.jetbrains.plugins.terminal.TerminalUtil
-import org.jetbrains.plugins.terminal.block.reworked.*
+import org.jetbrains.plugins.terminal.block.output.HighlightingInfo
+import org.jetbrains.plugins.terminal.block.output.TextStyleAdapter
+import org.jetbrains.plugins.terminal.block.reworked.TerminalSessionModel
+import org.jetbrains.plugins.terminal.block.ui.TerminalContrastRatio
+import org.jetbrains.plugins.terminal.block.ui.TerminalUiUtils.toTextAttributes
+import org.jetbrains.plugins.terminal.view.TerminalContentChangeEvent
+import org.jetbrains.plugins.terminal.view.TerminalCursorOffsetChangeEvent
+import org.jetbrains.plugins.terminal.view.TerminalOffset
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.TerminalOutputModelListener
 import java.awt.Color
 import java.awt.Font
 import java.awt.Graphics2D
 import java.awt.geom.Rectangle2D
 import java.util.concurrent.CopyOnWriteArrayList
 
+@OptIn(AwaitCancellationAndInvoke::class)
 internal class TerminalCursorPainter private constructor(
   private val editor: EditorEx,
   private val outputModel: TerminalOutputModel,
@@ -39,6 +57,7 @@ internal class TerminalCursorPainter private constructor(
   private val listeners = CopyOnWriteArrayList<TerminalCursorPainterListener>()
 
   private var cursorPaintingJob: Job? = null
+  private var curHighlighter: RangeHighlighter? = null
 
   private var curCursorState: CursorState = CursorState(
     offset = outputModel.cursorOffset,
@@ -50,9 +69,19 @@ internal class TerminalCursorPainter private constructor(
   init {
     updateCursor(curCursorState)
 
+    coroutineScope.awaitCancellationAndInvoke(Dispatchers.EDT) {
+      curHighlighter?.dispose()
+      curHighlighter = null
+    }
+
     outputModel.addListener(coroutineScope.asDisposable(), object : TerminalOutputModelListener {
       override fun cursorOffsetChanged(event: TerminalCursorOffsetChangeEvent) {
         curCursorState = curCursorState.copy(offset = event.newOffset)
+        updateCursor(curCursorState)
+      }
+
+      override fun afterContentChanged(event: TerminalContentChangeEvent) {
+        curCursorState = curCursorState.copy(offset = outputModel.cursorOffset)
         updateCursor(curCursorState)
       }
     })
@@ -95,7 +124,12 @@ internal class TerminalCursorPainter private constructor(
 
   @RequiresEdt
   private fun updateCursor(state: CursorState) {
+    // Remove the active highlighter synchronously to avoid the situation when both old and new highlighters are painted.
+    // Can't move highlighter disposing to the painter job, because its cancellation is asynchronous.
+    curHighlighter?.dispose()
+    curHighlighter = null
     cursorPaintingJob?.cancel()
+
     cursorPaintingJob = coroutineScope.launch(Dispatchers.EDT + ModalityState.any().asContextElement(), CoroutineStart.UNDISPATCHED) {
       paintCursor(state)
     }
@@ -131,38 +165,28 @@ internal class TerminalCursorPainter private constructor(
   }
 
   private suspend fun paintBlinkingCursor(renderer: CursorRenderer, offset: TerminalOffset) {
-    var highlighter: RangeHighlighter? = renderer.installCursorHighlighter(offset)
-    try {
-      val blinkingPeriod = editor.settings.caretBlinkPeriod.toLong()
-      var shouldPaint = false
+    curHighlighter = renderer.installCursorHighlighter(offset)
+    val blinkingPeriod = editor.settings.caretBlinkPeriod.toLong()
+    var shouldPaint = false
 
-      while (true) {
-        delay(blinkingPeriod)
+    while (true) {
+      delay(blinkingPeriod)
 
-        if (shouldPaint) {
-          highlighter = renderer.installCursorHighlighter(offset)
-        }
-        else {
-          highlighter?.dispose()
-          highlighter = null
-        }
-
-        shouldPaint = !shouldPaint
+      if (shouldPaint) {
+        curHighlighter = renderer.installCursorHighlighter(offset)
       }
-    }
-    finally {
-      highlighter?.dispose()
+      else {
+        curHighlighter?.dispose()
+        curHighlighter = null
+      }
+
+      shouldPaint = !shouldPaint
     }
   }
 
   private suspend fun paintStaticCursor(renderer: CursorRenderer, offset: TerminalOffset) {
-    val highlighter = renderer.installCursorHighlighter(offset)
-    try {
-      awaitCancellation()
-    }
-    finally {
-      highlighter.dispose()
-    }
+    curHighlighter = renderer.installCursorHighlighter(offset)
+    awaitCancellation()
   }
 
   private fun getDefaultCursorShape(): CursorShape {
@@ -215,19 +239,21 @@ internal class TerminalCursorPainter private constructor(
     }
 
     final override fun installCursorHighlighter(offset: TerminalOffset): RangeHighlighter {
-      val cursorAttributes = getCursorTextAttributes(offset)
-      val foregroundColor = cursorAttributes.foregroundColor ?: editor.colorsScheme.defaultForeground
-      val backgroundColor = cursorAttributes.backgroundColor ?: editor.colorsScheme.defaultBackground
+      val textHighlighting = outputModel.getHighlightingAt(offset)
+      val textAttributes = getTextAttributes(textHighlighting)
+      val textForegroundColor = textAttributes.foregroundColor ?: editor.colorsScheme.defaultForeground
+      val textBackgroundColor = textAttributes.backgroundColor ?: editor.colorsScheme.defaultBackground
 
-      val effectiveForeground = if (inverseForeground) backgroundColor else foregroundColor
-      val attributes = TextAttributes(effectiveForeground, null, null, null, Font.PLAIN)
+      val effectiveTextForeground = if (inverseForeground) textBackgroundColor else textForegroundColor
+      val effectiveAttributes = TextAttributes(effectiveTextForeground, null, null, null, Font.PLAIN)
+      val cursorColor = getCursorColor(textHighlighting)
 
       // offset == textLength is allowed (it means that the cursor is at the end, a very common case)
       val relativeOffset = offset.toRelative(outputModel)
       val startOffset = relativeOffset.coerceIn(0..editor.document.textLength)
       val endOffset = (relativeOffset + 1).coerceIn(0..editor.document.textLength)
       val highlighter = editor.markupModel.addRangeHighlighter(startOffset, endOffset, HighlighterLayer.LAST,
-                                                               attributes, HighlighterTargetArea.EXACT_RANGE)
+                                                               effectiveAttributes, HighlighterTargetArea.EXACT_RANGE)
       highlighter.setCustomRenderer { _, _, g ->
         val offset = highlighter.startOffset
         val point = editor.offsetToPoint2D(offset)
@@ -237,7 +263,7 @@ internal class TerminalCursorPainter private constructor(
         val cursorHeight = editor.lineHeight
         val rect = Rectangle2D.Double(point.x, point.y, cursorWidth.toDouble(), cursorHeight.toDouble())
         g as Graphics2D
-        paintCursor(g, rect, foregroundColor)
+        paintCursor(g, rect, cursorColor)
 
         for (listener in listeners) {
           listener.cursorPainted()
@@ -247,10 +273,29 @@ internal class TerminalCursorPainter private constructor(
       return highlighter
     }
 
-    private fun getCursorTextAttributes(offset: TerminalOffset): TextAttributes {
-      val highlighting = outputModel.getHighlightingAt(offset)
-      return highlighting?.textAttributesProvider?.getTextAttributes()
-             ?: TextAttributes.ERASE_MARKER // If there are no specific highlighting, use the default
+    private fun getTextAttributes(highlighting: HighlightingInfo?): TextAttributes {
+      if (highlighting == null) {
+        // Use default text attributes if there is no specific highlighting
+        return TextAttributes.ERASE_MARKER
+      }
+      return highlighting.textAttributesProvider.getTextAttributes()
+    }
+
+    /**
+     * Calculates the color of the cursor taking into account the [highlighting] of the text under the cursor.
+     * We use the foreground color of the text as the cursor color but have to manually adjust the contrast.
+     * Because default contrast adjustment in [org.jetbrains.plugins.terminal.block.output.TextAttributesProvider.getTextAttributes]
+     * doesn't adjust the contrast if both text foreground and background colors are defined as absolute RGB values.
+     * But for cursor, we need to enforce contrast in this case.
+     */
+    private fun getCursorColor(highlighting: HighlightingInfo?): Color {
+      val textStyleAdapter = highlighting?.textAttributesProvider as? TextStyleAdapter
+                             ?: return editor.colorsScheme.defaultForeground
+      // Enforce default contrast, but take into account user-defined value if it is higher.
+      val userDefinedContrast = TerminalOptionsProvider.instance.minContrastRatio
+      val defaultContrast = TerminalContrastRatio.DEFAULT_VALUE
+      val requiredContrast = if (userDefinedContrast.value > defaultContrast.value) userDefinedContrast else defaultContrast
+      return textStyleAdapter.style.toTextAttributes(textStyleAdapter.colorPalette, requiredContrast).foregroundColor
     }
   }
 

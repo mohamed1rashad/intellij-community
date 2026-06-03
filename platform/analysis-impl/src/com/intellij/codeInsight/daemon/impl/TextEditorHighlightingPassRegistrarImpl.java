@@ -1,7 +1,12 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl;
 
-import com.intellij.codeHighlighting.*;
+import com.intellij.codeHighlighting.DirtyScopeTrackingHighlightingPassFactory;
+import com.intellij.codeHighlighting.MainHighlightingPassFactory;
+import com.intellij.codeHighlighting.Pass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassFactory;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassFactoryRegistrar;
 import com.intellij.codeInsight.daemon.ProblemHighlightFilter;
 import com.intellij.codeInsight.multiverse.CodeInsightContext;
 import com.intellij.codeInsight.multiverse.CodeInsightContextUtil;
@@ -9,7 +14,6 @@ import com.intellij.codeInsight.multiverse.EditorContextManager;
 import com.intellij.codeInspection.ex.GlobalInspectionContextBase;
 import com.intellij.codeWithMe.ClientId;
 import com.intellij.openapi.application.AccessToken;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.ClientEditorManager;
 import com.intellij.openapi.editor.Document;
@@ -27,6 +31,7 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ArrayUtilRt;
+import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.containers.ContainerUtil;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
@@ -38,7 +43,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.VisibleForTesting;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -101,13 +110,27 @@ public final class TextEditorHighlightingPassRegistrarImpl extends TextEditorHig
     return configs;
   }
 
+  /**
+   * This API is made {@code Internal} intentionally as it could lead to unpredictable highlighting performance behavior.
+   *
+   * @param flag if {@code true}: enables code insight passes serialization:
+   *             Injected fragments {@link InjectedGeneralHighlightingPass} highlighting and Inspections run after
+   *             completion of Syntax analysis {@link GeneralHighlightingPass}.
+   *             if {@code false} (default behavior) code insight passes are running in parallel
+   * @deprecated do not use, because it could slow down highlighting
+   */
   @ApiStatus.Internal
+  @Deprecated
   public void serializeCodeInsightPasses(boolean flag) {
     serializeCodeInsightPasses = flag;
     reRegisterFactories();
   }
 
+  /**
+   * @deprecated do not use, because it could slow down highlighting
+   */
   @ApiStatus.Internal
+  @Deprecated
   public boolean isSerializeCodeInsightPasses() {
     return serializeCodeInsightPasses;
   }
@@ -177,7 +200,7 @@ public final class TextEditorHighlightingPassRegistrarImpl extends TextEditorHig
   public @NotNull List<@NotNull TextEditorHighlightingPass> instantiatePasses(@NotNull PsiFile psiFile,
                                                                               @NotNull Editor editor,
                                                                               int @NotNull [] passesToIgnore) {
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
+    ThreadingAssertions.assertBackgroundThread();
     DaemonProgressIndicator indicator = GlobalInspectionContextBase.assertUnderDaemonProgress();
     PsiDocumentManager documentManager = PsiDocumentManager.getInstance(myProject);
     Document document = editor.getDocument();
@@ -216,7 +239,7 @@ public final class TextEditorHighlightingPassRegistrarImpl extends TextEditorHig
         else {
           // init with editor's color scheme
           pass.setColorsScheme(editor.getColorsScheme());
-          pass.setContext(context);
+          pass.setContext(psiFileContext);
 
           IntList ids = passConfig.completionPredecessorIds.length == 0 ? IntList.of() : new IntArrayList(passConfig.completionPredecessorIds.length);
           for (int id : passConfig.completionPredecessorIds) {
@@ -242,11 +265,13 @@ public final class TextEditorHighlightingPassRegistrarImpl extends TextEditorHig
     FileStatusMap statusMap = daemonCodeAnalyzer.getFileStatusMap();
     for (int i = 0; i < passesRefusedToCreate.size(); i++) {
       int id = passesRefusedToCreate.getInt(i);
-      statusMap.markFileUpToDate(document, context, id, indicator);
+      statusMap.markFileUpToDate(document, psiFileContext, id, indicator);
     }
     if (!shouldHighlightFile) {
       // in case when some extension prohibited highlighting, return empty pass to distinguish from error during pass creation and endless restart
-      result.add(new ProgressableTextEditorHighlightingPass.EmptyPass(myProject, document));
+      ProgressableTextEditorHighlightingPass.EmptyPass emptyPass = new ProgressableTextEditorHighlightingPass.EmptyPass(myProject, document);
+      emptyPass.setContext(psiFileContext);
+      result.add(emptyPass);
     }
     return result;
   }
@@ -256,7 +281,7 @@ public final class TextEditorHighlightingPassRegistrarImpl extends TextEditorHig
   public @NotNull List<@NotNull TextEditorHighlightingPass> instantiateMainPasses(@NotNull PsiFile psiFile,
                                                                                   @NotNull Document document,
                                                                                   @NotNull HighlightInfoProcessor highlightInfoProcessor) {
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
+    ThreadingAssertions.assertBackgroundThread();
     Set<TextEditorHighlightingPass> ids = new HashSet<>();
     PassConfig[] frozenPassConfigs = freezeRegisteredPassFactories();
     CodeInsightContext context = CodeInsightContextUtil.getCodeInsightContext(psiFile);

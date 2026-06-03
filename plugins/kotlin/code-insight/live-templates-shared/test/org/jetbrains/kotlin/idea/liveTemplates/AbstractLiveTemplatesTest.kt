@@ -12,11 +12,11 @@ import com.intellij.util.ArrayUtil
 import com.intellij.util.ui.UIUtil
 import junit.framework.TestCase
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.kotlin.idea.artifacts.KotlinJvmLightProjectDescriptor
 import org.jetbrains.kotlin.idea.base.test.InTextDirectivesUtils
-import org.jetbrains.kotlin.idea.base.test.KotlinJvmLightProjectDescriptor
 import org.jetbrains.kotlin.idea.base.test.NewLightKotlinCodeInsightFixtureTestCase
 import org.jetbrains.kotlin.test.TestMetadata
-import java.util.*
+import java.util.Arrays
 
 abstract class AbstractLiveTemplatesTest : NewLightKotlinCodeInsightFixtureTestCase() {
 

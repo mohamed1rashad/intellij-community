@@ -7,8 +7,21 @@ import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.util.treeView.ValidateableNode;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.CommonShortcuts;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.PlatformDataKeys;
+import com.intellij.openapi.actionSystem.Separator;
+import com.intellij.openapi.actionSystem.UiCompatibleDataProvider;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.CoroutinesKt;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -17,7 +30,12 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.UserDataHolder;
+import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.pom.Navigatable;
@@ -30,17 +48,30 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
-import com.intellij.util.ui.update.MergingUpdateQueue;
-import com.intellij.util.ui.update.Update;
+import com.intellij.util.ui.update.DebouncedUpdates;
+import com.intellij.util.ui.update.UpdateQueue;
+import kotlin.Unit;
+import kotlinx.coroutines.Dispatchers;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ListCellRenderer;
+import javax.swing.ListSelectionModel;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.LayoutManager;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -73,7 +104,7 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter
   protected final CollectionListModel<T> myListModel = new CollectionListModel<>();
   private List<ListItemPresentation> myPresentations = Collections.emptyList();
 
-  private final MergingUpdateQueue myMergingUpdateQueue = new MergingUpdateQueue("FinderRecursivePanel", 100, true, this, this);
+  private final UpdateQueue<Unit> myMergingUpdateQueue;
   private volatile boolean isMergeListItemsRunning;
 
   private final AtomicBoolean myUpdateSelectedPathModeActive = new AtomicBoolean();
@@ -124,6 +155,12 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter
     myProject = project;
     myParent = parent;
     myGroupId = groupId;
+
+
+    myMergingUpdateQueue = DebouncedUpdates.<Unit>forComponent(this, "FinderRecursivePanel", 100)
+      .withContext(CoroutinesKt.getEDT(Dispatchers.INSTANCE))
+      .runLatest(ignored -> performUpdate())
+      .cancelOnDispose(this);
 
     if (myParent != null) {
       Disposer.register(myParent, this);
@@ -414,7 +451,6 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter
   @Override
   public void dispose() {
     super.dispose();
-    myMergingUpdateQueue.cancelAllUpdates();
     myDisposed = true;
   }
 
@@ -447,17 +483,19 @@ public abstract class FinderRecursivePanel<T> extends OnePixelSplitter
     }
 
     myList.setPaintBusy(true);
-    myMergingUpdateQueue.queue(Update.create("update", () -> {
-      T oldValue = getSelectedValue();
-      int oldIndex = myList.getSelectedIndex();
+    myMergingUpdateQueue.queue(Unit.INSTANCE);
+  }
 
-      if (myNonBlockingLoad) {
-        scheduleUpdateNonBlocking(oldValue, oldIndex);
-      }
-      else {
-        scheduleUpdateBlocking(oldValue, oldIndex);
-      }
-    }));
+  private void performUpdate() {
+    T oldValue = getSelectedValue();
+    int oldIndex = myList.getSelectedIndex();
+
+    if (myNonBlockingLoad) {
+      scheduleUpdateNonBlocking(oldValue, oldIndex);
+    }
+    else {
+      scheduleUpdateBlocking(oldValue, oldIndex);
+    }
   }
 
   private void scheduleUpdateBlocking(T oldSelectedValue, int oldSelectedIndex) {

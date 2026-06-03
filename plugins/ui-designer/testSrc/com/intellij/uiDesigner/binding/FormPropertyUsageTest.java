@@ -17,7 +17,7 @@ import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.util.Query;
 import com.intellij.util.containers.ContainerUtil;
 
-import javax.swing.*;
+import javax.swing.JButton;
 import java.util.Collection;
 
 
@@ -40,7 +40,7 @@ public class FormPropertyUsageTest extends JavaPsiTestCase {
 
   public void testClassUsage() {
     PsiClass psiClass = myJavaFacade.findClass(JButton.class.getName(), GlobalSearchScope.allScope(myProject));
-    final Query<PsiReference> query = ReferencesSearch.search(psiClass);
+    final Query<PsiReference> query = ReferencesSearch.search(psiClass, GlobalSearchScope.projectScope(myProject));
     final Collection<PsiReference> result = query.findAll();
     assertEquals(1, result.size());
   }

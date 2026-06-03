@@ -37,7 +37,11 @@ import com.intellij.ui.util.height
 import com.intellij.ui.util.width
 import com.intellij.util.cancelOnDispose
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import java.awt.Dimension
@@ -111,6 +115,8 @@ class IntentionPreviewPopupUpdateProcessor internal constructor(
 
     component.startLoading()
 
+    component.background = null
+
     val modality = ModalityState.defaultModalityState().asContextElement()
     job = project.service<IntentionPreviewPopupUpdateProcessorCoroutineScopeHolder>().coroutineScope.launch {
       oldJob?.join()
@@ -162,6 +168,9 @@ class IntentionPreviewPopupUpdateProcessor internal constructor(
 
   private fun renderPreview(result: IntentionPreviewInfo): JComponent {
     return when (result) {
+      is IntentionPreviewInfo.ModernDiff -> {
+        renderModernDiffPreview(result)
+      }
       is IntentionPreviewDiffResult -> {
         val location = popup.locationOnScreen
         val screen = ScreenUtil.getScreenRectangle(location)
@@ -211,6 +220,14 @@ class IntentionPreviewPopupUpdateProcessor internal constructor(
       is Html -> IntentionPreviewComponent.createHtmlPanel(result)
       else -> IntentionPreviewComponent.createNoPreviewPanel()
     }
+  }
+
+  private fun renderModernDiffPreview(modernDiff: IntentionPreviewInfo.ModernDiff): JComponent {
+    val diffs = modernDiff.diffs
+    if (diffs.isEmpty()) {
+      return IntentionPreviewComponent.createNoPreviewPanel()
+    }
+    return ModernDiffPreviewPanel(project, modernDiff, popup)
   }
 
   fun setup(popup: IntentionPreviewComponentHolder, parentIndex: Int) {

@@ -12,7 +12,7 @@ import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.Comparator;
 
 public interface PsiElementRenderingInfo<T extends PsiElement> {
@@ -41,7 +41,7 @@ public interface PsiElementRenderingInfo<T extends PsiElement> {
 
   static <T extends @NotNull PsiElement>
   @NotNull Comparator<T> getComparator(@NotNull PsiElementRenderingInfo<? super T> renderingInfo) {
-    return Comparator.comparing(element -> ReadAction.compute(() -> {
+    return Comparator.comparing(element -> ReadAction.computeBlocking(() -> {
       String elementText = renderingInfo.getPresentableText(element);
       String containerText = renderingInfo.getContainerText(element);
       TextWithIcon moduleTextWithIcon = PsiElementListCellRenderer.getModuleTextWithIcon(element);

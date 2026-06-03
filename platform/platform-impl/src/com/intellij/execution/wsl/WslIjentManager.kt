@@ -18,7 +18,7 @@ import org.jetbrains.annotations.ApiStatus
 @ApiStatus.Experimental
 interface WslIjentManager {
   /**
-   * This coroutine scope is for usage in [com.intellij.execution.ijent.IjentChildProcessAdapter] and things like that.
+   * This coroutine scope is for usage in [com.intellij.platform.ijent.IjentChildProcessAdapter] and things like that.
    */
   @DelicateCoroutinesApi
   val processAdapterScope: CoroutineScope
@@ -45,6 +45,8 @@ interface WslIjentManager {
    * @return An initialized [IjentPosixApi] ready for interaction with the WSL environment.
    */
   suspend fun getIjentApi(descriptor: EelDescriptor?, wslDistribution: WSLDistribution, project: Project?, rootUser: Boolean): IjentPosixApi
+
+  fun isIjentInitialized(descriptor: EelDescriptor): Boolean
 
   @Deprecated(
     "Use WslIjentAvailabilityService.runWslCommandsViaIjent",

@@ -12,7 +12,6 @@ import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.xml.util.XmlUtil;
 import org.jetbrains.annotations.NotNull;
-import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.DisableOnDebug;
 import org.junit.rules.TestRule;
@@ -20,9 +19,19 @@ import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * @author Dmitry Avdeev
@@ -32,8 +41,7 @@ import java.util.*;
 public class XmlSchemaIndexTest extends LightJavaCodeInsightFixtureTestCase {
   private static final String NS = "http://java.jb.com/xml/ns/javaee";
 
-  @Rule
-  public TestRule timeout = new DisableOnDebug(Timeout.seconds(30));
+  public TestRule timeout = asOuterRule(new DisableOnDebug(Timeout.seconds(10)));
 
   private static @NotNull Collection<String> computeTagNames(@NotNull VirtualFile file) throws IOException {
     List<String> tags = new ArrayList<>();

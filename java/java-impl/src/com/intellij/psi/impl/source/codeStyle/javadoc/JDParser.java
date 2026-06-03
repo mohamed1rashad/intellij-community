@@ -6,7 +6,11 @@ import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiJavaDocumentedElement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMethod;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
@@ -14,7 +18,7 @@ import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.TodoPattern;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.text.CharArrayUtil;
-import com.intellij.xml.util.HtmlUtil;
+import com.intellij.xml.util.BasicHtmlUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -465,7 +469,7 @@ public class JDParser {
   }
 
   private static boolean containsTagToKeepIndentsAfter(@NotNull String line) {
-    String tag = HtmlUtil.getStartTag(line);
+    String tag = BasicHtmlUtil.getStartTag(line);
     return tag != null && ArrayUtil.contains(tag, TAGS_TO_KEEP_INDENTS_AFTER);
   }
 
@@ -714,7 +718,7 @@ public class JDParser {
   }
 
   private boolean isKeepLineFeedsIn(@NotNull String line) {
-    return mySettings.JD_PRESERVE_LINE_FEEDS || HtmlUtil.startsWithTag(line);
+    return mySettings.JD_PRESERVE_LINE_FEEDS || BasicHtmlUtil.startsWithTag(line);
   }
 
   /**
@@ -967,7 +971,7 @@ public class JDParser {
   }
 
   /**
-   * Returns formatted JavaDoc tag description, according to selected configuration. Prefixs
+   * Returns formatted JavaDoc tag description, according to selected configuration. Prefixes
    * may be specified for the first lines and all subsequent lines. This distinction allows
    * partially manual formatting of the first line (by moving content from the description
    * to the first line prefix) and allow continuation lines to use different indentation.
@@ -1074,7 +1078,7 @@ public class JDParser {
     for (int i = currLine + 1; i < lines.size(); i ++) {
       String line = lines.get(i);
       if (!line.isEmpty()) {
-        return HtmlUtil.startsWithTag(line);
+        return BasicHtmlUtil.startsWithTag(line);
       }
     }
     return false;

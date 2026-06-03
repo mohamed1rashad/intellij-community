@@ -2,15 +2,50 @@
 package org.jetbrains.kotlin.idea.k2.quickFix
 
 import com.intellij.codeInsight.intention.IntentionAction
-import com.intellij.lang.jvm.*
-import com.intellij.lang.jvm.actions.*
+import com.intellij.lang.jvm.JvmClass
+import com.intellij.lang.jvm.JvmElement
+import com.intellij.lang.jvm.JvmMethod
+import com.intellij.lang.jvm.JvmModifier
+import com.intellij.lang.jvm.JvmValue
 import com.intellij.lang.jvm.actions.AnnotationAttributeValueRequest.NestedAnnotation
 import com.intellij.lang.jvm.actions.AnnotationAttributeValueRequest.StringValue
+import com.intellij.lang.jvm.actions.AnnotationRequest
+import com.intellij.lang.jvm.actions.ChangeModifierRequest
+import com.intellij.lang.jvm.actions.CreateFieldRequest
+import com.intellij.lang.jvm.actions.CreateMethodRequest
+import com.intellij.lang.jvm.actions.EP_NAME
+import com.intellij.lang.jvm.actions.ExpectedParameter
+import com.intellij.lang.jvm.actions.ExpectedType
+import com.intellij.lang.jvm.actions.ExpectedTypes
+import com.intellij.lang.jvm.actions.annotationRequest
+import com.intellij.lang.jvm.actions.arrayAttribute
+import com.intellij.lang.jvm.actions.constructorRequest
+import com.intellij.lang.jvm.actions.createAddAnnotationActions
+import com.intellij.lang.jvm.actions.createChangeAnnotationAttributeActions
+import com.intellij.lang.jvm.actions.createChangeTypeActions
+import com.intellij.lang.jvm.actions.createConstructorActions
+import com.intellij.lang.jvm.actions.createMethodActions
+import com.intellij.lang.jvm.actions.createModifierActions
+import com.intellij.lang.jvm.actions.expectedParameter
+import com.intellij.lang.jvm.actions.expectedType
+import com.intellij.lang.jvm.actions.expectedTypes
+import com.intellij.lang.jvm.actions.intAttribute
+import com.intellij.lang.jvm.actions.methodRequest
+import com.intellij.lang.jvm.actions.stringAttribute
+import com.intellij.lang.jvm.actions.typeRequest
 import com.intellij.lang.jvm.types.JvmSubstitutor
+import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Pair.pair
-import com.intellij.psi.*
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiField
+import com.intellij.psi.PsiJvmSubstitutor
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiModifierListOwner
+import com.intellij.psi.PsiSubstitutor
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypes
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.CodeInsightTestFixture
 import com.intellij.testFramework.runInEdtAndWait
@@ -21,9 +56,14 @@ import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
 import org.jetbrains.kotlin.asJava.toLightElements
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.util.allScope
+import org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.CreateConstructorFromKotlinUsageRequest
 import org.jetbrains.kotlin.idea.test.KotlinLightCodeInsightFixtureTestCaseBase
 import org.jetbrains.kotlin.idea.test.KotlinWithJdkAndRuntimeLightProjectDescriptor
+import org.jetbrains.kotlin.idea.test.util.elementByOffset
+import org.jetbrains.kotlin.psi.KtCallElement
+import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtModifierListOwner
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.uast.UClass
@@ -32,6 +72,7 @@ import org.jetbrains.uast.toUElementOfType
 import org.junit.Assert
 import org.junit.internal.runners.JUnit38ClassRunner
 import org.junit.runner.RunWith
+import kotlin.jvm.java
 
 @RunWith(JUnit38ClassRunner::class)
 class K2CommonIntentionActionsTest : KotlinLightCodeInsightFixtureTestCaseBase() {
@@ -1114,9 +1155,7 @@ class K2CommonIntentionActionsTest : KotlinLightCodeInsightFixtureTestCaseBase()
         myFixture.checkResult(
             """
         |class Foo() {
-        |    constructor(param0: Int) : this() {
-        |
-        |    }
+        |    constructor(param0: Int) : this()
         |}
         """.trim().trimMargin(), true
         )
@@ -1142,6 +1181,24 @@ class K2CommonIntentionActionsTest : KotlinLightCodeInsightFixtureTestCaseBase()
         |}
         """.trim().trimMargin(), true
         )
+    }
+
+    fun testChangePrimaryConstructorNoJavaFix() {
+        myFixture.configureByText(
+            "foo.kt", """
+        private val test = Foo("1<caret>23")
+        class Foo(i: Int)
+        """
+        )
+
+        val intentionActions =  ActionUtil.underModalProgress(project, "") {
+            val call = PsiTreeUtil.getParentOfType(myFixture.elementByOffset, KtCallElement::class.java)!!
+            createConstructorActions(
+                (myFixture.file as KtFile).declarations.filterIsInstance<KtClass>().first().toUElement() as JvmClass,
+                CreateConstructorFromKotlinUsageRequest(call, emptyList())
+            )
+        }
+        assertSize(1, intentionActions)
     }
 
     fun testRemoveConstructorParameters() {

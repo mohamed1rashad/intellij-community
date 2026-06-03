@@ -1,32 +1,37 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:ApiStatus.Internal
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.openapi.externalSystem.settings.workspaceModel.impl
 
 import com.intellij.openapi.externalSystem.settings.workspaceModel.ExternalProjectBuildClasspathEntity
 import com.intellij.openapi.externalSystem.settings.workspaceModel.ExternalProjectsBuildClasspathEntity
-import com.intellij.openapi.externalSystem.settings.workspaceModel.ModifiableExternalProjectsBuildClasspathEntity
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.ConnectionId
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
+import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
+import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import org.jetbrains.annotations.ApiStatus
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: ExternalProjectsBuildClasspathEntityData) : ExternalProjectsBuildClasspathEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: ExternalProjectsBuildClasspathEntityData) :
+  ExternalProjectsBuildClasspathEntity, WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
+
 
   override val projectsBuildClasspath: Map<String, ExternalProjectBuildClasspathEntity>
     get() {
@@ -45,8 +50,9 @@ internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: 
   }
 
 
-  internal class Builder(result: ExternalProjectsBuildClasspathEntityData?) : ModifiableWorkspaceEntityBase<ExternalProjectsBuildClasspathEntity, ExternalProjectsBuildClasspathEntityData>(
-    result), ExternalProjectsBuildClasspathEntity.Builder {
+  internal class Builder(result: ExternalProjectsBuildClasspathEntityData?) :
+    ModifiableWorkspaceEntityBase<ExternalProjectsBuildClasspathEntity, ExternalProjectsBuildClasspathEntityData>(result),
+    ExternalProjectsBuildClasspathEntity.Builder {
     internal constructor() : this(ExternalProjectsBuildClasspathEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -59,15 +65,13 @@ internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: 
           error("Entity ExternalProjectsBuildClasspathEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -90,7 +94,8 @@ internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: 
     override fun relabel(dataSource: WorkspaceEntity, parents: Set<WorkspaceEntity>?) {
       dataSource as ExternalProjectsBuildClasspathEntity
       if (this.entitySource != dataSource.entitySource) this.entitySource = dataSource.entitySource
-      if (this.projectsBuildClasspath != dataSource.projectsBuildClasspath) this.projectsBuildClasspath = dataSource.projectsBuildClasspath.toMutableMap()
+      if (this.projectsBuildClasspath != dataSource.projectsBuildClasspath) this.projectsBuildClasspath =
+        dataSource.projectsBuildClasspath.toMutableMap()
       updateChildToParentReferences(parents)
     }
 
@@ -103,7 +108,6 @@ internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: 
         changedProperty.add("entitySource")
 
       }
-
     override var projectsBuildClasspath: Map<String, ExternalProjectBuildClasspathEntity>
       get() = getEntityData().projectsBuildClasspath
       set(value) {
@@ -114,6 +118,7 @@ internal class ExternalProjectsBuildClasspathEntityImpl(private val dataSource: 
 
     override fun getEntityClass(): Class<ExternalProjectsBuildClasspathEntity> = ExternalProjectsBuildClasspathEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -122,14 +127,13 @@ internal class ExternalProjectsBuildClasspathEntityData : WorkspaceEntityData<Ex
 
   internal fun isProjectsBuildClasspathInitialized(): Boolean = ::projectsBuildClasspath.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ExternalProjectsBuildClasspathEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ExternalProjectsBuildClasspathEntity> {
     val modifiable = ExternalProjectsBuildClasspathEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ExternalProjectsBuildClasspathEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -141,17 +145,15 @@ internal class ExternalProjectsBuildClasspathEntityData : WorkspaceEntityData<Ex
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.openapi.externalSystem.settings.workspaceModel.ExternalProjectsBuildClasspathEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.openapi.externalSystem.settings.workspaceModel.ExternalProjectsBuildClasspathEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return ExternalProjectsBuildClasspathEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ExternalProjectsBuildClasspathEntity(projectsBuildClasspath, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ExternalProjectsBuildClasspathEntity(projectsBuildClasspath, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -162,9 +164,7 @@ internal class ExternalProjectsBuildClasspathEntityData : WorkspaceEntityData<Ex
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ExternalProjectsBuildClasspathEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.projectsBuildClasspath != other.projectsBuildClasspath) return false
     return true
@@ -173,9 +173,7 @@ internal class ExternalProjectsBuildClasspathEntityData : WorkspaceEntityData<Ex
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ExternalProjectsBuildClasspathEntityData
-
     if (this.projectsBuildClasspath != other.projectsBuildClasspath) return false
     return true
   }

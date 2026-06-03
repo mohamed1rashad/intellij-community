@@ -3,20 +3,31 @@ package org.jetbrains.kotlin.idea.gradleJava.configuration.kpm
 
 import com.intellij.openapi.externalSystem.model.DataNode
 import com.intellij.openapi.externalSystem.model.ProjectKeys
-import com.intellij.openapi.externalSystem.model.project.*
+import com.intellij.openapi.externalSystem.model.project.LibraryData
+import com.intellij.openapi.externalSystem.model.project.LibraryDependencyData
+import com.intellij.openapi.externalSystem.model.project.LibraryLevel
+import com.intellij.openapi.externalSystem.model.project.LibraryPathType
+import com.intellij.openapi.externalSystem.model.project.ModuleData
+import com.intellij.openapi.externalSystem.model.project.ModuleDependencyData
+import com.intellij.openapi.externalSystem.model.project.ProjectData
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.externalSystem.util.ExternalSystemConstants
 import com.intellij.openapi.externalSystem.util.ExternalSystemTelemetryUtil
 import com.intellij.openapi.externalSystem.util.Order
 import com.intellij.openapi.roots.DependencyScope
 import org.gradle.tooling.model.idea.IdeaModule
-import org.jetbrains.kotlin.gradle.idea.kpm.*
+import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmDependency
+import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmFragment
+import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmFragmentDependency
+import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmProject
+import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmProjectContainer
+import org.jetbrains.kotlin.gradle.idea.kpm.IdeaKpmResolvedBinaryDependency
 import org.jetbrains.kotlin.idea.base.externalSystem.findAll
 import org.jetbrains.kotlin.idea.gradle.configuration.buildClasspathData
 import org.jetbrains.kotlin.idea.gradle.configuration.findChildModuleById
 import org.jetbrains.kotlin.idea.gradle.configuration.kpm.ContentRootsCreator
 import org.jetbrains.kotlin.idea.gradle.configuration.kpm.ModuleDataInitializer
-import org.jetbrains.kotlin.idea.gradleTooling.*
+import org.jetbrains.kotlin.idea.gradleTooling.IdeaKpmProjectProvider
 import org.jetbrains.kotlin.tooling.core.Extras
 import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider
 import org.jetbrains.plugins.gradle.model.data.BuildScriptClasspathData
@@ -51,7 +62,7 @@ open class KotlinKPMGradleProjectResolver : AbstractProjectResolverExtension() {
         super.populateModuleExtraModels(gradleModule, ideModule)
     }
 
-    override fun createModule(gradleModule: IdeaModule, projectDataNode: DataNode<ProjectData>) =
+    override fun createModule(gradleModule: IdeaModule, projectDataNode: DataNode<ProjectData>): DataNode<ModuleData?>? =
         super.createModule(gradleModule, projectDataNode)?.also { mainModuleNode ->
             ExternalSystemTelemetryUtil.runWithSpan(mainModuleNode.data.owner, "kotlin_import_kmp_createModule") {
                 val initializerContext = ModuleDataInitializer.Context.EMPTY
@@ -88,8 +99,6 @@ open class KotlinKPMGradleProjectResolver : AbstractProjectResolverExtension() {
             return this.getExtraProject(gradleModule, IdeaKpmProjectContainer::class.java)?.instanceOrNull
         }
 
-        //TODO check this
-        internal fun extractPackagePrefix(fragment: IdeaKpmFragment): String? = null
         private fun extractContentRootSources(model: IdeaKpmProject): Collection<IdeaKpmFragment> =
             model.modules.flatMap { it.fragments }
 

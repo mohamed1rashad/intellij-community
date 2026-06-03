@@ -11,8 +11,34 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaDirectoryService;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterList;
 import com.intellij.psi.codeStyle.CodeStyleManager;
+import com.intellij.psi.impl.compiled.ClsElementImpl;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.MethodSignature;
 import com.intellij.psi.util.PsiUtil;
@@ -28,9 +54,16 @@ import com.intellij.util.CommonJavaRefactoringUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class ExtractSuperClassUtil {
   private static final Logger LOG = Logger.getInstance(ExtractSuperClassUtil.class);
@@ -134,8 +167,22 @@ public final class ExtractSuperClassUtil {
       final PsiCodeBlock body = constructor.getBody();
       assert body != null;
       body.add(statement);
-      constructor.getThrowsList().replace(baseConstructor.getThrowsList());
+      PsiReferenceList throwsList = getThrowsList(baseConstructor, factory);
+      constructor.getThrowsList().replace(throwsList);
     }
+  }
+
+  private static @NotNull PsiReferenceList getThrowsList(@NotNull PsiMethod baseConstructor,
+                                                         @NotNull PsiElementFactory factory) {
+    PsiReferenceList throwsList = baseConstructor.getThrowsList();
+    if (throwsList instanceof ClsElementImpl) {
+      List<PsiJavaCodeReferenceElement> toList = new ArrayList<>();
+      for (PsiJavaCodeReferenceElement element : throwsList.getReferenceElements()) {
+        toList.add(factory.createReferenceFromText(element.getCanonicalText(), baseConstructor));
+      }
+      throwsList = factory.createReferenceList(toList.toArray(PsiJavaCodeReferenceElement.EMPTY_ARRAY));
+    }
+    return throwsList;
   }
 
   private static PsiMethod[] getCalledBaseConstructors(final PsiClass subclass) {

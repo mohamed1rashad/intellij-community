@@ -6,6 +6,12 @@
  */
 package com.intellij.tests.bazel;
 
+import com.intellij.tests.IgnoreException;
+import org.junit.platform.engine.TestExecutionResult;
+import org.junit.platform.engine.reporting.ReportEntry;
+import org.junit.platform.launcher.TestIdentifier;
+import org.opentest4j.TestAbortedException;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,12 +19,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-
-import com.intellij.tests.IgnoreException;
-import org.junit.platform.engine.TestExecutionResult;
-import org.junit.platform.engine.reporting.ReportEntry;
-import org.junit.platform.launcher.TestIdentifier;
-import org.opentest4j.TestAbortedException;
 
 class TestData {
   private final TestIdentifier id;
@@ -88,7 +88,7 @@ class TestData {
       return false;
     }
 
-    return result.getThrowable().map(thr -> thr instanceof AssertionError).orElse(false);
+    return result.getThrowable().map(thr -> !(thr instanceof AssertionError)).orElse(false);
   }
 
   public boolean isFailure() {
@@ -98,11 +98,8 @@ class TestData {
         || isSkipped()) {
       return false;
     }
-    if (result.getStatus() == TestExecutionResult.Status.ABORTED) {
-      return true;
-    }
 
-    return result.getThrowable().map(thr -> (!(thr instanceof AssertionError))).orElse(false);
+    return result.getThrowable().map(thr -> thr instanceof AssertionError).orElse(false);
   }
 
   public boolean isDisabled() {
@@ -115,6 +112,10 @@ class TestData {
     }
 
     if (getSkipReason() != null) {
+      return true;
+    }
+
+    if (getResult().getStatus() == TestExecutionResult.Status.ABORTED) {
       return true;
     }
 

@@ -6,17 +6,19 @@ import com.intellij.ide.plugins.IdeaPluginDescriptor;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
-import com.intellij.openapi.fileEditor.*;
+import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.FileEditor;
+import com.intellij.openapi.fileEditor.FileEditorManager;
+import com.intellij.openapi.fileEditor.TextEditor;
+import com.intellij.openapi.fileEditor.TextEditorWithPreview;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.editorconfig.Utils;
 import org.jetbrains.annotations.NotNull;
 
 public class EditorConfigEditorWithPreview extends TextEditorWithPreview {
-  private final DocumentChangeInactivityDetector myInactivityDetector;
-  private final DocumentSaveHandler myHandler = new DocumentSaveHandler();
   private final VirtualFile myFile;
-  private final Project     myProject;
+  private final Project myProject;
 
   public EditorConfigEditorWithPreview(@NotNull VirtualFile file,
                                        @NotNull Project project,
@@ -25,10 +27,8 @@ public class EditorConfigEditorWithPreview extends TextEditorWithPreview {
     super(editor, preview);
     myFile = file;
     myProject = project;
-    myInactivityDetector = new DocumentChangeInactivityDetector(getEditor().getDocument());
-    getEditor().getDocument().addDocumentListener(myInactivityDetector);
-    myInactivityDetector.addListener(myHandler);
-    myInactivityDetector.start();
+    DocumentChangeInactivityDetector inactivityDetector = new DocumentChangeInactivityDetector(getEditor().getDocument(), this);
+    inactivityDetector.addListener(new DocumentSaveHandler());
     ApplicationManager.getApplication().getMessageBus().connect(this).
       subscribe(DynamicPluginListener.TOPIC, new DynamicPluginListener() {
         @Override
@@ -38,14 +38,6 @@ public class EditorConfigEditorWithPreview extends TextEditorWithPreview {
           }
         }
       });
-  }
-
-  @Override
-  public void dispose() {
-    myInactivityDetector.stop();
-    myInactivityDetector.removeListener(myHandler);
-    getEditor().getDocument().removeDocumentListener(myInactivityDetector);
-    super.dispose();
   }
 
   private class DocumentSaveHandler implements DocumentChangeInactivityDetector.InactivityListener {

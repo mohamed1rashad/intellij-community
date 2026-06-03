@@ -3,7 +3,12 @@ package com.intellij.vcs.commit
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Presentation
 import com.intellij.openapi.actionSystem.ex.TooltipDescriptionProvider
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl
 import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
@@ -44,11 +49,19 @@ import com.intellij.util.ui.NamedColorUtil
 import com.intellij.util.ui.StartupUiUtil
 import com.intellij.util.ui.accessibility.AccessibleAnnouncerUtil
 import com.intellij.vcs.VcsDisposable
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.plus
 import org.jetbrains.annotations.ApiStatus
 import java.awt.Dimension
 import java.awt.Font
@@ -62,6 +75,7 @@ import javax.swing.border.Border
 import javax.swing.event.HyperlinkEvent
 import kotlin.properties.Delegates.observable
 import kotlin.properties.ReadWriteProperty
+import kotlin.time.Duration.Companion.milliseconds
 
 private fun JBLabel.setError(@NlsContexts.Label errorText: String) {
   text = errorText
@@ -78,10 +92,15 @@ private fun JBLabel.setWarning(@NlsContexts.Label warningText: String) {
 }
 
 @OptIn(FlowPreview::class)
-open class CommitProgressPanel(project: Project) : CommitProgressUi, InclusionListener, DocumentListener, Disposable {
+@ApiStatus.Internal
+open class CommitProgressPanel(project: Project, parentDisposable: Disposable) : CommitProgressUi, Disposable {
   private val scope = VcsDisposable.getInstance(project).coroutineScope.childScope("CommitProgressPanel", Dispatchers.EDT)
 
-  constructor(project: Project, commitWorkflowUi: CommitWorkflowUi, commitMessage: EditorTextComponent) : this(project) {
+  init {
+    Disposer.register(parentDisposable, this)
+  }
+
+  constructor(project: Project, commitWorkflowUi: CommitWorkflowUi, commitMessage: EditorTextComponent) : this(project, commitWorkflowUi) {
     setup(commitWorkflowUi, commitMessage, empty())
   }
 
@@ -97,8 +116,8 @@ open class CommitProgressPanel(project: Project) : CommitProgressUi, InclusionLi
 
   private var announceCommitErrorAlarm: SingleAlarm? = null
 
-  override var isEmptyMessage by stateFlag()
-  override var isEmptyChanges by stateFlag()
+  override var isEmptyMessage: Boolean by stateFlag()
+  override var isEmptyChanges: Boolean by stateFlag()
 
   private val dumbModeFlow: MutableStateFlow<Boolean> = MutableStateFlow(false)
   override var isDumbMode: Boolean by dumbModeFlow::value
@@ -106,7 +125,7 @@ open class CommitProgressPanel(project: Project) : CommitProgressUi, InclusionLi
 
   init {
     scope.launch {
-      dumbModeFlow.debounce(300).collect { update() }
+      dumbModeFlow.debounce(300.milliseconds).collect { update() }
     }
   }
 
@@ -124,9 +143,17 @@ open class CommitProgressPanel(project: Project) : CommitProgressUi, InclusionLi
     panel.add(failuresPanel)
     panel.border = border
 
-    Disposer.register(commitWorkflowUi, this)
-    commitMessage.addDocumentListener(this)
-    commitWorkflowUi.addInclusionListener(this, this)
+    val documentListener = object : DocumentListener {
+      override fun documentChanged(event: DocumentEvent): Unit = clearError()
+    }
+    commitMessage.addDocumentListener(documentListener)
+    Disposer.register(this, Disposable {
+      commitMessage.removeDocumentListener(documentListener)
+    })
+
+    commitWorkflowUi.addInclusionListener(object : InclusionListener {
+      override fun inclusionChanged(): Unit = clearError()
+    }, this)
 
     setupProgressVisibilityDelay()
     setupProgressSpinnerTooltip()
@@ -136,7 +163,7 @@ open class CommitProgressPanel(project: Project) : CommitProgressUi, InclusionLi
   @Suppress("EXPERIMENTAL_API_USAGE")
   private fun setupProgressVisibilityDelay() {
     progressFlow
-      .debounce(ProgressUIUtil.DEFAULT_PROGRESS_DELAY_MILLIS)
+      .debounce(ProgressUIUtil.DEFAULT_PROGRESS_DELAY_MILLIS.milliseconds)
       .onEach { indicator ->
         if (indicator?.isRunning == true && failuresPanel.isEmpty()) {
           indicator.component.isVisible = true
@@ -255,10 +282,6 @@ open class CommitProgressPanel(project: Project) : CommitProgressUi, InclusionLi
     shouldWarnAboutDumbMode = false
     update()
   }
-
-  override fun documentChanged(event: DocumentEvent) = clearError()
-
-  override fun inclusionChanged() = clearError()
 
   protected fun update() {
     if (!isDumbMode) {
@@ -466,7 +489,7 @@ private fun createCommitChecksToolbar(target: JComponent): ActionToolbar =
     component.border = null
   }
 
-private class RerunCommitChecksAction : DumbAwareAction(), TooltipDescriptionProvider {
+internal class RerunCommitChecksAction : DumbAwareAction(), TooltipDescriptionProvider {
   init {
     templatePresentation.apply {
       setText(Presentation.NULL_STRING)

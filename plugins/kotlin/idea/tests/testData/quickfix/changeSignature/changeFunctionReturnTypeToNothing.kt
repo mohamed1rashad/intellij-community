@@ -1,5 +1,6 @@
-// "Change return type of enclosing function 'Test.foo' to 'Nothing'" "true"
+// "Specify 'Nothing' return type for enclosing function 'Test.foo'" "true"
 // WITH_STDLIB
+// K2_ERROR: Return type 'Nothing' needs to be specified explicitly.
 
 class Test {
     fun fo<caret>o() = throw NotImplementedError()

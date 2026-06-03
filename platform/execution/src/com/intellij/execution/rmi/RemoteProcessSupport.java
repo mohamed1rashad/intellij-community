@@ -1,13 +1,18 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.rmi;
 
-import com.intellij.execution.*;
+import com.intellij.execution.ExecutionBundle;
+import com.intellij.execution.ExecutionException;
+import com.intellij.execution.ExecutionManager;
+import com.intellij.execution.ExecutionResult;
+import com.intellij.execution.Executor;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.configurations.RunProfileState;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.process.ProcessEvent;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.process.ProcessListener;
+import com.intellij.execution.process.ProcessOutputType;
 import com.intellij.execution.process.ProcessOutputTypes;
 import com.intellij.execution.runners.DefaultProgramRunnerKt;
 import com.intellij.execution.runners.ExecutionEnvironment;
@@ -17,7 +22,12 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.Cancellation;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.ObjectUtils;
@@ -36,7 +46,14 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.RMIClientSocketFactory;
 import java.rmi.server.RMISocketFactory;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
@@ -407,7 +424,7 @@ public abstract class RemoteProcessSupport<Target, EntryPoint, Parameters> {
         if (outputType == ProcessOutputTypes.STDERR) {
           LOG.warn("Remote process stderr:" + event.getText());
         } else
-        if (outputType == ProcessOutputTypes.SYSTEM) {
+        if (ProcessOutputType.isSystem(outputType)) {
           LOG.info("Remote process system:" + event.getText());
         }
 
@@ -621,14 +638,13 @@ public abstract class RemoteProcessSupport<Target, EntryPoint, Parameters> {
       myFuture = AppExecutorUtil.getAppScheduledExecutorService().scheduleWithFixedDelay(() -> {
         beat();
       }, pulseTimeoutMillis, pulseTimeoutMillis, TimeUnit.MILLISECONDS);
-      //noinspection TestOnlyProblems
       Job contextJob = Cancellation.currentJob();
       if (contextJob != null) {
         // The spawned process is bound to the container that invoked it
         // Using Application as a default container is a bad guess, as it does not allow
         // proper disposal of the closing of the actual container
         // which may lead to project leaks, in this particular case.
-        contextJob.invokeOnCompletion((__) -> {
+        contextJob.invokeOnCompletion((_) -> {
           stopBeat();
           return null;
         });

@@ -6,6 +6,8 @@ import kotlin.jvm.JvmField
 
 /**
  * @see com.intellij.psi.JavaDocTokenType
+ *
+ * @formatter:off
  */
 object JavaDocSyntaxTokenType {
   @JvmField val DOC_COMMENT_START: SyntaxElementType = SyntaxElementType("DOC_COMMENT_START")
@@ -31,6 +33,7 @@ object JavaDocSyntaxTokenType {
   @JvmField val DOC_TAG_VALUE_SLASH: SyntaxElementType = SyntaxElementType("DOC_TAG_VALUE_SLASH")
   @JvmField val DOC_TAG_VALUE_SHARP_TOKEN: SyntaxElementType = SyntaxElementType("DOC_TAG_VALUE_SHARP_TOKEN")
   @JvmField val DOC_TAG_VALUE_DOUBLE_SHARP_TOKEN: SyntaxElementType = SyntaxElementType("DOC_TAG_VALUE_DOUBLE_SHARP_TOKEN")
+  @JvmField val DOC_TAG_FORMAT_STRING: SyntaxElementType = SyntaxElementType("DOC_TAG_FORMAT_STRING")
 
   // Additional tokens for java 23 markdown
   @JvmField val DOC_CODE_FENCE: SyntaxElementType = SyntaxElementType("DOC_CODE_FENCE")
@@ -42,6 +45,8 @@ object JavaDocSyntaxTokenType {
   @JvmField val DOC_DOUBLE_SHARP: SyntaxElementType = SyntaxElementType("DOC_DOUBLE_SHARP")
   @JvmField val DOC_INLINE_CODE_FENCE: SyntaxElementType = SyntaxElementType("DOC_INLINE_CODE_FENCE")
   @JvmField val DOC_COMMA: SyntaxElementType = SyntaxElementType("DOC_COMMA")
+  @JvmField val DOC_LT: SyntaxElementType = SyntaxElementType("DOC_LT")
+  @JvmField val DOC_GT: SyntaxElementType = SyntaxElementType("DOC_GT")
 
   @JvmField val DOC_COMMENT_BAD_CHARACTER: SyntaxElementType = SyntaxElementType("DOC_COMMENT_BAD_CHARACTER")
 }

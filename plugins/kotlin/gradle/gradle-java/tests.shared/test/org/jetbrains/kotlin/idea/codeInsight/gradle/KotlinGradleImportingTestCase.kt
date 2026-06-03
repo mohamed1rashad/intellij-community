@@ -13,13 +13,14 @@ import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil
 import com.intellij.openapi.module.Module
-import com.intellij.openapi.options.advanced.AdvancedSettings
-import com.intellij.openapi.options.advanced.AdvancedSettingsImpl
+import com.intellij.openapi.projectRoots.JavaSdkVersion
+import com.intellij.openapi.projectRoots.JavaSdkVersionUtil
 import com.intellij.openapi.roots.LibraryOrderEntry
 import com.intellij.openapi.roots.ModuleOrderEntry
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.roots.OrderEntry
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.util.io.toCanonicalPath
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.testFramework.VfsTestUtil
@@ -29,9 +30,13 @@ import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.test.AndroidStudioTestUtils
 import org.jetbrains.kotlin.idea.gradleTooling.KotlinMPPGradleModel
 import org.jetbrains.kotlin.idea.gradleTooling.KotlinMPPGradleModelBinary
-import org.jetbrains.kotlin.idea.test.*
+import org.jetbrains.kotlin.idea.test.ExpectedPluginModeProvider
+import org.jetbrains.kotlin.idea.test.GradleProcessOutputInterceptor
+import org.jetbrains.kotlin.idea.test.IDEA_TEST_DATA_DIR
+import org.jetbrains.kotlin.idea.test.KotlinTestUtils
 import org.jetbrains.kotlin.idea.test.KotlinTestUtils.getTestDataFileName
 import org.jetbrains.kotlin.idea.test.TestMetadataUtil.getTestData
+import org.jetbrains.kotlin.idea.test.setUpWithKotlinPlugin
 import org.jetbrains.kotlin.utils.addToStdlib.filterIsInstanceWithChecker
 import org.jetbrains.plugins.gradle.importing.GradleImportingTestCase
 import org.jetbrains.plugins.gradle.service.project.open.createLinkSettings
@@ -41,8 +46,10 @@ import org.junit.runners.Parameterized
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.ObjectInputStream
+import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import kotlin.io.path.Path
 import kotlin.reflect.KClass
 
 @Suppress("ACCIDENTAL_OVERRIDE")
@@ -153,11 +160,14 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
                         clearTextFromMarkup(FileUtil.loadFile(it, /* convertLineSeparators = */ true)),
                         properties
                     )
-                    val virtualFile = createProjectSubFile(it.path.substringAfter(rootDir.path + File.separator), text)
+                    val relativePath = it.path.substringAfter(rootDir.path + File.separator)
+                    val afterFile = rootDir.parentFile.toPath().resolve("after").resolve(relativePath)
+                    val virtualFile = createProjectSubFile(relativePath, text)
 
                     // Real file with expected testdata allows to throw nicer exceptions in
                     // case of mismatch, as well as open interactive diff window in IDEA
-                    virtualFile.putUserData(VfsTestUtil.TEST_DATA_FILE_PATH, it.absolutePath)
+                    virtualFile.putUserData(VfsTestUtil.TEST_DATA_FILE_PATH,
+                        afterFile.takeIf(Files::exists)?.toCanonicalPath() ?: it.absolutePath)
 
                     virtualFile
                 }
@@ -251,7 +261,7 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
     }
 
     override fun importProject(skipIndexing: Boolean?) {
-        AndroidStudioTestUtils.specifyAndroidSdk(File(projectPath))
+        AndroidStudioTestUtils.specifyAndroidSdk(Path(projectPath))
         super.importProject(skipIndexing)
     }
 
@@ -273,6 +283,7 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
             GradleVersion.version(gradleVersion),
             requireJdkHome(),
             clazz,
+            null,
             debuggerOptions
         )
 
@@ -385,12 +396,18 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
         }
     }
 
+    fun assertModuleSdk(moduleName: String, expectedLevel: JavaSdkVersion?) {
+        val module = getModule(moduleName)
+        val sdk = ModuleRootManager.getInstance(module).sdk
+        assertEquals(expectedLevel, JavaSdkVersionUtil.getJavaSdkVersion(sdk))
+    }
+
     companion object {
         const val AFTER_SUFFIX = ".after"
 
         const val LATEST_STABLE_GRADLE_PLUGIN_VERSION = "2.0.0"
 
-        val SUPPORTED_GRADLE_VERSIONS = arrayOf("6.8.3", "7.6")
+        val SUPPORTED_GRADLE_VERSIONS = arrayOf("6.8.3", "7.6.5")//, "9.0.0", "9.1.0") // To support them in KTIJ-36754
 
         // https://kotlinlang.org/docs/gradle-configure-project.html#targeting-the-jvm
         val GRADLE_TO_KGP_VERSION = mapOf(
@@ -405,7 +422,3 @@ abstract class KotlinGradleImportingTestCase : GradleImportingTestCase(),
     }
 }
 
-fun GradleImportingTestCase.enableExperimentalMPP(enable: Boolean) {
-    //enable experimental MPP features e.g. an import K/JS run tasks
-    (AdvancedSettings.getInstance() as AdvancedSettingsImpl).setSetting("kotlin.mpp.experimental", enable, testRootDisposable)
-}

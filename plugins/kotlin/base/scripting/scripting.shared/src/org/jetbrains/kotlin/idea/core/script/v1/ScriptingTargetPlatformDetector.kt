@@ -13,6 +13,7 @@ import com.intellij.psi.util.CachedValue
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArgumentsConfigurator
 import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.parseCommandLineArguments
 import org.jetbrains.kotlin.cli.common.arguments.toLanguageVersionSettings
@@ -109,8 +110,7 @@ private inline fun createCachedValue(project: Project, crossinline body: () -> S
 }
 
 private fun getScriptSettings(project: Project, virtualFile: VirtualFile, definition: ScriptDefinition): ScriptLanguageSettings {
-    val compilerOptions = definition.defaultCompilerOptions +
-                          definition.compilerOptions.addGradleSpecificsIfNeeded(definition)
+    val compilerOptions = definition.compilerOptions.addGradleSpecificsIfNeeded(definition).toList()
 
     return if (compilerOptions.isEmpty()) {
         val scriptModule = getScriptModule(project, virtualFile)
@@ -125,7 +125,7 @@ private fun getScriptSettings(project: Project, virtualFile: VirtualFile, defini
             scriptingDebugLog(virtualFile) { "compiler options: $compilerOptions" }
 
             val languageVersionSettings = compilerArguments.toLanguageVersionSettings(
-              MessageCollector.NONE,
+                CommonCompilerArgumentsConfigurator.Reporter.DoNothing,
               mapOf(AnalysisFlags.ideMode to true)
             )
             val scriptModule = getScriptModule(project, virtualFile)?.takeIf { !it.isDisposed }

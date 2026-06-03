@@ -7,28 +7,39 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.util.io.delete
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.idea.gradle.diagnostic.KotlinGradleBuildErrorsChecker
 import org.jetbrains.kotlin.idea.gradle.statistics.v2.flow.KotlinBuildToolFusFlowProcessor
 import org.jetbrains.kotlin.statistics.BuildSessionLogger
 import org.jetbrains.kotlin.statistics.fileloggers.MetricsContainer
 import java.nio.file.Path
-import kotlin.io.path.*
+import kotlin.io.path.Path
+import kotlin.io.path.exists
+import kotlin.io.path.getLastModifiedTime
+import kotlin.io.path.isRegularFile
+import kotlin.io.path.listDirectoryEntries
+import kotlin.io.path.notExists
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.minutes
 
 /**
- * Delay between sequential checks of gradle statistics
+ * Delay between polling of gradle statistics
  */
-private const val EXECUTION_DELAY_MIN = 60L
+private val GRADLE_STATISTICS_POLLING_INTERVAL = 60L.minutes
+
+private val GRADLE_STATISTICS_POLLING_SHORT_INTERVAL = 2L.minutes
 
 /**
- * Delay between sequential checks of gradle build errors
+ * Delay between polling of gradle build errors
  */
-private const val ERRORS_EXECUTION_DELAY_MIN = 2L
+private val GRADLE_BUILD_ERRORS_POLLING_INTERVAL = 2L.minutes
 
 /**
  * Maximum amount of directories which were reported as gradle user dirs
@@ -61,6 +72,8 @@ class KotlinGradleFUSLogger(private val project: Project, private val coroutineS
                     (lastModified > 0) && (System.currentTimeMillis() - maxFileAge > lastModified)
                 }.forEach { it.delete() }
         }
+
+        private fun isFusTestMode() = System.getProperty("idea.is.internal").toBoolean() && System.getProperty("kotlin.gradle.fus.test").toBoolean()
     }
 
     private suspend fun reportStatistics() {
@@ -106,17 +119,19 @@ class KotlinGradleFUSLogger(private val project: Project, private val coroutineS
     }
 
     fun setup() {
+        val executionDelay = if (isFusTestMode()) GRADLE_STATISTICS_POLLING_SHORT_INTERVAL else GRADLE_STATISTICS_POLLING_INTERVAL
         coroutineScope.launch {
             while (true) {
-                delay(EXECUTION_DELAY_MIN.minutes)
+                delay(executionDelay)
                 reportStatistics()
             }
         }
 
         gradleErrorsChecker.init()
+
         coroutineScope.launch {
             while (true) {
-                delay(ERRORS_EXECUTION_DELAY_MIN.minutes)
+                delay(GRADLE_BUILD_ERRORS_POLLING_INTERVAL)
                 gradleErrorsChecker.run()
             }
         }

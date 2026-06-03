@@ -11,7 +11,21 @@ import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
 import org.jetbrains.kotlin.idea.util.application.isUnitTestMode
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtLoopExpression
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtThisExpression
+import org.jetbrains.kotlin.psi.KtUserType
 import org.jetbrains.kotlin.psi.psiUtil.endOffset
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForReceiverOrThis
 import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
@@ -29,7 +43,6 @@ abstract class AbstractKtExpressionPostfixTemplateSelector<CTX>(
         }
     }
 
-    @OptIn(KaAllowAnalysisOnEdt::class, KaAllowAnalysisFromWriteAction::class)
     private fun filterElement(element: PsiElement): Boolean {
         if (element !is KtExpression) return false
 
@@ -70,7 +83,7 @@ abstract class AbstractKtExpressionPostfixTemplateSelector<CTX>(
         get() = (this is KtIfExpression && this.elseKeyword == null)
 
     override fun getExpressions(context: PsiElement, document: Document, offset: Int): List<PsiElement> {
-        val originalFile = context.containingFile.originalFile
+        val originalFile = context.containingFile
         val textRange = context.textRange
         val originalElement = findElementOfClassAtRange(originalFile, textRange.startOffset, textRange.endOffset, context::class.java)
             ?: return emptyList()
@@ -81,7 +94,14 @@ abstract class AbstractKtExpressionPostfixTemplateSelector<CTX>(
 
         val boundExpression = expressions.firstOrNull { it.parent.endOffset > offset }
         val boundElementParent = boundExpression?.parent
-        val filteredByOffset = expressions.takeWhile { it != boundElementParent }.toMutableList()
+        val filteredByOffset = if (boundElementParent != null && boundElementParent !is KtExpression) {
+            // boundElementParent is not a KtExpression (e.g., KtClassBody), so it won't appear
+            // in the expressions list. Take elements up to and including boundExpression only —
+            // expressions above boundElementParent's level in the tree must not be included.
+            (expressions.takeWhile { it != boundExpression } + listOfNotNull(boundExpression)).toMutableList()
+        } else {
+            expressions.takeWhile { it != boundElementParent }.toMutableList()
+        }
         if (boundElementParent is KtDotQualifiedExpression && boundExpression == boundElementParent.receiverExpression) {
             val qualifiedExpressionEnd = boundElementParent.endOffset
             expressions

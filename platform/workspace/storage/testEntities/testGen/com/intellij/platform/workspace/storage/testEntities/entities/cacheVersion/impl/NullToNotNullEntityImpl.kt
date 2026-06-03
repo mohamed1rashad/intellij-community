@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -16,20 +17,18 @@ import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableNullToNotNullEntity
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.NullToNotNullEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.NullToNotNullEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEntityData) : NullToNotNullEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEntityData) : NullToNotNullEntity,
+                                                                                          WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -38,7 +37,6 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
       readField("nullString")
       return dataSource.nullString
     }
-
   override val notNullBoolean: Boolean
     get() {
       readField("notNullBoolean")
@@ -61,8 +59,8 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
   }
 
 
-  internal class Builder(result: NullToNotNullEntityData?) : ModifiableWorkspaceEntityBase<NullToNotNullEntity, NullToNotNullEntityData>(
-    result), ModifiableNullToNotNullEntity {
+  internal class Builder(result: NullToNotNullEntityData?) :
+    ModifiableWorkspaceEntityBase<NullToNotNullEntity, NullToNotNullEntityData>(result), NullToNotNullEntityBuilder {
     internal constructor() : this(NullToNotNullEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -75,15 +73,13 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
           error("Entity NullToNotNullEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -118,7 +114,6 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
         changedProperty.add("entitySource")
 
       }
-
     override var nullString: String?
       get() = getEntityData().nullString
       set(value) {
@@ -126,7 +121,6 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
         getEntityData(true).nullString = value
         changedProperty.add("nullString")
       }
-
     override var notNullBoolean: Boolean
       get() = getEntityData().notNullBoolean
       set(value) {
@@ -134,7 +128,6 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
         getEntityData(true).notNullBoolean = value
         changedProperty.add("notNullBoolean")
       }
-
     override var notNullInt: Int
       get() = getEntityData().notNullInt
       set(value) {
@@ -145,6 +138,7 @@ internal class NullToNotNullEntityImpl(private val dataSource: NullToNotNullEnti
 
     override fun getEntityClass(): Class<NullToNotNullEntity> = NullToNotNullEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -154,14 +148,13 @@ internal class NullToNotNullEntityData : WorkspaceEntityData<NullToNotNullEntity
   var notNullInt: Int = 0
 
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<NullToNotNullEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<NullToNotNullEntity> {
     val modifiable = NullToNotNullEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): NullToNotNullEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -173,15 +166,14 @@ internal class NullToNotNullEntityData : WorkspaceEntityData<NullToNotNullEntity
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.NullToNotNullEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.NullToNotNullEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return NullToNotNullEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return NullToNotNullEntity(notNullBoolean, notNullInt, entitySource) {
       this.nullString = this@NullToNotNullEntityData.nullString
     }
@@ -195,9 +187,7 @@ internal class NullToNotNullEntityData : WorkspaceEntityData<NullToNotNullEntity
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as NullToNotNullEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.nullString != other.nullString) return false
     if (this.notNullBoolean != other.notNullBoolean) return false
@@ -208,9 +198,7 @@ internal class NullToNotNullEntityData : WorkspaceEntityData<NullToNotNullEntity
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as NullToNotNullEntityData
-
     if (this.nullString != other.nullString) return false
     if (this.notNullBoolean != other.notNullBoolean) return false
     if (this.notNullInt != other.notNullInt) return false

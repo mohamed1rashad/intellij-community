@@ -18,6 +18,7 @@ import com.jetbrains.python.inspections.quickfix.PyQuickFixUtil;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.psi.PyNamedParameter;
 import com.jetbrains.python.psi.PyParameter;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import com.jetbrains.python.pyi.PyiUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -32,8 +33,14 @@ public final class PyMissingTypeHintsInspection extends PyInspection {
   public boolean m_onlyWhenTypesAreKnown = true;
 
   @Override
-  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly, @NotNull LocalInspectionToolSession session) {
-    return new PyInspectionVisitor(holder, PyInspectionVisitor.getContext(session)) {
+  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
+                                                 boolean isOnTheFly,
+                                                 @NotNull LocalInspectionToolSession session) {
+    TypeEvalContext context = PyInspectionVisitor.getContext(session);
+    return new PyInspectionVisitor(holder, context) {
+      {
+        downgradeHighlightForTypeEngine = context.getUsesExternalTypeEngine();
+      }
       @Override
       public void visitPyFunction(@NotNull PyFunction function) {
         if (function.getTypeComment() == null &&
@@ -59,7 +66,8 @@ public final class PyMissingTypeHintsInspection extends PyInspection {
       if (instance != null) {
         PySignature signature = instance.findSignature(function);
         return signature != null && canAnnotate(signature);
-      } else {
+      }
+      else {
         return false;
       }
     }

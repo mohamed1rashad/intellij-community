@@ -96,7 +96,7 @@ class RunBlockingCancellableTest : CancellationTest() {
 
   @Test
   fun `with indicator non-cancellable context`() {
-    val modalityState = ModalityStateEx()
+    val modalityState = ModalityStateEx(listOf<Any>())
     withIndicator(EmptyProgressIndicator(modalityState)) {
       ProgressManager.getInstance().computeInNonCancelableSection<_, Nothing> {
         assertSame(modalityState, ProgressManager.getInstance().currentProgressModality)
@@ -277,7 +277,7 @@ class RunBlockingCancellableTest : CancellationTest() {
   @Test
   @RegistryKey("ide.run.blocking.cancellable.assert.in.tests", "true")
   fun `runBlockingCancellable in inner explicit ra of wa`(): Unit = timeoutRunBlocking {
-    getGlobalThreadingSupport().runWriteAction(Runnable::class.java) {
+    getGlobalThreadingSupport().runWriteAction {
       ReadAction.run<Throwable> {
         // checks that there are no assertions
         runBlockingCancellable {

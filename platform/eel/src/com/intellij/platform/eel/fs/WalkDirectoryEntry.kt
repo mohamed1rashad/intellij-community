@@ -3,7 +3,6 @@ package com.intellij.platform.eel.fs
 
 import com.intellij.platform.eel.path.EelPath
 import org.jetbrains.annotations.ApiStatus
-import java.nio.file.attribute.PosixFilePermission
 import java.time.ZonedDateTime
 
 @ApiStatus.Internal
@@ -15,6 +14,7 @@ sealed interface WalkDirectoryEntry {
     interface Directory : Type
     interface Regular : Type {
       val hash: Long?
+      val size: Long?
     }
 
     interface Other : Type
@@ -79,7 +79,6 @@ interface WalkDirectoryEntryPosix : WalkDirectoryEntry {
     val stickyBit: Boolean
 
     val mask: Int
-    val permissionsSet: Set<PosixFilePermission>
   }
 }
 

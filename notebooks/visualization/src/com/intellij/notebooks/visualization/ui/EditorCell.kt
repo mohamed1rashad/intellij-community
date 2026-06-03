@@ -1,3 +1,4 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.notebooks.visualization.ui
 
 import com.intellij.notebooks.jupyter.core.jupyter.CellType
@@ -38,6 +39,12 @@ class EditorCell(
     executionStatus.afterDistinctChange(this) {
       thisLogger().debug("Execution status changed: $it for interval ${intervalPointer.get()?.ordinal}")
     }
+
+    isUnfolded.afterDistinctChange(this) {
+      if (isUnfolded.get()) {
+        updateIfInVisibleRect()
+      }
+    }
   }
 
   val cellFrameManager: EditorCellFrameManager? = EditorCellFrameManager.create(this)?.also {
@@ -68,7 +75,7 @@ class EditorCell(
   }
 
   fun update() {
-    editor.updateManager.update { ctx -> update(ctx) }
+    editor.notebookViewUpdater.update { ctx -> update(ctx) }
   }
 
   fun update(updateCtx: UpdateContext) {
@@ -83,11 +90,11 @@ class EditorCell(
     view?.checkAndRebuildInlays()
   }
 
-  fun onViewportChange() {
-    view?.onViewportChanges()
+  fun updateIfInVisibleRect() {
+    view?.updateIfInVisibleRect()
   }
 
-  fun updateOutputs(): Unit = editor.updateManager.update {
+  fun updateOutputs(): Unit = editor.notebookViewUpdater.update {
     outputs.updateOutputs()
   }
 
@@ -119,8 +126,8 @@ class EditorCell(
   }
 
   /** Called only in RD mode with a ready list of NotebookOutputDataKey, to avoid reading data from JSON which is missing on the frontend. */
-  fun updateOutputs(keys: List<NotebookOutputDataKey>): Unit = editor.updateManager.update {
-    outputs.outputs.set(keys.map { EditorCellOutput(it) })
+  fun updateOutputs(keys: List<NotebookOutputDataKey>): Unit = editor.notebookViewUpdater.update {
+    outputs.updateWith(keys)
   }
 
   data class ExecutionStatus(

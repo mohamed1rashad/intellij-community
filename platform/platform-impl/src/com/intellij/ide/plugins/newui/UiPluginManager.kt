@@ -1,9 +1,19 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins.newui
 
+import com.intellij.diagnostic.LoadingState
 import com.intellij.frontend.FrontendApplicationInfo
 import com.intellij.frontend.FrontendType
-import com.intellij.ide.plugins.marketplace.*
+import com.intellij.ide.plugins.marketplace.ApplyPluginsStateResult
+import com.intellij.ide.plugins.marketplace.CheckErrorsResult
+import com.intellij.ide.plugins.marketplace.IdeCompatibleUpdate
+import com.intellij.ide.plugins.marketplace.InitSessionResult
+import com.intellij.ide.plugins.marketplace.IntellijPluginMetadata
+import com.intellij.ide.plugins.marketplace.PluginReviewComment
+import com.intellij.ide.plugins.marketplace.PluginSearchResult
+import com.intellij.ide.plugins.marketplace.PrepareToUninstallResult
+import com.intellij.ide.plugins.marketplace.SetEnabledStateResult
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.PluginId
@@ -18,7 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.UUID
 import javax.swing.JComponent
 
 /*
@@ -73,6 +83,12 @@ class UiPluginManager {
     }
   }
 
+  fun setPluginsAutoUpdateEnabled(enabled: Boolean) {
+    service<FrontendRpcCoroutineContext>().coroutineScope.launch(Dispatchers.IO) {
+      getController().setPluginsAutoUpdateEnabled(enabled)
+    }
+  }
+
   suspend fun loadErrors(sessionId: String): Map<PluginId, CheckErrorsResult> {
     return getController().loadErrors(sessionId)
   }
@@ -99,16 +115,16 @@ class UiPluginManager {
     getController().setPluginStatus(sessionId, pluginIds, enable)
   }
 
-  suspend fun applySession(sessionId: String, parent: JComponent? = null, project: Project?): ApplyPluginsStateResult {
-    return getController().applySession(sessionId, parent, project)
+  suspend fun apply(parent: JComponent? = null, project: Project?): ApplyPluginsStateResult {
+    return getController().apply(parent, project)
   }
 
   suspend fun updatePluginDependencies(sessionId: String): Set<PluginId> {
     return getController().updatePluginDependencies(sessionId)
   }
 
-  suspend fun isModified(sessionId: String): Boolean {
-    return getController().isModified(sessionId)
+  suspend fun isModified(): Boolean {
+    return getController().isModified()
   }
 
   suspend fun findInstalledPlugins(plugins: Set<PluginId>): Map<PluginId, PluginUiModel> {
@@ -129,6 +145,15 @@ class UiPluginManager {
 
   fun enablePlugins(sessionId: String, descriptorIds: List<PluginId>, enable: Boolean, project: Project?): SetEnabledStateResult {
     return getController().enablePlugins(sessionId, descriptorIds, enable, project)
+  }
+
+  /**
+   * Marks the plugins with provided IDs as disabled.
+   * If the IDE is running in remove development mode, this will affect both backend and the frontend processes.
+   * Note that this function doesn't actually unload the plugins. The changes will take effect after the IDE restarts.
+   */
+  fun markPluginsAsDisabled(pluginIds: List<PluginId>) {
+    getController().markPluginsAsDisabled(pluginIds)
   }
 
   suspend fun prepareToUninstall(pluginsToUninstall: List<PluginId>): PrepareToUninstallResult {
@@ -228,7 +253,7 @@ class UiPluginManager {
   }
 
   fun subscribeToUpdatesCount(sessionId: String, callback: (Int?) -> Unit): PluginUpdatesService {
-    return getController().connectToUpdateServiceWithCounter(sessionId, callback)
+    return getController().connectToPluginUpdateService(sessionId, { updatedPlugins -> callback(updatedPlugins?.size ?: 0)})
   }
 
   companion object {
@@ -237,6 +262,9 @@ class UiPluginManager {
 
     @JvmStatic
     fun isCombinedPluginManagerEnabled(): Boolean {
+      if (!LoadingState.APP_READY.isOccurred || ApplicationManager.getApplication() == null) {
+        return false
+      }
       val frontendType = FrontendApplicationInfo.getFrontendType()
       return frontendType is FrontendType.Remote && frontendType.isController() && Registry.`is`("reworked.plugin.manager.enabled", false)
     }

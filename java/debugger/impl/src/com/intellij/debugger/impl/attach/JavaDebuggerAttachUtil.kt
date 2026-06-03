@@ -4,10 +4,20 @@ package com.intellij.debugger.impl.attach
 
 import com.intellij.debugger.DebuggerManagerEx
 import com.intellij.execution.process.BaseProcessHandler
+import com.intellij.execution.target.TargetEnvironment
+import com.intellij.execution.target.targetEnvironment
+import com.intellij.ide.DataManager
+import com.intellij.openapi.actionSystem.LangDataKeys
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.sun.tools.attach.AttachNotSupportedException
 import com.sun.tools.attach.VirtualMachine
-import sun.jvmstat.monitor.*
+import org.jetbrains.annotations.ApiStatus
+import sun.jvmstat.monitor.HostIdentifier
+import sun.jvmstat.monitor.MonitoredHost
+import sun.jvmstat.monitor.MonitoredVm
+import sun.jvmstat.monitor.MonitoredVmUtil
+import sun.jvmstat.monitor.VmIdentifier
 import java.io.IOException
 
 object JavaDebuggerAttachUtil {
@@ -72,5 +82,13 @@ object JavaDebuggerAttachUtil {
     finally {
       vm?.detach()
     }
+  }
+
+  @JvmStatic
+  @ApiStatus.Internal
+  fun getTargetEnvironment(editor: Editor): TargetEnvironment? {
+    val descriptor = LangDataKeys.RUN_CONTENT_DESCRIPTOR.getData(DataManager.getInstance().getDataContext(editor.contentComponent))
+                     ?: return null
+    return descriptor.processHandler?.targetEnvironment
   }
 }

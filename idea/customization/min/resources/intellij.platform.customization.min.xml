@@ -22,6 +22,7 @@
     <moduleConfigurationEditorProvider implementation="com.intellij.openapi.module.WebModuleConfigurationEditorProvider"/>
 
     <editorNotificationProvider implementation="com.intellij.codeInsight.daemon.impl.SdkSetupNotificationProvider"/>
+    <applicationSettings service="com.intellij.platform.templates.ProjectTemplateExportable"/>
   </extensions>
 
   <actions resource-bundle="messages.ActionsBundle">
@@ -35,7 +36,7 @@
     </group>
 
     <group id="WelcomeScreen.DefaultNewProjectActionGroup" class="com.intellij.ide.actions.DefaultNewProjectActionGroup">
-      <add-to-group group-id="WelcomeScreen.QuickStart" anchor="first"/>
+      <add-to-group group-id="WelcomeScreen.QuickStart" anchor="before" relative-to-action="WelcomeScreen.OpenProject"/>
     </group>
 
     <action id="WelcomeScreen.DefaultNewProjectAction" class="com.intellij.ide.actions.DefaultNewProjectAction">
@@ -45,9 +46,6 @@
     <action id="WelcomeScreen.OpenProject" class="com.intellij.ide.actions.OpenFileAction$OnWelcomeScreen">
       <add-to-group group-id="WelcomeScreen.QuickStart" anchor="before" relative-to-action="Vcs.VcsClone"/>
     </action>
-
-    <action id="RerunFailedTests" class="com.intellij.execution.testframework.actions.RerunFailedTestsAction"
-            icon="AllIcons.RunConfigurations.RerunFailedTests"/>
 
     <action id="ConsoleView.FoldLinesLikeThis" class="com.intellij.execution.console.FoldLinesLikeThis">
       <add-to-group group-id="ConsoleEditorPopupMenu" anchor="after" relative-to-action="$SearchWeb"/>

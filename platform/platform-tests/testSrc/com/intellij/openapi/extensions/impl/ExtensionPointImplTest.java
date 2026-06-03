@@ -5,11 +5,23 @@ import com.intellij.diagnostic.ActivityCategory;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.components.ComponentManager;
 import com.intellij.openapi.diagnostic.DefaultLogger;
-import com.intellij.openapi.extensions.*;
+import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.DefaultPluginDescriptor;
+import com.intellij.openapi.extensions.ExtensionNotApplicableException;
+import com.intellij.openapi.extensions.ExtensionPoint;
+import com.intellij.openapi.extensions.ExtensionPointAdapter;
+import com.intellij.openapi.extensions.ExtensionPointListener;
+import com.intellij.openapi.extensions.ExtensionPointUtil;
+import com.intellij.openapi.extensions.ExtensionsArea;
+import com.intellij.openapi.extensions.LoadingOrder;
+import com.intellij.openapi.extensions.PluginDescriptor;
+import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Key;
+import com.intellij.testFramework.LoggedErrorProcessor;
+import com.intellij.testFramework.TestLoggerFactory;
 import com.intellij.testFramework.TestLoggerKt;
 import com.intellij.util.KeyedLazyInstance;
 import com.intellij.util.messages.MessageBus;
@@ -17,14 +29,23 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.After;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
+import org.junit.runners.model.Statement;
 
 import java.lang.reflect.Constructor;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 public class ExtensionPointImplTest {
   private Disposable disposable = Disposer.newDisposable();
@@ -35,6 +56,24 @@ public class ExtensionPointImplTest {
       Disposer.dispose(disposable);
     }
   }
+
+  static {
+    Logger.setFactory(TestLoggerFactory.class);
+  }
+  @Rule
+  public TestRule checkNoControlFlowExceptionsAreLoggedRule = (base, description) -> new Statement() {
+    @Override
+    public void evaluate() throws Throwable {
+      LoggedErrorProcessor.executeWith(new LoggedErrorProcessor() {
+        @Override
+        public boolean processWarn(@NotNull String category, @NotNull String message, @Nullable Throwable t) {
+          assertThat(message).doesNotContain("Control-flow exceptions (e.g. this");
+
+          return !message.contains("Cancellation while notifying");
+        }
+      }, ()-> base.evaluate());
+    }
+  };
 
   @Test
   public void testCreate() {
@@ -255,6 +294,19 @@ public class ExtensionPointImplTest {
     adapter.setFire(null);
     extensionPoint.getExtensionList();
     assertThat(extensions).contains("first", "second", "");
+  }
+  @Test
+  public void testThrowingListenersMustNotCrashEverythingElse() {
+    ExtensionPoint<@NotNull String> extensionPoint = buildExtensionPoint(String.class);
+    
+    extensionPoint.addExtensionPointListener(new ExtensionPointAdapter<>() {
+      @Override
+      public void extensionListChanged() {
+        throw new ProcessCanceledException();
+      }
+    }, true, null);
+
+    extensionPoint.registerExtension("first", disposable);
   }
 
   @Test

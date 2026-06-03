@@ -1,17 +1,15 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build.impl
 
-import com.intellij.platform.util.coroutines.mapConcurrent
+import com.intellij.platform.buildScripts.licenses.LibraryLicense
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.Span
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import org.jetbrains.intellij.build.BuildContext
 import org.jetbrains.intellij.build.BuildOptions
-import org.jetbrains.intellij.build.LibraryLicense
 import org.jetbrains.intellij.build.executeStep
+import org.jetbrains.intellij.build.mapConcurrent
 import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
 import java.net.HttpURLConnection
 import java.net.MalformedURLException
@@ -21,20 +19,20 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
-import java.util.Collections
+import java.util.concurrent.CopyOnWriteArrayList
 
 private val CONNECT_TIMEOUT = Duration.ofMillis(System.getProperty("idea.connection.timeout")?.toLong() ?: 30_000)
 private val READ_TIMEOUT = Duration.ofMillis(System.getProperty("idea.read.timeout")?.toLong() ?: 60_000)
 
-internal suspend fun checkLibraryUrls(context: BuildContext, licenses: List<LibraryLicense>) {
+internal suspend fun checkLibraryUrls(licenses: List<LibraryLicense>, context: BuildContext) {
   context.executeStep(spanBuilder("checking library URLs"), BuildOptions.LIBRARY_URL_CHECK_STEP) {
-    val errors = Collections.synchronizedList(ArrayList<String>())
+    val errors = CopyOnWriteArrayList<String>()
     try {
       checkLicenseUrls(licenses, errors)
       checkWebsiteUrls(licenses, errors)
     }
     catch (e: Exception) {
-      errors += "Unhandled exception: ${e.message}"
+      errors.add("Unhandled exception: ${e.message}")
     }
     if (errors.isNotEmpty()) {
       context.messages.logErrorAndThrow("Library URLs check failed. Errors:\n${errors.joinToString("\n")}")
@@ -42,7 +40,7 @@ internal suspend fun checkLibraryUrls(context: BuildContext, licenses: List<Libr
   }
 }
 
-private fun checkLicenseUrls(licenses: List<LibraryLicense>, errors: MutableList<String>) {
+private suspend fun checkLicenseUrls(licenses: List<LibraryLicense>, errors: MutableList<String>) {
   val knownLicenses = setOf(
     "https://www.apache.org/licenses/LICENSE-2.0",
     "https://www.gnu.org/licenses/lgpl-3.0.html",
@@ -58,7 +56,7 @@ private fun checkLicenseUrls(licenses: List<LibraryLicense>, errors: MutableList
   checkUrls("License", map, errors)
 }
 
-private fun checkWebsiteUrls(licenses: List<LibraryLicense>, errors: MutableList<String>) {
+private suspend fun checkWebsiteUrls(licenses: List<LibraryLicense>, errors: MutableList<String>) {
   val knownProblems = setOf(
     "https://github.com/JetBrains/intellij-deps-commons-vfs",  // private repo
     "https://www.dabeaz.com/ply/",  // JRE does not recognize the certificate
@@ -67,24 +65,26 @@ private fun checkWebsiteUrls(licenses: List<LibraryLicense>, errors: MutableList
     "https://packages.jetbrains.team/maven/p/ij/intellij-dependencies/org/jetbrains/rocksdbjni/",
   )
   val map = licenses.asSequence()
-    .filterNot { it.url == null || it.url in knownProblems || (it.licenseUrl ?: "").startsWith(it.url) }
+    .filterNot { it.url == null || it.url in knownProblems || (it.licenseUrl ?: "").startsWith(it.url!!) }
     .groupBy { it.url }
     .mapKeys { it.key!! }
-  checkUrls("Website", map, errors)
+  checkUrls(type = "Website", urls = map, errors = errors)
 }
 
-private fun checkUrls(type: String, urls: Map<String, List<LibraryLicense>>, errors: MutableList<String>) {
+private const val maxParallelPerHosts = 4
+
+private suspend fun checkUrls(type: String, urls: Map<String, List<LibraryLicense>>, errors: MutableList<String>) {
   fun usedIn(libs: List<LibraryLicense>): String = "Used in: ${libs.joinToString { "'${it.presentableName}'" }}"
-  val maxParallelPerHosts = 4
   val span = Span.current()
 
   // to run parallel requests to different hosts, we need to group URLs by host
   val urlsAndLicensesGroupedByHost = urls.entries.groupBy {
     try {
+      @Suppress("DEPRECATION")
       URL(it.key).host
     }
     catch (e: MalformedURLException) {
-      errors += "${type} URL '${it.key}': ${e.javaClass.name}: ${e.message}. ${usedIn(it.value)}"
+      errors.add("${type} URL '${it.key}': ${e.javaClass.name}: ${e.message}. ${usedIn(it.value)}")
       null
     }
   }.filterKeys { it != null }
@@ -106,25 +106,21 @@ private fun checkUrls(type: String, urls: Map<String, List<LibraryLicense>>, err
     .followRedirects(HttpClient.Redirect.ALWAYS)
     .build()
 
-  runBlocking(Dispatchers.IO) {
-    for (group in urlsAndLicensesGroupedByHost.values) {
-      launch {
-        group.mapConcurrent(concurrency = maxParallelPerHosts) { (url, libraries) ->
-          try {
-            val request = HttpRequest.newBuilder(URI(url))
-              .apply { if (url.startsWith("https://redocly.com/")) GET() else method("HEAD", HttpRequest.BodyPublishers.noBody()) }
-              .timeout(READ_TIMEOUT)
-              .header("User-Agent", "IntelliJ")
-              .build()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() != HttpURLConnection.HTTP_OK) {
-              errors += "${type} URL '${url}' error: ${response.statusCode()}. ${usedIn(libraries)}"
-            }
-          }
-          catch (e: Exception) {
-            errors += "${type} URL '${url}': ${e.javaClass.name}: ${e.message}. ${usedIn(libraries)}"
-          }
+  urlsAndLicensesGroupedByHost.values.mapConcurrent(workerDispatcher = Dispatchers.IO) { group ->
+    group.mapConcurrent(concurrency = maxParallelPerHosts) { (url, libraries) ->
+      try {
+        val request = HttpRequest.newBuilder(URI(url))
+          .apply { if (url.startsWith("https://redocly.com/")) GET() else method("HEAD", HttpRequest.BodyPublishers.noBody()) }
+          .timeout(READ_TIMEOUT)
+          .header("User-Agent", "IntelliJ")
+          .build()
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() != HttpURLConnection.HTTP_OK) {
+          errors.add("${type} URL '${url}' error: ${response.statusCode()}. ${usedIn(libraries)}")
         }
+      }
+      catch (e: Exception) {
+        errors.add("${type} URL '${url}': ${e.javaClass.name}: ${e.message}. ${usedIn(libraries)}")
       }
     }
   }

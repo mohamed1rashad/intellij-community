@@ -14,11 +14,22 @@ import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.DependencyScope;
+import com.intellij.openapi.roots.ExportableOrderEntry;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.OrderEntry;
+import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaModuleGraphHelper;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaModule;
+import com.intellij.psi.PsiNameHelper;
+import com.intellij.psi.PsiRequiresStatement;
 import com.intellij.psi.impl.light.LightJavaModule;
 import com.intellij.psi.impl.source.resolve.JavaResolveUtil;
 import com.intellij.psi.search.GlobalSearchScope;
@@ -104,6 +115,9 @@ public final class JavaModuleGraphUtil {
     if (to.equals(from.getName())) return false;
     if (!PsiNameHelper.isValidModuleName(to, from)) return false;
     if (alreadyContainsRequires(from, to)) return false;
+
+    PsiJavaModule toModule = JavaPsiFacade.getInstance(from.getProject()).findModule(to, from.getResolveScope());
+    if (toModule != null && JavaPsiModuleUtil.reads(toModule, from)) return false; // check for circular dependencies
     PsiUtil.addModuleStatement(from, JavaKeywords.REQUIRES + " " +
                                      (isStaticModule(to, scope) ? JavaKeywords.STATIC + " " : "") +
                                      (isExported ? JavaKeywords.TRANSITIVE + " " : "") +
@@ -129,10 +143,11 @@ public final class JavaModuleGraphUtil {
     if (to.getName().equals(JAVA_BASE)) return false;
     if (!PsiUtil.isAvailable(JavaFeature.MODULES, from)) return false;
     if (from instanceof LightJavaModule) return false;
-    if (from == to) return false;
+    if (from == to || from.getName().equals(to.getName())) return false;
     if (!PsiNameHelper.isValidModuleName(to.getName(), to)) return false;
     if (contains(from.getRequires(), to.getName())) return false;
     if (JavaPsiModuleUtil.reads(from, to)) return false;
+    if (JavaPsiModuleUtil.reads(to, from)) return false; // check for circular dependencies
     PsiUtil.addModuleStatement(from, JavaKeywords.REQUIRES + " " +
                                       (isStaticModule(to.getName(), scope) ? JavaKeywords.STATIC + " " : "") +
                                       (isExported(from, to) ? JavaKeywords.TRANSITIVE + " " : "") +

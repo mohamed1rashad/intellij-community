@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.completion.test;
 
@@ -35,6 +35,11 @@ public class MultiFileSmartCompletionTestGenerated extends AbstractMultiFileSmar
         runTest("../testData/smartMultiFile/AnonymousObjectGenericJava/");
     }
 
+    @TestMetadata("AnonymousObjectGenericJavaSubClass")
+    public void testAnonymousObjectGenericJavaSubClass() throws Exception {
+        runTest("../testData/smartMultiFile/AnonymousObjectGenericJavaSubClass/");
+    }
+
     @TestMetadata("CallableReferenceNotImported")
     public void testCallableReferenceNotImported() throws Exception {
         runTest("../testData/smartMultiFile/CallableReferenceNotImported/");
@@ -43,6 +48,26 @@ public class MultiFileSmartCompletionTestGenerated extends AbstractMultiFileSmar
     @TestMetadata("CallablesInExcludedPackage")
     public void testCallablesInExcludedPackage() throws Exception {
         runTest("../testData/smartMultiFile/CallablesInExcludedPackage/");
+    }
+
+    @TestMetadata("FlexibleType")
+    public void testFlexibleType() throws Exception {
+        runTest("../testData/smartMultiFile/FlexibleType/");
+    }
+
+    @TestMetadata("FlexibleTypeMultipleArguments")
+    public void testFlexibleTypeMultipleArguments() throws Exception {
+        runTest("../testData/smartMultiFile/FlexibleTypeMultipleArguments/");
+    }
+
+    @TestMetadata("FlexibleTypeMultipleArgumentsNullable")
+    public void testFlexibleTypeMultipleArgumentsNullable() throws Exception {
+        runTest("../testData/smartMultiFile/FlexibleTypeMultipleArgumentsNullable/");
+    }
+
+    @TestMetadata("FlexibleTypeNotNull")
+    public void testFlexibleTypeNotNull() throws Exception {
+        runTest("../testData/smartMultiFile/FlexibleTypeNotNull/");
     }
 
     @TestMetadata("FunctionFromAnotherPackage")
@@ -68,6 +93,16 @@ public class MultiFileSmartCompletionTestGenerated extends AbstractMultiFileSmar
     @TestMetadata("GenericInheritors4")
     public void testGenericInheritors4() throws Exception {
         runTest("../testData/smartMultiFile/GenericInheritors4/");
+    }
+
+    @TestMetadata("HideNestedPrivateObject")
+    public void testHideNestedPrivateObject() throws Exception {
+        runTest("../testData/smartMultiFile/HideNestedPrivateObject/");
+    }
+
+    @TestMetadata("HidePrivateObject")
+    public void testHidePrivateObject() throws Exception {
+        runTest("../testData/smartMultiFile/HidePrivateObject/");
     }
 
     @TestMetadata("InheritorInTheSameFile")
@@ -123,6 +158,11 @@ public class MultiFileSmartCompletionTestGenerated extends AbstractMultiFileSmar
     @TestMetadata("NotImportedGetValue")
     public void testNotImportedGetValue() throws Exception {
         runTest("../testData/smartMultiFile/NotImportedGetValue/");
+    }
+
+    @TestMetadata("ShowElementsFromIndexWithoutPrefix")
+    public void testShowElementsFromIndexWithoutPrefix() throws Exception {
+        runTest("../testData/smartMultiFile/ShowElementsFromIndexWithoutPrefix/");
     }
 
     @TestMetadata("StaticMembers1")

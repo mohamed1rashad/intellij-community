@@ -4,7 +4,14 @@ package com.intellij.java.codeInspection.dataFlow;
 import com.intellij.codeInsight.intention.impl.preview.IntentionPreviewDiffResult;
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
 import com.intellij.codeInspection.dataFlow.EditContractIntention;
-import com.intellij.modcommand.*;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModChooseAction;
+import com.intellij.modcommand.ModCommandAction;
+import com.intellij.modcommand.ModCommandExecutor;
+import com.intellij.modcommand.ModEditOptions;
+import com.intellij.modcommand.ModUpdateFileText;
+import com.intellij.modcommand.Presentation;
+import com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiClass;
@@ -33,7 +40,7 @@ public final class EditContractIntentionTest extends LightJavaCodeInsightFixture
       stringClass.getConstructors(), ctr -> ctr.getParameterList().getParametersCount() == 3 &&
                                             PsiTypes.intType().equals(ctr.getParameterList().getParameter(1).getType()));
     assertNotNull(constructor);
-    int offset = constructor.getTextOffset();
+    int offset = BinaryFileTypeDecompilers.getInstance().allowDecompilerSlowOperation(() -> constructor.getTextOffset());
     ActionContext ctx = new ActionContext(getProject(), constructor.getContainingFile(), offset, TextRange.create(offset, offset), null);
     Presentation presentation = intention.getPresentation(ctx);
     assertNotNull(presentation);

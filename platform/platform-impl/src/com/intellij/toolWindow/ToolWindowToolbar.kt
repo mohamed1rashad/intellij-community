@@ -3,6 +3,7 @@
 package com.intellij.toolWindow
 
 import com.intellij.accessibility.AccessibilityUtils
+import com.intellij.openapi.application.impl.InternalUICustomization
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.VerticalFlowLayout
 import com.intellij.openapi.util.NlsSafe
@@ -12,14 +13,18 @@ import com.intellij.openapi.wm.WindowManager
 import com.intellij.openapi.wm.impl.AbstractDroppableStripe
 import com.intellij.openapi.wm.impl.LayoutData
 import com.intellij.openapi.wm.impl.SquareStripeButton
-import com.intellij.ui.BorderPainter
 import com.intellij.ui.ComponentUtil
-import com.intellij.ui.DefaultBorderPainter
 import com.intellij.ui.UIBundle
 import com.intellij.ui.components.JBPanel
 import com.intellij.util.ui.JBUI
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Color
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.LayoutManager
+import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import javax.accessibility.AccessibleContext
@@ -41,8 +46,6 @@ abstract class ToolWindowToolbar(private val isPrimary: Boolean, val anchor: Too
 
   private var hasVisibleButtons = false
   private val visibleButtonsListeners = mutableListOf<() -> Unit>()
-
-  internal var borderPainter: BorderPainter = DefaultBorderPainter()
 
   protected open fun init() {
     layout = myResizeManager.createLayout()
@@ -107,9 +110,8 @@ abstract class ToolWindowToolbar(private val isPrimary: Boolean, val anchor: Too
   open fun createBorder():Border = JBUI.Borders.empty()
   open fun getBorderColor(): Color? = JBUI.CurrentTheme.ToolWindow.borderColor()
 
-  override fun paint(g: Graphics) {
-    super.paint(g)
-    borderPainter.paintAfterChildren(this, g)
+  override fun getComponentGraphics(graphics: Graphics?): Graphics? {
+    return InternalUICustomization.runGlobalCGTransformWithInactiveFrameSupport(this, graphics as Graphics2D)
   }
 
   internal abstract fun getStripeFor(anchor: ToolWindowAnchor): AbstractDroppableStripe
@@ -173,9 +175,9 @@ abstract class ToolWindowToolbar(private val isPrimary: Boolean, val anchor: Too
   }
 
   internal class StripeV2(private val toolBar: ToolWindowToolbar,
-                          paneId: String,
-                          override val anchor: ToolWindowAnchor,
-                          override val split: Boolean = false,
+    paneId: String,
+    override val anchor: ToolWindowAnchor,
+    override val split: Boolean = false,
                           layout : LayoutManager = VerticalFlowLayout(0, 0)
   ) : AbstractDroppableStripe(paneId, layout) {
     var bottomAnchorDropAreaComponent: JComponent? = null
@@ -232,6 +234,10 @@ abstract class ToolWindowToolbar(private val isPrimary: Boolean, val anchor: Too
         return bounds.contains(screenPoint)
       }
       return super.containsPoint(screenPoint)
+    }
+
+    override fun getComponentGraphics(graphics: Graphics?): Graphics {
+      return InternalUICustomization.runGlobalCGTransformWithInactiveFrameSupport(this, graphics as Graphics2D)
     }
 
     private fun getFirstVisibleToolWindowSize(width: Boolean): Int {

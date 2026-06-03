@@ -21,7 +21,16 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.OSAgnosticPathUtil;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vcs.*;
+import com.intellij.openapi.vcs.AbstractVcs;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import com.intellij.openapi.vcs.VcsBundle;
+import com.intellij.openapi.vcs.VcsDataKeys;
+import com.intellij.openapi.vcs.VcsDirectoryMapping;
+import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.VcsKey;
+import com.intellij.openapi.vcs.VcsRoot;
+import com.intellij.openapi.vcs.VcsSharedProjectSettings;
 import com.intellij.openapi.vcs.actions.VcsContextFactory;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangeListManager;
@@ -35,13 +44,26 @@ import com.intellij.openapi.vfs.limits.FileSizeLimit;
 import com.intellij.util.Function;
 import com.intellij.util.ThrowableConvertor;
 import com.intellij.vcs.VcsSymlinkResolver;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.SystemIndependent;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.AbstractSet;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static com.intellij.openapi.util.io.FileUtil.toSystemDependentName;
 
@@ -133,8 +155,8 @@ public final class VcsUtil {
 
   private static @Nullable <T> T computeValue(@NotNull Project project,
                                               @NotNull java.util.function.Function<? super ProjectLevelVcsManager, ? extends T> provider) {
-    return ReadAction.compute(() -> {
-      //  IDEADEV-17916, when e.g. ContentRevision.getContent is called in
+    return ReadAction.computeBlocking(() -> {
+      //  IDEADEV-17916, when e.g., ContentRevision.getContent is called in
       //  a future task after the component has been disposed.
       T result = null;
       if (!project.isDisposed()) {
@@ -146,11 +168,11 @@ public final class VcsUtil {
   }
 
   public static @Nullable VirtualFile getVirtualFile(@NotNull @NonNls String path) {
-    return ReadAction.compute(() -> LocalFileSystem.getInstance().findFileByPath(path.replace(File.separatorChar, '/')));
+    return ReadAction.computeBlocking(() -> LocalFileSystem.getInstance().findFileByPath(path.replace(File.separatorChar, '/')));
   }
 
   public static @Nullable VirtualFile getVirtualFile(@NotNull File file) {
-    return ReadAction.compute(() -> LocalFileSystem.getInstance().findFileByIoFile(file));
+    return ReadAction.computeBlocking(() -> LocalFileSystem.getInstance().findFileByIoFile(file));
   }
 
   public static @Nullable VirtualFile getVirtualFileWithRefresh(@Nullable File file) {
@@ -164,7 +186,7 @@ public final class VcsUtil {
   }
 
   public static @NlsSafe String getFileContent(@NotNull @NonNls String path) {
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       VirtualFile vFile = getVirtualFile(path);
       assert vFile != null;
       return FileDocumentManager.getInstance().getDocument(vFile).getText();

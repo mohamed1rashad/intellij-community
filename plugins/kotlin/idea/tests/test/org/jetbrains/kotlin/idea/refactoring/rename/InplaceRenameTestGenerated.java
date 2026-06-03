@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.refactoring.rename;
 
@@ -285,16 +285,6 @@ public class InplaceRenameTestGenerated extends AbstractInplaceRenameTest {
         runTest("testData/refactoring/rename/inplace/HidingClassFromCompanionObject.kt");
     }
 
-    @TestMetadata("HidingClassFromReceiver.kt")
-    public void testHidingClassFromReceiver() throws Exception {
-        runTest("testData/refactoring/rename/inplace/HidingClassFromReceiver.kt");
-    }
-
-    @TestMetadata("HidingClassFromReceiver1.kt")
-    public void testHidingClassFromReceiver1() throws Exception {
-        runTest("testData/refactoring/rename/inplace/HidingClassFromReceiver1.kt");
-    }
-
     @TestMetadata("HidingClassFromSuper.kt")
     public void testHidingClassFromSuper() throws Exception {
         runTest("testData/refactoring/rename/inplace/HidingClassFromSuper.kt");
@@ -358,16 +348,6 @@ public class InplaceRenameTestGenerated extends AbstractInplaceRenameTest {
     @TestMetadata("HidingExternalClass.kt")
     public void testHidingExternalClass() throws Exception {
         runTest("testData/refactoring/rename/inplace/HidingExternalClass.kt");
-    }
-
-    @TestMetadata("HidingFunctionFromReceiver.kt")
-    public void testHidingFunctionFromReceiver() throws Exception {
-        runTest("testData/refactoring/rename/inplace/HidingFunctionFromReceiver.kt");
-    }
-
-    @TestMetadata("HidingFunctionFromReceiver1.kt")
-    public void testHidingFunctionFromReceiver1() throws Exception {
-        runTest("testData/refactoring/rename/inplace/HidingFunctionFromReceiver1.kt");
     }
 
     @TestMetadata("HidingLocalByParameter.kt")
@@ -465,16 +445,6 @@ public class InplaceRenameTestGenerated extends AbstractInplaceRenameTest {
         runTest("testData/refactoring/rename/inplace/HidingPropertyByTopLevel1.kt");
     }
 
-    @TestMetadata("HidingPropertyFromReceiver.kt")
-    public void testHidingPropertyFromReceiver() throws Exception {
-        runTest("testData/refactoring/rename/inplace/HidingPropertyFromReceiver.kt");
-    }
-
-    @TestMetadata("HidingPropertyFromReceiver1.kt")
-    public void testHidingPropertyFromReceiver1() throws Exception {
-        runTest("testData/refactoring/rename/inplace/HidingPropertyFromReceiver1.kt");
-    }
-
     @TestMetadata("HidingTopLevelClass.kt")
     public void testHidingTopLevelClass() throws Exception {
         runTest("testData/refactoring/rename/inplace/HidingTopLevelClass.kt");
@@ -493,6 +463,11 @@ public class InplaceRenameTestGenerated extends AbstractInplaceRenameTest {
     @TestMetadata("HidingTypeParameterByContainingClassTypeParameter1.kt")
     public void testHidingTypeParameterByContainingClassTypeParameter1() throws Exception {
         runTest("testData/refactoring/rename/inplace/HidingTypeParameterByContainingClassTypeParameter1.kt");
+    }
+
+    @TestMetadata("ImportAliasConstructor.kt")
+    public void testImportAliasConstructor() throws Exception {
+        runTest("testData/refactoring/rename/inplace/ImportAliasConstructor.kt");
     }
 
     @TestMetadata("InvokeToFoo.kt")
@@ -610,6 +585,31 @@ public class InplaceRenameTestGenerated extends AbstractInplaceRenameTest {
         runTest("testData/refactoring/rename/inplace/MultiDeclaration.kt");
     }
 
+    @TestMetadata("NameBasedDestructuringFull.kt")
+    public void testNameBasedDestructuringFull() throws Exception {
+        runTest("testData/refactoring/rename/inplace/NameBasedDestructuringFull.kt");
+    }
+
+    @TestMetadata("NameBasedDestructuringFullFromEntry.kt")
+    public void testNameBasedDestructuringFullFromEntry() throws Exception {
+        runTest("testData/refactoring/rename/inplace/NameBasedDestructuringFullFromEntry.kt");
+    }
+
+    @TestMetadata("NameBasedDestructuringFullFromUsage.kt")
+    public void testNameBasedDestructuringFullFromUsage() throws Exception {
+        runTest("testData/refactoring/rename/inplace/NameBasedDestructuringFullFromUsage.kt");
+    }
+
+    @TestMetadata("NameBasedDestructuringShort.kt")
+    public void testNameBasedDestructuringShort() throws Exception {
+        runTest("testData/refactoring/rename/inplace/NameBasedDestructuringShort.kt");
+    }
+
+    @TestMetadata("NameBasedDestructuringShortFromUsage.kt")
+    public void testNameBasedDestructuringShortFromUsage() throws Exception {
+        runTest("testData/refactoring/rename/inplace/NameBasedDestructuringShortFromUsage.kt");
+    }
+
     @TestMetadata("NamedArguments.kt")
     public void testNamedArguments() throws Exception {
         runTest("testData/refactoring/rename/inplace/NamedArguments.kt");
@@ -643,6 +643,26 @@ public class InplaceRenameTestGenerated extends AbstractInplaceRenameTest {
     @TestMetadata("ParameterRedecklaration.kt")
     public void testParameterRedecklaration() throws Exception {
         runTest("testData/refactoring/rename/inplace/ParameterRedecklaration.kt");
+    }
+
+    @TestMetadata("PositionBasedDestructuring.kt")
+    public void testPositionBasedDestructuring() throws Exception {
+        runTest("testData/refactoring/rename/inplace/PositionBasedDestructuring.kt");
+    }
+
+    @TestMetadata("PositionBasedDestructuringFromUsage.kt")
+    public void testPositionBasedDestructuringFromUsage() throws Exception {
+        runTest("testData/refactoring/rename/inplace/PositionBasedDestructuringFromUsage.kt");
+    }
+
+    @TestMetadata("PositionBasedDestructuringFull.kt")
+    public void testPositionBasedDestructuringFull() throws Exception {
+        runTest("testData/refactoring/rename/inplace/PositionBasedDestructuringFull.kt");
+    }
+
+    @TestMetadata("PositionBasedDestructuringFullFromUsage.kt")
+    public void testPositionBasedDestructuringFullFromUsage() throws Exception {
+        runTest("testData/refactoring/rename/inplace/PositionBasedDestructuringFullFromUsage.kt");
     }
 
     @TestMetadata("PropertyFunctionConflict.kt")

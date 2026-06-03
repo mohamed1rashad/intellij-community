@@ -60,9 +60,6 @@ import org.jetbrains.jewel.markdown.scrolling.ScrollingSynchronizer
  *   provided by the [MarkdownParserFactory], but you can provide your own if you need to customize the parser — e.g.,
  *   to ignore certain tags. If [markdownMode] is `MarkdownMode.WithEditor`, make sure you set
  *   `includeSourceSpans(IncludeSourceSpans.BLOCKS)` on the parser.
- * @param languageRecognizer A lambda that can recognize code language names (e.g., when used for fenced code blocks)
- *   and convert them into a [MimeType]. By default, this uses [MimeType.Known.fromMarkdownLanguageName], but you can
- *   provide your own implementation to, for example, support languages that Jewel doesn't recognize yet.
  * @param parseEmbeddedHtml If `true`, a subset of native HTML elements will be parsed as Markdown blocks.
  */
 @ApiStatus.Experimental
@@ -72,22 +69,21 @@ public class MarkdownProcessor(
     private val markdownMode: MarkdownMode = MarkdownMode.Standalone,
     private val commonMarkParser: Parser =
         MarkdownParserFactory.create(optimizeEdits = markdownMode is MarkdownMode.EditorPreview, extensions),
-    private val languageRecognizer: (String) -> MimeType? = { MimeType.Known.fromMarkdownLanguageName(it) },
     private val parseEmbeddedHtml: Boolean = false,
 ) {
+    @Suppress("UnusedPrivateProperty") // languageRecognizer is only here for binary compat reasons
+    @Deprecated(
+        "`languageRecognizer` is not necessary anymore. Use the constructor without it.",
+        replaceWith = ReplaceWith("MarkdownProcessor(extensions, markdownMode, commonMarkParser)"),
+    )
     public constructor(
         extensions: List<MarkdownProcessorExtension> = emptyList(),
         markdownMode: MarkdownMode = MarkdownMode.Standalone,
         commonMarkParser: Parser =
             MarkdownParserFactory.create(optimizeEdits = markdownMode is MarkdownMode.EditorPreview, extensions),
+        languageRecognizer: (String) -> MimeType? = { MimeType.Known.fromMarkdownLanguageName(it) },
         parseEmbeddedHtml: Boolean = false,
-    ) : this(
-        extensions,
-        markdownMode,
-        commonMarkParser,
-        { MimeType.Known.fromMarkdownLanguageName(it) },
-        parseEmbeddedHtml,
-    )
+    ) : this(extensions, markdownMode, commonMarkParser, parseEmbeddedHtml)
 
     @Deprecated("Use a version with a `parseEmbeddedHtml` parameter", level = DeprecationLevel.HIDDEN)
     public constructor(
@@ -243,8 +239,7 @@ public class MarkdownProcessor(
                 .subSequence(prefixPos, fullUpdatedText.length - commonSuffix.length)
                 .lineSequence()
                 .count() - previousText.subSequence(prefixPos, suffixPos).lineSequence().count()
-        // if modification starts at the edge, include the previous block by using less instead of less equal
-        val firstBlock = previousStartIndexes.indexOfLast { it < prefixPos }
+        val firstBlock = findFirstBlockToReparse(previousStartIndexes, prefixPos, previousBlocks)
         val blockAfterLast =
             previousEndIndexes.indexOfFirst { suffixPos <= it }.let { if (it == -1) previousBlocks.size else it + 1 }
         val changedText =
@@ -265,6 +260,35 @@ public class MarkdownProcessor(
         val updatedText: String,
         val nLinesDelta: Int,
     )
+
+    /**
+     * Finds the index of the first block that needs to be re-parsed after a text change.
+     *
+     * This function determines which block starts the range that needs re-parsing. It also considers whether the
+     * preceding block (if any) should be included, based on whether that block's extension allows merging with the next
+     * block.
+     */
+    private fun findFirstBlockToReparse(
+        previousStartIndexes: List<Int>,
+        prefixPos: Int,
+        previousBlocks: List<Block>,
+    ): Int {
+        // if modification starts at the edge, include the previous block by using less instead of less equal
+        val fb = previousStartIndexes.indexOfLast { it < prefixPos }
+        if (fb <= 0) return fb
+        val precedingBlock = previousBlocks[fb - 1]
+        // There are certain blocks (like tables) that can "absorb" the current block
+        // after the block is edited enough to be accounted as part of the preceding block.
+        // In case of tables, the current block can be a new table row.
+        return if (precedingBlock is CustomBlock && allowsMergingWithNextBlock(precedingBlock)) {
+            fb - 1
+        } else {
+            fb
+        }
+    }
+
+    private fun allowsMergingWithNextBlock(block: CustomBlock): Boolean =
+        blockExtensions.find { it.canProcess(block) }?.allowsMergingWithNextBlock == true
 
     private fun parseRawMarkdown(@Language("Markdown") rawMarkdown: String): List<Block> {
         val document =
@@ -351,7 +375,7 @@ public class MarkdownProcessor(
     }
 
     private fun FencedCodeBlock.toMarkdownCodeBlockOrNull(): CodeBlock.FencedCodeBlock =
-        CodeBlock.FencedCodeBlock(content = literal.removeSuffix("\n"), mimeType = languageRecognizer(info))
+        CodeBlock.FencedCodeBlock(content = literal.removeSuffix("\n"), language = info)
 
     private fun IndentedCodeBlock.toMarkdownCodeBlockOrNull(): CodeBlock.IndentedCodeBlock =
         CodeBlock.IndentedCodeBlock(literal.trimEnd('\n'))

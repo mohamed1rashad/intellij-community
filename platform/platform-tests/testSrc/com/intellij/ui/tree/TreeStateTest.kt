@@ -16,7 +16,11 @@ import com.intellij.util.asDisposable
 import com.intellij.util.concurrency.Invoker
 import com.intellij.util.concurrency.InvokerSupplier
 import com.intellij.util.ui.tree.TreeUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.assertj.core.api.Assertions.assertThat
 import org.jetbrains.annotations.Unmodifiable
 import org.jetbrains.concurrency.AsyncPromise
@@ -75,6 +79,28 @@ internal class TreeStateTest : BasePlatformTestCase() {
     )
   }
 
+  fun `test restore cached presentation when root is already loaded`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a3
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/a2",
+        "/root/a3",
+      ),
+      loadRootBeforeRestore = true,
+    )
+  }
+
   fun `test restore cached presentation - no children to restore`() {
     cachedPresentationTest(
       inputToSave = """
@@ -122,6 +148,213 @@ internal class TreeStateTest : BasePlatformTestCase() {
          *a2.2
         *a3
       """.trimIndent(),
+    )
+  }
+
+  fun `test restore cached presentation - extra cached siblings in the beginning and the end`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        -extra1
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a4
+        *extra2
+      """.trimIndent(),
+      inputToRestore = """
+       +root
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a4
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/a2",
+        "/root/a4",
+      )
+    )
+  }
+
+  fun `test restore cached presentation - extra cached siblings in the middle`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        +a1
+         *a1.1
+        -extra1
+        -a2
+         *a2.1
+         *a2.2
+        *extra2
+        *extra3
+        *a4
+      """.trimIndent(),
+      inputToRestore = """
+       +root
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a4
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/a2",
+        "/root/a4",
+      )
+    )
+  }
+
+  fun `test restore cached presentation - missing cached siblings in the beginning and the end`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a4
+      """.trimIndent(),
+      inputToRestore = """
+       +root
+        -missing1
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a4
+        *missing2
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/missing1",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/a2",
+        "/root/a4",
+        "/root/missing2",
+      )
+    )
+  }
+
+  fun `test restore cached presentation - missing cached siblings in the middle`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a4
+      """.trimIndent(),
+      inputToRestore = """
+       +root
+        +a1
+         *a1.1
+        -missing1
+        -a2
+         *a2.1
+         *a2.2
+        *missing2
+        *missing3
+        *a4
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/missing1",
+        "/root/a2",
+        "/root/missing2",
+        "/root/missing3",
+        "/root/a4",
+      )
+    )
+  }
+
+  fun `test restore cached presentation - replaced siblings in the beginning and the end`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        -a0
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a3
+        *a4
+      """.trimIndent(),
+      inputToRestore = """
+       +root
+        -x0
+        +a1
+         *a1.1
+        -a2
+         *a2.1
+         *a2.2
+        *a3
+        *x4
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/x0",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/a2",
+        "/root/a3",
+        "/root/x4",
+      )
+    )
+  }
+
+  fun `test restore cached presentation - replaced siblings in the middle`() {
+    cachedPresentationTest(
+      inputToSave = """
+       +root
+        +a1
+         *a1.1
+        -a2
+        -a3
+         *a3.1
+         *a3.2
+        *a4
+        *a5
+      """.trimIndent(),
+      inputToRestore = """
+       +root
+        +a1
+         *a1.1
+        -x2
+        -a3
+         *a3.1
+         *a3.2
+        *x4
+        *a5
+      """.trimIndent(),
+      expectedLoadedNodes = listOf(
+        "/root",
+        "/root/a1",
+        "/root/a1/a1.1",
+        "/root/x2",
+        "/root/a3",
+        "/root/x4",
+        "/root/a5",
+      )
     )
   }
 
@@ -191,12 +424,16 @@ internal class TreeStateTest : BasePlatformTestCase() {
     inputToSave: String,
     inputToRestore: String = inputToSave,
     expectedLoadedNodes: List<String>,
+    loadRootBeforeRestore: Boolean = false,
   ) = timeoutRunBlocking(context = Dispatchers.UiWithModelAccess) {
     val coroutineScope = this
     val tree = createTree(inputToSave, coroutineScope, async = true)
     expandInitiallyExpanded(tree)
     val state = TreeState.createOn(tree, true, false, true)
     val newTree = createTree(inputToRestore, coroutineScope, async = true)
+    if (loadRootBeforeRestore) {
+      loadRoot(newTree)
+    }
     state.applyTo(newTree)
     val actualLoadedNodes = suspendCancellableCoroutine { continuation -> 
       newTree.addPropertyChangeListener(CACHED_TREE_PRESENTATION_PROPERTY, PropertyChangeListener {
@@ -206,6 +443,12 @@ internal class TreeStateTest : BasePlatformTestCase() {
       })
     }
     assertThat(actualLoadedNodes).isEqualTo(expectedLoadedNodes)
+  }
+
+  private suspend fun loadRoot(tree: Tree) {
+    TreeUtil.promiseVisit(tree, object : TreeVisitor {
+      override fun visit(path: TreePath): TreeVisitor.Action = TreeVisitor.Action.INTERRUPT
+    }).await()
   }
 
   private fun syncSelectionTest(inputToSave: String, inputToRestore: String) = timeoutRunBlocking(context = Dispatchers.UiWithModelAccess) {

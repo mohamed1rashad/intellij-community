@@ -20,9 +20,14 @@ import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.util.containers.mapNotNullLoggingErrors
 import com.intellij.util.ui.UIUtil
-import com.intellij.vcs.commit.*
+import com.intellij.vcs.commit.AbstractCommitWorkflow
 import com.intellij.vcs.commit.AbstractCommitWorkflowHandler.Companion.getDefaultCommitActionName
+import com.intellij.vcs.commit.CommitOptionsPanel
+import com.intellij.vcs.commit.CommitWorkflowHandler
+import com.intellij.vcs.commit.NullCommitWorkflowHandler
+import com.intellij.vcs.commit.isPostCommit
 import com.intellij.vcs.commit.message.CommitMessageInspectionsPanel
+import com.intellij.vcs.commit.setRunSlowCommitChecksAfterCommit
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
 import java.io.File
@@ -104,7 +109,7 @@ class CommitDialogConfigurable(private val project: Project)
     override fun getComponent() = null
     override fun getPreferredFocusedComponent() = null
 
-    override fun getCommitWorkflowHandler(): CommitWorkflowHandler = NullCommitWorkflowHandler
+    override fun getCommitWorkflowHandler(): CommitWorkflowHandler = NullCommitWorkflowHandler(project)
     override fun getProject() = project
 
     override fun vcsIsAffected(name: String) = false

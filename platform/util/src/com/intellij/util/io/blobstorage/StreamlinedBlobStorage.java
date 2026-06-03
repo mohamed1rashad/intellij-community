@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.io.blobstorage;
 
 import com.intellij.openapi.Forceable;
@@ -46,6 +46,13 @@ public interface StreamlinedBlobStorage extends Closeable, AutoCloseable, Forcea
    * because of that
    */
   boolean wasClosedProperly() throws IOException;
+
+  /**
+   * @return true if the storage was always properly closed -- not just last time but every previous time as well.
+   * false if it wasn't properly closed at least once in its history and data could be inconsistent because of that.
+   * This is a 'sticky' property: once set, it is never reset.
+   */
+  boolean wasAlwaysClosedProperly();
 
   /** @return version of application data stored in storage -- managed by application */
   int getDataFormatVersion() throws IOException;
@@ -142,15 +149,21 @@ public interface StreamlinedBlobStorage extends Closeable, AutoCloseable, Forcea
   void deleteRecord(int recordId) throws IOException;
 
   /**
-   * Scan all records (even deleted one), and deliver their content to processor. ByteBuffer is read-only, and
+   * Scan all records (even deleted one), and deliver their content to the processor. ByteBuffer is read-only, and
    * prepared for reading (i.e. position=0, limit=payload.length). For deleted/moved records recordLength is negative
    * see {@link #isRecordActual(int)}.
-   * Scanning stops prematurely if processor returns false.
+   * Scanning stops prematurely if the processor returns false.
    *
    * @return how many records were processed
    */
   <E extends Exception> int forEach(@NotNull Processor<E> processor) throws IOException, E;
 
+  /**
+   * To be used with {@link #forEach(Processor)}: for-each iterates over all records, including
+   * non-actual (=moved/removed).
+   * For non-actual records a length has some special bits to identify them, and this method does
+   * that.
+   */
   boolean isRecordActual(int recordActualLength);
 
   int liveRecordsCount() throws IOException;

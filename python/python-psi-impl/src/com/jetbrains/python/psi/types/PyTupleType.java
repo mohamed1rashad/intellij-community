@@ -39,7 +39,10 @@ public class PyTupleType extends PyClassTypeImpl implements PyCollectionType {
     this(tupleClass, elementTypes, homogeneous, false);
   }
 
-  protected PyTupleType(@NotNull PyClass tupleClass, @NotNull List<? extends PyType> elementTypes, boolean homogeneous, boolean isDefinition) {
+  protected PyTupleType(@NotNull PyClass tupleClass,
+                        @NotNull List<? extends PyType> elementTypes,
+                        boolean homogeneous,
+                        boolean isDefinition) {
     super(tupleClass, isDefinition);
     myUnpackedTupleType = new PyUnpackedTupleTypeImpl(elementTypes, homogeneous);
   }
@@ -49,11 +52,13 @@ public class PyTupleType extends PyClassTypeImpl implements PyCollectionType {
     if (myUnpackedTupleType.isUnbound()) {
       return "(" + (getTypeName(getIteratedItemType())) + ", ...)";
     }
-    return "(" + StringUtil.join(myUnpackedTupleType.getElementTypes(), PyTupleType::getTypeName, ", ") + ")";
+    var elementTypes = myUnpackedTupleType.getElementTypes();
+    var suffix = elementTypes.size() == 1 ? ",)" : ")";
+    return "(" + StringUtil.join(elementTypes, PyTupleType::getTypeName, ", ") + suffix;
   }
 
   private static @Nullable String getTypeName(@Nullable PyType type) {
-    return type == null ? PyNames.UNKNOWN_TYPE : type.getName();
+    return type == null ? PyNames.ANY_TYPE : type.getName();
   }
 
   @Override
@@ -106,14 +111,20 @@ public class PyTupleType extends PyClassTypeImpl implements PyCollectionType {
   public @Nullable PyType getIteratedItemType() {
     List<PyType> types = myUnpackedTupleType.getElementTypes();
     List<PyType> unpackedTypes = ContainerUtil.map(types, type -> {
-        if (type instanceof PyUnpackedTupleType unpackedTupleType) {
-          assert unpackedTupleType.isUnbound();
-          return unpackedTupleType.getElementTypes().get(0);
-        } else {
-          return type;
-        }
-      });
+      if (type instanceof PyUnpackedTupleType unpackedTupleType) {
+        assert unpackedTupleType.isUnbound();
+        return unpackedTupleType.getElementTypes().get(0);
+      }
+      else {
+        return type;
+      }
+    });
     return PyUnionType.unionOrNever(unpackedTypes);
+  }
+
+  @Override
+  public String toString() {
+    return "PyTupleType: " + getName();
   }
 
   public @NotNull PyUnpackedTupleType asUnpackedTupleType() {

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInspection.dataFlow.inference
 
 import com.intellij.codeInsight.ExpressionUtil
@@ -7,15 +7,29 @@ import com.intellij.codeInsight.NullableNotNullManager
 import com.intellij.codeInspection.dataFlow.Mutability
 import com.intellij.codeInspection.dataFlow.MutationSignature
 import com.intellij.lang.LighterASTNode
-import com.intellij.psi.*
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.PsiArrayAccessExpression
+import com.intellij.psi.PsiAssignmentExpression
+import com.intellij.psi.PsiCallExpression
+import com.intellij.psi.PsiCodeBlock
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiLocalVariable
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiMethodCallExpression
+import com.intellij.psi.PsiNewExpression
+import com.intellij.psi.PsiParameter
+import com.intellij.psi.PsiPrimitiveType
+import com.intellij.psi.PsiReferenceExpression
 import com.intellij.psi.impl.source.PsiMethodImpl
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.PsiUtil
 import com.siyeh.ig.psiutils.ClassUtils
-import java.util.*
+import java.util.BitSet
 
+@ConsistentCopyVisibility
 public data class ExpressionRange internal constructor (val startOffset: Int, val endOffset: Int) {
 
   public companion object {
@@ -57,7 +71,8 @@ public data class PurityInferenceResult(internal val mutatesThis: Boolean,
 
     val psiCall : PsiCallExpression = singleCall.restoreExpression(body())
     val method = psiCall.resolveMethod()
-    if (method == currentMethod) {
+    if (method != null &&
+        (method == currentMethod || JavaSourceInference.INFERENCE_RECURSION_GUARD.currentStack().contains(method))) {
       if (!mutatesThis || psiCall is PsiMethodCallExpression && ExpressionUtil.isEffectivelyUnqualified(psiCall.methodExpression)) {
         return MutationSignature.pure()
       }
@@ -133,7 +148,7 @@ public interface MethodReturnInferenceResult {
       val call : PsiMethodCallExpression = delegate.restoreExpression(body) 
       val target = call.resolveMethod()
       return when {
-        target == null || target == caller -> Mutability.UNKNOWN
+        target == null || target == caller || JavaSourceInference.INFERENCE_RECURSION_GUARD.currentStack().contains(target) -> Mutability.UNKNOWN
         ClassUtils.isImmutable(target.returnType, false) -> Mutability.UNMODIFIABLE
         else -> Mutability.getMutability(target)
       }
@@ -144,6 +159,10 @@ public interface MethodReturnInferenceResult {
       if (call.type is PsiPrimitiveType) return true
 
       val target = call.resolveMethod()
+      if (target != null && JavaSourceInference.INFERENCE_RECURSION_GUARD.currentStack().contains(target)) {
+        //similar to target == caller
+        return true
+      }
       return target == caller || target != null && NullableNotNullManager.isNotNull(target)
     }
   }

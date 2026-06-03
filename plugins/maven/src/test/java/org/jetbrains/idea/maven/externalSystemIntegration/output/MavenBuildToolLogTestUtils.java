@@ -3,7 +3,15 @@ package org.jetbrains.idea.maven.externalSystemIntegration.output;
 
 import com.intellij.build.DefaultBuildDescriptor;
 import com.intellij.build.FilePosition;
-import com.intellij.build.events.*;
+import com.intellij.build.events.BuildEvent;
+import com.intellij.build.events.FailureResult;
+import com.intellij.build.events.FileMessageEvent;
+import com.intellij.build.events.FinishBuildEvent;
+import com.intellij.build.events.FinishEvent;
+import com.intellij.build.events.MessageEvent;
+import com.intellij.build.events.OutputBuildEvent;
+import com.intellij.build.events.StartEvent;
+import com.intellij.build.events.SuccessResult;
 import com.intellij.build.events.impl.FileMessageEventImpl;
 import com.intellij.build.events.impl.StartBuildEventImpl;
 import com.intellij.build.output.BuildOutputInstantReader;
@@ -30,7 +38,13 @@ import org.jetbrains.idea.maven.utils.MavenUtil;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -199,7 +213,7 @@ public abstract class MavenBuildToolLogTestUtils extends LightIdeaTestCase {
         (MavenRunConfiguration)new MavenRunConfigurationType.MavenRunConfigurationFactory(MavenRunConfigurationType.getInstance())
           .createTemplateConfiguration(getProject());
       CollectConsumer collectConsumer = new CollectConsumer();
-      MavenLogOutputParser parser = new MavenLogOutputParser(configuration, myTaskId, myParsers, false);
+      MavenLogOutputParser parser = new MavenLogOutputParser(configuration, myTaskId, myParsers);
 
       collectConsumer.accept(new StartBuildEventImpl(
         new DefaultBuildDescriptor(myTaskId, "Maven Run", System.getProperty("user.dir"), System.currentTimeMillis()), "Maven Run"));

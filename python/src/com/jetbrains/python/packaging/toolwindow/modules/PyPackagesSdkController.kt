@@ -19,13 +19,11 @@ import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.JBList
 import com.intellij.util.asDisposable
-import com.jetbrains.python.NON_INTERACTIVE_ROOT_TRACE_CONTEXT
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.TraceContext
 import com.jetbrains.python.packaging.toolwindow.PyPackagingToolWindowService
 import com.jetbrains.python.packaging.utils.PyPackageCoroutine
-import com.jetbrains.python.sdk.PySdkPopupFactory
-import com.jetbrains.python.sdk.icon
+import com.jetbrains.python.sdk.pyInterpreterPresentation
 import com.jetbrains.python.sdk.pythonSdk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +37,7 @@ import javax.swing.event.ListSelectionListener
 internal class PyPackagesSdkController(private val project: Project) : Disposable.Default {
 
   private val packagingScope: CoroutineScope = PyPackageCoroutine.getScope(project)
-    .childScope("Packages SDK Controller", TraceContext(PyBundle.message("tracecontext.packages.sdk.controller"), null)).also {
+    .childScope("Packages SDK Controller", TraceContext(PyBundle.message("trace.context.packages.sdk.controller"), null)).also {
       Disposer.register(this, it.asDisposable())
     }
 
@@ -51,15 +49,18 @@ internal class PyPackagesSdkController(private val project: Project) : Disposabl
 
   private val sdkListRenderer = object : SimpleListCellRenderer<Sdk>() {
     override fun customize(list: JList<out Sdk>, value: Sdk, index: Int, selected: Boolean, hasFocus: Boolean) {
-      text = PySdkPopupFactory.shortenNameInPopup(value, 50)
-      icon = icon(value)
+      val presentation = value.pyInterpreterPresentation()
+      text = presentation.shortName
+      icon = presentation.icon
     }
   }
+
+  private val selectionListener = createSelectionListener()
 
   private val sdkList: JBList<Sdk> = JBList(allSdks).apply {
     selectionMode = ListSelectionModel.SINGLE_SELECTION
     cellRenderer = sdkListRenderer
-    addListSelectionListener(createSelectionListener())
+    addListSelectionListener(selectionListener)
   }
 
   val mainScrollPane: JScrollPane = ScrollPaneFactory.createScrollPane(sdkList, true)
@@ -99,6 +100,22 @@ internal class PyPackagesSdkController(private val project: Project) : Disposabl
     packagingScope.launch(Dispatchers.EDT) {
       val index = (sdkList.model as DefaultListModel<Sdk>).indexOf(sdk)
       sdkList.selectionModel.setSelectionInterval(index, index)
+    }
+  }
+
+  internal fun refreshAndSyncSelection(sdk: Sdk?) {
+    sdkList.removeListSelectionListener(selectionListener)
+    try {
+      refreshModuleList()
+      if (sdk != null) {
+        val index = (sdkList.model as DefaultListModel<Sdk>).indexOf(sdk)
+        if (index >= 0) {
+          sdkList.selectionModel.setSelectionInterval(index, index)
+        }
+      }
+    }
+    finally {
+      sdkList.addListSelectionListener(selectionListener)
     }
   }
 

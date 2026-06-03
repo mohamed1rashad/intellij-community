@@ -1,5 +1,8 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.remoteDev.tests.impl.utils
 
+import com.intellij.concurrency.currentThreadContext
+import com.intellij.openapi.diagnostic.LogLevel
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.remoteDev.tests.impl.RdctTestFrameworkLoggerCategory
 import kotlinx.coroutines.CancellationException
@@ -11,7 +14,9 @@ import kotlin.time.DurationUnit
 import kotlin.time.measureTimedValue
 
 // it is easier to sort out logs from just testFramework
-internal val LOG = Logger.getInstance(RdctTestFrameworkLoggerCategory.category)
+internal val LOG = Logger.getInstance(RdctTestFrameworkLoggerCategory.category).also {
+  it.setLevel(LogLevel.INFO)
+}
 
 @TestOnly
 @ApiStatus.Internal
@@ -19,21 +24,22 @@ suspend fun <T> runLogged(actionTitle: String, timeout: Duration? = null, action
   val (result, passedTime) = measureTimedValue {
     try {
       if (timeout != null) {
-        LOG.info("'$actionTitle': starting with $timeout timeout on ${Thread.currentThread()}")
+        LOG.info("'$actionTitle': starting with $timeout timeout on ${currentThreadContext()}")
         withTimeoutDumping(actionTitle, timeout) {
           action()
         }
       }
       else {
-        LOG.info("'$actionTitle': starting on ${Thread.currentThread()}")
+        LOG.info("'$actionTitle': starting on ${currentThreadContext()}")
         action()
       }
     }
     catch (e: CancellationException) {
+      LOG.warn("'$actionTitle': was CANCELLED on ${currentThreadContext()}")
       throw e
     }
     catch (e: Throwable) {
-      LOG.warn("'$actionTitle': failed \n\t${e::class.simpleName}: '${e.message}'", e)
+      LOG.warn("'$actionTitle': failed", e)
       throw e
     }
   }

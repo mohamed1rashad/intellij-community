@@ -11,8 +11,14 @@ import com.intellij.openapi.progress.ProgressModel
 import com.intellij.openapi.progress.util.ProgressIndicatorBase
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
-import com.intellij.platform.ide.progress.*
+import com.intellij.platform.ide.progress.TaskInfoEntity
+import com.intellij.platform.ide.progress.TaskManager
+import com.intellij.platform.ide.progress.TaskStatus
+import com.intellij.platform.ide.progress.activeTasks
+import com.intellij.platform.ide.progress.statuses
 import com.intellij.platform.ide.progress.suspender.TaskSuspension
+import com.intellij.platform.ide.progress.suspensionState
+import com.intellij.platform.ide.progress.updates
 import com.intellij.platform.project.projectId
 import fleet.kernel.rete.asValuesFlow
 import fleet.kernel.rete.collect
@@ -28,7 +34,7 @@ import kotlinx.coroutines.launch
 
 private val LOG = logger<TaskInfoEntityCollector>()
 
-private class TaskInfoEntityCollector(cs: CoroutineScope) {
+internal class TaskInfoEntityCollector(cs: CoroutineScope) {
   init {
     LOG.trace { "TaskInfoEntityCollector started for application"}
     collectActiveTasks(cs, project = null)
@@ -45,18 +51,15 @@ internal class PerProjectTaskInfoEntityCollector(private val project: Project, p
 
 private fun collectActiveTasks(cs: CoroutineScope, project: Project?) {
   cs.launch {
-    val projectOrDefault = project ?: serviceAsync<ProjectManager>().defaultProject
     activeTasks
       .filter { it.projectEntity?.projectId == project?.projectId() }
       .collect { task ->
-        if (!isRhizomeProgressEnabled) return@collect
-
-        showTaskIndicator(cs, projectOrDefault, task)
+        showTaskIndicator(cs, project, task)
       }
   }
 }
 
-private fun showTaskIndicator(cs: CoroutineScope, project: Project, task: TaskInfoEntity) {
+private fun showTaskIndicator(cs: CoroutineScope, project: Project?, task: TaskInfoEntity) {
   cs.launch {
     tryWithEntities(task) {
       LOG.trace { "Showing indicator for task: entityId=${task.eid}, title=${task.title}, project=$project" }
@@ -75,8 +78,9 @@ private fun showTaskIndicator(cs: CoroutineScope, project: Project, task: TaskIn
         }
       }
 
+      val projectOrDefault = project ?: serviceAsync<ProjectManager>().defaultProject
       showIndicator(
-        project,
+        projectOrDefault,
         progressModel,
         task.updates.asValuesFlow()
       )

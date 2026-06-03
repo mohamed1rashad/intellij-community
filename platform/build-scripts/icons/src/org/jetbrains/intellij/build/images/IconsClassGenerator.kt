@@ -11,7 +11,6 @@ import com.intellij.util.diff.Diff
 import com.intellij.util.io.directoryStreamIfExists
 import com.intellij.util.xml.dom.readXmlAsModel
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet
-import kotlin.io.path.exists
 import org.jetbrains.intellij.build.images.sync.dotnet.DotnetIconClasses
 import org.jetbrains.jps.model.java.JavaResourceRootType
 import org.jetbrains.jps.model.java.JavaSourceRootProperties
@@ -29,6 +28,7 @@ import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import javax.xml.stream.XMLStreamException
+import kotlin.io.path.exists
 
 @JvmRecord
 internal data class ModifiedClass(
@@ -61,17 +61,8 @@ internal open class IconsClassGenerator(
     private val NAME_COMPARATOR: Comparator<String> = compareBy { it.lowercase(Locale.ENGLISH) + '.' }
 
     private val deprecatedIconFieldNameMap = CollectionFactory.createCharSequenceMap<String>(true).apply {
-      this["RwAccess"] = "Rw_access"
-      this["MenuOpen"] = "Menu_open"
-      this["MenuCut"] = "Menu_cut"
-      this["MenuPaste"] = "Menu_paste"
-      @Suppress("SpellCheckingInspection")
-      this["MenuSaveall"] = "Menu_saveall"
       this["PhpIcon"] = "Php_icon"
       this["Emulator02"] = "Emulator2"
-      this["Language"] = "LocalizationSettings"
-      this["PipetteRollover"] = "Pipette_rollover"
-      this["RunAnything"] = "Run_anything"
     }
 
     private val commentRegExp = Regex("(?s)<!--.*?-->")

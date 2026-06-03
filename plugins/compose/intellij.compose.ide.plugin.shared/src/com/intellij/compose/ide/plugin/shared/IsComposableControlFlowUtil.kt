@@ -2,11 +2,15 @@
 package com.intellij.compose.ide.plugin.shared
 
 import com.intellij.psi.PsiElement
+import com.intellij.psi.util.parentOfType
 import org.jetbrains.kotlin.analysis.api.KaContextParameterApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.annotations.KaAnnotated
+import org.jetbrains.kotlin.analysis.api.components.expectedType
 import org.jetbrains.kotlin.analysis.api.components.resolveToCall
+import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
+import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
 import org.jetbrains.kotlin.analysis.api.resolution.KaCallInfo
 import org.jetbrains.kotlin.analysis.api.resolution.singleConstructorCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
@@ -14,7 +18,13 @@ import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtAnnotationEntry
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtLambdaArgument
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtValueArgument
 import org.jetbrains.kotlin.psi.psiUtil.getAnnotationEntries
 
 /**
@@ -31,30 +41,33 @@ import org.jetbrains.kotlin.psi.psiUtil.getAnnotationEntries
  * ```
  * For detailed behavior, see: [com.intellij.compose.ide.plugin.shared.ComposableAnnotationToExtractedFunctionAddingAnalyserTest]
  */
-internal fun PsiElement?.isInsideComposableControlFlow(): Boolean = when (this) {
-  null -> false // Reached root parent
-  is KtPropertyAccessor, is KtNamedFunction -> hasComposableAnnotation()
-  is KtLambdaExpression -> analyze(this) { ownsComposableControlFlow() }
-  is KtLambdaArgument -> analyze(this) { ownsComposableControlFlow() }
-  else -> parent.isInsideComposableControlFlow()
+@OptIn(KaAllowAnalysisOnEdt::class)
+internal fun PsiElement?.isInsideComposableControlFlow(): Boolean = allowAnalysisOnEdt {
+  when (this) {
+    null -> false // Reached root parent
+    is KtPropertyAccessor, is KtNamedFunction -> hasComposableAnnotation()
+    is KtLambdaExpression -> analyze(this) { ownsComposableControlFlow() }
+    is KtLambdaArgument -> analyze(this) { ownsComposableControlFlow() }
+    else -> parent.isInsideComposableControlFlow()
+  }
 }
-
-context(_: KaSession)
-private fun KtLambdaExpression.ownsComposableControlFlow(): Boolean =
-  (parent as? KtLambdaArgument)?.ownsComposableControlFlow() // Only check lambda that is NOT an argument
-  // One would simply expect us to infer the type and then check whether the type has a `@Composable` annotation.
-  // But currently, annotations are not inferred. See https://jetbrains.slack.com/archives/C061DS4G41J/p1738180610032509
-  ?: getAnnotationEntries().containsAnnotationNamed(COMPOSABLE_ANNOTATION_FQ_NAME)
 
 @OptIn(KaContextParameterApi::class)
 context(_: KaSession)
-private fun KtLambdaArgument.ownsComposableControlFlow(): Boolean =
-  (parent as? KtCallExpression)
+private fun KtLambdaExpression.ownsComposableControlFlow(): Boolean =
+  getAnnotationEntries().containsAnnotationNamed(COMPOSABLE_ANNOTATION_FQ_NAME)
+  || expectedType?.isAnnotatedWith(COMPOSABLE_ANNOTATION_FQ_NAME) == true
+  || (parent as? KtValueArgument)?.ownsComposableControlFlow() == true
+
+@OptIn(KaContextParameterApi::class)
+context(_: KaSession)
+private fun KtValueArgument.ownsComposableControlFlow(): Boolean =
+  parentOfType<KtCallExpression>()
     ?.resolveToCall()
     .let { functionCall -> functionCall != null && this.ownsComposableControlFlowWhenArgumentOf(functionCall) }
 
 context(_: KaSession)
-private fun KtLambdaArgument.ownsComposableControlFlowWhenArgumentOf(functionCall: KaCallInfo): Boolean =
+private fun KtValueArgument.ownsComposableControlFlowWhenArgumentOf(functionCall: KaCallInfo): Boolean =
   this.hasAnnotationIn(functionCall, COMPOSABLE_ANNOTATION_FQ_NAME) || // We are explicitly in Composable flow!
   (
     !this.hasAnnotationIn(functionCall, DISALLOW_COMPOSABLE_CALLS_FQ_NAME) // If our flow is not explicitly forbidding Composable calls,
@@ -62,27 +75,27 @@ private fun KtLambdaArgument.ownsComposableControlFlowWhenArgumentOf(functionCal
     && parent.isInsideComposableControlFlow() // then check whether the parent is in Composable flow
   )
 
-private fun KtLambdaArgument.hasAnnotationIn(function: KaCallInfo, fqName: FqName): Boolean = analyze(this) {
+private fun KtValueArgument.hasAnnotationIn(function: KaCallInfo, fqName: FqName): Boolean = analyze(this) {
   function.parameterSymbolOf(this@hasAnnotationIn)
     ?.returnType
     ?.isAnnotatedWith(fqName) // Not cached, but doesn't matter for this infrequently triggered extension
-    ?: false
+  ?: false
 }
 
 private fun KaAnnotated.isAnnotatedWith(fqName: FqName): Boolean =
   annotations.any { it.classId?.asSingleFqName() == fqName }
 
 context(_: KaSession)
-private fun KtLambdaArgument.isInlinedInside(function: KaCallInfo): Boolean =
+private fun KtValueArgument.isInlinedInside(function: KaCallInfo): Boolean =
   function.isInline() &&
-    function.parameterSymbolOf(this@isInlinedInside)
-      ?.let { !it.isNoinline && !it.isCrossinline }
-      ?: true
+  function.parameterSymbolOf(this@isInlinedInside)
+    ?.let { !it.isNoinline && !it.isCrossinline }
+  ?: true
 
-private fun KaCallInfo.parameterSymbolOf(argument: KtLambdaArgument): KaValueParameterSymbol? =
+private fun KaCallInfo.parameterSymbolOf(argument: KtValueArgument): KaValueParameterSymbol? =
   argument.getArgumentExpression()?.let { expression ->
     successfulFunctionCallOrNull()
-      ?.argumentMapping
+      ?.valueArgumentMapping
       ?.get(expression)
       ?.symbol
   }
@@ -92,7 +105,7 @@ private fun KaCallInfo.isInline(): Boolean =
     ?.symbol
     ?.let { it as? KaNamedFunctionSymbol }
     ?.isInline
-    ?: false
+  ?: false
 
 /** Not cached, but doesn't matter for this infrequently triggered extension */
 @OptIn(KaContextParameterApi::class)

@@ -2,13 +2,19 @@
 package com.intellij.ide.actions.searcheverywhere
 
 import com.intellij.find.impl.TextSearchRightActionAction
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUiKind
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.editor.impl.FontInfo
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.AnimatedIcon
 import com.intellij.ui.Gray
-import com.intellij.ui.RowIcon
+import com.intellij.ui.LayeredIcon
 import com.intellij.ui.TextIcon
 import com.intellij.ui.components.fields.ExtendableTextComponent
 import com.intellij.ui.components.fields.ExtendableTextField
@@ -21,7 +27,7 @@ import javax.swing.Icon
 @ApiStatus.Internal
 class HintHelper(private val myTextField: ExtendableTextField) {
   private val myText = TextIcon("", JBUI.CurrentTheme.BigPopup.searchFieldGrayForeground(), Gray.TRANSPARENT, 0)
-  private val myLoadingIcon = RowIcon(2, com.intellij.ui.icons.RowIcon.Alignment.CENTER)
+  private val myLoadingIcon = LayeredIcon(2)
   private val myExtensionWithHintText = ExtendableTextComponent.Extension { myText }
   private val mySearchProcessExtension = ExtendableTextComponent.Extension { AnimatedIcon.Default.INSTANCE }
   private var myExtensionWithLoadingText: ExtendableTextComponent.Extension? = null
@@ -36,7 +42,6 @@ class HintHelper(private val myTextField: ExtendableTextField) {
     myText.setInsets(scale(3), scale(3), 0, 0)
 
     myLoadingIcon.setIcon(AnimatedIcon.Default.INSTANCE, 0)
-    myLoadingIcon.setIcon(myText, 1)
   }
 
   fun setHint(hintText: String?) {
@@ -56,7 +61,8 @@ class HintHelper(private val myTextField: ExtendableTextField) {
     myExtensionWithLoadingText = null
     if (StringUtil.isNotEmpty(text)) {
       myText.setText(text)
-      myLoadingIcon.setIcon(myText, 1)
+      val defaultAnimatedIcon = AnimatedIcon.Default.INSTANCE
+      myLoadingIcon.setIcon(myText, 1, defaultAnimatedIcon.iconWidth, (defaultAnimatedIcon.iconHeight - myText.iconHeight) / 2)
       myExtensionWithLoadingText = object : ExtendableTextComponent.Extension {
         override fun getIcon(hovered: Boolean): Icon = myLoadingIcon
         override fun getTooltip(): @NlsContexts.Tooltip String? = tooltip

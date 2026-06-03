@@ -3,16 +3,30 @@ package org.jetbrains.kotlin.idea.util
 
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.TextRange
-import com.intellij.psi.*
+import com.intellij.psi.PsiComment
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiRecursiveElementVisitor
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.psi.util.elementType
 import org.jetbrains.kotlin.idea.base.psi.isMultiLine
+import org.jetbrains.kotlin.kdoc.psi.api.KDoc
 import org.jetbrains.kotlin.lexer.KtToken
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtFunctionLiteral
 import org.jetbrains.kotlin.psi.KtPsiFactory
 import org.jetbrains.kotlin.psi.KtValueArgument
-import org.jetbrains.kotlin.psi.psiUtil.*
+import org.jetbrains.kotlin.psi.psiUtil.PsiChildRange
+import org.jetbrains.kotlin.psi.psiUtil.allChildren
+import org.jetbrains.kotlin.psi.psiUtil.anyDescendantOfType
+import org.jetbrains.kotlin.psi.psiUtil.getPrevSiblingIgnoringWhitespace
+import org.jetbrains.kotlin.psi.psiUtil.getStartOffsetIn
+import org.jetbrains.kotlin.psi.psiUtil.nextLeaf
+import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
+import org.jetbrains.kotlin.psi.psiUtil.prevLeaf
+import org.jetbrains.kotlin.psi.psiUtil.textRange
 import kotlin.properties.Delegates
 
 class CommentSaver(originalElements: PsiChildRange, private val saveLineBreaks: Boolean = false/*TODO?*/) {
@@ -172,7 +186,18 @@ class CommentSaver(originalElements: PsiChildRange, private val saveLineBreaks: 
 
         element.accept(object : PsiRecursiveElementVisitor() {
             override fun visitComment(comment: PsiComment) {
-                val treeElement = comment.savedTreeElement
+                removeIfSaved(comment)
+            }
+
+            override fun visitElement(element: PsiElement) {
+                if (element is KDoc) {
+                    removeIfSaved(element)
+                }
+                super.visitElement(element)
+            }
+
+            private fun removeIfSaved(element: PsiElement) {
+                val treeElement = element.savedTreeElement
                 if (treeElement != null) {
                     commentsToRestore.remove(treeElement)
                 }
@@ -225,15 +250,16 @@ class CommentSaver(originalElements: PsiChildRange, private val saveLineBreaks: 
         restore(PsiChildRange.singleElement(resultElement), forceAdjustIndent, isCommentBeneathSingleLine, isCommentInside)
     }
 
-    fun restore(resultElement: PsiElement, forceAdjustIndent: Boolean = false) {
-        restore(PsiChildRange.singleElement(resultElement), forceAdjustIndent)
+    fun restore(resultElement: PsiElement, forceAdjustIndent: Boolean = false, preserveTrailingComments: Boolean = false) {
+        restore(PsiChildRange.singleElement(resultElement), forceAdjustIndent, preserveTrailingComments = preserveTrailingComments)
     }
 
     fun restore(
         resultElements: PsiChildRange,
         forceAdjustIndent: Boolean = false,
         isCommentBeneathSingleLine: Boolean = false,
-        isCommentInside: Boolean = false
+        isCommentInside: Boolean = false,
+        preserveTrailingComments: Boolean = false
     ) {
         assert(!isFinished)
         assert(!resultElements.isEmpty)
@@ -256,7 +282,7 @@ class CommentSaver(originalElements: PsiChildRange, private val saveLineBreaks: 
                     })
                 }
 
-                restoreComments(resultElements, isCommentBeneathSingleLine, isCommentInside)
+                restoreComments(resultElements, isCommentBeneathSingleLine, isCommentInside, preserveTrailingComments)
 
                 restoreLineBreaks()
 
@@ -290,7 +316,8 @@ class CommentSaver(originalElements: PsiChildRange, private val saveLineBreaks: 
     private fun restoreComments(
         resultElements: PsiChildRange,
         isCommentBeneathSingleLine: Boolean = false,
-        isCommentInside: Boolean = false
+        isCommentInside: Boolean = false,
+        preserveTrailingComments: Boolean = false
     ) {
         var putAbandonedCommentsAfter = resultElements.last!!
 
@@ -337,19 +364,30 @@ class CommentSaver(originalElements: PsiChildRange, private val saveLineBreaks: 
                     }
                 }
             } else {
-                val parent = putAbandonedCommentsAfter.parent
-                //move comment out of argument, similar to parser
-                restored = (if (parent is KtValueArgument) parent.parent.addBefore(comment, parent)
-                else parent.addBefore(comment, putAbandonedCommentsAfter)) as PsiComment
+                val isTrailingComment = preserveTrailingComments &&
+                        comment.tokenType == KtTokens.EOL_COMMENT &&
+                        !commentTreeElement.spaceBefore.contains('\n')
 
-                if (isCommentInside) {
-                    val element = resultElements.first
-                    val innerExpression = element?.lastChild?.getPrevSiblingIgnoringWhitespace()
-                    innerExpression?.add(psiFactory.createWhiteSpace())
-                    innerExpression?.add(restored)
-                    restored.delete()
+                if (isTrailingComment) {
+                    val lastElement = resultElements.last!!
+                    val parent = lastElement.parent
+                    parent.addAfter(psiFactory.createWhiteSpace(" "), lastElement)
+                    restored = parent.addAfter(comment, lastElement.nextSibling) as PsiComment
+                } else {
+                    val parent = putAbandonedCommentsAfter.parent
+                    //move comment out of argument, similar to parser
+                    restored = (if (parent is KtValueArgument) parent.parent.addBefore(comment, parent)
+                    else parent.addBefore(comment, putAbandonedCommentsAfter)) as PsiComment
+
+                    if (isCommentInside) {
+                        val element = resultElements.first
+                        val innerExpression = element?.lastChild?.getPrevSiblingIgnoringWhitespace()
+                        innerExpression?.add(psiFactory.createWhiteSpace())
+                        innerExpression?.add(restored)
+                        restored.delete()
+                    }
+                    putAbandonedCommentsAfter = restored
                 }
-                putAbandonedCommentsAfter = restored
             }
 
             // shift (possible contained) comment in expression underneath braces

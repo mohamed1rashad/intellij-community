@@ -5,8 +5,11 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.fileLogger
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.newvfs.ManagingFS
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.Result
@@ -15,11 +18,12 @@ import com.jetbrains.python.onFailure
 import com.jetbrains.python.run.PythonCommandLineState
 import com.jetbrains.python.run.PythonExecution
 import com.jetbrains.python.run.target.HelpersAwareTargetEnvironmentRequest
+import com.jetbrains.python.sdk.add.v2.PathHolder
 import com.jetbrains.python.sdk.uv.ScriptSyncCheckResult
 import com.jetbrains.python.sdk.uv.UvLowLevel
-import com.jetbrains.python.sdk.uv.impl.createUvCli
-import com.jetbrains.python.sdk.uv.impl.createUvLowLevel
-import com.jetbrains.python.sdk.uv.impl.getUvExecutable
+import com.jetbrains.python.sdk.uv.impl.createUvCliLocal
+import com.jetbrains.python.sdk.uv.impl.createUvLowLevelLocal
+import com.jetbrains.python.sdk.uv.impl.getUvExecutableLocal
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Path
 
@@ -41,9 +45,15 @@ class UvRunConfigurationState(
     )
   }
 
-  override fun buildPythonExecution(helpersAwareRequest: HelpersAwareTargetEnvironmentRequest): PythonExecution {
-    return buildUvRunConfigurationCli(uvRunConfiguration.options, isDebug)
-  }
+  /**
+   * I'd prefer this whole function to be suspendable, but unfortunately it's an override from Java code, so we have to use
+   * [runBlockingMaybeCancellable] here :(
+   */
+  @RequiresBackgroundThread
+  override fun buildPythonExecution(helpersAwareRequest: HelpersAwareTargetEnvironmentRequest): PythonExecution =
+    runBlockingMaybeCancellable {
+      buildUvRunConfigurationCli(uvRunConfiguration.options, isDebug)
+    }
 }
 
 @ApiStatus.Internal
@@ -56,6 +66,7 @@ fun canRun(
 ): Boolean {
   // force save to make sure that commands read the most up-to-date pyproject.toml
   FileDocumentManager.getInstance().saveAllDocuments()
+  ManagingFS.getInstance().flushPendingUpdatesOrNotify()
 
   // if the check is disabled, then we can run the configuration immediately
   if (!options.checkSync) {
@@ -63,23 +74,23 @@ fun canRun(
   }
 
   val workingDirectory = options.workingDirectory
-  val uvExecutable = getUvExecutable()
   var isError = false
   var isUnsynced = false
+  runWithModalProgressBlocking(project, PyBundle.message("uv.run.configuration.state.progress.name")) {
+    val uvExecutable = getUvExecutableLocal()
 
-  if (workingDirectory != null && uvExecutable != null) {
-    runWithModalProgressBlocking(project, PyBundle.message("uv.run.configuration.state.progress.name")) {
-      val uv = createUvLowLevel(workingDirectory, createUvCli(uvExecutable))
+    if (workingDirectory != null && uvExecutable != null) {
+      val uv = createUvCliLocal(uvExecutable).mapSuccess { createUvLowLevelLocal(workingDirectory, it) }.getOrNull()
 
-      when (requiresSync(uv, options, logger).getOrNull()) {
+      when (uv?.let { requiresSync(it, options, logger) }?.getOrNull()) {
         true -> isUnsynced = true
         false -> {}
         null -> isError = true
       }
     }
-  }
-  else {
-    isError = true
+    else {
+      isError = true
+    }
   }
 
   if (isError || isUnsynced) {
@@ -91,7 +102,7 @@ fun canRun(
 
 @ApiStatus.Internal
 suspend fun requiresSync(
-  uv: UvLowLevel,
+  uv: UvLowLevel<PathHolder.Eel>,
   options: UvRunConfigurationOptions,
   logger: Logger,
 ): Result<Boolean, Unit> {

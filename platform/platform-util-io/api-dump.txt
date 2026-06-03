@@ -49,7 +49,6 @@ c:com.intellij.execution.configurations.GeneralCommandLine
 - putUserData(com.intellij.openapi.util.Key,java.lang.Object):V
 - setCharset(java.nio.charset.Charset):V
 - setExePath(java.lang.String):V
-- setPassParentEnvironment(Z):V
 - setRedirectErrorStream(Z):V
 - setWorkDirectory(java.io.File):V
 - setWorkDirectory(java.lang.String):V
@@ -263,6 +262,7 @@ f:com.intellij.execution.process.LocalPtyOptions
 - f:getInitialRows():I
 - f:getUseCygwinLaunch():Z
 - f:getUseWinConPty():Z
+- f:getWinConPtyInheritCursor():Z
 - f:getWinSuspendedProcessCallback():java.util.function.LongConsumer
 f:com.intellij.execution.process.LocalPtyOptions$Builder
 - f:build():com.intellij.execution.process.LocalPtyOptions
@@ -275,6 +275,8 @@ f:com.intellij.execution.process.LocalPtyOptions$Builder
 - f:set(com.intellij.execution.process.LocalPtyOptions):com.intellij.execution.process.LocalPtyOptions$Builder
 - f:useCygwinLaunch():Z
 - f:useCygwinLaunch(Z):com.intellij.execution.process.LocalPtyOptions$Builder
+- f:winConPtyInheritCursor():Z
+- f:winConPtyInheritCursor(Z):com.intellij.execution.process.LocalPtyOptions$Builder
 - f:winSuspendedProcessCallback():java.util.function.LongConsumer
 - f:winSuspendedProcessCallback(java.util.function.LongConsumer):com.intellij.execution.process.LocalPtyOptions$Builder
 f:com.intellij.execution.process.LocalPtyOptions$Companion
@@ -309,7 +311,9 @@ f:com.intellij.execution.process.OSProcessUtil
 - s:getProcessList():com.intellij.execution.process.ProcessInfo[]
 - s:killProcess(I):V
 - s:killProcess(java.lang.Process):V
+- s:killProcessTree(J):Z
 - s:killProcessTree(java.lang.Process):Z
+- s:processName(java.lang.ProcessHandle):java.lang.String
 - s:terminateProcessGracefully(I):V
 - s:terminateProcessGracefully(java.lang.Process):V
 c:com.intellij.execution.process.ProcessInfo
@@ -381,7 +385,6 @@ f:com.intellij.execution.process.ScriptRunnerUtil
 - s:getProcessOutput(com.intellij.execution.configurations.GeneralCommandLine,com.intellij.openapi.util.Condition,J):java.lang.String
 - s:getProcessOutput(com.intellij.execution.process.ProcessHandler,com.intellij.openapi.util.Condition,J):java.lang.String
 - s:terminateProcessHandler(com.intellij.execution.process.ProcessHandler,J,java.lang.String):V
-com.intellij.execution.process.SelfKiller
 f:com.intellij.execution.process.impl.ProcessListUtil
 - s:getProcessList():com.intellij.execution.process.ProcessInfo[]
 f:com.intellij.execution.util.ExecUtil

@@ -1,12 +1,15 @@
-// Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.intellij.plugins.markdown.editor.tables
 
 import com.intellij.openapi.editor.Caret
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.util.startOffset
+import com.intellij.util.DocumentUtil
+import com.intellij.util.SmartList
 import org.intellij.plugins.markdown.editor.tables.TableUtils.columnsIndices
 import org.intellij.plugins.markdown.editor.tables.TableUtils.getColumnAlignment
 import org.intellij.plugins.markdown.editor.tables.TableUtils.getColumnCells
@@ -20,6 +23,8 @@ import java.lang.Integer.max
 
 @ApiStatus.Internal
 object TableFormattingUtils {
+  private const val BULK_REFORMAT_CELL_COUNT_THRESHOLD = 100
+
   private class CellContentState(val contentWithCarets: String, val caretsInside: Array<Caret> = emptyArray()) {
     val trimmedContentWithCarets by lazy { contentWithCarets.trim(' ') }
     val trimmedContentWithoutCarets: String by lazy { trimmedContentWithCarets.filterNot { it == TableProps.CARET_REPLACE_CHAR } }
@@ -59,8 +64,10 @@ object TableFormattingUtils {
   ): Int {
     val trimToMaxContent = trimToMaxContent && !cells.all { it.text.isBlank() }
     val contentCellsWidth = when {
-      trimToMaxContent -> cellsContentsWithCarets.asSequence().map { it.trimmedContentWithoutCarets }.maxOfOrNull { it.length + 2 }
-      else -> cells.maxOfOrNull { it.textRange.length }
+      trimToMaxContent -> cellsContentsWithCarets.asSequence().map { it.trimmedContentWithoutCarets }.maxOfOrNull {
+        TableCharacterWidthUtils.calculateDisplayWidth(it) + 2
+      }
+      else -> cells.maxOfOrNull { TableCharacterWidthUtils.calculateDisplayWidth(it.text) }
     }
     checkNotNull(contentCellsWidth)
     return max(contentCellsWidth, separatorCellRange?.length ?: 1)
@@ -83,16 +90,17 @@ object TableFormattingUtils {
     state: CellContentState,
     maxCellWidth: Int,
     alignment: MarkdownTableSeparatorRow.CellAlignment,
-    preventExpand: Boolean
+    preventExpand: Boolean,
+    delayedCaretMoves: DelayedCaretMoves?,
   ) {
     val expectedContent = TableModificationUtils.buildRealignedCellContent(
       state.trimmedContentWithCarets,
-      maxCellWidth + state.caretsInside.size,
+      maxCellWidth,
       alignment
     )
     val range = cell.textRange
     val cellContent = document.charsSequence.substring(range.startOffset, range.endOffset)
-    if (preventExpand && cellContent.length < maxCellWidth) {
+    if (preventExpand && TableCharacterWidthUtils.calculateDisplayWidth(cellContent) < maxCellWidth) {
       return
     }
     val expectedContentWithoutCarets = expectedContent.replace(TableProps.CARET_REPLACE_CHAR.toString(), "")
@@ -101,7 +109,11 @@ object TableFormattingUtils {
       val caretsPositions = calculateNewCaretsPositions(expectedContent, range)
       check(caretsPositions.size == state.caretsInside.size)
       for ((caret, position) in state.caretsInside.asSequence().zip(caretsPositions.asSequence())) {
-        caret.moveToOffset(position)
+        if (delayedCaretMoves != null) {
+          delayedCaretMoves.delayMove(caret, position)
+        } else {
+          caret.moveToOffset(position)
+        }
       }
     }
   }
@@ -144,11 +156,16 @@ object TableFormattingUtils {
     )
     val alignment = getColumnAlignment(columnIndex)
     val contentCells = cells.asSequence().zip(cellsStates.asSequence()).takeWhile { (cell, _) -> cell.parentRow?.isHeaderRow == false }
-    for ((cell, state) in contentCells) {
-      processCell(document, cell, state, maxCellWidth, alignment, preventExpand)
+    val useBulkMode = cells.size > BULK_REFORMAT_CELL_COUNT_THRESHOLD
+    val delayedCaretMoves = if (useBulkMode) DelayedCaretMoves(document) else null
+    DocumentUtil.executeInBulk(document, useBulkMode) {
+      for ((cell, state) in contentCells) {
+        processCell(document, cell, state, maxCellWidth, alignment, preventExpand, delayedCaretMoves)
+      }
+      processSeparator(document, separatorRow, columnIndex, maxCellWidth, preventExpand)
+      processCell(document, cells.last(), cellsStates.last(), maxCellWidth, alignment, preventExpand, delayedCaretMoves)
     }
-    processSeparator(document, separatorRow, columnIndex, maxCellWidth, preventExpand)
-    processCell(document, cells.last(), cellsStates.last(), maxCellWidth, alignment, preventExpand)
+    delayedCaretMoves?.moveCarets()
   }
 
   fun reformatAllColumns(table: MarkdownTable, document: Document, trimToMaxContent: Boolean = true, preventExpand: Boolean = false) {
@@ -167,5 +184,31 @@ object TableFormattingUtils {
   fun MarkdownTable.isSoftWrapping(editor: Editor): Boolean {
     val range = textRange
     return editor.softWrapModel.getSoftWrapsForRange(range.startOffset, range.endOffset).isNotEmpty()
+  }
+
+  /**
+   * Caret cannot be moved during document bulk mode
+   */
+  private class DelayedCaretMoves(
+    private val document: Document,
+  ) {
+    private val moves: SmartList<Pair<Caret, RangeMarker>> = SmartList()
+
+    fun delayMove(caret: Caret, targetPosition: Int) {
+      val marker = document.createRangeMarker(targetPosition, targetPosition)
+      moves.add(caret to marker)
+    }
+
+    fun moveCarets() {
+      for ((caret, targetPosition) in moves) {
+        try {
+          if (targetPosition.isValid) {
+            caret.moveToOffset(targetPosition.startOffset)
+          }
+        } finally {
+            targetPosition.dispose()
+        }
+      }
+    }
   }
 }

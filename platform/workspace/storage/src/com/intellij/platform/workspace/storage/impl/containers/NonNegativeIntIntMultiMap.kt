@@ -1,9 +1,13 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.workspace.storage.impl.containers
 
-import it.unimi.dsi.fastutil.ints.*
+import it.unimi.dsi.fastutil.ints.IntArrayList
+import it.unimi.dsi.fastutil.ints.IntImmutableList
+import it.unimi.dsi.fastutil.ints.IntIntBiConsumer
+import it.unimi.dsi.fastutil.ints.IntList
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet
+import it.unimi.dsi.fastutil.ints.IntSet
 import org.jetbrains.annotations.TestOnly
-import java.util.function.BiConsumer
 import java.util.function.IntConsumer
 import java.util.function.IntFunction
 
@@ -120,7 +124,7 @@ internal sealed class MutableNonNegativeIntIntMultiMap(
       val newLinks = Int2IntWithDefaultMap()
 
       var valuesCounter = 0
-      links.forEach(BiConsumer { key, value ->
+      links.forEach(IntIntBiConsumer { key, value ->
         if (value >= 0) {
           newLinks[key] = value
         }

@@ -3,6 +3,7 @@ package com.jetbrains.python.debugger.attach;
 
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.ExecutionResult;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
@@ -42,7 +43,7 @@ public class PyAttachToProcessDebugRunner extends PyDebugRunner {
   }
 
   public XDebugSession launch() throws ExecutionException {
-    FileDocumentManager.getInstance().saveAllDocuments();
+    WriteAction.run(() -> FileDocumentManager.getInstance().saveAllDocuments());
 
     return launchRemoteDebugServer();
   }
@@ -63,44 +64,47 @@ public class PyAttachToProcessDebugRunner extends PyDebugRunner {
     final ExecutionResult result = state.execute(state.getEnvironment().getExecutor(), this);
 
     //start remote debug server
-    return XDebuggerManager.getInstance(myProject).
-      startSessionAndShowTab(String.valueOf(myPid), null, new XDebugProcessStarter() {
-        @Override
-        public @NotNull XDebugProcess start(final @NotNull XDebugSession session) {
-          PyRemoteDebugProcess pyDebugProcess =
-            new PyRemoteDebugProcess(session, serverSocket, result.getExecutionConsole(),
-                                     result.getProcessHandler(), "") {
-              @Override
-              protected void printConsoleInfo() {
-              }
+    XDebugProcessStarter starter = new XDebugProcessStarter() {
+      @Override
+      public @NotNull XDebugProcess start(final @NotNull XDebugSession session) {
+        PyRemoteDebugProcess pyDebugProcess =
+          new PyRemoteDebugProcess(session, serverSocket, result.getExecutionConsole(),
+                                   result.getProcessHandler(), "") {
+            @Override
+            protected void printConsoleInfo() {
+            }
 
-              @Override
-              public int getConnectTimeout() {
-                return getInt("python.debugger.attach.timeout");
-              }
+            @Override
+            public int getConnectTimeout() {
+              return getInt("python.debugger.attach.timeout");
+            }
 
-              @Override
-              protected void detachDebuggedProcess() {
-                handleStop();
-              }
+            @Override
+            protected void detachDebuggedProcess() {
+              handleStop();
+            }
 
-              @Override
-              protected String getConnectionMessage() {
-                return PyBundle.message("python.debugger.attaching.to.process.with.pid", myPid);
-              }
+            @Override
+            protected String getConnectionMessage() {
+              return PyBundle.message("python.debugger.attaching.to.process.with.pid", myPid);
+            }
 
-              @Override
-              protected String getConnectionTitle() {
-                return PyBundle.message("python.debugger.attaching");
-              }
-            };
-          pyDebugProcess.setPositionConverter(new PyLocalPositionConverter());
+            @Override
+            protected String getConnectionTitle() {
+              return PyBundle.message("python.debugger.attaching");
+            }
+          };
+        pyDebugProcess.setPositionConverter(new PyLocalPositionConverter());
 
 
-          createConsoleCommunication(myProject, result, pyDebugProcess, session);
+        createConsoleCommunication(myProject, result, pyDebugProcess, session);
 
-          return pyDebugProcess;
-        }
-      });
+        return pyDebugProcess;
+      }
+    };
+    return XDebuggerManager.getInstance(myProject).newSessionBuilder(starter)
+      .sessionName(String.valueOf(myPid))
+      .showTab(true)
+      .startSession().getSession();
   }
 }

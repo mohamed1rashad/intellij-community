@@ -4,7 +4,10 @@ package com.intellij.configurationStore
 import com.fasterxml.aalto.UncheckedStreamException
 import com.intellij.diagnostic.PluginException
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PathMacroManager
+import com.intellij.openapi.components.PathMacroSubstitutor
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.RoamingType
 import com.intellij.openapi.components.impl.stores.ComponentStorageUtil
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.extensions.PluginId
@@ -262,7 +265,7 @@ abstract class XmlElementStorage protected constructor(
 
         if (elements == null) {
           if (provider != null && provider.delete(storage.fileSpec, storage.roamingType)) {
-            listener?.onDelete(storage.fileSpec)
+            listener?.onDelete(storage.fileSpec, storage.roamingType)
           }
           else {
             isSavedLocally = true
@@ -277,7 +280,7 @@ abstract class XmlElementStorage protected constructor(
             content = content,
             roamingType = storage.roamingType,
           )
-          listener?.onWrite(storage.fileSpec, content)
+          listener?.onWrite(storage.fileSpec, content, storage.roamingType)
         }
         else {
           isSavedLocally = true
@@ -294,11 +297,11 @@ abstract class XmlElementStorage protected constructor(
       private fun removeOrSaveLocally(events: MutableList<VFileEvent>?) {
         if (writer == null) {
           remove(events)
-          storage.listener?.onDelete(storage.fileSpec)
+          storage.listener?.onDelete(storage.fileSpec, storage.roamingType)
         }
         else {
           saveLocally(dataWriter = writer, events = events)
-          storage.listener?.onWrite(storage.fileSpec, writer.toBufferExposingByteArray(LineSeparator.LF).toByteArray())
+          storage.listener?.onWrite(storage.fileSpec, writer.toBufferExposingByteArray(LineSeparator.LF).toByteArray(), storage.roamingType)
         }
       }
     }

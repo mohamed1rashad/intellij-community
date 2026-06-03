@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.impl.heavy.attributes;
 
 import com.intellij.openapi.vfs.newvfs.persistent.AttributesStorageOnTheTopOfBlobStorageTestBase.AttributeRecord;
@@ -6,20 +6,12 @@ import com.intellij.openapi.vfs.newvfs.persistent.AttributesStorageOnTheTopOfBlo
 import com.intellij.openapi.vfs.newvfs.persistent.AttributesStorageOverBlobStorage;
 import com.intellij.openapi.vfs.newvfs.persistent.VFSAttributesStorage;
 import com.intellij.platform.util.io.storages.StorageFactory;
-import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageHelper;
-import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageOverLockFreePagedStorage;
 import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageOverMMappedFile;
-import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageOverPagedStorage;
 import com.intellij.platform.util.io.storages.mmapped.MMappedFileStorageFactory;
 import com.intellij.util.indexing.impl.IndexDebugProperties;
-import com.intellij.util.io.PageCacheUtils;
-import com.intellij.util.io.PagedFileStorage;
-import com.intellij.util.io.PagedFileStorageWithRWLockedPageContent;
-import com.intellij.util.io.StorageLockContext;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy.DataLengthPlusFixedPercentStrategy;
 import com.intellij.util.io.blobstorage.StreamlinedBlobStorage;
-import com.intellij.util.io.pagecache.impl.PageContentLockingStrategy;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import org.jetbrains.annotations.NotNull;
@@ -34,27 +26,27 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import static com.intellij.openapi.vfs.newvfs.persistent.VFSAttributesStorage.INLINE_ATTRIBUTE_SMALLER_THAN;
 import static org.jetbrains.jetCheck.Generator.constant;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 @RunWith(Parameterized.class)
 public class AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest {
 
   private static final int PAGE_SIZE = 1 << 14;
-  private static final StorageLockContext LOCK_CONTEXT = new StorageLockContext(true, true);
 
   private static final SpaceAllocationStrategy SPACE_ALLOCATION_STRATEGY = new DataLengthPlusFixedPercentStrategy(
     64, 256,
-    StreamlinedBlobStorageHelper.MAX_CAPACITY,
+    StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY,
     30
   );
 
-  private static final int ITERATION_COUNT = 100;
+  private static final int ITERATION_COUNT = 300;
 
   @BeforeClass
   public static void beforeClass() {
@@ -70,32 +62,11 @@ public class AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest {
     List<Object[]> storages = new ArrayList<>();
 
     storages.add(new Object[]{
-      (StorageFactory<StreamlinedBlobStorageOverPagedStorage>)storagePath -> {
-        return new StreamlinedBlobStorageOverPagedStorage(
-          new PagedFileStorage(storagePath, LOCK_CONTEXT, PAGE_SIZE, true, true),
-          SPACE_ALLOCATION_STRATEGY
-        );
-      }
-    });
-    storages.add(new Object[]{
       MMappedFileStorageFactory.withDefaults()
         .pageSize(PAGE_SIZE)
         .compose(storage -> new StreamlinedBlobStorageOverMMappedFile(storage, SPACE_ALLOCATION_STRATEGY))
     });
-
-    if (PageCacheUtils.LOCK_FREE_PAGE_CACHE_ENABLED) {
-      storages.add(new Object[]{
-        (StorageFactory<StreamlinedBlobStorageOverLockFreePagedStorage>)storagePath -> {
-          return new StreamlinedBlobStorageOverLockFreePagedStorage(
-            new PagedFileStorageWithRWLockedPageContent(
-              storagePath, LOCK_CONTEXT, PAGE_SIZE, PageContentLockingStrategy.LOCK_PER_PAGE
-            ),
-            SPACE_ALLOCATION_STRATEGY
-          );
-        }
-      });
-    }
-
+    //add other implementations, if needed
 
     return storages;
   }
@@ -104,11 +75,6 @@ public class AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest {
 
   public AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest(@NotNull StorageFactory<? extends StreamlinedBlobStorage> storageFactory) {
     this.storageFactory = storageFactory;
-  }
-
-  protected AttributesStorageOverBlobStorage createStorage(Path storagePath) throws Exception {
-    StreamlinedBlobStorage storage = storageFactory.open(storagePath);
-    return new AttributesStorageOverBlobStorage(storage);
   }
 
   @Test
@@ -121,16 +87,19 @@ public class AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest {
       .checkScenarios(() -> {
         return env -> {
           final Attributes attributes = new Attributes();
-          try (AttributesStorageOverBlobStorage storage = createStorage(temporaryFolder.newFile().toPath())) {
-            final List<AttributeRecord> records = new ArrayList<>();
-            //updates count 10x of inserts/deletes
-            final Generator<ImperativeCommand> commandsGenerator = Generator.frequency(
-              1, constant(new InsertAttribute(attributes, storage, records)),
-              10, constant(new UpdateAttribute(attributes, storage, records)),
-              1, constant(new DeleteAttribute(attributes, storage, records))
-            );
-            env.executeCommands(commandsGenerator);
-            env.logMessage("Total records: " + records.size());
+          try {
+            StreamlinedBlobStorage blobStorage = storageFactory.open(temporaryFolder.newFile().toPath());
+            try (AttributesStorageOverBlobStorage attributesStorage = new AttributesStorageOverBlobStorage(blobStorage)) {
+              final List<AttributeRecord> records = new ArrayList<>();
+              //updates count 10x of inserts/deletes
+              final Generator<ImperativeCommand> commandsGenerator = Generator.frequency(
+                1, constant(new InsertAttribute(attributes, attributesStorage, records, PAGE_SIZE - 32)),
+                10, constant(new UpdateAttribute(attributes, attributesStorage, records)),
+                1, constant(new DeleteAttribute(attributes, attributesStorage, records))
+              );
+              env.executeCommands(commandsGenerator);
+              env.logMessage("Total records: " + records.size());
+            }
           }
           catch (Exception e) {
             throw new AssertionError(e);
@@ -145,15 +114,18 @@ public class AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest {
     private final Attributes attributes;
     private final AttributesStorageOverBlobStorage storage;
     private final List<AttributeRecord> records;
+    private final int maxPayloadSize;
 
     private final Int2IntMap fileIdToAttributeId = new Int2IntOpenHashMap();
 
     public InsertAttribute(final @NotNull Attributes attributes,
                            final @NotNull AttributesStorageOverBlobStorage storage,
-                           final @NotNull List<AttributeRecord> records) {
+                           final @NotNull List<AttributeRecord> records,
+                           int maxPayloadSize) {
       this.attributes = attributes;
       this.storage = storage;
       this.records = records;
+      this.maxPayloadSize = maxPayloadSize;
     }
 
     @Override
@@ -174,7 +146,7 @@ public class AttributesStorageOnTheTopOfBlobStorage_PropertyBasedTest {
 
           final AttributeRecord insertedRecord = attributes.insertOrUpdateRecord(
             AttributeRecord.newAttributeRecord(fileId, attributeId)
-              .withRandomAttributeBytes(1029),
+              .withRandomAttributeBytes(maxPayloadSize),
             storage
           );
           records.add(insertedRecord);

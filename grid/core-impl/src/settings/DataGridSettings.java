@@ -145,4 +145,26 @@ public interface DataGridSettings {
   default boolean isFloatingToolbarCustomizable() { return true; }
 
   default void setFloatingToolbarCustomizable(boolean value) { }
+
+  default boolean isShowGeoAsBinary() {
+    return false;
+  }
+
+  default void setShowGeoAsBinary(boolean value) { }
+
+  default int getFirstRowIndex() {
+    return 1;
+  }
+
+  default boolean isEditArrayAsText() {
+    return false;
+  }
+
+  default void setEditArrayAsText(boolean value) { }
+
+  default boolean isHideDeletedInArrayGrid() {
+    return false;
+  }
+
+  default void setHideDeletedInArrayGrid(boolean value) { }
 }

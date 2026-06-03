@@ -1,16 +1,17 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.ide.scratch.workspace.impl
 
-import com.intellij.ide.scratch.workspace.ModifiableScratchRootsEntity
 import com.intellij.ide.scratch.workspace.ScratchRootsEntity
+import com.intellij.ide.scratch.workspace.ScratchRootsEntityBuilder
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -25,14 +26,12 @@ import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class ScratchRootsEntityImpl(private val dataSource: ScratchRootsEntityData) : ScratchRootsEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class ScratchRootsEntityImpl(private val dataSource: ScratchRootsEntityData) : ScratchRootsEntity,
+                                                                                        WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -53,8 +52,8 @@ internal class ScratchRootsEntityImpl(private val dataSource: ScratchRootsEntity
   }
 
 
-  internal class Builder(result: ScratchRootsEntityData?) : ModifiableWorkspaceEntityBase<ScratchRootsEntity, ScratchRootsEntityData>(
-    result), ModifiableScratchRootsEntity {
+  internal class Builder(result: ScratchRootsEntityData?) :
+    ModifiableWorkspaceEntityBase<ScratchRootsEntity, ScratchRootsEntityData>(result), ScratchRootsEntityBuilder {
     internal constructor() : this(ScratchRootsEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -67,16 +66,14 @@ internal class ScratchRootsEntityImpl(private val dataSource: ScratchRootsEntity
           error("Entity ScratchRootsEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
       index(this, "roots", this.roots)
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -119,7 +116,6 @@ internal class ScratchRootsEntityImpl(private val dataSource: ScratchRootsEntity
         changedProperty.add("entitySource")
 
       }
-
     private val rootsUpdater: (value: List<VirtualFileUrl>) -> Unit = { value ->
       val _diff = diff
       if (_diff != null) index(this, "roots", value)
@@ -145,6 +141,7 @@ internal class ScratchRootsEntityImpl(private val dataSource: ScratchRootsEntity
 
     override fun getEntityClass(): Class<ScratchRootsEntity> = ScratchRootsEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -153,14 +150,13 @@ internal class ScratchRootsEntityData : WorkspaceEntityData<ScratchRootsEntity>(
 
   internal fun isRootsInitialized(): Boolean = ::roots.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ScratchRootsEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ScratchRootsEntity> {
     val modifiable = ScratchRootsEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ScratchRootsEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -186,9 +182,8 @@ internal class ScratchRootsEntityData : WorkspaceEntityData<ScratchRootsEntity>(
     return ScratchRootsEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ScratchRootsEntity(roots, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ScratchRootsEntity(roots, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -199,9 +194,7 @@ internal class ScratchRootsEntityData : WorkspaceEntityData<ScratchRootsEntity>(
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ScratchRootsEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.roots != other.roots) return false
     return true
@@ -210,9 +203,7 @@ internal class ScratchRootsEntityData : WorkspaceEntityData<ScratchRootsEntity>(
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ScratchRootsEntityData
-
     if (this.roots != other.roots) return false
     return true
   }

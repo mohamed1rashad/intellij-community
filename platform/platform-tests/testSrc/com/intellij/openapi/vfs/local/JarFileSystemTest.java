@@ -11,7 +11,14 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.io.FileAttributes;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.IoTestUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.JarFileSystem;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.StandardFileSystems;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
+import com.intellij.openapi.vfs.VirtualFileVisitor;
+import com.intellij.openapi.vfs.impl.InputStreamSkippingBOM;
 import com.intellij.openapi.vfs.impl.ZipHandler;
 import com.intellij.openapi.vfs.impl.ZipHandlerBase;
 import com.intellij.openapi.vfs.impl.jar.JarFileSystemImpl;
@@ -37,11 +44,16 @@ import org.junit.Rule;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -51,7 +63,15 @@ import java.util.stream.Stream;
 
 import static com.intellij.testFramework.PlatformTestUtil.assertPathsEqual;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 public class JarFileSystemTest extends BareTestFixtureTestCase {
   @Rule public TempDirectory tempDir = new TempDirectory();
@@ -276,9 +296,15 @@ public class JarFileSystemTest extends BareTestFixtureTestCase {
     var small2 = jarRoot.findChild("small2");
     var large = jarRoot.findChild("large");
     try (var is1 = small1.getInputStream(); var is2 = small2.getInputStream(); var il = large.getInputStream()) {
-      assertSame(is1.getClass(), is2.getClass());
-      assertNotSame(is1.getClass(), il.getClass());
+      assertSame(getSourceStream(is1).getClass(), getSourceStream(is2).getClass());
+      assertNotSame(getSourceStream(is1).getClass(), getSourceStream(il).getClass());
     }
+  }
+
+  private static InputStream getSourceStream(InputStream is) {
+    if (is instanceof InputStreamSkippingBOM)
+      return ((InputStreamSkippingBOM)is).getSourceStream();
+    return is;
   }
 
   @Test
@@ -325,25 +351,25 @@ public class JarFileSystemTest extends BareTestFixtureTestCase {
       var jar = IoTestUtil.createTestJar(
         tempDir.newFile("p.jar"),
         "file1.txt", "my_content", "file2.dat", "my_content"
-      );
-      var jarRoot = JarFileSystem.getInstance().getJarRootForLocalFile(LocalFileSystem.getInstance().refreshAndFindFileByIoFile(jar));
+      ).toPath();
+      var jarRoot = JarFileSystem.getInstance().getJarRootForLocalFile(LocalFileSystem.getInstance().refreshAndFindFileByNioFile(jar));
 
       var file1Txt = jarRoot.findChild("file1.txt");
       var file2Dat = jarRoot.findChild("file2.dat");
       assertEquals(file1Txt.getTimeStamp(), file2Dat.getTimeStamp());
 
-      try (var it = new JBZipFile(jar)) {
+      try (var it = new JBZipFile(jar, false)) {
         it.getOrCreateEntry(file1Txt.getName()).setData("my_new_content".getBytes(StandardCharsets.UTF_8));
       }
       // LFS invalidates JarFS caches
-      LocalFileSystem.getInstance().refreshNioFiles(List.of(jar.toPath()), false, true, null);
+      LocalFileSystem.getInstance().refreshNioFiles(List.of(jar), false, true, null);
       assertNotEquals(file1Txt.getTimeStamp(), file2Dat.getTimeStamp());
 
-      try (var it = new JBZipFile(jar)) {
+      try (var it = new JBZipFile(jar, false)) {
         it.getOrCreateEntry(file2Dat.getName()).setData("my_new_content".getBytes(StandardCharsets.UTF_8));
       }
       // LFS invalidates JarFS caches
-      LocalFileSystem.getInstance().refreshNioFiles(List.of(jar.toPath()), false, true, null);
+      LocalFileSystem.getInstance().refreshNioFiles(List.of(jar), false, true, null);
       assertEquals(file1Txt.getTimeStamp(), file2Dat.getTimeStamp());
     });
   }

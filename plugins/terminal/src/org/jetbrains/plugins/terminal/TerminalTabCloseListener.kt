@@ -8,7 +8,6 @@ import com.intellij.execution.ui.RunContentManagerImpl
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Key
 import com.intellij.ui.content.Content
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.terminal.fus.ReworkedTerminalUsageCollector
@@ -27,13 +26,13 @@ abstract class TerminalTabCloseListener(
     if (projectClosing) {
       return true
     }
-    if (content.getUserData(SILENT) == true) {
+    if (content.getUserData(Content.TEMPORARY_REMOVED_KEY) == true) {
       return true
     }
 
     val startTime = TimeSource.Monotonic.markNow()
     try {
-      if (!hasChildProcesses(content)) {
+      if (!shouldConfirmClosing(content)) {
         return true
       }
     }
@@ -52,24 +51,28 @@ abstract class TerminalTabCloseListener(
     return result != null
   }
 
-  abstract fun hasChildProcesses(content: Content): Boolean
+  abstract fun shouldConfirmClosing(content: Content): Boolean
 
   override fun canClose(project: Project): Boolean {
     return project === this.project && closeQuery(this.content, true)
   }
 
   companion object {
+    /**
+     * If you remove the content from the tool window content manager using this method,
+     * close the tool window manually in case it became empty.
+     * Because it won't be closed by the platform logic because of [Content.TEMPORARY_REMOVED_KEY] we set.
+     */
     fun executeContentOperationSilently(content: Content, runnable: () -> Unit) {
-      content.putUserData(SILENT, true)
+      content.putUserData(Content.TEMPORARY_REMOVED_KEY, true)
       try {
         runnable()
       }
       finally {
-        content.putUserData(SILENT, null)
+        content.putUserData(Content.TEMPORARY_REMOVED_KEY, null)
       }
     }
   }
 }
 
-private val SILENT = Key.create<Boolean>("Silent content operation")
 private val LOG = logger<TerminalTabCloseListener>()

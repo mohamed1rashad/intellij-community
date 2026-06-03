@@ -14,17 +14,23 @@ import com.intellij.openapi.wm.impl.IdeFrameImpl
 import com.intellij.openapi.wm.impl.WindowButtonsConfiguration
 import com.intellij.openapi.wm.impl.X11UiUtil
 import com.intellij.platform.util.coroutines.childScope
-import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.dsl.builder.Panel
 import com.intellij.ui.dsl.builder.RowLayout
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.builder.selected
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.system.OS
 import com.intellij.util.ui.StartupUiUtil
 import com.intellij.util.ui.UnixDesktopEnv
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.Frame
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -127,7 +133,7 @@ private class UnixInfoDialog(val project: Project?, dialogTitle: String) :
           }
           row("isTileWM:") {
             label(X11UiUtil.isTileWM().toString())
-            contextHelp(X11UiUtil.TILE_WM.sorted().joinToString("<br>"), "Known Tile WMs")
+              .contextHelp(X11UiUtil.TILE_WM.sorted().joinToString("<br>"), "Known Tile WMs")
           }
           row("isWSL:") {
             label(X11UiUtil.isWSL().toString())
@@ -148,7 +154,7 @@ private class UnixInfoDialog(val project: Project?, dialogTitle: String) :
           lbFrameExtendedState = label("").component
 
           val cb = comboBox(listOf(Frame::MAXIMIZED_VERT, Frame::MAXIMIZED_HORIZ, Frame::MAXIMIZED_BOTH),
-                            SimpleListCellRenderer.create("") { it.name }).component
+                            textListCellRenderer("") { it.name }).component
 
           button("Set `state or value`") {
             getFrame()?.let {
@@ -232,8 +238,8 @@ private class UnixInfoDialog(val project: Project?, dialogTitle: String) :
 
     val frame = getFrame()
     lbIsInFullScreenMode.text = if (frame == null) "IdeFrame not found" else X11UiUtil.isInFullScreenMode(frame).toString()
-    lbIsMaximizedVert.text = if (frame == null) "IdeFrame not found" else X11UiUtil.isMaximizedVert(frame).toString()
-    lbIsMaximizedHorz.text = if (frame == null) "IdeFrame not found" else X11UiUtil.isMaximizedHorz(frame).toString()
+    lbIsMaximizedVert.text = if (frame == null) "IdeFrame not found" else X11UiUtil.isVMaximized(frame).toString()
+    lbIsMaximizedHorz.text = if (frame == null) "IdeFrame not found" else X11UiUtil.isHMaximized(frame).toString()
     lbIdeFrameInFullScreen.text = frame?.isInFullScreen?.toString() ?: "IdeFrame not found"
     lbFrameExtendedState.text = if (frame == null) "IdeFrame not found" else extendedStateToString(frame.extendedState)
   }

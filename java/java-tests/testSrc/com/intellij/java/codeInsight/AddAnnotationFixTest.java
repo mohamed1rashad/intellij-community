@@ -21,7 +21,11 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.AnnotationOrderRootType;
+import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.ModuleRootModificationUtil;
+import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.roots.libraries.LibraryTable;
 import com.intellij.openapi.util.Disposer;
@@ -31,13 +35,29 @@ import com.intellij.openapi.util.io.StreamUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassOwner;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiParameter;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.testFramework.PsiTestUtil;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.testFramework.builders.JavaModuleFixtureBuilder;
-import com.intellij.testFramework.fixtures.*;
+import com.intellij.testFramework.fixtures.CodeInsightTestFixture;
+import com.intellij.testFramework.fixtures.DefaultLightProjectDescriptor;
+import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
+import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory;
+import com.intellij.testFramework.fixtures.JavaTestFixtureFactory;
+import com.intellij.testFramework.fixtures.TestFixtureBuilder;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
@@ -136,7 +156,7 @@ public class AddAnnotationFixTest extends UsefulTestCase {
     assertNotNull(psiElement);
     final PsiModifierListOwner listOwner = PsiTreeUtil.getParentOfType(psiElement, PsiModifierListOwner.class);
     assertNotNull(listOwner);
-    assertNotNull(ExternalAnnotationsManager.getInstance(myFixture.getProject()).findExternalAnnotation(listOwner, AnnotationUtil.NOT_NULL));
+    assertNotNull(ExternalAnnotationsManager.getInstance(myFixture.getProject()).findExternalTypeAnnotation(listOwner, "", AnnotationUtil.NOT_NULL));
 
     myFixture.checkResultByFile("content/anno/p/annotations.xml", "content/anno/p/annotationsAnnotateLibrary_after.xml", false);
   }
@@ -236,13 +256,13 @@ public class AddAnnotationFixTest extends UsefulTestCase {
                                                          PsiMethod method,
                                                          PsiParameter parameter,
                                                          String expectedValue) {
-    PsiAnnotation methodAnnotation = manager.findExternalAnnotation(method, AnnotationUtil.NULLABLE);
+    PsiAnnotation methodAnnotation = manager.findExternalTypeAnnotation(method, "", AnnotationUtil.NULLABLE);
     assertNotNull(methodAnnotation);
     PsiAnnotationMemberValue methodValue = methodAnnotation.findAttributeValue("value");
     assertNotNull(methodValue);
     assertEquals(expectedValue, methodValue.getText());
 
-    PsiAnnotation parameterAnnotation = manager.findExternalAnnotation(parameter, AnnotationUtil.NOT_NULL);
+    PsiAnnotation parameterAnnotation = manager.findExternalTypeAnnotation(parameter, "", AnnotationUtil.NOT_NULL);
     assertNotNull(parameterAnnotation);
     PsiAnnotationMemberValue parameterValue = parameterAnnotation.findAttributeValue("value");
     assertNotNull(parameterValue);
@@ -291,11 +311,11 @@ public class AddAnnotationFixTest extends UsefulTestCase {
     ModCommand withPath = ((ModEditOptions<?>)command).applyOptions(Map.of("myExternalAnnotationsRoot", annoDir.getPath()));
 
     assertNull(DumbService.getInstance(project)
-                 .computeWithAlternativeResolveEnabled(() -> manager.findExternalAnnotation(method, AnnotationUtil.NOT_NULL)));
+                 .computeWithAlternativeResolveEnabled(() -> manager.findExternalTypeAnnotation(method, "", AnnotationUtil.NOT_NULL)));
     ModCommandExecutor.executeInteractively(ActionContext.from(null, myFixture.getFile()), "", null, () -> withPath);
     NonBlockingReadActionImpl.waitForAsyncTaskCompletion();
     assertNotNull(DumbService.getInstance(project)
-                 .computeWithAlternativeResolveEnabled(() -> manager.findExternalAnnotation(method, AnnotationUtil.NOT_NULL)));
+                 .computeWithAlternativeResolveEnabled(() -> manager.findExternalTypeAnnotation(method, "", AnnotationUtil.NOT_NULL)));
   }
 
   public void testListenerNotifiedOnExternalChanges() throws IOException {
@@ -324,7 +344,7 @@ public class AddAnnotationFixTest extends UsefulTestCase {
 
     PsiClass aClass = ((PsiJavaFile)files[0]).getClasses()[0];
     assertNotNull(aClass);
-    assertTrue(AnnotationUtil.isAnnotated(aClass.getMethods()[0], AnnotationUtil.NOT_NULL, AnnotationUtil.CHECK_EXTERNAL));
+    assertTrue(AnnotationUtil.isAnnotated(aClass.getMethods()[0], AnnotationUtil.NOT_NULL, AnnotationUtil.CHECK_EXTERNAL | AnnotationUtil.CHECK_TYPE));
 
     ModuleRootModificationUtil.updateModel(myFixture.getModule(), model -> {
       final LibraryTable libraryTable = model.getModuleLibraryTable();
@@ -335,14 +355,13 @@ public class AddAnnotationFixTest extends UsefulTestCase {
       libraryModifiableModel.commit();
     });
 
-    assertFalse(AnnotationUtil.isAnnotated(aClass.getMethods()[0], AnnotationUtil.NOT_NULL, AnnotationUtil.CHECK_EXTERNAL));
+    assertFalse(AnnotationUtil.isAnnotated(aClass.getMethods()[0], AnnotationUtil.NOT_NULL, AnnotationUtil.CHECK_EXTERNAL | AnnotationUtil.CHECK_TYPE));
   }
 
   public void testAnnotationsUpdatedWhenFileEdited() {
     addDefaultLibrary();
     final PsiFile[] files = myFixture.configureByFiles("content/anno/edit/annotations.xml", "lib/edit/Foo.java");
     final PsiClass fooJava = ((PsiClassOwner)files[1]).getClasses()[0];
-    ExternalAnnotationsManager.getInstance(myFixture.getProject());
 
     PsiAnnotation annotation = AnnotationUtil.findAnnotation(fooJava, "java.lang.Deprecated");
     assertNotNull(annotation);

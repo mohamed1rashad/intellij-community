@@ -4,7 +4,12 @@ package com.intellij.psi.util;
 import com.intellij.JavaTestUtil;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.openapi.util.Key;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiTypes;
 import com.intellij.testFramework.EqualsToFile;
 import com.intellij.testFramework.LightJavaCodeInsightTestCase;
 import org.intellij.lang.annotations.Language;
@@ -39,7 +44,7 @@ public class PsiTreeUtilTest extends LightJavaCodeInsightTestCase {
   private void doTraversalTest(boolean childrenFirst) {
     configureFromFileText("C.java", "class C { int answer = 42; }");
     StringBuilder result = new StringBuilder();
-    Iterator<PsiElement> descendants = PsiTreeUtilKt.descendants(getFile(), childrenFirst, __ -> true).iterator();
+    Iterator<PsiElement> descendants = PsiTreeUtilKt.descendants(getFile(), childrenFirst, _ -> true).iterator();
     while (descendants.hasNext()) {
       PsiElement next = descendants.next();
       result.append(next.getTextRange()).append(" ").append(next.getNode().getElementType()).append("\n");

@@ -6,6 +6,8 @@ import com.intellij.codeInsight.documentation.DocumentationManagerProtocol.PSI_E
 import com.intellij.codeInsight.hint.HintManager
 import com.intellij.codeInsight.hint.HintManagerImpl
 import com.intellij.codeInsight.hint.HintUtil
+import com.intellij.ui.components.JBScrollBar
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.injected.editor.EditorWindow
 import com.intellij.internal.statistic.service.fus.collectors.UIEventLogger.CtrlMouseHintShown
 import com.intellij.lang.documentation.ide.impl.DocumentationManager
@@ -15,7 +17,12 @@ import com.intellij.model.Pointer
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.MouseShortcut
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadConstraint
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.constrainedReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.editor.Document
@@ -24,7 +31,12 @@ import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.EditorMouseHoverPopupManager
 import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.colors.EditorColorsManager
-import com.intellij.openapi.editor.event.*
+import com.intellij.openapi.editor.event.EditorMouseEvent
+import com.intellij.openapi.editor.event.EditorMouseEventArea
+import com.intellij.openapi.editor.event.EditorMouseListener
+import com.intellij.openapi.editor.event.EditorMouseMotionListener
+import com.intellij.openapi.editor.event.VisibleAreaEvent
+import com.intellij.openapi.editor.event.VisibleAreaListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
@@ -49,11 +61,22 @@ import com.intellij.ui.ScreenUtil.isMovementTowards
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.util.ui.EDT
 import com.intellij.util.ui.JBUI
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.annotations.VisibleForTesting
-import java.awt.*
+import java.awt.Cursor
+import java.awt.Dimension
+import java.awt.Font
+import java.awt.Point
+import java.awt.Rectangle
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseEvent
@@ -64,7 +87,7 @@ import javax.swing.event.HyperlinkListener
 import kotlin.math.max
 import kotlin.math.min
 
-private class InitCtrlMouseHandlerActivity : ProjectActivity {
+internal class InitCtrlMouseHandlerActivity : ProjectActivity {
   override suspend fun execute(project: Project) {
     project.serviceAsync<CtrlMouseHandler2>()
   }
@@ -417,13 +440,28 @@ private fun wrapInScrollPaneIfNeeded(component: JComponent, editor: Editor): JCo
   if (preferredSize.width <= maxWidth && preferredSize.height <= maxHeight) {
     return component
   }
-  // We expect documentation providers to exercise good judgment in limiting the displayed information,
-  // but in any case, we don't want the hint to cover the whole screen, so we also implement certain limiting here.
   return ScrollPaneFactory.createScrollPane(component, true).also {
+    // We expect documentation providers to exercise good judgment in limiting the displayed information,
+    // but in any case, we don't want the hint to cover the whole screen, so we also implement certain limiting here.
     it.preferredSize = Dimension(
       min(preferredSize.width, maxWidth),
       min(preferredSize.height, maxHeight),
     )
+    // Cmd+Wheel doesn't scroll natively - handling by hand
+    it.addMouseWheelListener { mouseEvent ->
+      if (JBScrollPane.isScrollEvent(mouseEvent))
+        return@addMouseWheelListener
+
+      if (getCtrlMouseAction(mouseEvent.modifiersEx) == null)
+        return@addMouseWheelListener
+
+      val scrollBar = if (mouseEvent.isShiftDown) it.horizontalScrollBar else it.verticalScrollBar
+      if (scrollBar !is JBScrollBar || !scrollBar.isVisible)
+        return@addMouseWheelListener
+
+      if (scrollBar.handleMouseWheelEvent(mouseEvent))
+        mouseEvent.consume()
+    }
   }
 }
 

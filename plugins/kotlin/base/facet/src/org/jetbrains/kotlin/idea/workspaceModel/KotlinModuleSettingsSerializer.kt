@@ -2,8 +2,8 @@
 package org.jetbrains.kotlin.idea.workspaceModel
 
 import com.intellij.openapi.extensions.ExtensionNotApplicableException
-import com.intellij.platform.workspace.jps.entities.ModifiableModuleEntity
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.ModuleEntityBuilder
 import com.intellij.platform.workspace.jps.entities.ModuleId
 import com.intellij.platform.workspace.jps.serialization.impl.CustomFacetRelatedEntitySerializer
 import com.intellij.platform.workspace.storage.EntitySource
@@ -11,7 +11,13 @@ import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.util.descriptors.ConfigFileItemSerializer
 import org.jdom.Element
 import org.jetbrains.jps.model.serialization.facet.FacetState
-import org.jetbrains.kotlin.config.*
+import org.jetbrains.kotlin.config.CompilerSettings
+import org.jetbrains.kotlin.config.KotlinFacetSettings
+import org.jetbrains.kotlin.config.KotlinModuleKind
+import org.jetbrains.kotlin.config.deserializeFacetSettings
+import org.jetbrains.kotlin.config.deserializeTargetPlatformByComponentPlatforms
+import org.jetbrains.kotlin.config.serializeComponentPlatforms
+import org.jetbrains.kotlin.config.serializeFacetSettings
 import org.jetbrains.kotlin.idea.facet.KotlinFacetType
 import org.jetbrains.kotlin.platform.IdePlatformKind
 import org.jetbrains.kotlin.platform.jvm.JvmPlatforms
@@ -30,9 +36,9 @@ class KotlinModuleSettingsSerializer : CustomFacetRelatedEntitySerializer<Kotlin
         get() = KotlinFacetType.INSTANCE.stringId
 
     override fun loadEntitiesFromFacetState(
-        moduleEntity: ModifiableModuleEntity,
-        facetState: FacetState,
-        evaluateEntitySource: (FacetState) -> EntitySource
+      moduleEntity: ModuleEntityBuilder,
+      facetState: FacetState,
+      evaluateEntitySource: (FacetState) -> EntitySource
     ) {
         val entitySource = evaluateEntitySource(facetState)
         val kotlinSettingsEntity = KotlinSettingsEntity(
@@ -140,7 +146,7 @@ class KotlinModuleSettingsSerializer : CustomFacetRelatedEntitySerializer<Kotlin
     }
 
     override fun serializeBuilder(entity: WorkspaceEntity.Builder<out KotlinSettingsEntity>, module: ModuleEntity, rootElement: Element): Element {
-        entity as ModifiableKotlinSettingsEntity
+        entity as KotlinSettingsEntityBuilder
 
         KotlinFacetSettings().apply {
             version = entity.version

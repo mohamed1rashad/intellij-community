@@ -1,13 +1,15 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.collaboration.api.data
 
-import java.util.*
+import java.util.Date
 
 class GraphQLRequestPagination private constructor(
   val afterCursor: String? = null,
   val since: Date? = null,
   val pageSize: Int = DEFAULT_PAGE_SIZE
 ) {
+  constructor(pageSize: Int = DEFAULT_PAGE_SIZE) : this(null, null, pageSize)
+
   constructor(afterCursor: String? = null, pageSize: Int = DEFAULT_PAGE_SIZE) : this(afterCursor, null, pageSize)
 
   constructor(since: Date? = null, pageSize: Int = DEFAULT_PAGE_SIZE) : this(null, since, pageSize)
@@ -17,9 +19,9 @@ class GraphQLRequestPagination private constructor(
   }
 
   companion object {
-    private const val DEFAULT_PAGE_SIZE = 100
+    const val DEFAULT_PAGE_SIZE: Int = 100
 
-    val DEFAULT = GraphQLRequestPagination(afterCursor = null)
+    val DEFAULT: GraphQLRequestPagination = GraphQLRequestPagination(afterCursor = null)
   }
 }
 

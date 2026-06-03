@@ -1,16 +1,23 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package andel.editor
 
-import andel.operation.EditLog
 import andel.intervals.Interval
 import andel.intervals.Intervals
-import andel.lines.*
+import andel.lines.Fold
+import andel.lines.Inlay
+import andel.lines.Interline
+import andel.lines.LinesLayout
+import andel.lines.Postline
+import andel.operation.EditLog
 import andel.operation.Operation
 import andel.operation.Sticky
 import andel.text.Text
 import andel.text.TextRange
-import andel.undo.*
+import andel.undo.DefaultUndoGroupKey
 import andel.undo.NavigationUndoGroupKey
+import andel.undo.UndoGroupKey
+import andel.undo.UndoLog
+import andel.undo.UndoScope
 import fleet.util.UID
 import fleet.util.openmap.BoundedOpenMap
 import fleet.util.openmap.Key
@@ -129,9 +136,11 @@ interface MutableEditor : Editor {
 
   fun scrollTo(scrollCommand: EditorScrollCommand)
 
-  fun command(commandType: EditorCommandType,
-              groupKey: UndoGroupKey = commandType.defaultGroupKey(),
-              command: UndoScope.() -> Unit)
+  fun command(
+    commandType: EditorCommandType,
+    groupKey: UndoGroupKey = commandType.defaultGroupKey(),
+    command: UndoScope.() -> Unit
+  )
 
   fun addHistoryPlace()
 
@@ -157,19 +166,21 @@ interface MutableEditorLayout : EditorLayout {
 // Order is significant: the greater index, the more specific is the command type
 @Serializable
 enum class EditorCommandType {
-  NAVIGATION, EDIT,
+  NAVIGATION,
+  EDIT,
   GENERATED_EDIT,
 
   // This is not really a good third action command, but rather an ad-hoc solution not to introduce an actionTracker.
   COMMENT
 }
 
-fun EditorCommandType.defaultGroupKey() = when (this) {
-  EditorCommandType.NAVIGATION -> NavigationUndoGroupKey
-  EditorCommandType.EDIT -> DefaultUndoGroupKey
-  EditorCommandType.GENERATED_EDIT -> DefaultUndoGroupKey
-  EditorCommandType.COMMENT -> DefaultUndoGroupKey
-}
+fun EditorCommandType.defaultGroupKey() =
+  when (this) {
+    EditorCommandType.NAVIGATION -> NavigationUndoGroupKey
+    EditorCommandType.EDIT -> DefaultUndoGroupKey
+    EditorCommandType.GENERATED_EDIT -> DefaultUndoGroupKey
+    EditorCommandType.COMMENT -> DefaultUndoGroupKey
+  }
 
 interface Document {
   val text: Text
@@ -190,8 +201,10 @@ interface MutableDocument : Document {
   fun createRangeMarker(rangeStart: Long, rangeEnd: Long, lifetime: AnchorLifetime): RangeMarkerId
   fun removeRangeMarker(markerId: RangeMarkerId)
 
-  fun batchUpdateAnchors(anchorIds: List<AnchorId>, anchorOffsets: LongArray,
-                         rangeIds: List<RangeMarkerId>, ranges: List<TextRange>)
+  fun batchUpdateAnchors(
+    anchorIds: List<AnchorId>, anchorOffsets: LongArray,
+    rangeIds: List<RangeMarkerId>, ranges: List<TextRange>
+  )
 }
 
 object EditorCommandKey : EditorMetaKey<EditorCommandType>

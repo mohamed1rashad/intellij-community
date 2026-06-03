@@ -1,10 +1,9 @@
 ### auto-generated section `build intellij.platform.diagnostic.telemetry.agent.extension` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library")
 
-resourcegroup(
-  name = "diagnostic-telemetry-agent-extension_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
+jvm_provided_library(
+  name = "libraries_opentelemetry-sdk-autoconfigure-spi_provided",
+  lib = "//libraries/opentelemetry-sdk-autoconfigure-spi"
 )
 
 jvm_library(
@@ -12,42 +11,94 @@ jvm_library(
   module_name = "intellij.platform.diagnostic.telemetry.agent.extension",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":diagnostic-telemetry-agent-extension_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = "@community//:k8",
   deps = [
-    "@lib//:opentelemetry",
+    "//libraries/opentelemetry",
     "@lib//:jetbrains-annotations",
-    "@lib//:opentelemetry-exporter-otlp-common",
-    "//libraries/jackson/jackson",
-    "@lib//:io-opentelemetry-sdk-extension-autoconfigure-spi-provided",
-    "//libraries/jackson/databind",
+    "//libraries/opentelemetry-exporter-otlp-common",
+    "//libraries/jackson3/jackson:libraries-jackson3",
+    "//libraries/jackson3/databind",
+    ":libraries_opentelemetry-sdk-autoconfigure-spi_provided",
   ]
 )
 
 jvm_library(
   name = "diagnostic-telemetry-agent-extension_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.diagnostic.telemetry.agent.extension",
   visibility = ["//visibility:public"],
-  srcs = glob(["testSrc/**/*.kt", "testSrc/**/*.java", "testSrc/**/*.form"], allow_empty = True),
+  srcs = glob([], allow_empty = True),
   kotlinc_opts = "@community//:k8",
-  associates = [":diagnostic-telemetry-agent-extension"],
-  deps = [
-    "@lib//:opentelemetry",
-    "@lib//:jetbrains-annotations",
-    "@lib//:junit5",
-    "@lib//:opentelemetry-exporter-otlp-common",
-    "//libraries/jackson/jackson",
-    "@lib//:io-opentelemetry-sdk-extension-autoconfigure-spi-provided",
-    "//libraries/jackson/databind",
+  runtime_deps = [
+    ":diagnostic-telemetry-agent-extension",
+    "//libraries/opentelemetry:opentelemetry_test_lib",
+    "//libraries/junit5",
+    "//libraries/junit5:junit5_test_lib",
+    "//libraries/opentelemetry-exporter-otlp-common:opentelemetry-exporter-otlp-common_test_lib",
+    "//libraries/jackson3/jackson:libraries-jackson3_test_lib",
+    "//libraries/opentelemetry-sdk-autoconfigure-spi",
+    "//libraries/opentelemetry-sdk-autoconfigure-spi:opentelemetry-sdk-autoconfigure-spi_test_lib",
+    "//libraries/jackson3/databind:databind_test_lib",
     "@lib//:kotlin-stdlib",
   ]
 )
 ### auto-generated section `build intellij.platform.diagnostic.telemetry.agent.extension` end
 
-### auto-generated section `test intellij.platform.diagnostic.telemetry.agent.extension` start
+### auto-generated section `iml intellij.platform.diagnostic.telemetry.agent.extension` start
+exports_files([
+  "intellij.platform.diagnostic.telemetry.agent.extension.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.diagnostic.telemetry.agent.extension` end
+
+### auto-generated section `build intellij.platform.diagnostic.telemetry.agent.extension.tests` start
+jvm_library(
+  name = "diagnostic-telemetry-agent-extension-tests",
+  module_name = "intellij.platform.diagnostic.telemetry.agent.extension.tests",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True)
+)
+
+jvm_library(
+  name = "diagnostic-telemetry-agent-extension-tests_test_lib",
+  testonly = True,
+  visibility = ["//visibility:public"],
+  srcs = glob(["testSrc/**/*.kt", "testSrc/**/*.java", "testSrc/**/*.form"], allow_empty = True),
+  associates = [
+    "//platform/diagnostic/telemetry/agent-extension:diagnostic-telemetry-agent-extension",
+    "//platform/diagnostic/telemetry/agent-extension:diagnostic-telemetry-agent-extension_test_lib",
+  ],
+  deps = [
+    "//libraries/opentelemetry",
+    "//libraries/opentelemetry:opentelemetry_test_lib",
+    "@lib//:jetbrains-annotations",
+    "@lib//:junit5",
+    "//libraries/opentelemetry-exporter-otlp-common",
+    "//libraries/opentelemetry-exporter-otlp-common:opentelemetry-exporter-otlp-common_test_lib",
+    "//libraries/jackson3/jackson:libraries-jackson3",
+    "//libraries/jackson3/jackson:libraries-jackson3_test_lib",
+    "//libraries/opentelemetry-sdk-autoconfigure-spi",
+    "//libraries/opentelemetry-sdk-autoconfigure-spi:opentelemetry-sdk-autoconfigure-spi_test_lib",
+    "//libraries/jackson3/databind",
+    "//libraries/jackson3/databind:databind_test_lib",
+    "@lib//:kotlin-stdlib",
+  ],
+  runtime_deps = [":diagnostic-telemetry-agent-extension-tests"]
+)
+### auto-generated section `build intellij.platform.diagnostic.telemetry.agent.extension.tests` end
+
+### auto-generated section `iml intellij.platform.diagnostic.telemetry.agent.extension.tests` start
+exports_files([
+  "intellij.platform.diagnostic.telemetry.agent.extension.tests.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.diagnostic.telemetry.agent.extension.tests` end
+
+### auto-generated section `test intellij.platform.diagnostic.telemetry.agent.extension.tests` start
 load("@community//build:tests-options.bzl", "jps_test")
 
 jps_test(
-  name = "diagnostic-telemetry-agent-extension_test",
-  runtime_deps = [":diagnostic-telemetry-agent-extension_test_lib"]
+  name = "diagnostic-telemetry-agent-extension-tests_test",
+  runtime_deps = [":diagnostic-telemetry-agent-extension-tests_test_lib"]
 )
-### auto-generated section `test intellij.platform.diagnostic.telemetry.agent.extension` end
+### auto-generated section `test intellij.platform.diagnostic.telemetry.agent.extension.tests` end

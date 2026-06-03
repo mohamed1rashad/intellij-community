@@ -3,8 +3,15 @@ package com.intellij.xdebugger.memory.ui;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CustomShortcutSet;
+import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.KeyboardShortcut;
+import com.intellij.openapi.actionSystem.UiDataProvider;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.CoroutinesKt;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.TextRange;
@@ -17,40 +24,50 @@ import com.intellij.ui.scale.JBUIScale;
 import com.intellij.ui.speedSearch.SpeedSearchUtil;
 import com.intellij.ui.table.JBTable;
 import com.intellij.util.concurrency.ThreadingAssertions;
-import com.intellij.util.containers.FList;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.text.matching.MatchedFragment;
 import com.intellij.util.ui.JBDimension;
 import com.intellij.util.ui.StatusText;
-import com.intellij.util.ui.update.MergingUpdateQueue;
-import com.intellij.util.ui.update.Update;
+import com.intellij.util.ui.update.DebouncedUpdates;
+import com.intellij.util.ui.update.UpdateQueue;
 import com.intellij.xdebugger.XDebuggerBundle;
 import com.intellij.xdebugger.memory.component.InstancesTracker;
 import com.intellij.xdebugger.memory.tracking.TrackerForNewInstancesBase;
 import com.intellij.xdebugger.memory.tracking.TrackingType;
 import com.intellij.xdebugger.memory.utils.AbstractTableColumnDescriptor;
 import com.intellij.xdebugger.memory.utils.AbstractTableModelWithColumns;
+import kotlinx.coroutines.Dispatchers;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JTable;
+import javax.swing.KeyStroke;
+import javax.swing.ListSelectionModel;
+import javax.swing.RowFilter;
+import javax.swing.RowSorter;
+import javax.swing.SortOrder;
+import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableRowSorter;
-import java.awt.*;
+import java.awt.Cursor;
 import java.awt.event.InputEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClassesTable extends JBTable implements UiDataProvider, Disposable {
   public static final DataKey<TypeInfo> SELECTED_CLASS_KEY = DataKey.create("ClassesTable.SelectedClass");
   public static final DataKey<ReferenceCountProvider> REF_COUNT_PROVIDER_KEY =
     DataKey.create("ClassesTable.ReferenceCountProvider");
-
-  private static final JBColor CLICKABLE_COLOR = new JBColor(new Color(250, 251, 252), new Color(62, 66, 69));
 
   private static final SimpleTextAttributes LINK_ATTRIBUTES =
     new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, SimpleTextAttributes.LINK_ATTRIBUTES.getFgColor());
@@ -71,10 +88,11 @@ public class ClassesTable extends JBTable implements UiDataProvider, Disposable 
   private boolean myOnlyTracked;
   private boolean myOnlyWithInstances;
   private MinusculeMatcher myMatcher = NameUtil.buildMatcher("*").build();
-  private String myFilteringPattern = "";
-  private final MergingUpdateQueue myFilterTypingMergeQueue = new MergingUpdateQueue(
-    "Classes table typing merging queue", 500, true,
-    this, this, this, true).setRestartTimerOnAdd(true);
+  private final UpdateQueue<String> myFilterTypingMergeQueue =
+    DebouncedUpdates.<String>forComponent(this, "Classes table typing merging queue", 500)
+      .withContext(CoroutinesKt.getUI(Dispatchers.INSTANCE))
+      .restartTimerOnAdd(true)
+      .runLatest(this::updateMatcher);
 
   private volatile List<TypeInfo> myItems = Collections.unmodifiableList(new ArrayList<>());
   private boolean myIsShowCounts = true;
@@ -234,7 +252,6 @@ public class ClassesTable extends JBTable implements UiDataProvider, Disposable 
 
       @Override
       void updateTable(boolean mouseOnTable) {
-        setBackground(mouseOnTable ? CLICKABLE_COLOR : JBColor.background());
         SimpleTextAttributes linkAttributes = mouseOnTable ? UNDERLINE_LINK_ATTRIBUTES : LINK_ATTRIBUTES;
         getEmptyText().clear()
                       .appendText(XDebuggerBundle.message("memory.view.no.classes.loaded")).appendText(" ")
@@ -264,7 +281,6 @@ public class ClassesTable extends JBTable implements UiDataProvider, Disposable 
       removeMouseListener(myMouseListener);
       myMouseListener = null;
       setCursor(Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
-      setBackground(JBColor.background());
     }
   }
 
@@ -273,22 +289,18 @@ public class ClassesTable extends JBTable implements UiDataProvider, Disposable 
   }
 
   void setFilterPattern(String pattern) {
-    if (!myFilteringPattern.equals(pattern)) {
-      myFilteringPattern = pattern;
-      myFilterTypingMergeQueue.queue(new Update(myMatcher, true) {
-        @Override
-        public void run() {
-          String newPattern = "*" + myFilteringPattern;
-          if (myMatcher.getPattern().equals(newPattern)) {
-            return;
-          }
-          myMatcher = NameUtil.buildMatcher(newPattern).build();
-          fireTableDataChanged();
-          if (getSelectedClass() == null && getRowCount() > 0) {
-            getSelectionModel().setSelectionInterval(0, 0);
-          }
-        }
-      });
+    myFilterTypingMergeQueue.queue(pattern);
+  }
+
+  private void updateMatcher(String pattern) {
+    String newPattern = "*" + pattern;
+    if (myMatcher.getPattern().equals(newPattern)) {
+      return;
+    }
+    myMatcher = NameUtil.buildMatcher(newPattern).build();
+    fireTableDataChanged();
+    if (getSelectedClass() == null && getRowCount() > 0) {
+      getSelectionModel().setSelectionInterval(0, 0);
     }
   }
 
@@ -567,10 +579,12 @@ public class ClassesTable extends JBTable implements UiDataProvider, Disposable 
       String presentation = ((TypeInfo)value).name();
       append(" ");
       if (isSelected) {
-        FList<TextRange> textRanges = myMatcher.matchingFragments(presentation);
-        if (textRanges != null) {
+        @Nullable List<@NotNull MatchedFragment> fragments = myMatcher.match(presentation);
+        if (fragments != null) {
           SimpleTextAttributes attributes = new SimpleTextAttributes(getBackground(), getForeground(), null,
                                                                      SimpleTextAttributes.STYLE_SEARCH_MATCH);
+
+          Iterable<TextRange> textRanges = ContainerUtil.map(fragments, f -> TextRange.create(f.getStartOffset(), f.getEndOffset()));
           SpeedSearchUtil.appendColoredFragments(this, presentation, textRanges,
                                                  SimpleTextAttributes.REGULAR_ATTRIBUTES, attributes);
         }

@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework.fixtures
 
 import com.intellij.openapi.application.ex.ApplicationManagerEx
@@ -15,26 +15,27 @@ class TestFixtureRule : ExternalResource() {
     private set
 
   override fun apply(base: Statement, description: Description): Statement {
-    ApplicationManagerEx.setInStressTest(TestFrameworkUtil.isStressTest(description.methodName, description.className))
-    return super.apply(base, description)
+    val superStatement = super.apply(base, description)
+    return object : Statement() {
+      override fun evaluate() {
+        ApplicationManagerEx.runInStressTest<Exception>(TestFrameworkUtil.isStressTest(description.methodName, description.testClass)) {
+          superStatement.evaluate()
+        }
+      }
+    }
   }
 
   override fun before() {
-    val headless = TestFrameworkUtil.SKIP_HEADLESS && javaClass.getAnnotation(SkipInHeadlessEnvironment::class.java) != null
+    val headless = TestFrameworkUtil.shouldSkipHeadless() && javaClass.getAnnotation(SkipInHeadlessEnvironment::class.java) != null
     assumeFalse("Class '${javaClass.name}' is skipped because it requires working UI environment", headless)
 
     val slow = TestFrameworkUtil.SKIP_SLOW && javaClass.getAnnotation(SkipSlowTestLocally::class.java) != null
     assumeFalse("Class '${javaClass.name}' is skipped because it is dog slow", slow)
 
-    fixture = IdeaTestFixtureFactory.getFixtureFactory().createBareFixture().also { it.setUp() }
+    fixture = IdeaTestFixtureFactory.getFixtureFactory().createBareFixture().apply { setUp() }
   }
 
   override fun after() {
-    try {
-      fixture.tearDown()
-    }
-    finally {
-      ApplicationManagerEx.setInStressTest(false)
-    }
+    fixture.tearDown()
   }
 }

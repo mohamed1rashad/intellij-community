@@ -1,8 +1,14 @@
 <idea-plugin package="org.jetbrains.idea.devkit.kotlin">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <module name="intellij.devkit.core"/>
     <plugin id="org.jetbrains.kotlin"/>
+    <module name="intellij.devkit.core"/>
+    <module name="intellij.kotlin.codeInsight.shared"/>
+    <module name="intellij.kotlin.codeInsight.fixes"/>
+    <module name="intellij.xml.dom"/>
+    <module name="intellij.xml.psi"/>
   </dependencies>
+  <!-- endregion -->
 
   <resource-bundle>messages.DevKitKotlinBundle</resource-bundle>
 
@@ -46,6 +52,14 @@
                      enabledByDefault="true" level="ERROR"
                      implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.UsePlatformProcessAwaitExitInspection"
                      key="inspection.use.platform.process.await.exit.display.name"/>
+
+    <localInspection language="UAST" shortName="InstanceIElementTypeField"
+                     projectType="INTELLIJ_PLUGIN"
+                     groupBundle="messages.DevKitBundle"
+                     key="inspection.instance.ielement.type.field.display.name"
+                     groupPathKey="inspections.group.path" groupKey="inspections.group.code"
+                     enabledByDefault="true" level="WARNING"
+                     implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.InstanceIElementTypeFieldInspection"/>
 
     <localInspection language="kotlin"
                      projectType="INTELLIJ_PLUGIN"
@@ -93,19 +107,50 @@
                      implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.remotedev.RpcInterfaceDoesNotExtendRemoteApiInspection"
                      key="inspection.remote.dev.rpc.interface.does.not.extend.remote.api.name"/>
 
+    <localInspection language="kotlin" shortName="PrivateExtensionClass"
+                     projectType="INTELLIJ_PLUGIN"
+                     groupBundle="messages.DevKitBundle"
+                     groupPathKey="inspections.group.path" groupKey="inspections.group.code"
+                     enabledByDefault="true" level="WARNING"
+                     implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.PrivateExtensionClassInspection"
+                     key="inspection.private.extension.class"/>
+
+    <localInspection language="kotlin" shortName="KotlinPolySymbolPropertyType"
+                     projectType="INTELLIJ_PLUGIN"
+                     groupBundle="messages.DevKitBundle"
+                     groupPathKey="inspections.group.path" groupKey="inspections.group.code"
+                     enabledByDefault="true" level="ERROR"
+                     implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.KtPolySymbolPropertyTypeInspection"
+                     key="inspection.polySymbol.property.type.mismatch.display.name"/>
+
+    <useScopeEnlarger implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteUseScopeEnlarger"/>
+    <methodReferencesSearch implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteMethodReferenceSearcher"/>
+    <overridingMethodsSearch implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteMethodImplementationSearcher"/>
+    <allOverridingMethodsSearch implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteMethodAllImplementationSearcher"/>
+    <directClassInheritorsSearch implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteInterfaceDirectImplementationSearcher"/>
+    <classInheritorsSearch implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteInterfaceImplementationSearcher"/>
+
     <iconProvider implementation="org.jetbrains.idea.devkit.kotlin.driver.RemoteIconProvider" order="first"/>
 
-    <registryKey key="devkit.inspections.forbidden.method.in.suspend.context" defaultValue="false"
+    <registryKey key="devkit.inspections.forbidden.method.in.suspend.context" defaultValue="true"
                  description="Enables checks for RequiresBlockingContext in suspend contexts"/>
+    <registryKey key="devkit.inspections.checked.exception.for.kotlin.throws" defaultValue="false"
+                 description="Enables KotlinCheckedExceptionInspection for @Throws annotations"/>
   </extensions>
 
   <extensions defaultExtensionNs="DevKit.lang">
+    <LockReqPsiOps
+      language="kotlin"
+      implementationClass="org.jetbrains.idea.devkit.kotlin.threadingModelHelper.KtLockReqPsiOps"/>
     <cancellationCheckProvider
       language="kotlin"
       implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.KtCancellationCheckProvider"/>
     <cancellationCheckInLoopsFixProvider
       language="kotlin"
       implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.KtCancellationCheckInLoopsFixProvider"/>
+    <useHtmlChunkToolTipFixProvider
+      language="kotlin"
+      implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.KtUseHtmlChunkToolTipFixProvider"/>
     <visitorProviderForRBCInspection
       language="kotlin"
       implementationClass="org.jetbrains.idea.devkit.kotlin.inspections.KtCallingFunctionShouldBeRequiresBlockingContextVisitorProvider"/>

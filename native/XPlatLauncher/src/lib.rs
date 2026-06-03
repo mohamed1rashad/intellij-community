@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 #![warn(
 absolute_paths_not_starting_with_crate,
@@ -33,23 +33,25 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use log::{debug, LevelFilter, warn};
+use log::{debug, warn, LevelFilter};
 use serde::Deserialize;
 
 #[cfg(target_os = "windows")]
 use {
-    std::io::Write,
-    std::ptr::null_mut,
+    windows::core::{GUID, HSTRING, PWSTR},
     windows::Win32::Foundation,
     windows::Win32::Foundation::HANDLE,
-    windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, SetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE},
     windows::Win32::System::LibraryLoader,
     windows::Win32::UI::Shell,
-    windows::core::{HSTRING, GUID, PCWSTR, PWSTR},
 };
 
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::PermissionsExt;
+
+#[cfg(target_os = "linux")]
+use std::os::unix::process::CommandExt;
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+use libc::{dl_iterate_phdr, dl_phdr_info, size_t};
 
 use crate::cef_sandbox::CefScopedSandboxInfo;
 use crate::default::DefaultLaunchConfiguration;
@@ -76,59 +78,12 @@ pub fn main_lib() {
     let server_mode_argument_used = env::args().nth(1).map(|x| x == "serverMode").unwrap_or(false);
     let remote_dev = remote_dev_launcher_used || server_mode_argument_used;
     let sandbox_subprocess = cfg!(target_os = "windows") && env::args().any(|arg| arg.contains("--type="));
-
     let debug_mode = env::var(DEBUG_MODE_ENV_VAR).is_ok();
-
-    #[cfg(target_os = "windows")]
-    {
-        if debug_mode && !sandbox_subprocess {
-            attach_console();
-        }
-    }
 
     if let Err(e) = main_impl(exe_path, remote_dev, debug_mode, sandbox_subprocess, remote_dev_launcher_used) {
         let gui_mode = !debug_mode && !sandbox_subprocess;
         ui::show_error(gui_mode, e);
         std::process::exit(1);
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn attach_console() {
-    unsafe {
-        let mut err = None;
-        if AttachConsole(ATTACH_PARENT_PROCESS).is_err() {
-            err = Some(Foundation::GetLastError());
-        }
-
-        // case: races when restarting in remote-dev on Windows
-        // (ssh session -> tb proxy -> tb agent -> IDE -> restarter.exe (dying too fast) -> IDE)
-        // cannot repro on a smaller setup (e.g. cmd /C via ssh)
-        // * case: console is alive, but in a state of being closed
-        // * AttachConsole does not always error
-        // * GetStdHandle for STD_OUT_HANDLE returns without errors and the handle is not zero/invalid
-        // * println!/eprintln! panics when it can't write
-        // * setting various process creation flags in restarter does not seem to help
-        // this is the only reliable way I've found to check if it's possible to call println! without panic
-        if writeln!(std::io::stderr(), ".").is_err() {
-            // usually it's Os { code: 232, kind: BrokenPipe, message: "The pipe is being closed." }
-            // but even if it's some other error, let's not write there
-            // passing null here is not explicitly documented,
-            // but it works and is consistent with the GetStdHandle returning null
-            if SetStdHandle(STD_ERROR_HANDLE, HANDLE(null_mut())).is_err() {
-                std::process::exit(1011)
-            }
-        }
-
-        if writeln!(std::io::stdout(), ".").is_err() {
-            if SetStdHandle(STD_OUTPUT_HANDLE, HANDLE(null_mut())).is_err() {
-                std::process::exit(1012)
-            }
-        }
-
-        if let Some(err) = err {
-            eprintln!("AttachConsole(ATTACH_PARENT_PROCESS): {:?}", err)
-        }
     }
 }
 
@@ -156,20 +111,32 @@ fn main_impl(exe_path: PathBuf, remote_dev: bool, debug_mode: bool, sandbox_subp
         ensure_env_vars_set()?;
     }
 
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        // on Linux, glibc allocates arenas too aggressively 
-        if unsafe { libc::mallopt(libc::M_ARENA_MAX, 1) } == 0 {
-            bail!(std::io::Error::last_os_error());
-        }
-    }
-
     debug!("** Preparing launch configuration");
-    let configuration = get_configuration(remote_dev, &exe_path.strip_ns_prefix()?, started_via_remote_dev_launcher).context("Cannot detect a launch configuration")?;
+    let configuration = get_configuration(remote_dev, &exe_path.strip_ns_prefix()?, started_via_remote_dev_launcher)
+        .context("Cannot detect a launch configuration")?;
+
+    let is_musl = if cfg!(all(target_os = "linux", target_env = "gnu")) {
+        is_running_with_gcompat()
+    } else {
+        cfg!(all(target_os = "linux", target_env = "musl"))
+    };
 
     debug!("** Locating runtime");
-    let (jre_home, main_class) = configuration.prepare_for_launch().context("Cannot find a runtime")?;
+    let (jre_home, main_class, _extra_libs) = configuration.prepare_for_launch(is_musl).context("Cannot find a runtime")?;
     debug!("Resolved runtime: {jre_home:?}");
+
+    #[cfg(target_os = "linux")]
+    {
+        if is_musl {
+            adjust_to_musl(&exe_path, &jre_home, &_extra_libs)?;
+        }
+    }
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        if !is_musl {
+            call_mallopt();
+        }
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -184,7 +151,9 @@ fn main_impl(exe_path: PathBuf, remote_dev: bool, debug_mode: bool, sandbox_subp
 
     debug!("** Launching JVM");
     let args = configuration.get_args();
-    java::run_jvm_and_event_loop(&jre_home, vm_options, main_class, args.to_vec(), debug_mode).context("Cannot start the runtime")?;
+    let redirect_stdout = configuration.should_redirect_stdout();
+    java::run_jvm_and_event_loop(&jre_home, vm_options, main_class, args.to_vec(), debug_mode, redirect_stdout, is_musl)
+        .context("Cannot start the runtime")?;
 
     Ok(())
 }
@@ -192,10 +161,12 @@ fn main_impl(exe_path: PathBuf, remote_dev: bool, debug_mode: bool, sandbox_subp
 #[cfg(target_os = "windows")]
 fn ensure_env_vars_set() -> Result<()> {
     let app_data = get_known_folder_path(&Shell::FOLDERID_RoamingAppData, "FOLDERID_RoamingAppData")?;
-    env::set_var("APPDATA", app_data.strip_ns_prefix()?.to_string_checked()?);
-
     let local_app_data = get_known_folder_path(&Shell::FOLDERID_LocalAppData, "FOLDERID_LocalAppData")?;
-    env::set_var("LOCALAPPDATA", local_app_data.strip_ns_prefix()?.to_string_checked()?);
+
+    unsafe {
+        env::set_var("APPDATA", app_data.strip_ns_prefix()?.to_string_checked()?);
+        env::set_var("LOCALAPPDATA", local_app_data.strip_ns_prefix()?.to_string_checked()?);
+    }
 
     Ok(())
 }
@@ -203,13 +174,13 @@ fn ensure_env_vars_set() -> Result<()> {
 #[cfg(target_os = "windows")]
 fn strip_working_directory_ns_prefix() -> Result<()> {
     let cwd_res = env::current_dir();
-    debug!("Adjusting current directory {:?}", cwd_res);
+    debug!("Adjusting current directory {cwd_res:?}");
 
     if let Ok(cwd) = cwd_res {
         let orig_len = cwd.as_os_str().len();
         if let Ok(stripped) = cwd.strip_ns_prefix() {
             if stripped.as_os_str().len() < orig_len {
-                debug!("  ... to {:?}", stripped);
+                debug!("  ... to {stripped:?}");
                 env::set_current_dir(&stripped)
                     .with_context(|| format!("Cannot set current directory to '{}'", stripped.display()))?;
             }
@@ -227,7 +198,7 @@ fn set_dll_search_path(jre_home: &Path) -> Result<()> {
         .context("Failed to set JRE DLL dependencies search path")?;
 
     let jre_bin_dir = jre_home.join("bin");
-    debug!("[JVM] Adding {:?} to the DLL search path", jre_bin_dir);
+    debug!("[JVM] Adding {jre_bin_dir:?} to the DLL search path");
     let jre_bin_dir_cookie = unsafe { LibraryLoader::AddDllDirectory(&HSTRING::from(jre_bin_dir.as_path())) };
     if jre_bin_dir_cookie.is_null() {
         return Err(anyhow::Error::from(std::io::Error::last_os_error()))
@@ -242,16 +213,100 @@ fn restore_working_directory() -> Result<()> {
     let (cwd_res, pwd_var) = (env::current_dir(), env::var("PWD"));
     debug!("Adjusting current directory (current={:?} $PWD={:?})", cwd_res, pwd_var);
 
-    if let Ok(cwd) = cwd_res {
-        if cwd == PathBuf::from("/") {
-            if let Ok(pwd) = pwd_var {
-                env::set_current_dir(&pwd)
-                    .with_context(|| format!("Cannot set current directory to '{pwd}'"))?;
-            }
-        }
+    #[allow(clippy::cmp_owned)]
+    if let Ok(cwd) = cwd_res && cwd == PathBuf::from("/") && let Ok(pwd) = pwd_var {
+        env::set_current_dir(&pwd).with_context(|| format!("Cannot set current directory to '{pwd}'"))?;
     }
 
     Ok(())
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn is_running_with_gcompat() -> bool {
+    false
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn is_running_with_gcompat() -> bool {
+    unsafe {
+        dl_iterate_phdr(Some(check_gcompat_callback), std::ptr::null_mut()) == 1
+    }
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+extern "C" fn check_gcompat_callback(info: *mut dl_phdr_info, _size: size_t, _data: *mut std::ffi::c_void,) -> std::ffi::c_int {
+    unsafe {
+        let name_ptr = (*info).dlpi_name;
+        if !name_ptr.is_null() {
+            if let Ok(name) = std::ffi::CStr::from_ptr(name_ptr).to_str() {
+                if name.contains("libgcompat.so") {
+                    return 1;
+                }
+            }
+        }
+    }
+    0
+}
+
+#[cfg(target_os = "linux")]
+fn adjust_to_musl(exe_path: &Path, jre_home: &Path, extra_libs: &Option<PathBuf>) -> Result<()> {
+    let prev_ld_lib_path = env::var_os("_IJ_PREV_LD_LIBRARY_PATH");
+    if let Some(val) = prev_ld_lib_path {
+        debug!("restoring LD_LIBRARY_PATH to {val:?}");
+        restore_env("LD_LIBRARY_PATH", &val);
+        restore_env("_IJ_PREV_LD_LIBRARY_PATH", &std::ffi::OsString::default());
+        return Ok(());
+    }
+
+    let ld_lib_path = env::var_os("LD_LIBRARY_PATH").unwrap_or_default();
+    let jvm_dir = jre_home.join("lib/server");
+    let mut new_ld_lib_path = std::ffi::OsString::from(jvm_dir);
+    new_ld_lib_path.push(":");
+    new_ld_lib_path.push(jre_home.join("lib"));
+    if let Some(extra_libs) = extra_libs {
+        new_ld_lib_path.push(":");
+        new_ld_lib_path.push(extra_libs);
+    }
+    if !ld_lib_path.is_empty() {
+        new_ld_lib_path.push(":");
+        new_ld_lib_path.push(&ld_lib_path);
+    };
+
+    debug!("*** restarting with LD_LIBRARY_PATH={new_ld_lib_path:?}\n=====");
+    let args: Vec<String> = env::args().collect();
+    Err(std::process::Command::new(exe_path)
+        .args(args[1..].to_vec())
+        .env("LD_LIBRARY_PATH", new_ld_lib_path)
+        .env("_IJ_PREV_LD_LIBRARY_PATH", ld_lib_path)
+        .exec().into())
+}
+
+#[cfg(target_os = "linux")]
+fn restore_env(key: &str, val: &std::ffi::OsStr) {
+    if val.is_empty() {
+        unsafe { env::set_var(key, val); }
+    } else {
+        unsafe { env::remove_var(key); }
+    }
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn call_mallopt() {
+    // on Linux, glibc allocates arenas too aggressively
+    // (dynamic loading to avoid unresolvable dependency on musl systems)
+    type MalloptFn = extern "C" fn(std::ffi::c_int, std::ffi::c_int) -> std::ffi::c_int;
+    unsafe {
+        let mallopt_ptr = libc::dlsym(std::ptr::null_mut(), c"mallopt".as_ptr());
+        if mallopt_ptr.is_null() {
+            warn!("mallopt: symbol not found");
+        } else {
+            let mallopt: MalloptFn = std::mem::transmute(mallopt_ptr);
+            debug!("calling 'mallopt' at {mallopt:?}'");
+            if mallopt(libc::M_ARENA_MAX, 1) == 1 {
+                warn!("mallopt: {}", std::io::Error::last_os_error());
+            }
+        }
+    }
 }
 
 #[macro_export]
@@ -276,6 +331,7 @@ pub struct ProductInfoLaunchField {
     pub bootClassPathJarNames: Vec<String>,
     pub additionalJvmArguments: Vec<String>,
     pub mainClass: String,
+    pub stdioRedirectArg: Option<String>,
     pub customCommands: Option<Vec<ProductInfoCustomCommandField>>,
 }
 
@@ -288,6 +344,7 @@ pub struct ProductInfoCustomCommandField {
     pub bootClassPathJarNames: Vec<String>,
     #[serde(default = "Vec::new")]
     pub additionalJvmArguments: Vec<String>,
+    pub stdioRedirectArg: Option<String>,
     pub mainClass: Option<String>,
     pub envVarBaseName: Option<String>,
     pub dataDirectoryName: Option<String>,
@@ -298,7 +355,8 @@ pub trait LaunchConfiguration {
     fn get_vm_options(&self) -> Result<Vec<String>>;
     fn get_custom_properties_file(&self) -> Result<PathBuf>;
     fn get_class_path(&self) -> Result<Vec<String>>;
-    fn prepare_for_launch(&self) -> Result<(PathBuf, &str)>;
+    fn should_redirect_stdout(&self) -> bool;
+    fn prepare_for_launch(&self, is_musl: bool) -> Result<(PathBuf, &str, Option<PathBuf>)>;
 }
 
 fn get_configuration(is_remote_dev: bool, exe_path: &Path, started_via_remote_dev_launcher: bool) -> Result<Box<dyn LaunchConfiguration>> {
@@ -315,6 +373,8 @@ fn get_configuration(is_remote_dev: bool, exe_path: &Path, started_via_remote_de
 
 #[cfg(all(target_os = "windows", feature = "cef"))]
 fn init_cef_sandbox(jre_home: &Path, sandbox_subprocess: bool) -> Result<Option<CefScopedSandboxInfo>> {
+    use windows::core::PCWSTR;
+
     debug!("** Initializing CEF sandbox");
     let cef_sandbox = CefScopedSandboxInfo::new();
 
@@ -323,7 +383,7 @@ fn init_cef_sandbox(jre_home: &Path, sandbox_subprocess: bool) -> Result<Option<
         let exit_code = unsafe {
             let helper_path = jre_home.join("bin\\jcef_helper.dll");
             let lib = libloading::Library::new(&helper_path)
-                .with_context(|| format!("Cannot load '{:#?}'", helper_path))?;
+                .with_context(|| format!("Cannot load '{helper_path:#?}'"))?;
 
             let proc: libloading::Symbol<'_, unsafe extern "system" fn(*mut std::os::raw::c_void, *mut std::os::raw::c_void) -> i32> = lib.get(b"execute_subprocess\0")
                 .context("Cannot find 'execute_subprocess' in 'jcef_helper.dll'")?;
@@ -331,7 +391,7 @@ fn init_cef_sandbox(jre_home: &Path, sandbox_subprocess: bool) -> Result<Option<
             let mut h_instance = LibraryLoader::GetModuleHandleW(PCWSTR::null())?;
             proc(&mut h_instance as *mut _ as *mut std::os::raw::c_void, cef_sandbox.ptr)
         };
-        debug!("  finished: {}", exit_code);
+        debug!("  finished: {exit_code}");
         std::process::exit(exit_code);
     }
 
@@ -349,10 +409,10 @@ fn get_full_vm_options(configuration: &dyn LaunchConfiguration, _cef_sandbox: &O
     debug!("Looking for custom properties environment variable");
     match configuration.get_custom_properties_file() {
         Ok(path) => {
-            debug!("Custom properties file: {:?}", path);
+            debug!("Custom properties file: {path:?}");
             vm_options.push(jvm_property!("idea.properties.file", path.to_string_checked()?));
         }
-        Err(e) => { debug!("Failed: {}", e.to_string()); }
+        Err(e) => { debug!("Failed: {e}"); }
     }
 
     debug!("Assembling classpath");
@@ -382,10 +442,10 @@ pub fn get_caches_home() -> Result<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn get_known_folder_path(rfid: &GUID, rfid_debug_name: &str) -> Result<PathBuf> {
-    debug!("Calling SHGetKnownFolderPath({})", rfid_debug_name);
+    debug!("Calling SHGetKnownFolderPath({rfid_debug_name})");
     let result: PWSTR = unsafe { Shell::SHGetKnownFolderPath(rfid, Shell::KF_FLAG_CREATE, None) }?;
     let result_str = unsafe { result.to_string() }?;
-    debug!("  result: {}", result_str);
+    debug!("  result: {result_str}");
     Ok(PathBuf::from(result_str))
 }
 
@@ -435,11 +495,11 @@ fn win_user_profile_dir() -> Result<String> {
     let token = HANDLE(-4isize as *mut std::ffi::c_void);  // as defined in `GetCurrentProcessToken()`
     let mut buf = [0u16; Foundation::MAX_PATH as usize];
     let mut size = buf.len() as u32;
-    debug!("Calling GetUserProfileDirectoryW({:?})", token);
+    debug!("Calling GetUserProfileDirectoryW({token:?})");
     let result = unsafe {
         Shell::GetUserProfileDirectoryW(token, Some(PWSTR::from_raw(buf.as_mut_ptr())), std::ptr::addr_of_mut!(size))
     };
-    debug!("  result: {:?}, size: {}", result, size);
+    debug!("  result: {result:?}, size: {size}");
     if result.is_ok() {
         Ok(String::from_utf16(&buf[0..(size - 1) as usize])?)
     } else {
@@ -467,9 +527,9 @@ pub fn get_path_from_user_config(config_raw: &str, expecting_dir: bool) -> Resul
 
     let path = PathBuf::from(config_value);
     if expecting_dir && !path.is_dir() {
-        bail!("Not a directory: {:?}", path);
+        bail!("Not a directory: {path:?}");
     } else if !expecting_dir && !path.is_file() {
-        bail!("Not a file: {:?}", path);
+        bail!("Not a file: {path:?}");
     }
 
     Ok(path)
@@ -492,7 +552,7 @@ impl PathExt for Path {
     fn to_string_checked(&self) -> Result<String> {
         self.to_str()
             .map(|s| s.to_string())
-            .ok_or_else(|| anyhow!("Inconvertible path: {:?}", self))
+            .ok_or_else(|| anyhow!("Inconvertible path: {self:?}"))
     }
 
     #[cfg(target_os = "windows")]

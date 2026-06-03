@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -96,43 +97,7 @@ public fun TabStrip(
 
     Box(
         modifier
-            .onPreviewKeyEvent { event ->
-                if (!enabled || tabs.isEmpty()) return@onPreviewKeyEvent false
-
-                when (event.type) {
-                    KeyEventType.KeyDown ->
-                        when (event.key) {
-                            Key.DirectionLeft -> {
-                                tabs[if (selectedIndex > 0) (selectedIndex - 1) else tabs.lastIndex].onClick()
-                                true
-                            }
-
-                            Key.DirectionRight -> {
-                                tabs[(selectedIndex + 1) % tabCount].onClick()
-                                true
-                            }
-
-                            else -> false
-                        }
-
-                    KeyEventType.KeyUp ->
-                        when (event.key) {
-                            Key.MoveHome -> {
-                                tabs.first().onClick()
-                                true
-                            }
-
-                            Key.MoveEnd -> {
-                                tabs.last().onClick()
-                                true
-                            }
-
-                            else -> false
-                        }
-
-                    else -> false
-                }
-            }
+            .onPreviewKeyEvent(handleTabStripKeyEvent(enabled, tabs, selectedIndex, tabCount))
             .focusable(enabled, interactionSource)
             .hoverable(interactionSource, enabled)
     ) {
@@ -183,13 +148,80 @@ public fun TabStrip(
             }
         }
 
+        val scrollbarVisibility = style.scrollbarStyle.scrollbarVisibility
+
         AnimatedVisibility(
             visible = tabStripState.isHovered,
-            enter = fadeIn(tween(durationMillis = 125, delayMillis = 0, easing = LinearEasing)),
-            exit = fadeOut(tween(durationMillis = 125, delayMillis = 700, easing = LinearEasing)),
+            enter =
+                fadeIn(
+                    tween(
+                        durationMillis = scrollbarVisibility.thumbColorAnimationDuration.inWholeMilliseconds.toInt(),
+                        delayMillis = 0,
+                        easing = LinearEasing,
+                    )
+                ),
+            exit =
+                fadeOut(
+                    tween(
+                        durationMillis = scrollbarVisibility.thumbColorAnimationDuration.inWholeMilliseconds.toInt(),
+                        delayMillis = scrollbarVisibility.lingerDuration.inWholeMilliseconds.toInt(),
+                        easing = LinearEasing,
+                    )
+                ),
             modifier = Modifier.semantics { hideFromAccessibility() },
         ) {
             HorizontalScrollbar(scrollState, style = style.scrollbarStyle, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+private fun handleTabStripKeyEvent(
+    enabled: Boolean,
+    tabs: List<TabData>,
+    selectedIndex: Int,
+    tabCount: Int,
+): (KeyEvent) -> Boolean = onPreviewKeyEvent@{ event ->
+    if (!enabled || tabs.isEmpty()) return@onPreviewKeyEvent false
+
+    when (event.type) {
+        KeyEventType.KeyDown -> {
+            when (event.key) {
+                Key.DirectionLeft -> {
+                    tabs[if (selectedIndex > 0) (selectedIndex - 1) else tabs.lastIndex].onClick()
+                    true
+                }
+
+                Key.DirectionRight -> {
+                    tabs[(selectedIndex + 1) % tabCount].onClick()
+                    true
+                }
+
+                else -> {
+                    false
+                }
+            }
+        }
+
+        KeyEventType.KeyUp -> {
+            when (event.key) {
+                Key.MoveHome -> {
+                    tabs.first().onClick()
+                    true
+                }
+
+                Key.MoveEnd -> {
+                    tabs.last().onClick()
+                    true
+                }
+
+                else -> {
+                    false
+                }
+            }
+        }
+
+        else -> {
+            false
         }
     }
 }

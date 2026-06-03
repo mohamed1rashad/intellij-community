@@ -8,11 +8,17 @@ import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.lang.Language;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaCodeFragment;
+import com.intellij.psi.JavaCodeFragmentFactory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiInvalidElementAccessException;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xdebugger.XExpression;
 import com.intellij.xdebugger.XSourcePosition;
@@ -55,9 +61,14 @@ public class JavaDebuggerEditorsProvider extends XDebuggerEditorsProviderBase {
 
   @Override
   public @NotNull XExpression createExpression(@NotNull Project project, @NotNull Document document, @Nullable Language language, @NotNull EvaluationMode mode) {
-    PsiFile psiFile = ReadAction.compute(() -> PsiDocumentManager.getInstance(project).getPsiFile(document));
-    if (psiFile instanceof JavaCodeFragment) {
-      return new XExpressionImpl(document.getText(), language, StringUtil.nullize(((JavaCodeFragment)psiFile).importsToString()), mode);
+    try {
+      PsiFile psiFile = ReadAction.computeBlocking(() -> PsiDocumentManager.getInstance(project).getPsiFile(document));
+      if (psiFile instanceof JavaCodeFragment fragment) {
+        return new XExpressionImpl(document.getText(), language, StringUtil.nullize(fragment.importsToString()), mode);
+      }
+    }
+    catch (PsiInvalidElementAccessException e) {
+      Logger.getInstance(JavaDebuggerEditorsProvider.class).error("Cannot create expression, as file is invalid", e);
     }
     return super.createExpression(project, document, language, mode);
   }

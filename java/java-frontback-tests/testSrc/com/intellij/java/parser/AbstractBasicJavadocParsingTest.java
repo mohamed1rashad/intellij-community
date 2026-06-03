@@ -61,6 +61,7 @@ public abstract class AbstractBasicJavadocParsingTest extends AbstractBasicJavaP
   public void testLinkTag8() { doTest(true); }
   public void testLinkTag9() { doTest(true); }
   public void testLinkTag10() { doTest(true); }
+  public void testLinkTag11() { doTest(true); }
 
   public void testParamTag0() { doTest(true); }
   public void testParamTag1() { doTest(true); }
@@ -91,8 +92,10 @@ public abstract class AbstractBasicJavadocParsingTest extends AbstractBasicJavaP
   public void testIDEADEV_41403() { doTest(true); }
 
   public void testValueQualified() { doTest(true); }
+  public void testValueQualifiedBreak() { doTest(true); }
   public void testValueUnqualifiedWithHash() { doTest(true); }
   public void testValueUnqualifiedWithoutHash() { doTest(true); }
+  public void testValueWithFormat() { doTest(true); }
 
   public void testThrowsTag() { doTest(true); }
   public void testUsesTag() { doTest(true); }
@@ -113,6 +116,9 @@ public abstract class AbstractBasicJavadocParsingTest extends AbstractBasicJavaP
   public void testSnippetTag10() { doTest(true); }
   public void testSnippetTag11() { doTest(true); }
   public void testSnippetTag12() { doTest(true); }
+
+  public void testNestedTag0() { doTest(true); }
+  public void testNestedTag1() { doTest(true); }
 
   // Markdown version, to ensure parity
   public void testAdjacent01Markdown() { doTest(true); }
@@ -174,6 +180,7 @@ public abstract class AbstractBasicJavadocParsingTest extends AbstractBasicJavaP
   public void testSeeTag19Markdown() { doTest(true); }
   public void testSeeTag20Markdown() { doTest(true); }
   public void testSeeTag21Markdown() { doTest(true); }
+  public void testSeeTag22Markdown() { doTest(true); }
 
   public void testSeparated01Markdown() { doTest(true); }
 
@@ -232,6 +239,15 @@ public abstract class AbstractBasicJavadocParsingTest extends AbstractBasicJavaP
   public void testReferenceLinkMarkdown11() { doTest(true); }
   public void testReferenceLinkMarkdown12() { doTest(true); }
   public void testReferenceLinkMarkdown13() { doTest(true); }
+  public void testReferenceLinkMarkdown14() { doTest(true); }
+  public void testReferenceLinkMarkdown15() { doTest(true); }
+  public void testReferenceLinkMarkdown16() { doTest(true); }
+  public void testReferenceLinkMarkdown17() { doTest(true); }
+
+  public void testNestedTag0Markdown() { doTest(true); }
+  public void testNestedTag1Markdown() { doTest(true); }
+  
+  public void testEscapedCharsMarkdown() { doTest(true); }
 
   public void testMarkdownWithDocCommentBeforeMarkdown() {
     setLanguageLevel(LanguageLevel.JDK_21);
@@ -254,4 +270,6 @@ public abstract class AbstractBasicJavadocParsingTest extends AbstractBasicJavaP
   }
 
   public void testNoValueElementTagsMarkdown() { doTest(true); }
+
+  public void testNoAsterisks() { doTest(true); }
 }

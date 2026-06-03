@@ -2,99 +2,110 @@
 
 package com.intellij.tools.build.bazel.jvmIncBuilder.impl
 
-import java.io.ByteArrayOutputStream
-import java.io.DataOutputStream
+import org.jetbrains.annotations.TestOnly
 import org.jetbrains.jps.dependency.BackDependencyIndex
 import org.jetbrains.jps.dependency.DependencyGraph
 import org.jetbrains.jps.dependency.ReferenceID
 import org.jetbrains.jps.dependency.java.JvmNodeReferenceID
-import org.jetbrains.jps.dependency.java.SubclassesIndex
+import org.jetbrains.jps.dependency.kotlin.KotlinSubclassesIndex
 import org.jetbrains.jps.dependency.kotlin.LookupsIndex
+import java.io.DataOutput
 
-const val VERSION = 1
+const val VERSION = 4
 
-internal fun prepareSerializedData(graph: DependencyGraph): Map<String, ByteArray> {
-  val serializedDataResult = mutableMapOf<String, ByteArray>()
+internal fun exportCRIData(graph: DependencyGraph, dataOut : DataOutput) {
+  dataOut.writeInt(VERSION)
 
   // process subtypes
-  val subclassesIndex: BackDependencyIndex? = graph.getIndex(SubclassesIndex.NAME)
-  val subclassesCount = subclassesIndex?.keys?.count() ?: 0
-  if (subclassesCount > 0) {
-    ByteArrayOutputStream().use { byteStream ->
-      DataOutputStream(byteStream).use { dataOut ->
-        dataOut.writeVersion()
-        dataOut.writeInt(subclassesCount)
-        subclassesIndex?.keys?.forEach { key ->
-          val dependencies = subclassesIndex.getDependencies(key).map { it.toFqName() }
-          dataOut.writeUTF(key.toFqName())
-          dataOut.writeInt(dependencies.size)
-          dependencies.forEach { dataOut.writeUTF(it) }
-        }
-      }
-      byteStream.toByteArray()
-    }.also { serializedDataResult["subtypes"] = it }
-  }
+  val subclassesIndex: BackDependencyIndex? = graph.getIndex(KotlinSubclassesIndex.NAME)
+  val subclassesFilteredKeys = subclassesIndex?.keys
+    ?.filter { key -> subclassesIndex.getDependencies(key).iterator().hasNext() }
+  val subclassesCount = subclassesFilteredKeys?.count() ?: 0
+  dataOut.writeInt(subclassesCount)
+  subclassesFilteredKeys
+    ?.sortedBy { it.toFqName() }
+    ?.forEach { key ->
+      val dependencies = subclassesIndex.getDependencies(key).map { it.toFqName() }.sorted()
+      dataOut.writeUTF(key.toFqName())
+      dataOut.writeInt(dependencies.size)
+      dependencies.forEach { dataOut.writeUTF(it) }
+    }
 
   // process lookups
   val lookupsIndex: BackDependencyIndex? = graph.getIndex(LookupsIndex.NAME)
   val lookupsCount = lookupsIndex?.keys?.count() ?: 0
-  val lookupsAccumulator = mutableMapOf<String, Int>()
-  if (lookupsCount > 0) {
-    ByteArrayOutputStream().use { byteStream ->
-      DataOutputStream(byteStream).use { dataOut ->
-        dataOut.writeVersion()
-        dataOut.writeInt(lookupsCount)
-        lookupsIndex?.keys?.forEach { key ->
-          val dependencies = lookupsIndex.getDependencies(key)
-            .mapNotNull { (it as? JvmNodeReferenceID)?.nodeName }
-          dataOut.writeUTF(key.toFqName())
-          dataOut.writeInt(dependencies.count())
-          dependencies.forEach {
-            dataOut.writeInt(it.addFilePathIfNeeded(lookupsAccumulator)) }
+  val fileIdToPathEntryAccumulator = mutableMapOf<String, Int>()
+  dataOut.writeInt(lookupsCount)
+  lookupsIndex?.keys
+    ?.sortedBy { it.toFqName() }
+    ?.forEach { key ->
+      val dependencies = lookupsIndex.getDependencies(key)
+        .mapNotNull { (it as? JvmNodeReferenceID)?.nodeName }
+        .sorted()
+      dataOut.writeUTF(key.toFqName())
+      dataOut.writeInt(dependencies.count())
+      dependencies
+        .map { dependency -> dependency.addFilePathIfNeeded(fileIdToPathEntryAccumulator) }
+        .forEach { indexedDependency ->
+          dataOut.writeInt(indexedDependency)
         }
-      }
-      byteStream.toByteArray()
-    }.also { serializedDataResult["lookups"] = it }
-
-    if (lookupsAccumulator.isNotEmpty()) {
-      ByteArrayOutputStream().use { byteStream ->
-        DataOutputStream(byteStream).use { dataOut ->
-          dataOut.writeVersion()
-          dataOut.writeInt(lookupsAccumulator.size)
-          lookupsAccumulator.forEach { (path, fileId) ->
-            dataOut.writeInt(fileId)
-            dataOut.writeUTF(path)
-          }
-        }
-        byteStream.toByteArray()
-      }.also { serializedDataResult["fileIdToPath"] = it }
     }
-  }
 
-  return serializedDataResult
+  dataOut.writeInt(fileIdToPathEntryAccumulator.size)
+  fileIdToPathEntryAccumulator.toSortedMap().forEach { (path, fileId) ->
+    dataOut.writeInt(fileId)
+    dataOut.writeUTF(path)
+  }
 }
 
 /**
- * Converts the current `ReferenceID` to its fully qualified name (FqName) representation.
+ * Converts a JVM reference ID to a dot-separated fully qualified name.
  *
- * Example transformation:
- * Input:  `com/intellij/AppKt$foo$3$1`
- * Output: `com.intellij.AppKt.foo`
- *
- * @return The fully qualified name as a `String`.
+ * Examples:
+ * - `com/example/Foo` → `com.example.Foo`
+ * - `com/example/Foo$Bar` → `com.example.Foo.Bar`
+ * - `com/example/Foo$1` → `com.example.Foo`
+ * - `com/example/Foo$$Lambda$3` → `com.example.Foo.$Lambda`
  */
 private fun ReferenceID.toFqName(): String {
-  return (this as? JvmNodeReferenceID)?.nodeName
-           ?.replace('/', '.')
-           ?.replace(DOLLAR_DIGITS_SUFFIX_REGEX, "")
-           ?.replace('$', '.')
-         ?: this.toString()
+  val jvmName: String = (this as? JvmNodeReferenceID)?.nodeName ?: return toString()
+
+  return jvmName.normalizeJvmName()
 }
 
-private val DOLLAR_DIGITS_SUFFIX_REGEX = Regex("(?:\\$\\d+)+$")
+private fun String.normalizeJvmName(): String =
+  this.replace('/', '.')
+    .replace("$$", DOUBLE_DOLLAR_PLACEHOLDER)
+    .removeAnonymousSuffix()
+    .replace('$', '.')
+    .replace(DOUBLE_DOLLAR_PLACEHOLDER, ".$")
+
+@TestOnly
+fun String.normalizeJvmNameForTests(): String = normalizeJvmName()
+
+private const val DOUBLE_DOLLAR_PLACEHOLDER = "\u0000DOUBLE_DOLLAR\u0000"
+private fun String.removeAnonymousSuffix(): String {
+  var end = length
+
+  while (end > 0) {
+    var i = end - 1
+    // Skip digits
+    while (i >= 0 && this[i].isDigit()) {
+      i--
+    }
+
+    // Check for $ and at least one digit found
+    if (i >= 0 && i < end - 1 && this[i] == '$') {
+      end = i
+    }
+    else {
+      break
+    }
+  }
+
+  return if (end == length) this else substring(0, end)
+}
 
 private fun String.addFilePathIfNeeded(fileIdToPathEntryAccumulator: MutableMap<String, Int>): Int {
   return fileIdToPathEntryAccumulator.computeIfAbsent(this) { fileIdToPathEntryAccumulator.size + 1 }
 }
-
-private fun DataOutputStream.writeVersion() = writeInt(VERSION)

@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.platform.core` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "core_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "core",
   module_name = "intellij.platform.core",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":core_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = "@community//:k8",
   deps = [
     "//platform/util",
@@ -20,13 +15,63 @@ jvm_library(
     "//platform/util/progress",
     "//platform/util/jdom",
     "@lib//:kotlin-stdlib",
-    "@lib//:kotlinx-coroutines-core",
+    "//libraries/kotlinx/coroutines/core",
     "//platform/util/xmlDom",
     "//platform/diagnostic",
     "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
     "//platform/util/coroutines",
+    "//platform/util/multiplatform",
+    "//platform/util/base/multiplatform",
+    "//platform/util/base",
     "@lib//:jetbrains-annotations",
+    "//libraries/fastutil",
   ],
-  exports = ["//platform/extensions"]
+  exports = [
+    "//platform/extensions",
+    "//platform/util/multiplatform",
+    "//platform/util/base/multiplatform",
+    "//platform/util/base",
+  ]
+)
+
+jvm_library(
+  name = "core_test_lib",
+  testonly = True,
+  module_name = "intellij.platform.core",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = "@community//:k8",
+  exports = [
+    "//platform/extensions",
+    "//platform/extensions:extensions_test_lib",
+    "//platform/util/multiplatform",
+    "//platform/util/multiplatform:multiplatform_test_lib",
+    "//platform/util/base/multiplatform",
+    "//platform/util/base/multiplatform:multiplatform_test_lib",
+    "//platform/util/base",
+    "//platform/util/base:base_test_lib",
+  ],
+  runtime_deps = [
+    ":core",
+    "//platform/util:util_test_lib",
+    "//platform/extensions:extensions_test_lib",
+    "//platform/util/progress:progress_test_lib",
+    "//platform/util/jdom:jdom_test_lib",
+    "//libraries/kotlinx/coroutines/core:core_test_lib",
+    "//platform/util/xmlDom:xmlDom_test_lib",
+    "//platform/diagnostic:diagnostic_test_lib",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable_test_lib",
+    "//platform/util/coroutines:coroutines_test_lib",
+    "//platform/util/multiplatform:multiplatform_test_lib",
+    "//platform/util/base/multiplatform:multiplatform_test_lib",
+    "//platform/util/base:base_test_lib",
+    "//libraries/fastutil:fastutil_test_lib",
+  ]
 )
 ### auto-generated section `build intellij.platform.core` end
+
+### auto-generated section `iml intellij.platform.core` start
+exports_files([
+  "intellij.platform.core.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.platform.core` end

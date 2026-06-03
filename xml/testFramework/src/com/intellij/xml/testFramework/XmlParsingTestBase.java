@@ -1,7 +1,13 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.xml.testFramework;
 
-import com.intellij.lang.*;
+import com.intellij.lang.ASTNode;
+import com.intellij.lang.HtmlScriptContentProvider;
+import com.intellij.lang.InjectableLanguage;
+import com.intellij.lang.Language;
+import com.intellij.lang.LanguageASTFactory;
+import com.intellij.lang.LanguageHtmlScriptContentProvider;
+import com.intellij.lang.ParserDefinition;
 import com.intellij.lang.html.HTMLLanguage;
 import com.intellij.lang.html.HTMLParserDefinition;
 import com.intellij.lang.xml.XMLLanguage;
@@ -14,11 +20,19 @@ import com.intellij.platform.syntax.psi.LanguageSyntaxDefinitions;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.source.tree.LeafElement;
+import com.intellij.psi.impl.source.tree.TreeElement;
 import com.intellij.psi.impl.source.tree.TreeUtil;
+import com.intellij.psi.impl.source.tree.mvcc.InternalPsiVersioning;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.psi.xml.*;
+import com.intellij.psi.xml.StartTagEndTokenProvider;
+import com.intellij.psi.xml.XmlDoctype;
+import com.intellij.psi.xml.XmlDocument;
+import com.intellij.psi.xml.XmlElementTypeConverterExtension;
+import com.intellij.psi.xml.XmlFile;
+import com.intellij.psi.xml.XmlProlog;
 import com.intellij.testFramework.JUnit38AssumeSupportRunner;
 import com.intellij.testFramework.ParsingTestCase;
+import com.intellij.testFramework.PerformanceUnitTest;
 import com.intellij.testFramework.PlatformTestUtil;
 import com.intellij.tools.ide.metrics.benchmark.Benchmark;
 import org.jetbrains.annotations.NonNls;
@@ -178,17 +192,19 @@ public abstract class XmlParsingTestBase extends ParsingTestCase {
     doTestXml(loadFile("manyErrors.xml"));
   }
 
-  private static void transformAllChildren(final ASTNode file) {
-    for (ASTNode child = file.getFirstChildNode(); child != null; child = child.getTreeNext()) {
-      transformAllChildren(child);
+  private static void transformAllChildren(final ASTNode file, long version) {
+    for (TreeElement child = ((TreeElement)file).getFirstChildNodeVersioned(version); child != null; child = child.getTreeNextVersioned(version)) {
+      transformAllChildren(child, version);
     }
   }
 
+  @PerformanceUnitTest
   public void testPerformance1() throws Exception {
     //noinspection SpellCheckingInspection
     doTestPerformance("pallada.xml");
   }
 
+  @PerformanceUnitTest
   public void testPerformance2() throws Exception {
     doTestPerformance("performance2.xml");
   }
@@ -197,13 +213,15 @@ public abstract class XmlParsingTestBase extends ParsingTestCase {
     final String text = loadFileDefault(getXmlParsingTestDataPath() + "psi/xml", fileName);
     long start = System.nanoTime();
     final PsiFile file = createFile(fileName, text);
-    transformAllChildren(file.getNode());
+    long version1 = InternalPsiVersioning.getCurrentPsiVersion();
+    transformAllChildren(file.getNode(), version1);
     LOG.debug("First parsing took " + (System.nanoTime() - start) + "ns");
 
     var perfTest = Benchmark.newBenchmark("XML Parser Performance on " + fileName, () -> {
       for (int i = 0; i < 10; i++) {
         PsiFile next = createPsiFile("test" + i, text);
-        transformAllChildren(next.getNode());
+        long version2 = InternalPsiVersioning.getCurrentPsiVersion();
+        transformAllChildren(next.getNode(), version2);
       }
     });
 

@@ -1,0 +1,69 @@
+package com.intellij.ide.starter.driver.engine.remoteDev
+
+import com.intellij.driver.sdk.waitNotNullAsync
+import com.intellij.ide.starter.process.exec.ExecOutputRedirect
+import com.intellij.ide.starter.process.exec.ProcessExecutor
+import com.intellij.ide.starter.process.getProcessList
+import com.intellij.ide.starter.runner.IDERunContext
+import com.intellij.ide.starter.utils.getRunningDisplays
+import com.intellij.tools.ide.util.common.logError
+import com.intellij.tools.ide.util.common.logOutput
+import com.intellij.tools.ide.util.common.withRetry
+import kotlin.io.path.div
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.seconds
+
+object XorgWindowManagerHandler {
+
+  suspend fun provideDisplay(): Int {
+    return waitNotNullAsync("There is a display", 5.seconds) { getRunningDisplays().firstOrNull() }
+  }
+
+  // region Fluxbox
+  private val fluxboxName = "fluxbox"
+
+  private suspend fun isFluxBoxIsRunning(displayWithColumn: String): Boolean {
+    val running = getProcessList(processName = fluxboxName).any { it.arguments.contains(":$displayWithColumn") }
+    logOutput("$fluxboxName is running: $running")
+    return running
+  }
+
+  private suspend fun isFluxBoxInstalled(): Boolean {
+    val result = ExecOutputRedirect.ToString()
+    ProcessExecutor(
+      presentableName = "which $fluxboxName",
+      args = listOf("which", fluxboxName),
+      workDir = null,
+      stdoutRedirect = result,
+      analyzeProcessExit = false
+    ).startCancellable()
+    return result.read().isNotBlank()
+  }
+
+  suspend fun startFluxBox(ideRunContext: IDERunContext) {
+    val displayWithColumn = ideRunContext.testContext.ide.vmOptions.environmentVariables["DISPLAY"]!!
+
+    if (!isFluxBoxInstalled()) {
+      logError("FluxBox is not installed. Please be aware the possibility of test env will be restricted. E.g. you will not be able to resize windows.")
+      return
+    }
+
+    if (!isFluxBoxIsRunning(displayWithColumn)) {
+      val fluxboxRunLog = ideRunContext.logsDir / "$fluxboxName.log"
+      withRetry("$fluxboxName failed to start", retries = 5, delay = 3.seconds) {
+        ProcessExecutor(
+          presentableName = "Start $fluxboxName",
+          timeout = 2.hours,
+          args = listOf("/usr/bin/${fluxboxName}", "-display", displayWithColumn),
+          workDir = null,
+          stdoutRedirect = ExecOutputRedirect.ToFile(fluxboxRunLog),
+          stderrRedirect = ExecOutputRedirect.ToFile(fluxboxRunLog)
+        ).startCancellable()
+      }
+    }
+    else {
+      logOutput("$fluxboxName is already running on display $displayWithColumn")
+    }
+  }
+  // endregion Fluxbox
+}

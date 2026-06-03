@@ -12,9 +12,17 @@ import com.jetbrains.python.psi.PyElementVisitor;
 import com.jetbrains.python.psi.PyExpression;
 import com.jetbrains.python.psi.impl.references.PyOperatorReference;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyAnyType;
+import com.jetbrains.python.psi.types.PyStructuralType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeChecker;
+import com.jetbrains.python.psi.types.PyUnionType;
+import com.jetbrains.python.psi.types.PyUnsafeUnionType;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import static com.jetbrains.python.psi.types.PyTypeUtilKt.isUnknown;
 
 
 public class PyBinaryExpressionImpl extends PyElementImpl implements PyBinaryExpression {
@@ -61,7 +69,7 @@ public class PyBinaryExpressionImpl extends PyElementImpl implements PyBinaryExp
       final PyExpression right = getRightExpression();
       final PyType rightType = right != null ? context.getType(right) : null;
       if (leftType == null && rightType == null) {
-        return null;
+        return PyAnyType.getUnknown();
       }
       if (isOperator(PyNames.OR)) {
         // TODO: also exclude Literal[False, 0, ""]
@@ -75,17 +83,32 @@ public class PyBinaryExpressionImpl extends PyElementImpl implements PyBinaryExp
       return PyBuiltinCache.getInstance(this).getBoolType();
     }
     PyType callResultType = PyCallExpressionHelper.getCallType(this, context, key);
-    if (callResultType == null) {
+    if (callResultType instanceof PyAnyType.Any) return callResultType;
+    if (isUnknown(callResultType)) {
       if (referencedName != null && PyNames.COMPARISON_OPERATORS.contains(referencedName)) {
-        // we don't know if it was explicit or not, so we form an unsafe union of Any and bool
-        // TODO: when { explicit Any -> Any, Unknown -> UnsafeUnion[bool | Any] }
-        return PyUnsafeUnionType.unsafeUnion(null, PyBuiltinCache.getInstance(this).getBoolType());
+        // it was not an explicit `Any`, so we form an unsafe union of `Unknown` and `bool`
+        return PyUnsafeUnionType.unsafeUnion(callResultType, PyBuiltinCache.getInstance(this).getBoolType());
       }
-      return null;
+      return callResultType;
     }
     boolean bothOperandsAreKnown = operandIsKnown(getLeftExpression(), context) && operandIsKnown(getRightExpression(), context);
     // TODO requires weak union. See PyTypeCheckerInspectionTest#testBinaryExpressionWithUnknownOperand
     return bothOperandsAreKnown ? callResultType : PyUnionType.createWeakType(callResultType);
+  }
+
+  @Override
+  public PyExpression getLeftExpression() {
+    return PyBinaryExpression.super.getLeftExpression();
+  }
+
+  @Override
+  public @Nullable PyExpression getRightExpression() {
+    return PyBinaryExpression.super.getRightExpression();
+  }
+
+  @Override
+  public @Nullable PyExpression getQualifier() {
+    return PyBinaryExpression.super.getQualifier();
   }
 
   private static boolean operandIsKnown(@Nullable PyExpression operand, @NotNull TypeEvalContext context) {

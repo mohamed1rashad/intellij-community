@@ -9,12 +9,19 @@ import com.intellij.ui.LayeredIcon
 import com.intellij.ui.RetrievableIcon
 import com.intellij.ui.RowIcon
 import com.intellij.ui.icons.CachedImageIcon
+import com.intellij.ui.icons.ImageDescriptor
 import org.jetbrains.annotations.ApiStatus.Internal
 import javax.swing.Icon
 import kotlin.math.min
 
 internal fun getIconData(icon: Icon?): CachedIconPresentation? {
-  return findCachedImageIcon(icon)?.getCoords()?.let {
+  val cachedIcon = findCachedImageIcon(icon) ?: return null
+
+  if (cachedIcon.imageFlags and ImageDescriptor.NO_TREE_PRESENTATION_CACHE != 0) {
+    return null
+  }
+  
+  return cachedIcon.getCoords()?.let {
     getIconData(it)
   }
 }
@@ -47,27 +54,29 @@ private fun getBiggestRow(icon: RowIcon): Icon? =
 private val Icon.size: Int
   get() = min(iconWidth, iconHeight)
 
-private val DEFAULT_ICON = AllIcons.FileTypes.Unknown
-
 @get:Internal
-val CachedPresentationData.icon: Icon get() = getLoadingIcon(iconData)
+val CachedPresentationData.icon: Icon get() = getLoadingIcon(iconData, isLeaf)
 
-private fun getLoadingIcon(iconData: CachedIconPresentation?): Icon {
-  if (iconData == null) return DEFAULT_ICON
+private fun getDefaultIcon(isLeaf: Boolean): Icon {
+  return if (isLeaf) AllIcons.FileTypes.Unknown else AllIcons.Nodes.Folder
+}
+
+private fun getLoadingIcon(iconData: CachedIconPresentation?, isLeaf: Boolean): Icon {
+  if (iconData == null) return getDefaultIcon(isLeaf)
   val iconManager = IconManager.getInstance()
   return iconManager.createDeferredIcon(
-    DEFAULT_ICON,
+    getDefaultIcon(isLeaf),
     iconData,
   ) {
     val classLoader = iconManager.getClassLoader(iconData.plugin, iconData.module)
     if (classLoader == null) {
-      DEFAULT_ICON
+      getDefaultIcon(isLeaf)
     }
     else try {
       iconManager.getIcon(iconData.path, classLoader)
     }
-    catch (e: Exception) {
-      DEFAULT_ICON
+    catch (_: Exception) {
+      getDefaultIcon(isLeaf)
     }
   }
 }

@@ -4,7 +4,13 @@ package org.jetbrains.idea.devkit.dom;
 import com.intellij.ide.presentation.Presentation;
 import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.psi.PsiClass;
-import com.intellij.util.xml.*;
+import com.intellij.util.xml.Attribute;
+import com.intellij.util.xml.Convert;
+import com.intellij.util.xml.DomUtil;
+import com.intellij.util.xml.ExtendClass;
+import com.intellij.util.xml.GenericAttributeValue;
+import com.intellij.util.xml.Required;
+import com.intellij.util.xml.SubTagList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.devkit.dom.impl.ActionOrGroupPresentationProvider;
@@ -49,6 +55,13 @@ public interface Action extends ActionOrGroup {
   List<KeyboardShortcut> getKeyboardShortcuts();
 
   KeyboardShortcut addKeyboardShortcut();
+
+
+  @NotNull
+  @SubTagList("keyboard-gesture-shortcut")
+  List<KeyboardGestureShortcut> getKeyboardGestureShortcuts();
+
+  KeyboardGestureShortcut addKeyboardGestureShortcut();
 
 
   @NotNull

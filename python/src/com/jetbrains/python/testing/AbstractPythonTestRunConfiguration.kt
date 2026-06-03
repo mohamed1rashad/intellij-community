@@ -10,21 +10,21 @@ import com.intellij.execution.target.value.TargetEnvironmentFunction
 import com.intellij.execution.testframework.AbstractTestProxy
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.progress.runBlockingMaybeCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.util.PsiTreeUtil
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.extensions.getQName
-import com.jetbrains.python.packaging.management.PythonPackageManager
-import com.jetbrains.python.packaging.management.hasInstalledPackage
 import com.jetbrains.python.psi.PyClass
 import com.jetbrains.python.psi.PyFile
 import com.jetbrains.python.psi.PyFunction
+import com.jetbrains.python.psi.resolve.PackageAvailabilitySpec
+import com.jetbrains.python.psi.resolve.isPackageAvailable
 import com.jetbrains.python.run.AbstractPythonRunConfiguration
 import com.jetbrains.python.testing.AbstractPythonTestRunConfiguration.Companion.TEST_NAME_PARTS_SPLITTER
 import org.jetbrains.annotations.ApiStatus.Internal
+
 
 /**
  * Parent of all test configurations
@@ -33,7 +33,11 @@ import org.jetbrains.annotations.ApiStatus.Internal
  */
 abstract class AbstractPythonTestRunConfiguration<T : AbstractPythonTestRunConfiguration<T>>
 @JvmOverloads
-protected constructor(project: Project, factory: ConfigurationFactory, private val requiredPackage: String? = null) :
+protected constructor(
+  project: Project,
+  factory: ConfigurationFactory,
+  private val packageSpec: PackageAvailabilitySpec? = null,
+) :
   AbstractPythonRunConfiguration<T>(project, factory) {
   /**
    * Create test spec (string to be passed to runner, probably glued with [TEST_NAME_PARTS_SPLITTER])
@@ -109,9 +113,9 @@ protected constructor(project: Project, factory: ConfigurationFactory, private v
   @Throws(RuntimeConfigurationException::class)
   override fun checkConfiguration() {
     super.checkConfiguration()
-    if (requiredPackage != null && !isFrameworkInstalled()) {
+    if (packageSpec != null && !isFrameworkInstalled()) {
       throw RuntimeConfigurationWarning(
-        PyBundle.message("runcfg.testing.no.test.framework", requiredPackage))
+        PyBundle.message("runcfg.testing.no.test.framework", packageSpec.packageName))
     }
   }
 
@@ -125,11 +129,8 @@ protected constructor(project: Project, factory: ConfigurationFactory, private v
       logger<AbstractPythonRunConfiguration<*>>().warn("Failed to detect test framework: SDK is null")
       return false
     }
-    val requiredPackage = this.requiredPackage ?: return true // Installed by default
-    val isInstalled = runBlockingMaybeCancellable {
-      PythonPackageManager.forSdk(project, sdk).hasInstalledPackage(requiredPackage)
-    }
-    return isInstalled
+    if (packageSpec == null) return true
+    return isPackageAvailable(project, sdk, packageSpec)
   }
 
 

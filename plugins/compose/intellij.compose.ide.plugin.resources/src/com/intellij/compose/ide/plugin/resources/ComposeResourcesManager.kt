@@ -6,6 +6,7 @@ import com.intellij.compose.ide.plugin.shared.associateNotNull
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.Service.Level
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.externalSystem.model.DataNode
 import com.intellij.openapi.externalSystem.model.project.ModuleData
 import com.intellij.openapi.externalSystem.service.project.ProjectDataManager
@@ -39,28 +40,34 @@ internal class ComposeResourcesManager(private val project: Project) {
 
   /** Retrieves all `ComposeResourcesModel` data nodes associated with the current project
    * in case of multiple modules having compose resources */
-  private val composeResourcesModels: Collection<DataNode<ComposeResourcesModel>>
+  private val composeResourcesModels: Collection<DataNode<ComposeResourcesModel>>?
     get() {
       val externalProjectData = ProjectDataManager.getInstance()
-                                  .getExternalProjectsData(project, SYSTEM_ID)
-                                  .firstOrNull() ?: return emptyList()
-      val externalProjectStructure = externalProjectData.externalProjectStructure ?: return emptyList()
-      return ExternalSystemApiUtil.findAllRecursively(externalProjectStructure, COMPOSE_RESOURCES_KEY)
+        .getExternalProjectsData(project, SYSTEM_ID)
+      if (externalProjectData.isEmpty()) return null // Returns null so the AtomicReference doesn't cache it
+
+      val models = externalProjectData
+        .mapNotNull { it.externalProjectStructure }
+        .flatMap { ExternalSystemApiUtil.findAllRecursively(it, COMPOSE_RESOURCES_KEY) }
+      log.info("ComposeResources: Scanned ${externalProjectData.size} projects, found ${models.size} resource models.")
+      return models
     }
 
-
-  private fun loadComposeResources(): Map<String, ComposeResources> =
-    composeResourcesModels.associateNotNull { node ->
-      val moduleName = (node.parent?.data as? ModuleData)?.moduleName ?: return@associateNotNull null
+  private fun loadComposeResources(): Map<String, ComposeResources>? =
+    composeResourcesModels?.associateNotNull { node ->
+      val moduleData = node.parent?.data as? ModuleData ?: return@associateNotNull null
+      val moduleName = moduleData.moduleName
+      val projectGroupName = moduleData.group.orEmpty()
       val dirs = node.data.customComposeResourcesDirs.mapValues { (sourceSetName, customDirectoryPath) ->
         val (directoryPath, isCustom) = customDirectoryPath
-        ComposeResourcesDir(moduleName, sourceSetName, Path.of(directoryPath), isCustom)
+        ComposeResourcesDir(moduleName, sourceSetName, Path.of(directoryPath), projectGroupName, isCustom)
       }
       moduleName to ComposeResources(
         moduleName = moduleName,
         directoriesBySourceSetName = dirs,
         isPublicResClass = node.data.isPublicResClass,
         nameOfResClass = node.data.nameOfResClass,
+        packageOfResClass = node.data.packageOfResClass
       )
     }
 
@@ -69,5 +76,9 @@ internal class ComposeResourcesManager(private val project: Project) {
     override fun onImportFinished(projectPath: String?) {
       project.service<ComposeResourcesManager>().refresh()
     }
+  }
+
+  companion object {
+    private val log = logger<ComposeResourcesManager>()
   }
 }

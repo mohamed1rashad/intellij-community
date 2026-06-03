@@ -1,18 +1,17 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.application.options.colors
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.editor.colors.EditorColorSchemesSorter
 import com.intellij.openapi.editor.colors.EditorColorsScheme
 import com.intellij.openapi.editor.colors.Groups
 import org.jetbrains.annotations.ApiStatus
 import java.lang.ref.WeakReference
 
-
+@ApiStatus.Internal
 internal class ColorAndFontOptionsModel {
   private var schemes: MutableMap<String, EditorColorsScheme> = mutableMapOf()
   var selectedScheme: EditorColorsScheme? = null
-    private set
-  var preselectedSchemeName: String? = null
     private set
 
   private val listeners: MutableList<ColorAndFontOptionsModelListener> = mutableListOf()
@@ -52,11 +51,6 @@ internal class ColorAndFontOptionsModel {
     notifyListeners(source)
   }
 
-  fun setPreselectedSchemeName(schemeName: String?, source: Any) {
-    preselectedSchemeName = schemeName
-    notifyListeners(source)
-  }
-
   fun setSchemes(newSchemes: Map<String, EditorColorsScheme>, source: Any) {
     schemes = mutableMapOf()
     schemes.putAll(newSchemes)
@@ -75,12 +69,18 @@ internal class ColorAndFontOptionsModel {
     }
     finally {
       batchedCounter -= 1
-      notifyListeners(source)
+      val app = ApplicationManager.getApplication()
+      if (app.isDispatchThread) {
+        notifyListeners(source)
+      }
+      else {
+        app.invokeLater { notifyListeners(source) }
+      }
     }
   }
 
   companion object {
-    private var instance = WeakReference<ColorAndFontOptionsModel>(null);
+    private var instance = WeakReference<ColorAndFontOptionsModel>(null)
 
     @JvmStatic
     fun getInstance(): ColorAndFontOptionsModel {

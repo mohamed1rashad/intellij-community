@@ -1,38 +1,57 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:Internal
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:ApiStatus.Internal
 @file:JvmName("Main")
+@file:OptIn(LowLevelLocalMachineAccess::class)
+@file:Suppress("KotlinPrintToLogpoint")
 package com.intellij.idea
 
+import com.intellij.DynamicBundle
 import com.intellij.concurrency.IdeaForkJoinWorkerThreadFactory
 import com.intellij.diagnostic.CoroutineTracerShim
 import com.intellij.diagnostic.StartUpMeasurer
 import com.intellij.ide.BootstrapBundle
+import com.intellij.ide.plugins.PluginMainDescriptor
+import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.startup.StartupActionScriptManager
 import com.intellij.openapi.application.ApplicationNamesInfo
 import com.intellij.openapi.application.InitialConfigImportState
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
+import com.intellij.openapi.extensions.ExtensionDescriptor
 import com.intellij.openapi.project.impl.P3SupportInstaller
 import com.intellij.platform.bootstrap.initMarketplace
 import com.intellij.platform.diagnostic.telemetry.impl.rootTask
 import com.intellij.platform.diagnostic.telemetry.impl.span
 import com.intellij.platform.ide.bootstrap.AppStarter
 import com.intellij.platform.ide.bootstrap.StartupErrorReporter
+import com.intellij.platform.ide.bootstrap.ZipFilePoolImpl
 import com.intellij.platform.ide.bootstrap.startApplication
 import com.intellij.platform.impl.toolkit.IdeFontManager
 import com.intellij.platform.impl.toolkit.IdeGraphicsEnvironment
 import com.intellij.platform.impl.toolkit.IdeToolkit
+import com.intellij.util.lang.ZipFilePool
+import com.intellij.util.system.LowLevelLocalMachineAccess
 import com.intellij.util.system.OS
 import com.intellij.util.ui.TextLayoutUtil
 import com.jetbrains.JBR
-import kotlinx.coroutines.*
-import org.jetbrains.annotations.ApiStatus.Internal
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.ApiStatus
 import java.awt.Toolkit
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.*
 import java.util.function.Consumer
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
@@ -44,7 +63,7 @@ fun main(rawArgs: Array<String>) {
   val startupTimings = ArrayList<Any>(12)
   startupTimings.add("startup begin")
   startupTimings.add(startTimeNano)
-  mainImpl(rawArgs, startupTimings, startTimeUnixNano, changeClassPath = null)
+  mainImpl(rawArgs = rawArgs, startupTimings = startupTimings, startTimeUnixNano = startTimeUnixNano, changeClassPath = null)
 }
 
 internal fun mainImpl(
@@ -71,7 +90,7 @@ internal fun mainImpl(
         addBootstrapTiming("init scope creating", startupTimings)
         StartUpMeasurer.addTimings(startupTimings, "bootstrap", startTimeUnixNano)
 
-        startApp(args, mainScope = this@runBlocking, busyThread, changeClassPath)
+        startApp(args = args, mainScope = this@runBlocking, busyThread = busyThread, changeClassPath = changeClassPath)
       }
 
       awaitCancellation()
@@ -91,20 +110,17 @@ private suspend fun startApp(args: List<String>, mainScope: CoroutineScope, busy
 
         override fun rootTrace() = rootTask()
 
-        override suspend fun <T> span(
-          name: String,
-          context: CoroutineContext,
-          action: suspend CoroutineScope.() -> T,
-        ): T {
+        override suspend fun <T> span(name: String, context: CoroutineContext, action: suspend CoroutineScope.() -> T): T {
           return com.intellij.platform.diagnostic.telemetry.impl.span(name, context, action)
         }
       }
     }
+
     launch {
       P3SupportInstaller.seal()
     }
 
-    if (AppMode.isRemoteDevHost() || java.lang.Boolean.getBoolean("ide.started.from.remote.dev.launcher")) {
+    if (AppMode.isRemoteDevHost() || System.getProperty("ide.started.from.remote.dev.launcher").toBoolean()) {
       span("cwm host init") {
         initRemoteDev(args)
       }
@@ -120,26 +136,20 @@ private suspend fun startApp(args: List<String>, mainScope: CoroutineScope, busy
       isConfigImportNeeded(PathManager.getConfigDir())
     }
 
-    // this check must be performed before system directories are locked
-    if (!AppMode.isCommandLine() || java.lang.Boolean.getBoolean(AppMode.FORCE_PLUGIN_UPDATES)) {
-      span("plugin updates installation") {
+    if (!AppMode.isCommandLine() || System.getProperty(AppMode.FORCE_PLUGIN_UPDATES).toBoolean()) {
+      span("update marketplace plugin") {
+        // this check must be performed before system directories are locked
         val configImportNeeded = !AppMode.isHeadless() && Files.notExists(PathManager.getConfigDir())
         if (!configImportNeeded) {
-          // Consider following steps:
-          // - user opens settings, and installs some plugins;
-          // - the plugins are downloaded and saved somewhere;
-          // - IDE prompts for restart;
-          // - after restart, the plugins are moved to proper directories ("installed") by the next line.
-          // TODO get rid of this: plugins should be installed before restarting the IDE
-          installPluginUpdates()
+          runMarketplaceCommandsInActionScript()
         }
       }
     }
 
-    // must be after installPluginUpdates
+    // must be after runMarketplaceCommandsInActionScript
     span("marketplace init") {
       // 'marketplace' plugin breaks JetBrains Client, so for now this condition is used to disable it
-      if (changeClassPath == null) {  
+      if (changeClassPath == null) {
         initMarketplace()
       }
     }
@@ -155,21 +165,27 @@ private suspend fun startApp(args: List<String>, mainScope: CoroutineScope, busy
       mainClassLoaderDeferred = null
     }
     else {
-      mainClassLoaderDeferred = async(CoroutineName("main class loader initializing")) {
-        val classLoader = AppMode::class.java.classLoader
+      val classLoader = AppMode::class.java.classLoader
+      span("main class loader initializing") {
         changeClassPath.accept(classLoader)
-        classLoader
       }
+      mainClassLoaderDeferred = CompletableDeferred(classLoader)
 
       appStarterDeferred = async(CoroutineName("main class loading")) {
-        val aClass = mainClassLoaderDeferred.await().loadClass("com.intellij.idea.MainImpl")
+        val aClass = classLoader.loadClass("com.intellij.idea.MainImpl")
         MethodHandles.lookup().findConstructor(aClass, MethodType.methodType(Void.TYPE)).invoke() as AppStarter
       }
     }
 
     startApplication(
-      scope = this, args, configImportNeededDeferred, customTargetDirectoryToImportConfig, mainClassLoaderDeferred, appStarterDeferred,
-      mainScope, busyThread
+      scope = this,
+      args = args,
+      configImportNeededDeferred = configImportNeededDeferred,
+      customTargetDirectoryToImportConfig = customTargetDirectoryToImportConfig,
+      mainClassLoaderDeferred = mainClassLoaderDeferred,
+      appStarterDeferred = appStarterDeferred,
+      mainScope = mainScope,
+      busyThread = busyThread,
     )
   }
 }
@@ -192,7 +208,7 @@ private fun initRemoteDev(args: List<String>) {
     error("JBR version 17.0.6b796 or later is required to run a remote-dev server with lux")
   }
 
-  val isSplitMode = args.firstOrNull() == AppMode.SPLIT_MODE_COMMAND
+  val isSplitMode = args.firstOrNull() == WellKnownCommand.SPLIT_MODE
 
   // avoid an icon jumping in dock for the backend process
   if (OS.CURRENT == OS.macOS) {
@@ -261,7 +277,6 @@ private fun initLux() {
 
   @Suppress("JAVA_MODULE_DOES_NOT_EXPORT_PACKAGE")
   setStaticField(sun.font.FontManagerFactory::class.java, "instance", IdeFontManager())
-  @Suppress("SpellCheckingInspection")
   System.setProperty("sun.font.fontmanager", IdeFontManager::class.java.canonicalName)
 
   TextLayoutUtil.disableLayoutInTextComponents()
@@ -274,54 +289,113 @@ private fun addBootstrapTiming(name: String, startupTimings: MutableList<Any>) {
 
 private fun preprocessArgs(args: Array<String>): List<String> {
   if (args.isEmpty()) {
-    return Collections.emptyList()
+    return listOf()
   }
 
   // a buggy DE may fail to strip an unused parameter from a .desktop file
   if (args.size == 1 && args[0] == "%f") {
-    return Collections.emptyList()
+    return listOf()
   }
 
-  if (AppMode.HELP_OPTION in args) {
-    println("""
-        Some of the common commands and options (sorry, the full list is not yet supported):
-          --help      prints a short list of commands and options
-          --version   shows version information
-          /project/dir
-            opens a project from the given directory
-          [/project/dir|--temp-project] [--wait] [--line <line>] [--column <column>] file
-            opens the file, either in a context of the given project or as a temporary single-file project,
-            optionally waiting until the editor tab is closed
-          diff <left> <right>
-            opens a diff window between <left> and <right> files/directories
-          merge <local> <remote> [base] <merged>
-            opens a merge window between <local> and <remote> files (with optional common <base>), saving the result to <merged>
-        """.trimIndent())
-    exitProcess(0)
-  }
-
-  if (AppMode.VERSION_OPTION in args) {
-    val appInfo = ApplicationInfoImpl.getShadowInstance()
-    val edition = ApplicationNamesInfo.getInstance().editionName?.let { " (${it})" } ?: ""
-    println("${appInfo.fullApplicationName}${edition}\nBuild #${appInfo.build.asString()}")
-    exitProcess(0)
-  }
-
-  val (propertyArgs, otherArgs) = args.partition { it.startsWith("-D") && it.contains('=') }
+  val (propertyArgs, args) = args.partition { it.startsWith("-D") && it.contains('=') }
   for (arg in propertyArgs) {
     val (option, value) = arg.removePrefix("-D").split('=', limit = 2)
     System.setProperty(option, value)
   }
-  return otherArgs
+
+  val filteredArgs = ApplicationStartArguments.stripKnownArguments(args)
+  @Suppress("ReplaceSizeCheckWithIsNotEmpty") val firstArg = when {
+      filteredArgs.size > 1 && (filteredArgs[0] == "-e" || filteredArgs[0] == "--edit") -> filteredArgs[1]
+      filteredArgs.size > 0 -> filteredArgs[0]
+      else -> null
+  }
+  when (firstArg) {
+    "--help", "-h", "-?" -> {
+      println("""
+        Basic commands and options:
+        --help           prints the short list of basic commands and options
+        --list-commands  prints the full list of commands available in this installation
+        --version        shows version information
+
+        /project/dir
+          opens a project from the given directory
+
+        [/project/dir|--temp-project] [--wait] [--line <line>] [--column <column>] file
+          opens the file, either in a context of the given project or as a temporary single-file project,
+          optionally waiting until the editor tab is closed
+
+        -e [--wait] /some/file
+        --edit [--wait] /some/file
+          opens the file in the LightEdit mode, optionally waiting until the editor tab is closed
+        """.trimIndent()
+      )
+      exitProcess(0)
+    }
+
+    "--list-commands" -> {
+      @Suppress("RAW_RUN_BLOCKING")
+      val pluginSet = runBlocking {
+        val zipPoolDeferred = CompletableDeferred(ZipFilePoolImpl().apply { ZipFilePool.PATH_CLASSLOADER_POOL = this })
+        PluginManagerCore.scheduleDescriptorLoading(
+          coroutineScope = this, zipPoolDeferred, mainClassLoaderDeferred = null, logDeferred = null
+        ).await()
+      }
+      val isInternal = System.getProperty(ApplicationManagerEx.IS_INTERNAL_PROPERTY).toBoolean()
+      pluginSet.enabledPlugins.forEach { plugin ->
+        val starters = (sequenceOf(plugin) + plugin.contentModules.asSequence())
+          .flatMap { it.extensions["com.intellij.appStarter"] ?: emptyList() }
+          .filter { isInternal || !it.element?.attributes?.get("internal").toBoolean() }
+          .toList()
+        if (starters.isNotEmpty()) {
+          println("=== ${if (plugin.pluginId == PluginManagerCore.CORE_ID) "Built-in" else plugin.name} commands")
+          starters.forEach { starter ->
+            val message = starterHelp(plugin, starter).replace("\n", "\n  ")
+            println("\n${starter.orderId}\n  ${message}")
+          }
+          println()
+        }
+      }
+      exitProcess(0)
+    }
+
+    "--version", "-version" -> {
+      val appInfo = ApplicationInfoImpl.getShadowInstance()
+      val edition = ApplicationNamesInfo.getInstance().editionName?.let { " (${it})" } ?: ""
+      println("${appInfo.fullApplicationName}${edition}\nBuild #${appInfo.build.asString()}")
+      exitProcess(0)
+    }
+  }
+
+  return args
 }
 
-private fun installPluginUpdates() {
+private fun starterHelp(plugin: PluginMainDescriptor, starter: ExtensionDescriptor): String {
+  val classLoader = plugin.pluginClassLoader
+  if (classLoader != null) {
+    val bundle = starter.element?.attributes?.get("bundle")
+    val key = starter.element?.attributes?.get("key")
+    if (bundle != null && key != null) {
+      return DynamicBundle.getResourceBundle(classLoader, bundle).getString(key)
+    }
+  }
+  if (starter.element?.attributes?.get("internal").toBoolean()) {
+    return "internal command; consult with the source code"
+  }
+  return "(no description)"
+}
+
+private fun runMarketplaceCommandsInActionScript() {
   try {
     // load `StartupActionScriptManager` and other related classes (`ObjectInputStream`, etc.) only when there is a script to run
-    // (referencing a string constant is OK - it is inlined by the compiler)
+    // (referencing a string constant is OK - it is inlined by the compiler 🤞)
     val scriptFile = PathManager.getStartupScriptDir().resolve(StartupActionScriptManager.ACTION_SCRIPT_FILE)
     if (Files.isRegularFile(scriptFile)) {
-      StartupActionScriptManager.executeActionScript()
+      if (System.getProperty("disable.IJPL.221005") == "true") {
+        // just in case the fix for IJPL-221005 blows up in the minor update, TODO drop after 26.1
+        StartupActionScriptManager.executeActionScript()
+      } else {
+        StartupActionScriptManager.executeMarketplaceCommandsFromActionScript()
+      }
     }
   }
   catch (e: Throwable) {
@@ -332,6 +406,5 @@ private fun installPluginUpdates() {
 // separate class for nicer presentation in dumps
 private class StartupAbortedExceptionHandler : AbstractCoroutineContextElement(CoroutineExceptionHandler), CoroutineExceptionHandler {
   override fun handleException(context: CoroutineContext, exception: Throwable) = StartupErrorReporter.processException(exception)
-
   override fun toString() = "StartupAbortedExceptionHandler"
 }

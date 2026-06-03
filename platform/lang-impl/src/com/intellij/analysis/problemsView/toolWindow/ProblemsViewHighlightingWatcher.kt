@@ -33,7 +33,11 @@ internal class ProblemsViewHighlightingWatcher(
     val markupModel = DocumentMarkupModel.forDocument(document, provider.project, true) as MarkupModelEx
     markupModel.addMarkupModelListener(this, this)
     val highlighters = markupModel.allHighlighters
-    highlighters.forEach { afterAdded(it as RangeHighlighterEx) }
+    highlighters.forEach {
+      if (it.isValid) {
+        afterAdded(it as RangeHighlighterEx)
+      }
+    }
     Disposer.register(provider, this)
   }
 
@@ -92,7 +96,7 @@ internal class ProblemsViewHighlightingWatcher(
     !isValid(highlighter) -> null
     else -> {
       synchronized(lock) {
-        problems.computeIfAbsent(highlighter) { HighlightingProblem(provider, file, highlighter) }
+        problems.computeIfAbsent(highlighter) { HighlightingProblemFactory.EP_NAME.extensionList.first().createHighlightingProblem(provider, file, highlighter) }
       }
     }
   }

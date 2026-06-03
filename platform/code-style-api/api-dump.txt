@@ -50,7 +50,6 @@ a:com.intellij.codeStyle.CodeStyleFacade
 - a:getIndentSize(com.intellij.openapi.fileTypes.FileType):I
 - s:getInstance():com.intellij.codeStyle.CodeStyleFacade
 - s:getInstance(com.intellij.openapi.project.Project):com.intellij.codeStyle.CodeStyleFacade
-- getLineIndent(com.intellij.openapi.editor.Editor,com.intellij.lang.Language,I,Z):java.lang.String
 - a:useTabCharacter(com.intellij.openapi.fileTypes.FileType):Z
 com.intellij.formatting.ASTBlock
 - com.intellij.formatting.Block
@@ -304,7 +303,7 @@ a:com.intellij.formatting.service.AsyncDocumentFormattingService
 - p:getTimeoutNotificationDisplayId():java.lang.String
 - p:needToUpdate():Z
 - p:prepareForFormatting(com.intellij.openapi.editor.Document,com.intellij.formatting.FormattingContext):V
-p:com.intellij.formatting.service.AsyncDocumentFormattingService$FormattingTask
+com.intellij.formatting.service.AsyncDocumentFormattingService$FormattingTask
 - java.lang.Runnable
 - a:cancel():Z
 - isRunUnderProgress():Z
@@ -334,6 +333,7 @@ com.intellij.formatting.service.FormattingNotificationService
 com.intellij.formatting.service.FormattingService
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
 - a:canFormat(com.intellij.psi.PsiFile):Z
+- canFormat(com.intellij.psi.PsiFile,com.intellij.formatting.service.FormattingService$Feature[]):Z
 - a:formatElement(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange,Z):com.intellij.psi.PsiElement
 - a:formatElement(com.intellij.psi.PsiElement,Z):com.intellij.psi.PsiElement
 - a:formatRanges(com.intellij.psi.PsiFile,com.intellij.formatting.FormattingRangesInfo,Z,Z):V
@@ -461,7 +461,6 @@ c:com.intellij.psi.codeStyle.CodeStyleSettings
 - FORMATTER_TAGS_ENABLED:Z
 - GENERATE_FINAL_LOCALS:Z
 - GENERATE_FINAL_PARAMETERS:Z
-- f:IMPORT_LAYOUT_TABLE:com.intellij.psi.codeStyle.PackageEntryTable
 - INNER_CLASSES_ORDER_WEIGHT:I
 - INSERT_INNER_CLASS_IMPORTS:Z
 - INSERT_OVERRIDE_ANNOTATION:Z
@@ -474,7 +473,6 @@ c:com.intellij.psi.codeStyle.CodeStyleSettings
 - METHODS_ORDER_WEIGHT:I
 - NAMES_COUNT_TO_USE_IMPORT_ON_DEMAND:I
 - f:OTHER_INDENT_OPTIONS:com.intellij.psi.codeStyle.CommonCodeStyleSettings$IndentOptions
-- f:PACKAGES_TO_USE_IMPORT_ON_DEMAND:com.intellij.psi.codeStyle.PackageEntryTable
 - PARAMETER_NAME_PREFIX:java.lang.String
 - PARAMETER_NAME_SUFFIX:java.lang.String
 - PARENTHESES_AROUND_METHOD_ARGUMENTS:Z
@@ -511,7 +509,6 @@ c:com.intellij.psi.codeStyle.CodeStyleSettings
 - getExcludedFiles():com.intellij.psi.codeStyle.ExcludedFiles
 - getFormatterOffPattern():java.util.regex.Pattern
 - getFormatterOnPattern():java.util.regex.Pattern
-- getImportLayoutTable():com.intellij.psi.codeStyle.PackageEntryTable
 - getIndentOptions():com.intellij.psi.codeStyle.CommonCodeStyleSettings$IndentOptions
 - getIndentOptions(com.intellij.openapi.fileTypes.FileType):com.intellij.psi.codeStyle.CommonCodeStyleSettings$IndentOptions
 - getIndentOptionsByDocument(com.intellij.openapi.project.Project,com.intellij.openapi.editor.Document):com.intellij.psi.codeStyle.CommonCodeStyleSettings$IndentOptions
@@ -521,7 +518,6 @@ c:com.intellij.psi.codeStyle.CodeStyleSettings
 - getLineSeparator():java.lang.String
 - getModificationTracker():com.intellij.openapi.util.SimpleModificationTracker
 - getNamesCountToUseImportOnDemand():I
-- getPackagesToUseImportOnDemand():com.intellij.psi.codeStyle.PackageEntryTable
 - getParentSettings():com.intellij.psi.codeStyle.CodeStyleSettings
 - getRepeatAnnotations():java.util.List
 - getRightMargin(com.intellij.lang.Language):I
@@ -603,7 +599,6 @@ com.intellij.psi.codeStyle.CodeStyleSettingsListener
 - a:codeStyleSettingsChanged(com.intellij.psi.codeStyle.CodeStyleSettingsChangeEvent):V
 c:com.intellij.psi.codeStyle.CodeStyleSettingsManager
 - com.intellij.openapi.components.PersistentStateComponentWithModificationTracker
-- PER_PROJECT_SETTINGS:com.intellij.psi.codeStyle.CodeStyleSettings
 - PREFERRED_PROJECT_CODE_STYLE:java.lang.String
 - USE_PER_PROJECT_SETTINGS:Z
 - <init>():V
@@ -690,6 +685,7 @@ c:com.intellij.psi.codeStyle.CommonCodeStyleSettings
 - CATCH_ON_NEW_LINE:Z
 - CLASS_ANNOTATION_WRAP:I
 - CLASS_BRACE_STYLE:I
+- DOCUMENTATION_LINE_COMMENT_PREFERRED:Z
 - DOWHILE_BRACE_FORCE:I
 - sf:DO_NOT_FORCE:I
 - DO_NOT_INDENT_TOP_LEVEL_CLASS_MEMBERS:Z
@@ -957,9 +953,7 @@ a:com.intellij.psi.codeStyle.FileIndentOptionsProvider
 - useOnFullReformat():Z
 com.intellij.psi.codeStyle.ImportsLayoutSettings
 - a:getClassCountToUseImportOnDemand():I
-- a:getImportLayoutTable():com.intellij.psi.codeStyle.PackageEntryTable
 - a:getNamesCountToUseImportOnDemand():I
-- a:getPackagesToUseImportOnDemand():com.intellij.psi.codeStyle.PackageEntryTable
 - a:isInsertInnerClassImports():Z
 - a:isLayoutStaticImportsSeparately():Z
 - a:isUseFqClassNames():Z
@@ -970,6 +964,16 @@ com.intellij.psi.codeStyle.ImportsLayoutSettings
 - a:setNamesCountToUseImportOnDemand(I):V
 - a:setUseFqClassNames(Z):V
 - a:setUseSingleClassImports(Z):V
+com.intellij.psi.codeStyle.LanguageCodeStyleProvider
+- canInsertSpaceInLineComment(java.lang.String):Z
+- s:findUsingBaseLanguage(com.intellij.lang.Language):com.intellij.psi.codeStyle.LanguageCodeStyleProvider
+- s:forLanguage(com.intellij.lang.Language):com.intellij.psi.codeStyle.LanguageCodeStyleProvider
+- a:getDefaultCommonSettings():com.intellij.psi.codeStyle.CommonCodeStyleSettings
+- a:getDocCommentSettings(com.intellij.psi.codeStyle.CodeStyleSettings):com.intellij.psi.codeStyle.DocCommentSettings
+- a:getLanguage():com.intellij.lang.Language
+- a:getSupportedFields():java.util.Set
+- useBaseLanguageCommonSettings():Z
+- usesCommonKeepLineBreaks():Z
 c:com.intellij.psi.codeStyle.LegacyCodeStyleSettings
 - com.intellij.psi.codeStyle.CommonCodeStyleSettings
 - BLANK_LINES_AROUND_CLASS:I
@@ -1022,25 +1026,6 @@ c:com.intellij.psi.codeStyle.PackageEntry
 - isStatic():Z
 - isWithSubpackages():Z
 - matchesPackageName(java.lang.String):Z
-c:com.intellij.psi.codeStyle.PackageEntryTable
-- com.intellij.openapi.util.JDOMExternalizable
-- java.lang.Cloneable
-- <init>():V
-- addEntry(com.intellij.psi.codeStyle.PackageEntry):V
-- clone():java.lang.Object
-- contains(java.lang.String):Z
-- copyFrom(com.intellij.psi.codeStyle.PackageEntryTable):V
-- equals(java.lang.Object):Z
-- getEntries():com.intellij.psi.codeStyle.PackageEntry[]
-- getEntryAt(I):com.intellij.psi.codeStyle.PackageEntry
-- getEntryCount():I
-- hashCode():I
-- insertEntryAt(com.intellij.psi.codeStyle.PackageEntry,I):V
-- readExternal(org.jdom.Element):V
-- removeEmptyPackages():V
-- removeEntryAt(I):V
-- setEntryAt(com.intellij.psi.codeStyle.PackageEntry,I):V
-- writeExternal(org.jdom.Element):V
 a:com.intellij.psi.codeStyle.PredefinedCodeStyle
 - sf:EMPTY_ARRAY:com.intellij.psi.codeStyle.PredefinedCodeStyle[]
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
@@ -1058,6 +1043,7 @@ a:com.intellij.psi.codeStyle.PsiBasedFileIndentOptionsProvider
 - f:getIndentOptions(com.intellij.openapi.project.Project,com.intellij.psi.codeStyle.CodeStyleSettings,com.intellij.openapi.vfs.VirtualFile):com.intellij.psi.codeStyle.CommonCodeStyleSettings$IndentOptions
 - a:getIndentOptionsByPsiFile(com.intellij.psi.codeStyle.CodeStyleSettings,com.intellij.psi.PsiFile):com.intellij.psi.codeStyle.CommonCodeStyleSettings$IndentOptions
 com.intellij.psi.codeStyle.arrangement.ArrangementEntry
+- canBeGrouped():Z
 - a:canBeMatched():Z
 - a:getChildren():java.util.List
 - a:getDependencies():java.util.List
@@ -1498,7 +1484,6 @@ com.intellij.psi.codeStyle.modifier.CodeStyleStatusBarUIContributor
 f:com.intellij.psi.codeStyle.modifier.TransientCodeStyleSettings
 - com.intellij.psi.codeStyle.CodeStyleSettings
 - <init>(com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.project.Project,com.intellij.psi.codeStyle.CodeStyleSettings):V
-- <init>(com.intellij.psi.PsiFile,com.intellij.psi.codeStyle.CodeStyleSettings):V
 - addDependencies(java.util.List):V
 - addDependency(com.intellij.openapi.util.ModificationTracker):V
 - getDependencies():java.util.List

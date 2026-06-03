@@ -11,7 +11,16 @@ import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDirectoryContainer;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileSystemItem;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.PsiParserFacade;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.templateLanguages.OuterLanguageElement;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -23,9 +32,23 @@ import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PythonCodeStyleService;
 import com.jetbrains.python.ast.impl.PyUtilCore;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
+import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.documentation.docstrings.DocStringUtil;
 import com.jetbrains.python.documentation.doctest.PyDocstringFile;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyElement;
+import com.jetbrains.python.psi.PyElementGenerator;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyFromImportStatement;
+import com.jetbrains.python.psi.PyImportElement;
+import com.jetbrains.python.psi.PyImportStatement;
+import com.jetbrains.python.psi.PyImportStatementBase;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PyStatement;
+import com.jetbrains.python.psi.PyUtil;
+import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.impl.PyCodeFragmentWithHiddenImports;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
@@ -38,7 +61,11 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
 
 import static com.jetbrains.python.psi.PyUtil.as;
 import static com.jetbrains.python.psi.PyUtil.sure;
@@ -64,7 +91,9 @@ public final class AddImportHelper {
   }
 
   public static @NotNull Comparator<String> getImportTextComparator(@NotNull PsiFile settingsAnchor) {
-    return PythonCodeStyleService.getInstance().isOptimizeImportsCaseSensitiveOrder(settingsAnchor) ? String.CASE_INSENSITIVE_ORDER : Comparator.naturalOrder();
+    return PythonCodeStyleService.getInstance().isOptimizeImportsCaseSensitiveOrder(settingsAnchor)
+           ? String.CASE_INSENSITIVE_ORDER
+           : Comparator.naturalOrder();
   }
 
   private static @NotNull List<String> getSortNames(@NotNull PyImportStatementBase importStatement) {
@@ -161,7 +190,6 @@ public final class AddImportHelper {
     if (parentElement != null) {
       parentElement.addBefore(generator.createFromImportStatement(languageLevel, qualifier, name, asName), anchor);
     }
-
   }
 
   public static @Nullable PsiElement getLocalInsertPosition(@NotNull PsiElement anchor) {
@@ -368,7 +396,8 @@ public final class AddImportHelper {
     return getImportPriorityWithReason(importStatement, resolvedFileOrDir);
   }
 
-  static @NotNull ImportPriorityChoice getImportPriorityWithReason(@NotNull PsiElement importLocation, @NotNull PsiFileSystemItem toImport) {
+  static @NotNull ImportPriorityChoice getImportPriorityWithReason(@NotNull PsiElement importLocation,
+                                                                   @NotNull PsiFileSystemItem toImport) {
     final VirtualFile vFile = toImport.getVirtualFile();
     if (vFile == null) {
       return new ImportPriorityChoice(UNRESOLVED_SYMBOL_PRIORITY, toImport + " doesn't have an associated virtual file");
@@ -788,18 +817,43 @@ public final class AddImportHelper {
    * @see #addOrUpdateFromImportStatement
    */
   public static void addImport(@NotNull PsiNamedElement target, @NotNull PsiFile file, @NotNull PyElement element) {
+    if (target.getContainingFile().equals(file)) return;
+    if (PyBuiltinCache.getInstance(element).isBuiltin(target)) return;
+
     if (target instanceof PsiFileSystemItem) {
       addFileSystemItemImport((PsiFileSystemItem)target, file, element);
       return;
     }
 
-    final String name = target.getName();
+    // If target is a class attribute or nested class, import the top-level containing class
+    PsiNamedElement elementToImport = target;
+    var parent = ScopeUtil.getScopeOwner(target);
+    if (parent instanceof PyClass pyClass) {
+      elementToImport = pyClass;
+    }
+
+    // Walk up to the top-level class if elementToImport is itself a nested class
+    String nestedQualifierPrefix = null;
+    if (elementToImport instanceof PyClass nestedClass && !PyUtil.isTopLevel(nestedClass)) {
+      PyClass topLevel = PyNestedClassUtils.findTopLevelClass(nestedClass);
+      if (topLevel != null) {
+        elementToImport = topLevel;
+        nestedQualifierPrefix = PyNestedClassUtils.buildQualifiedName(nestedClass, topLevel);
+      }
+    }
+
+    final String name = elementToImport.getName();
     if (name == null) return;
 
-    final PsiFileSystemItem toImport = target.getContainingFile();
+    final PsiFileSystemItem toImport = elementToImport.getContainingFile();
     if (toImport == null) return;
 
-    final QualifiedName importPath = QualifiedNameFinder.findCanonicalImportPath(target, element);
+    // Check if the target is accessible via an already-imported module
+    if (qualifyViaExistingImport(toImport, name, nestedQualifierPrefix, file, element)) {
+      return;
+    }
+
+    final QualifiedName importPath = QualifiedNameFinder.findCanonicalImportPath(elementToImport, element);
     if (importPath == null) return;
 
     final String path = importPath.toString();
@@ -809,10 +863,25 @@ public final class AddImportHelper {
       addImportStatement(file, path, null, priority, element);
 
       final PyElementGenerator elementGenerator = PyElementGenerator.getInstance(file.getProject());
-      element.replace(elementGenerator.createExpressionFromText(LanguageLevel.forElement(target), path + "." + name));
+      String refText = nestedQualifierPrefix != null ? nestedQualifierPrefix : name;
+      element.replace(elementGenerator.createExpressionFromText(LanguageLevel.forElement(elementToImport), path + "." + refText));
     }
     else {
       addOrUpdateFromImportStatement(file, path, name, null, priority, element);
+      if (nestedQualifierPrefix != null) {
+        // Rewrite the qualifier reference to use the qualified nested class path, e.g. Inner -> Outer.Inner
+        // The element might be a qualified expression like Inner.do, so we need to find the unresolved
+        // qualifier that refers to the nested class and replace it with the full nesting chain.
+        PyElement toRewrite = element;
+        if (element instanceof PyReferenceExpression refExpr) {
+          PyExpression qualifier = refExpr.getQualifier();
+          if (qualifier instanceof PyReferenceExpression qualifierRef) {
+            toRewrite = qualifierRef;
+          }
+        }
+        final PyElementGenerator elementGenerator = PyElementGenerator.getInstance(file.getProject());
+        toRewrite.replace(elementGenerator.createExpressionFromText(LanguageLevel.forElement(elementToImport), nestedQualifierPrefix));
+      }
     }
   }
 
@@ -833,7 +902,91 @@ public final class AddImportHelper {
       element.replace(elementGenerator.createExpressionFromText(LanguageLevel.forElement(target), path));
     }
     else {
-      addOrUpdateFromImportStatement(file, importPath.removeLastComponent().toString(), target.getName(), null, priority, element);
+      String importedName = importPath.getLastComponent();
+      assert importedName != null;
+      String importSource = importPath.removeLastComponent().toString();
+      addOrUpdateFromImportStatement(file, importSource, importedName, null, priority, element);
     }
+  }
+
+  private static boolean qualifyViaExistingImport(@NotNull PsiFileSystemItem toImport,
+                                                  @NotNull String importedName,
+                                                  @Nullable String nestedQualifierPrefix,
+                                                  @NotNull PsiFile file,
+                                                  @NotNull PyElement element) {
+    if (!(file instanceof PyFile pyFile)) return false;
+
+    if (processFromImports(toImport, importedName, nestedQualifierPrefix, element, pyFile) ||
+        processRegularImports(toImport, importedName, nestedQualifierPrefix, element, pyFile)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Check regular imports: "import pkg.src" where pkg.src resolves to the target's module
+  private static boolean processRegularImports(@NotNull PsiFileSystemItem toImport,
+                                   @NotNull String importedName,
+                                   @Nullable String nestedQualifierPrefix,
+                                   @NotNull PyElement element,
+                                   PyFile pyFile) {
+    for (PyImportElement importElement : pyFile.getImportTargets()) {
+      PsiElement resolved = importElement.resolve();
+      PsiFile resolvedFile = as(PyUtil.turnDirIntoInit(resolved), PsiFile.class);
+      if (resolvedFile == null || !resolvedFile.equals(toImport)) continue;
+
+      QualifiedName importedQName = importElement.getImportedQName();
+      if (importedQName == null) continue;
+
+      String prefix = importElement.getAsName() != null
+          ? importElement.getVisibleName()
+          : importedQName.toString();
+      if (prefix == null) continue;
+
+      String qualifiedRef = nestedQualifierPrefix != null
+          ? prefix + "." + nestedQualifierPrefix
+          : prefix + "." + importedName;
+      replaceQualifier(element, qualifiedRef);
+      return true;
+    }
+    return false;
+  }
+
+  // Check from-imports: "from pkg import src" where src resolves to the target's module
+  private static boolean processFromImports(@NotNull PsiFileSystemItem toImport,
+                                            @NotNull String importedName,
+                                            @Nullable String nestedQualifierPrefix,
+                                            @NotNull PyElement element,
+                                            PyFile pyFile) {
+    for (PyFromImportStatement fromImport : pyFile.getFromImports()) {
+      if (fromImport.isStarImport()) continue;
+      for (PyImportElement importElement : fromImport.getImportElements()) {
+        PsiElement resolved = importElement.resolve();
+        PsiFile resolvedFile = as(PyUtil.turnDirIntoInit(resolved), PsiFile.class);
+        if (resolvedFile == null || !resolvedFile.equals(toImport)) continue;
+
+        String visibleName = importElement.getVisibleName();
+        if (visibleName == null) continue;
+
+        String qualifiedRef = nestedQualifierPrefix != null
+            ? visibleName + "." + nestedQualifierPrefix
+            : visibleName + "." + importedName;
+        replaceQualifier(element, qualifiedRef);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static void replaceQualifier(@NotNull PyElement element, @NotNull String qualifiedRef) {
+    PyElement toRewrite = element;
+    if (element instanceof PyReferenceExpression refExpr) {
+      PyExpression qualifier = refExpr.getQualifier();
+      if (qualifier instanceof PyReferenceExpression qualifierRef) {
+        toRewrite = qualifierRef;
+      }
+    }
+    PyElementGenerator gen = PyElementGenerator.getInstance(element.getProject());
+    toRewrite.replace(gen.createExpressionFromText(LanguageLevel.forElement(element), qualifiedRef));
   }
 }

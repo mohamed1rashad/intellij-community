@@ -3,19 +3,31 @@ package com.intellij.ide.browsers.actions
 
 import com.intellij.icons.AllIcons
 import com.intellij.ide.IdeBundle
-import com.intellij.ide.browsers.*
+import com.intellij.ide.browsers.BrowserLauncher
+import com.intellij.ide.browsers.OpenInBrowserRequest
+import com.intellij.ide.browsers.WebBrowser
+import com.intellij.ide.browsers.WebBrowserManager
+import com.intellij.ide.browsers.WebBrowserService
+import com.intellij.ide.browsers.WebBrowserUrlProvider
+import com.intellij.ide.browsers.WebBrowserXmlService
+import com.intellij.ide.browsers.createOpenInBrowserRequest
 import com.intellij.ide.browsers.impl.WebBrowserServiceImpl
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.keymap.KeymapUtil
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.vfs.newvfs.ManagingFS
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
-import com.intellij.ui.SimpleListCellRenderer
+import com.intellij.ui.dsl.listCellRenderer.listCellRenderer
 import com.intellij.util.BitUtil
 import com.intellij.util.Url
 import org.jetbrains.concurrency.AsyncPromise
@@ -42,6 +54,7 @@ internal class BaseOpenInBrowserAction(private val browser: WebBrowser) : DumbAw
           chooseUrl(urls)
             .onSuccess { url ->
               FileDocumentManager.getInstance().saveAllDocuments()
+              ManagingFS.getInstance().flushPendingUpdatesOrNotify()
               BrowserLauncher.instance.browse(url.toExternalForm(), browser, request.project)
             }
         }
@@ -152,10 +165,10 @@ internal fun chooseUrl(urls: Collection<Url>): Promise<Url> {
   val result = AsyncPromise<Url>()
   JBPopupFactory.getInstance()
     .createPopupChooserBuilder(urls.toMutableList())
-    .setRenderer(SimpleListCellRenderer.create { label, value, _ ->
+    .setRenderer(listCellRenderer("") {
       // todo icons looks good, but is it really suitable for all URLs providers?
-      label.icon = AllIcons.Nodes.Servlet
-      label.text = (value as Url).toDecodedForm()
+      icon(AllIcons.Nodes.Servlet)
+      text(value.toDecodedForm())
     })
     .setTitle(IdeBundle.message("browser.url.popup"))
     .setItemChosenCallback { value ->

@@ -4,7 +4,18 @@ package com.intellij.workspaceModel.ide.impl.legacyBridge.module.roots
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.projectRoots.Sdk
-import com.intellij.openapi.roots.*
+import com.intellij.openapi.roots.ContentEntry
+import com.intellij.openapi.roots.ExternalProjectSystemRegistry
+import com.intellij.openapi.roots.ModifiableRootModel
+import com.intellij.openapi.roots.ModuleFileIndex
+import com.intellij.openapi.roots.ModuleOrderEntry
+import com.intellij.openapi.roots.ModuleRootManager
+import com.intellij.openapi.roots.ModuleRootManagerEx
+import com.intellij.openapi.roots.OrderEntry
+import com.intellij.openapi.roots.OrderEnumerator
+import com.intellij.openapi.roots.ProjectModelExternalSource
+import com.intellij.openapi.roots.RootPolicy
+import com.intellij.openapi.roots.impl.ModuleFileIndexImpl
 import com.intellij.openapi.roots.impl.ModuleOrderEnumerator
 import com.intellij.openapi.roots.impl.RootConfigurationAccessor
 import com.intellij.openapi.vfs.VirtualFile
@@ -79,7 +90,9 @@ class ModuleRootComponentBridge(
   override fun getExternalSource(): ProjectModelExternalSource? =
     ExternalProjectSystemRegistry.getInstance().getExternalSource(module)
 
-  override fun getFileIndex(): ModuleFileIndex = currentModule.getService(ModuleFileIndex::class.java)!!
+  override fun getFileIndex(): ModuleFileIndex {
+    return ModuleFileIndexImpl(module)
+  }
 
   override fun getModifiableModel(): ModifiableRootModel = getModifiableModel(RootConfigurationAccessor.DEFAULT_INSTANCE)
   override fun getModifiableModel(accessor: RootConfigurationAccessor): ModifiableRootModel = ModifiableRootModelBridgeImpl(

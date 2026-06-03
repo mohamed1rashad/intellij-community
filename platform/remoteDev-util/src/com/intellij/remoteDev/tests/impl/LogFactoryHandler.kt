@@ -1,9 +1,10 @@
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.remoteDev.tests.impl
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.remoteDev.tests.modelGenerated.RdTestSession
 import com.intellij.remoteDev.tests.modelGenerated.LambdaRdTestSession
+import com.intellij.remoteDev.tests.modelGenerated.RdTestSession
 import com.jetbrains.rd.util.lifetime.Lifetime
 
 object LogFactoryHandler {
@@ -50,7 +51,7 @@ object LogFactoryHandler {
   inline fun <reified T : AgentTestLoggerFactory> assertLoggerFactory() {
     assert(Logger.getFactory()::class.java == T::class.java) {
       "Logger Factory was overridden during test method execution. " +
-      "Inspect logs to find stack trace of the overrider. " +
+      "Inspect logs to find stack trace of the overrider (${Logger.getFactory()::class.java}). " +
       "Overriding logger factory leads to breaking distributes test log processing."
     }
   }

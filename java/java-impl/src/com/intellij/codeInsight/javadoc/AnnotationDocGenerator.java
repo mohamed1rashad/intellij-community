@@ -19,7 +19,27 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Predicates;
 import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
+import com.intellij.psi.PsiAnnotationOwner;
+import com.intellij.psi.PsiArrayInitializerMemberValue;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaModule;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameValuePair;
+import com.intellij.psi.PsiQualifiedReferenceElement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiVariable;
 import com.intellij.ui.ColorUtil;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ObjectUtils;
@@ -80,8 +100,8 @@ public final class AnnotationDocGenerator {
     return myAnnotation.getQualifiedName();
   }
   
-  boolean isNonCodeTypeUseAnnotation() {
-    return (isExternal() || isInferred()) && AnnotationTargetUtil.isTypeAnnotation(myAnnotation);
+  boolean isInferredTypeUseAnnotation() {
+    return isInferred() && AnnotationTargetUtil.isTypeAnnotation(myAnnotation);
   }
 
   public boolean isInferred() {
@@ -295,6 +315,9 @@ public final class AnnotationDocGenerator {
   }
 
   public static List<AnnotationDocGenerator> getAnnotationsToShow(@NotNull PsiAnnotationOwner owner, @NotNull PsiElement context) {
+    if (owner instanceof PsiTypeParameter typeParameter) {
+      return getAnnotationsToShow(typeParameter);
+    }
     if (owner instanceof PsiModifierList modifierList) {
       return getAnnotationsToShow(((PsiModifierListOwner)modifierList.getParent()));
     }
@@ -304,7 +327,7 @@ public final class AnnotationDocGenerator {
     if (owner instanceof PsiArrayType type) {
       PsiType contextType = getContextType(context);
       if (type.equals(contextType)) {
-        return StreamEx.of(getAnnotationsToShow((PsiModifierListOwner)context)).filter(anno -> anno.isNonCodeTypeUseAnnotation())
+        return StreamEx.of(getAnnotationsToShow((PsiModifierListOwner)context)).filter(anno -> anno.isInferredTypeUseAnnotation())
           .append(generators).toList();
       }
     }
@@ -321,8 +344,7 @@ public final class AnnotationDocGenerator {
     return StreamEx.of(AnnotationUtil.getAllAnnotations(owner, false, null))
       .filter(owner instanceof PsiClass || owner instanceof PsiJavaModule ? Predicates.alwaysTrue()
                                                                           : anno -> !AnnotationTargetUtil.isTypeAnnotation(anno) ||
-                                                                                    AnnotationUtil.isInferredAnnotation(anno) ||
-                                                                                    AnnotationUtil.isExternalAnnotation(anno))
+                                                                                    AnnotationUtil.isInferredAnnotation(anno))
       .map(annotation -> forAnnotation(owner, shownAnnotations, annotation))
       .nonNull()
       .toList();

@@ -17,19 +17,58 @@ import com.jetbrains.python.PyPsiBundle;
 import com.jetbrains.python.PyStringFormatParser;
 import com.jetbrains.python.codeInsight.PySubstitutionChunkReference;
 import com.jetbrains.python.inspections.quickfix.PyAddSpecifierToFormatQuickFix;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyAssignmentStatement;
+import com.jetbrains.python.psi.PyBinaryExpression;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyComprehensionElement;
+import com.jetbrains.python.psi.PyConditionalExpression;
+import com.jetbrains.python.psi.PyDictLiteralExpression;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyKeyValueExpression;
+import com.jetbrains.python.psi.PyLiteralExpression;
+import com.jetbrains.python.psi.PyNumericLiteralExpression;
+import com.jetbrains.python.psi.PyParenthesizedExpression;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PySequenceExpression;
+import com.jetbrains.python.psi.PySliceItem;
+import com.jetbrains.python.psi.PyStringLiteralExpression;
+import com.jetbrains.python.psi.PySubscriptionExpression;
+import com.jetbrains.python.psi.PyTupleExpression;
+import com.jetbrains.python.psi.PyTypedElement;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.impl.PyBuiltinCache;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.QualifiedRatedResolveResult;
-import com.jetbrains.python.psi.types.*;
+import com.jetbrains.python.psi.types.PyABCUtil;
+import com.jetbrains.python.psi.types.PyClassType;
+import com.jetbrains.python.psi.types.PyTupleType;
+import com.jetbrains.python.psi.types.PyType;
+import com.jetbrains.python.psi.types.PyTypeChecker;
+import com.jetbrains.python.psi.types.PyTypeParser;
+import com.jetbrains.python.psi.types.PyTypeUtil;
+import com.jetbrains.python.psi.types.PyUnionType;
+import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.math.BigInteger;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IntSummaryStatistics;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.jetbrains.python.PyStringFormatParser.*;
+import static com.jetbrains.python.PyStringFormatParser.NewStyleSubstitutionChunk;
+import static com.jetbrains.python.PyStringFormatParser.PercentSubstitutionChunk;
+import static com.jetbrains.python.PyStringFormatParser.SubstitutionChunk;
+import static com.jetbrains.python.PyStringFormatParser.filterSubstitutions;
+import static com.jetbrains.python.PyStringFormatParser.parsePercentFormat;
 import static com.jetbrains.python.psi.PyUtil.as;
 import static com.jetbrains.python.psi.types.PyNoneTypeKt.isNoneType;
 
@@ -128,12 +167,15 @@ public final class PyStringFormatInspection extends PyInspection {
         else if (PsiTreeUtil.instanceOf(rightExpression, SIMPLE_RHS_EXPRESSIONS)) {
           if (s != null) {
             final PyType rightType = myTypeEvalContext.getType(rightExpression);
-            if (rightType instanceof PyTupleType tupleType) {
-              matchEntireTupleTypes(problemTarget, tupleType);
-              return tupleType.getElementCount();
-            }
-            else {
-              checkExpressionType(rightExpression, s, problemTarget);
+
+            for (var member : PyTypeUtil.toStream(rightType)) {
+              if (member instanceof PyTupleType tupleType) {
+                matchEntireTupleTypes(problemTarget, tupleType);
+                return tupleType.getElementCount();
+              }
+              else {
+                checkExpressionType(rightExpression, s, problemTarget);
+              }
             }
           }
           return 1;
@@ -452,9 +494,11 @@ public final class PyStringFormatInspection extends PyInspection {
     private static class NewStyleInspection {
 
       private static final List<String> CHECKED_TYPES =
-        Arrays.asList(PyNames.TYPE_STR, PyNames.TYPE_INT, PyNames.TYPE_LONG, "float", "complex", "None", "LiteralString");
+        Arrays.asList(PyNames.TYPE_STR, PyNames.TYPE_INT, PyNames.TYPE_LONG, PyNames.TYPE_FLOAT, PyNames.TYPE_COMPLEX, PyNames.NONE,
+                      "LiteralString");
 
-      private static final List<String> NUMERIC_TYPES = Arrays.asList(PyNames.TYPE_INT, PyNames.TYPE_LONG, "float", "complex");
+      private static final List<String> NUMERIC_TYPES =
+        Arrays.asList(PyNames.TYPE_INT, PyNames.TYPE_LONG, PyNames.TYPE_FLOAT, PyNames.TYPE_COMPLEX);
 
       private static final ImmutableMap<Character, String> NEW_STYLE_FORMAT_CONVERSIONS = ImmutableMap.<Character, String>builder()
         .put('s', "str or None")
@@ -580,10 +624,10 @@ public final class PyStringFormatInspection extends PyInspection {
                                                            @NotNull String mappingKey) {
         final PyTypedElement typedElement = as(target, PyTypedElement.class);
         if (typedElement != null && myFormatSpec.containsKey(mappingKey)) {
-          final PyType actual = myTypeEvalContext.getType(typedElement);
+          final PyType actual = PyUnionType.toNonWeakType(myTypeEvalContext.getType(typedElement));
           final PyType expected = PyTypeParser.getTypeByName(anchor, myFormatSpec.get(mappingKey));
           if (expected != null && actual != null
-              && CHECKED_TYPES.contains(actual.getName())
+              && PyTypeUtil.toStream(actual).allMatch(member -> member != null && CHECKED_TYPES.contains(member.getName()))
               && !PyTypeChecker.match(expected, actual, myTypeEvalContext)) {
             registerProblem(typedElement, PyPsiBundle.message("INSP.str.format.unexpected.argument.type", actual.getName()));
           }

@@ -2,7 +2,10 @@
 @file:ApiStatus.Internal
 package com.intellij.openapi.externalSystem.settings.workspaceModel
 
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.EntityType
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
 import org.jetbrains.annotations.ApiStatus
 
 object ExternalProjectsBuildClasspathEntitySource: EntitySource
@@ -11,8 +14,8 @@ interface ExternalProjectsBuildClasspathEntity : WorkspaceEntity {
   val projectsBuildClasspath: Map<String, ExternalProjectBuildClasspathEntity>
 
   //region generated code
-  @Deprecated(message = "Use ModifiableExternalProjectsBuildClasspathEntity instead")
-  interface Builder : ModifiableExternalProjectsBuildClasspathEntity
+  @Deprecated(message = "Use ExternalProjectsBuildClasspathEntityBuilder instead")
+  interface Builder : ExternalProjectsBuildClasspathEntityBuilder
   companion object : EntityType<ExternalProjectsBuildClasspathEntity, Builder>() {
     @Deprecated(message = "Use new API instead")
     @JvmOverloads

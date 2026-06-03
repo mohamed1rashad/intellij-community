@@ -1,8 +1,19 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.scopes.backend
 
+import com.intellij.ide.rpc.DataContextId
+import com.intellij.ide.rpc.dataContext
 import com.intellij.ide.ui.WindowFocusFrontendService
-import com.intellij.ide.util.scopeChooser.*
+import com.intellij.ide.util.scopeChooser.AbstractScopeModel
+import com.intellij.ide.util.scopeChooser.EditScopesDialog
+import com.intellij.ide.util.scopeChooser.ScopeDescriptor
+import com.intellij.ide.util.scopeChooser.ScopeModelListener
+import com.intellij.ide.util.scopeChooser.ScopeModelService
+import com.intellij.ide.util.scopeChooser.ScopeOption
+import com.intellij.ide.util.scopeChooser.ScopeService
+import com.intellij.ide.util.scopeChooser.ScopesFilterConditionType
+import com.intellij.ide.util.scopeChooser.ScopesSnapshot
+import com.intellij.ide.util.scopeChooser.ScopesStateService
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -23,7 +34,8 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.launch
-import java.util.*
+import kotlinx.coroutines.withContext
+import java.util.EnumSet
 import java.util.concurrent.ConcurrentHashMap
 
 internal class ScopesModelRemoteApiImpl : ScopeModelRemoteApi {
@@ -38,7 +50,12 @@ internal class ScopesModelRemoteApiImpl : ScopeModelRemoteApi {
    */
   private val modelIdToSelectedScopeName = ConcurrentHashMap<String, String>()
 
-  override suspend fun createModelAndSubscribe(projectId: ProjectId, modelId: String, filterConditionType: ScopesFilterConditionType): Flow<SearchScopesInfo>? {
+  override suspend fun createModelAndSubscribe(
+    projectId: ProjectId,
+    modelId: String,
+    filterConditionType: ScopesFilterConditionType,
+    dataContextId: DataContextId?
+  ): Flow<SearchScopesInfo>? {
     val project = projectId.findProjectOrNull() ?: return null
     val model = project.getService(ScopeService::class.java)
       .createModel(EnumSet.of(
@@ -49,7 +66,8 @@ internal class ScopesModelRemoteApiImpl : ScopeModelRemoteApi {
       ))
     modelIdToModel[modelId] = model
     val flow = subscribeToModelUpdates(model, modelId, project)
-    model.refreshScopes(null)
+    val dataContext = withContext(Dispatchers.EDT) { dataContextId?.dataContext() }
+    model.refreshScopes(dataContext)
     val scopeFilter = filterConditionType.getScopeFilterByType()
     if (scopeFilter != null) model.setFilter(scopeFilter)
 
@@ -130,7 +148,7 @@ internal class ScopesModelRemoteApiImpl : ScopeModelRemoteApi {
   }
 }
 
-private class ScopesStateApiProvider : RemoteApiProvider {
+internal class ScopesStateApiProvider : RemoteApiProvider {
   override fun RemoteApiProvider.Sink.remoteApis() {
     remoteApi(remoteApiDescriptor<ScopeModelRemoteApi>()) {
       ScopesModelRemoteApiImpl()

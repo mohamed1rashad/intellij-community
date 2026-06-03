@@ -8,7 +8,7 @@ import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.jetbrains.python.run.PythonExecution
 import com.jetbrains.python.run.PythonToolModuleExecution
 import com.jetbrains.python.run.PythonToolScriptExecution
-import com.jetbrains.python.sdk.uv.impl.getUvExecutable
+import com.jetbrains.python.sdk.uv.impl.getUvExecutableLocal
 import org.jetbrains.annotations.ApiStatus
 import java.nio.file.Files
 import java.nio.file.Path
@@ -16,13 +16,8 @@ import kotlin.io.path.pathString
 
 @ApiStatus.Internal
 @RequiresBackgroundThread(generateAssertion = false)
-fun buildUvRunConfigurationCli(options: UvRunConfigurationOptions, isDebug: Boolean): PythonExecution {
-  val toolPath = getUvExecutable()
-
-  if (toolPath == null) {
-    throw RuntimeException("Unable to find uv executable.")
-  }
-
+suspend fun buildUvRunConfigurationCli(options: UvRunConfigurationOptions, isDebug: Boolean): PythonExecution {
+  val toolPath = requireNotNull(getUvExecutableLocal()) { "Unable to find uv executable." }
   val toolParams = mutableListOf("run")
 
   if (isDebug && !options.uvArgs.contains("--cache-dir")) {
@@ -52,9 +47,11 @@ fun buildUvRunConfigurationCli(options: UvRunConfigurationOptions, isDebug: Bool
             toolPath.pathString,
             options.scriptOrModule
           ) + toolParams
-        } else if (!isDebug) {
+        }
+        else if (!isDebug) {
           toolParams + "--script"
-        } else {
+        }
+        else {
           toolParams
         },
         pythonScriptPath = constant(Path.of(options.scriptOrModule))

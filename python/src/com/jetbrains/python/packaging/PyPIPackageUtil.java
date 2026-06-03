@@ -25,7 +25,6 @@ import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.packaging.repository.PyPackageRepositories;
 import com.jetbrains.python.packaging.repository.PyPackageRepositoryUtil;
 import one.util.streamex.EntryStream;
-import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -37,6 +36,8 @@ import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.html.parser.ParserDelegator;
 import java.io.IOException;
 import java.io.Reader;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -145,10 +146,6 @@ public final class PyPIPackageUtil {
 
   public static boolean isPyPIRepository(@Nullable String repository) {
     return repository != null && repository.startsWith(PYPI_BASE_URL);
-  }
-
-  public @NotNull List<RepoPackage> getAdditionalPackages(@NotNull List<String> repositories) {
-    return StreamEx.of(myAdditionalPackages.getAllPresent(repositories).values()).flatMap(StreamEx::of).toList();
   }
 
   public void loadAdditionalPackages(@NotNull List<String> repositories, boolean alwaysRefresh) {
@@ -318,7 +315,8 @@ public final class PyPIPackageUtil {
    * Project API uses not normalized names (e.g. /project/Flask is correct, GET /project/flask redirects (HTTP 301) to /project/Flask)
    */
   public static @NotNull String buildProjectUrl(@NotNull String packageName) {
-    final String projectUrl = PYPI_BASE_URL + PYPI_PROJECT_API + packageName + "/";
+    final var encoded = URLEncoder.encode(packageName, StandardCharsets.UTF_8);
+    final String projectUrl = PYPI_BASE_URL + PYPI_PROJECT_API + encoded + "/";
     return projectUrl;
   }
 

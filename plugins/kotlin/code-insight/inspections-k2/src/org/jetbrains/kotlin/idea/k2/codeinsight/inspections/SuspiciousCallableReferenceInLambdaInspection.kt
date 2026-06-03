@@ -10,7 +10,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
-import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaClassSymbol
@@ -27,7 +26,22 @@ import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinAp
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.inspections.KotlinModCommandQuickFix
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDeclarationWithInitializer
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtLambdaArgument
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtValueArgument
+import org.jetbrains.kotlin.psi.KtValueArgumentList
+import org.jetbrains.kotlin.psi.KtVisitorVoid
+import org.jetbrains.kotlin.psi.ValueArgument
+import org.jetbrains.kotlin.psi.buildValueArgumentList
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelectorOrThis
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import org.jetbrains.kotlin.types.Variance
@@ -93,13 +107,13 @@ class SuspiciousCallableReferenceInLambdaInspection : KotlinApplicableInspection
             ?.resolveToCall()?.successfulFunctionCallOrNull() ?: return true
 
         val argumentExpression = (element.parent as? ValueArgument)?.getArgumentExpression()
-        val parameter = functionCall.argumentMapping.entries.firstOrNull { it.key == argumentExpression }?.value
+        val parameter = functionCall.valueArgumentMapping.entries.firstOrNull { it.key == argumentExpression }?.value
         val returnType = (parameter?.returnType as? KaFunctionType)?.returnType
 
         if (returnType?.isFunctionType == true || returnType?.isSuspendFunctionType == true) return false
 
         val originalReturnType =
-            (functionCall.partiallyAppliedSymbol.symbol.valueParameters[0].returnType as? KaFunctionType)?.returnType ?: return true
+            (functionCall.symbol.valueParameters[0].returnType as? KaFunctionType)?.returnType ?: return true
         return !originalReturnType.isFunctionInterfaceOrPropertyType() &&
                 (originalReturnType !is KaTypeParameterType || originalReturnType.allSupertypes.none { it.isFunctionInterfaceOrPropertyType() })
     }
@@ -132,7 +146,6 @@ class SuspiciousCallableReferenceInLambdaInspection : KotlinApplicableInspection
         }
     }
 
-    @OptIn(KaExperimentalApi::class)
     private fun createQuickFix(context: Context) = object : KotlinModCommandQuickFix<KtLambdaExpression>() {
         override fun getFamilyName() = KotlinBundle.message("move.reference.into.parentheses")
 
@@ -197,7 +210,7 @@ private fun KaSession.buildReferenceText(element: KtLambdaExpression, callableRe
     return if ((receiverSymbol == null || receiverSymbol is KaValueParameterSymbol) && receiverSymbol?.containingSymbol == lambdaSymbol) {
         val callableReferenceCall = callableRefExpr.resolveToCall()?.successfulFunctionCallOrNull()
         val receiverType =
-            callableReferenceCall?.partiallyAppliedSymbol?.let { it.extensionReceiver?.type ?: it.dispatchReceiver?.type }
+            callableReferenceCall?.let { it.extensionReceiver?.type ?: it.dispatchReceiver?.type }
         val typeText = receiverType?.render(position = Variance.INVARIANT)?.substringAfterLast('.') ?: ""
         "$typeText::${callableReference.text.trim()}"
     } else {

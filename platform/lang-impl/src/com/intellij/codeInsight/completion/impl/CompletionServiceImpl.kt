@@ -1,14 +1,32 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion.impl
 
-import com.intellij.codeInsight.completion.*
-import com.intellij.codeInsight.completion.CompletionPhase.*
+import com.intellij.codeInsight.completion.BaseCompletionService
+import com.intellij.codeInsight.completion.CompletionContributor
+import com.intellij.codeInsight.completion.CompletionLocation
+import com.intellij.codeInsight.completion.CompletionParameters
+import com.intellij.codeInsight.completion.CompletionPhase
+import com.intellij.codeInsight.completion.CompletionPhase.BgCalculation
+import com.intellij.codeInsight.completion.CompletionPhase.CommittingDocuments
 import com.intellij.codeInsight.completion.CompletionPhase.Companion.NoCompletion
+import com.intellij.codeInsight.completion.CompletionPhase.ItemsCalculated
+import com.intellij.codeInsight.completion.CompletionPhase.Synchronous
+import com.intellij.codeInsight.completion.CompletionPhase.ZombiePhase
+import com.intellij.codeInsight.completion.CompletionPhaseListener
+import com.intellij.codeInsight.completion.CompletionProcess
+import com.intellij.codeInsight.completion.CompletionProcessBase
+import com.intellij.codeInsight.completion.CompletionProgressIndicator
+import com.intellij.codeInsight.completion.CompletionResult
+import com.intellij.codeInsight.completion.CompletionResultSet
+import com.intellij.codeInsight.completion.CompletionSorter
+import com.intellij.codeInsight.completion.CompletionThreadingBase
+import com.intellij.codeInsight.completion.PrefixMatcher
 import com.intellij.codeInsight.completion.StatisticsWeigher.LookupStatisticsWeigher
 import com.intellij.codeInsight.lookup.Classifier
 import com.intellij.codeInsight.lookup.ClassifierFactory
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.util.CodeCompletion
+import com.intellij.codeInsight.util.CodeCompletionContributors
 import com.intellij.codeWithMe.ClientId.Companion.current
 import com.intellij.codeWithMe.ClientId.Companion.isCurrentlyUnderLocalId
 import com.intellij.ide.plugins.DynamicPluginListener
@@ -39,6 +57,7 @@ private val DEFAULT_PHASE_HOLDER = CompletionPhaseHolder(NoCompletion, null)
 
 open class CompletionServiceImpl : BaseCompletionService() {
   private val completionTracer = TelemetryManager.getInstance().getTracer(CodeCompletion)
+  private val contributorTracer = TelemetryManager.getInstance().getTracer(CodeCompletionContributors)
 
   companion object {
     @JvmStatic
@@ -205,7 +224,7 @@ open class CompletionServiceImpl : BaseCompletionService() {
   }
 
   override fun getVariantsFromContributor(params: CompletionParameters, contributor: CompletionContributor, result: CompletionResultSet) {
-    completionTracer.spanBuilder(contributor.javaClass.simpleName)
+    contributorTracer.spanBuilder(contributor.javaClass.simpleName)
       .setAttribute("avoid_null_value", true)
       .use {
         super.getVariantsFromContributor(params, contributor, result)
@@ -229,7 +248,7 @@ open class CompletionServiceImpl : BaseCompletionService() {
   }
 }
 
-private class ClientCompletionService(private val appSession: ClientAppSession) : Disposable {
+internal class ClientCompletionService(private val appSession: ClientAppSession) : Disposable {
   @Volatile
   var completionPhaseHolder: CompletionPhaseHolder = DEFAULT_PHASE_HOLDER
     private set
@@ -289,8 +308,7 @@ private fun reportPhase(phaseHolder: CompletionPhaseHolder) {
   LOG.error("${phaseHolder.phase}; $current$traceText")
 }
 
-private data class CompletionPhaseHolder(
+internal data class CompletionPhaseHolder(
   @JvmField val phase: CompletionPhase,
   @JvmField val phaseTrace: Throwable?
 )
-

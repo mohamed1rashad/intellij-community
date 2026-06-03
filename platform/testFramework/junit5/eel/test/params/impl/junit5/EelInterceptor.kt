@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.testFramework.junit5.eel.params.impl.junit5
 
 import com.intellij.platform.core.nio.fs.MultiRoutingFileSystemProvider
@@ -10,10 +10,15 @@ import com.intellij.platform.testFramework.junit5.eel.params.spi.EelIjentTestPro
 import com.intellij.testFramework.junit5.fixture.EelForFixturesProvider
 import com.intellij.testFramework.junit5.fixture.EelForFixturesProvider.Companion.makeFixturesEelAware
 import com.intellij.testFramework.junit5.impl.TypedStoreKey
-import com.intellij.testFramework.junit5.impl.TypedStoreKey.Companion.getTyped
+import com.intellij.testFramework.junit5.impl.TypedStoreKey.Companion.remove
 import org.jetbrains.annotations.TestOnly
 import org.junit.jupiter.api.condition.OS
-import org.junit.jupiter.api.extension.*
+import org.junit.jupiter.api.extension.AfterEachCallback
+import org.junit.jupiter.api.extension.BeforeAllCallback
+import org.junit.jupiter.api.extension.BeforeEachCallback
+import org.junit.jupiter.api.extension.ExtensionContext
+import org.junit.jupiter.api.extension.InvocationInterceptor
+import org.junit.jupiter.api.extension.ReflectiveInvocationContext
 import org.junit.platform.commons.util.AnnotationUtils.findAnnotation
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
@@ -83,13 +88,14 @@ internal class EelInterceptor : InvocationInterceptor, BeforeAllCallback, Before
   }
 
   override fun afterEach(context: ExtensionContext) {
-    context.store.getTyped(KEY_FOR_MANAGER)?.close()
+    context.remove(KEY_FOR_MANAGER)?.close()
   }
 
   private fun createEelManager(
     invocationContext: ReflectiveInvocationContext<*>,
     extensionContext: ExtensionContext,
   ) {
+    extensionContext.store.remove(KEY_FOR_MANAGER, EelsManager::class.java)?.close()
     val eelManager = EelsManager.create(invocationContext, extensionContext) ?: return
     extensionContext.makeFixturesEelAware(eelForFixturesProvider)
     extensionContext.store.put(KEY_FOR_MANAGER, eelManager)

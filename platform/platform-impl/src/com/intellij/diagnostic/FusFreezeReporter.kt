@@ -5,14 +5,15 @@ import com.intellij.featureStatistics.fusCollectors.LifecycleUsageTriggerCollect
 import com.intellij.internal.DebugAttachDetector
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.ProjectManager
+import com.intellij.util.SystemProperties
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
 private val isDebugEnabled = DebugAttachDetector.isDebugEnabled()
-private const val TOLERABLE_UI_LATENCY = 100
+private val TOLERABLE_UI_LATENCY = SystemProperties.getIntProperty("fus.freeze.tolerable.ui.latency", 100)
 private const val UI_RESPONSE_LOGGING_INTERVAL_MS = 100000
 
-private class FusFreezeReporter : PerformanceListener {
+internal class FusFreezeReporter : PerformanceListener {
   @Volatile
   private var previousLoggedUiResponse: Long = 0
 
@@ -27,11 +28,11 @@ private class FusFreezeReporter : PerformanceListener {
     val elapsedMs = TimeUnit.NANOSECONDS.toMillis(currentTime - previousLoggedUiResponse)
     if (elapsedMs >= UI_RESPONSE_LOGGING_INTERVAL_MS) {
       previousLoggedUiResponse = currentTime
-      UILatencyLogger.LATENCY.log(latencyMs)
+      UILatencyLogger.logLatency(latencyMs)
     }
     if (latencyMs >= TOLERABLE_UI_LATENCY && !isDebugEnabled) {
       val hasIndexingGoingOn = ProjectManager.getInstance().openProjects.any { DumbService.isDumb(it) }
-      UILatencyLogger.LAGGING.log(latencyMs, hasIndexingGoingOn)
+      UILatencyLogger.logLagging(latencyMs, hasIndexingGoingOn)
     }
   }
 }

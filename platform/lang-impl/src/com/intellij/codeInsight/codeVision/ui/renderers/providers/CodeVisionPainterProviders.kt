@@ -17,6 +17,7 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.util.ClassExtension
 import com.intellij.openapi.util.registry.Registry
+import org.jetbrains.annotations.ApiStatus
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Point
@@ -30,27 +31,27 @@ private class CodeVisionPainterProviders : ClassExtension<ICodeVisionEntryBasePa
   }
 }
 
-private class CounterCodeVisionEntryPainter : DefaultCodeVisionPainter<CounterCodeVisionEntry>(
+internal class CounterCodeVisionEntryPainter : DefaultCodeVisionPainter<CounterCodeVisionEntry>(
   iconProvider = { _, entry, _ -> entry.icon },
   textPainter = CodeVisionVisionTextPainter({ "${it.count} ${it.text}" })
 )
 
-private class TextCodeVisionEntryPainter : DefaultCodeVisionPainter<TextCodeVisionEntry>(
+internal class TextCodeVisionEntryPainter : DefaultCodeVisionPainter<TextCodeVisionEntry>(
   iconProvider = { _, entry, _ -> entry.icon },
   textPainter = CodeVisionVisionTextPainter({ it.text })
 )
 
-private class AdditionalCodeVisionEntryPainter : DefaultCodeVisionPainter<AdditionalCodeVisionEntry>(
+internal class AdditionalCodeVisionEntryPainter : DefaultCodeVisionPainter<AdditionalCodeVisionEntry>(
   iconProvider = { _, entry, _ -> entry.swingIcon },
   textPainter = CodeVisionVisionTextPainter({ it.text })
 )
 
-private class RichTextCodeVisionEntryPainter : DefaultCodeVisionPainter<RichTextCodeVisionEntry>(
+internal class RichTextCodeVisionEntryPainter : DefaultCodeVisionPainter<RichTextCodeVisionEntry>(
   iconProvider = { _, entry, _ -> entry.icon },
   textPainter = CodeVisionRichTextPainter({ it.text })
 )
 
-private class ZombieCodeVisionEntryPainter : DefaultCodeVisionPainter<ZombieCodeVisionEntry>(
+internal class ZombieCodeVisionEntryPainter : DefaultCodeVisionPainter<ZombieCodeVisionEntry>(
   iconProvider = { _, entry, _ -> entry.icon },
   textPainter = CodeVisionVisionTextPainter({
     val result = if (it.count != null) "${it.count} ${it.text}" else if (it.shouldBeDelimited) it.text else ""
@@ -63,7 +64,7 @@ private class ZombieCodeVisionEntryPainter : DefaultCodeVisionPainter<ZombieCode
   }
 }
 
-private class ZeroWidthCodeVisionEntryPainter : ICodeVisionEntryBasePainter<ZeroWidthCodeVisionEntry> {
+internal class ZeroWidthCodeVisionEntryPainter : ICodeVisionEntryBasePainter<ZeroWidthCodeVisionEntry> {
 
   override fun paint(
     editor: Editor,
@@ -87,6 +88,7 @@ private class ZeroWidthCodeVisionEntryPainter : ICodeVisionEntryBasePainter<Zero
   }
 }
 
-internal fun CodeVisionEntry.painter(): ICodeVisionEntryBasePainter<CodeVisionEntry> {
+@ApiStatus.Internal
+fun CodeVisionEntry.painter(): ICodeVisionEntryBasePainter<CodeVisionEntry> {
   return INSTANCE.getPainter(this@painter)
 }

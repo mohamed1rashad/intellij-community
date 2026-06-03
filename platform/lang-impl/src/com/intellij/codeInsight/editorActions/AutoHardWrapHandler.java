@@ -7,7 +7,14 @@ import com.intellij.ide.DataManager;
 import com.intellij.lang.Language;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.IdeActions;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.EditorSettings;
+import com.intellij.openapi.editor.LanguageLineWrapPositionStrategy;
+import com.intellij.openapi.editor.LineWrapPositionStrategy;
+import com.intellij.openapi.editor.LogicalPosition;
 import com.intellij.openapi.editor.actionSystem.EditorActionManager;
 import com.intellij.openapi.editor.event.DocumentEvent;
 import com.intellij.openapi.editor.event.DocumentListener;
@@ -26,7 +33,7 @@ import java.util.WeakHashMap;
 /**
  * Encapsulates logic for processing {@link EditorSettings#isWrapWhenTypingReachesRightMargin(Project)} option.
  */
-public final class AutoHardWrapHandler {
+public class AutoHardWrapHandler {
 
   /**
    * This key is used as a flag that indicates if {@code 'auto wrap line on typing'} activity is performed now.
@@ -34,8 +41,6 @@ public final class AutoHardWrapHandler {
    * @see CodeStyleSettings#isWrapOnTyping(Language)
    */
   public static final Key<Boolean> AUTO_WRAP_LINE_IN_PROGRESS_KEY = new Key<>("AUTO_WRAP_LINE_IN_PROGRESS");
-
-  private static final AutoHardWrapHandler INSTANCE = new AutoHardWrapHandler();
 
   /**
    * There is a possible case that the user configured editor to
@@ -50,7 +55,7 @@ public final class AutoHardWrapHandler {
   private final Map<Document, AutoWrapChange> myAutoWrapChanges = new WeakHashMap<>();
 
   public static AutoHardWrapHandler getInstance() {
-    return INSTANCE;
+    return ApplicationManager.getApplication().getService(AutoHardWrapHandler.class);
   }
 
   /**
@@ -181,7 +186,7 @@ public final class AutoHardWrapHandler {
         return event.getNewLength() <= event.getOldLength() && endsWithSpaces;
       }
     };
-
+    preprocessLineWrap(editor);
     caretModel.moveToOffset(wrapOffset);
     DataManager.getInstance().saveInDataContext(dataContext, AUTO_WRAP_LINE_IN_PROGRESS_KEY, true);
     document.addDocumentListener(listener);
@@ -201,6 +206,8 @@ public final class AutoHardWrapHandler {
 
     caretModel.moveToOffset(baseCaretOffset + caretOffsetDiff[0]);
   }
+
+  protected void preprocessLineWrap(@NotNull Editor editor) {}
 
   private static final class AutoWrapChange {
 

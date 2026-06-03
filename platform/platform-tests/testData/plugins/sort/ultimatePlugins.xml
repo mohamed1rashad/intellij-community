@@ -268,6 +268,7 @@
     <module value="com.intellij.modules.ruby-capable"/>
     <module value="com.intellij.modules.c-capable"/>
     <module value="com.intellij.modules.go-capable"/>
+    <module value="com.intellij.modules.database-capable"/>
     <module value="com.intellij.modules.nativeDebug-plugin-capable"/>
     <module value="com.intellij.modules.platform"/>
     <module value="com.intellij.modules.lang"/>
@@ -393,7 +394,7 @@
     <depends optional="true">-org-jetbrains-idea-maven-</depends>
     <depends>com.intellij.modules.ultimate</depends>
   </idea-plugin>
-  <idea-plugin url="file://out/intellij.javaee.jsp.base.impl/META-INF/plugin.xml">
+  <idea-plugin url="file://out/intellij.javaee.jsp/META-INF/plugin.xml">
     <id>-com-intellij-jsp-</id>
     <name>Java Server Pages (JSP)</name>
     <depends>com.intellij.modules.xml</depends>
@@ -609,13 +610,6 @@
     <depends>-com-intellij-css-</depends>
     <depends>com.intellij.modules.xml</depends>
   </idea-plugin>
-  <idea-plugin url="file://out/intellij.guice/META-INF/plugin.xml">
-    <id>-com-intellij-guice-</id>
-    <name>Guice</name>
-    <depends>-com-intellij-properties-</depends>
-    <depends>com.intellij.modules.java</depends>
-    <depends>com.intellij.modules.ultimate</depends>
-  </idea-plugin>
   <idea-plugin url="file://out/intellij.flex/META-INF/plugin.xml">
     <id>-com-intellij-flex-</id>
     <name>Flash/Flex</name>
@@ -633,11 +627,6 @@
     <name>Git</name>
     <depends>com.intellij.modules.vcs</depends>
     <depends optional="true">-com-intellij-java-</depends>
-  </idea-plugin>
-  <idea-plugin url="file://out/intellij.spring.osgi/META-INF/plugin.xml">
-    <id>-com-intellij-spring-osgi-</id>
-    <name>Spring OSGi</name>
-    <depends>-com-intellij-spring-</depends>
   </idea-plugin>
   <idea-plugin url="file://out/intellij.spring.data/META-INF/plugin.xml">
     <id>-com-intellij-spring-data-</id>
@@ -770,35 +759,10 @@
     <depends optional="true">com.intellij.modules.java</depends>
     <depends optional="true">-XPathView-</depends>
   </idea-plugin>
-  <idea-plugin url="file://out/intellij.osgi/META-INF/plugin.xml">
-    <id>-Osmorc-</id>
-    <name>OSGi</name>
-    <depends>com.intellij.modules.java</depends>
-    <depends optional="true">-org-jetbrains-idea-maven-</depends>
-  </idea-plugin>
   <idea-plugin url="file://out/intellij.asp/META-INF/plugin.xml">
     <id>-com-jetbrains-plugins-asp-</id>
     <name>ASP</name>
     <depends>com.intellij.modules.xml</depends>
-  </idea-plugin>
-  <idea-plugin url="file://out/intellij.groovy.grails/META-INF/plugin.xml">
-    <id>-org-intellij-grails-</id>
-    <name>Grails</name>
-    <depends optional="true">-JavaScript-</depends>
-    <depends optional="true">-com-intellij-css-</depends>
-    <depends optional="true">-com-intellij-copyright-</depends>
-    <depends optional="true">-com-intellij-java-i18n-</depends>
-    <depends optional="true">-org-jetbrains-idea-maven-</depends>
-    <depends optional="true">-com-intellij-hibernate-</depends>
-    <depends optional="true">-org-intellij-intelliLang-</depends>
-    <depends optional="true">com.intellij.modules.coverage</depends>
-    <depends>-com-intellij-javaee-</depends>
-    <depends>-com-intellij-jsp-</depends>
-    <depends>-org-intellij-groovy-</depends>
-    <depends>-com-intellij-properties-</depends>
-    <depends>-com-intellij-spring-</depends>
-    <depends>-org-jetbrains-plugins-gradle-</depends>
-    <depends>com.intellij.modules.ultimate</depends>
   </idea-plugin>
   <idea-plugin url="file://out/intellij.java.coverage.emma/META-INF/plugin.xml">
     <id>-Emma-</id>
@@ -859,12 +823,6 @@
     <depends>com.intellij.modules.xml</depends>
     <depends optional="true">-com-jetbrains-php-</depends>
     <depends>com.intellij.modules.ultimate</depends>
-  </idea-plugin>
-  <idea-plugin url="file://out/intellij.xslt.debugger/META-INF/plugin.xml">
-    <id>-XSLT-Debugger-</id>
-    <name>XSLT Debugger</name>
-    <depends>-XPathView-</depends>
-    <depends>com.intellij.modules.xml</depends>
   </idea-plugin>
   <idea-plugin url="file://out/intellij.nodeJS/META-INF/plugin.xml">
     <id>-NodeJS-</id>
@@ -1247,10 +1205,5 @@
     <depends>com.intellij.modules.ultimate</depends>
     <depends>com.intellij.modules.microservices</depends>
     <depends>-org-jetbrains-plugins-yaml-</depends>
-  </idea-plugin>
-  <idea-plugin url="file://out/intellij.python.concurrencyVisualizer/META-INF/plugin.xml">
-    <id>-org-jetbrains-python-concurrency-visualiser-</id>
-    <name>Concurrency Visualiser</name>
-    <depends>com.intellij.modules.pycharm.professional</depends>
   </idea-plugin>
 </root>

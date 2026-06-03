@@ -15,6 +15,7 @@ import com.intellij.grazie.jlanguage.Lang
 import com.intellij.grazie.remote.GrazieRemote
 import com.intellij.grazie.remote.GrazieRemote.getLanguagesBasedOnUserAgreement
 import com.intellij.grazie.remote.LanguageDownloader
+import com.intellij.grazie.utils.isPromotionAllowed
 import com.intellij.ide.DataManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.EDT
@@ -28,7 +29,13 @@ import com.intellij.openapi.options.ex.Settings
 import com.intellij.openapi.project.guessCurrentProject
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.profile.codeInspection.ui.ErrorsConfigurable
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.DslComponentProperty
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.Row
+import com.intellij.ui.dsl.builder.VerticalComponentGap
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.layout.ComponentPredicate
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.JBDimension
@@ -137,6 +144,7 @@ class ProofreadConfigurable : BoundSearchableConfigurable(
   }
 
   private fun Panel.cloudSettings() {
+    if (!isPromotionAllowed) return
     row {
       label(GrazieBundle.message("grazie.status.bar.widget.language.processing.label.text"))
 
@@ -183,7 +191,7 @@ class ProofreadConfigurable : BoundSearchableConfigurable(
   private suspend fun withProcessIcon(langs: Collection<Lang>, download: suspend (Collection<Lang>) -> Unit): Boolean {
     var failed = false
     try {
-      if (GrazieRemote.allAvailableLocally(langs)) return false
+      if (GrazieRemote.allAvailableLocally(langs)) return true
       val filteredLanguages = withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
         getLanguagesBasedOnUserAgreement(langs, project)
       }

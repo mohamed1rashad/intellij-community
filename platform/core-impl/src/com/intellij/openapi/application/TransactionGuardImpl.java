@@ -16,11 +16,8 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
 import java.util.Map;
 import java.util.Objects;
-
-import static com.intellij.concurrency.ThreadContext.currentThreadContext;
 
 public final class TransactionGuardImpl extends TransactionGuard {
   private static final Logger LOG = Logger.getInstance(TransactionGuardImpl.class);
@@ -35,7 +32,7 @@ public final class TransactionGuardImpl extends TransactionGuard {
 
   public TransactionGuardImpl() {
     myWriteSafeModalities.put(ModalityState.nonModal(), true);
-    myWritingAllowed = SwingUtilities.isEventDispatchThread(); // consider app startup a user activity
+    myWritingAllowed = EDT.isCurrentThreadEdt(); // consider app startup a user activity
   }
 
   @Override
@@ -136,9 +133,10 @@ public final class TransactionGuardImpl extends TransactionGuard {
     return Boolean.TRUE.equals(myWriteSafeModalities.get(state));
   }
 
-  public void assertWriteActionAllowed() {
+  @ApiStatus.Internal
+  public void assertWriteSafeEnvironment() {
     Application app = ApplicationManager.getApplication();
-    if (!EDT.isCurrentThreadEdt() && app.isWriteAccessAllowed()) {
+    if (!EDT.isCurrentThreadEdt()) {
       return;
     }
     app.assertWriteIntentLockAcquired();
@@ -147,6 +145,15 @@ public final class TransactionGuardImpl extends TransactionGuard {
       LOG.error(reportWriteUnsafeContext(ModalityState.current()));
       myErrorReported = true;
     }
+  }
+
+  /**
+   * @deprecated Use {@link assertWriteSafeEnvironment}. This function has unfortunate name
+   */
+  @Deprecated
+  @SuppressWarnings("unused")
+  public void assertWriteActionAllowed() {
+    assertWriteSafeEnvironment();
   }
 
   private static @NonNls String reportWriteUnsafeContext(@NotNull ModalityState modality) {

@@ -1,16 +1,15 @@
 ### auto-generated section `build intellij.textmate.core` start
 load("//build:compiler-options.bzl", "create_kotlinc_options")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library")
 
 create_kotlinc_options(
   name = "custom_core",
   opt_in = ["kotlin.concurrent.atomics.ExperimentalAtomicApi"]
 )
 
-resourcegroup(
-  name = "core_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
+jvm_provided_library(
+  name = "libraries_kotlinx_coroutines_core_provided",
+  lib = "//libraries/kotlinx/coroutines/core"
 )
 
 jvm_provided_library(
@@ -23,7 +22,8 @@ jvm_library(
   module_name = "intellij.textmate.core",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form", "srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form", "srcMultiplatform/**/*.kt", "srcMultiplatform/**/*.java", "srcMultiplatform/**/*.form"], allow_empty = True),
-  resources = [":core_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_core",
   deps = [
     "@lib//:jetbrains-annotations",
@@ -32,8 +32,33 @@ jvm_library(
     "@lib//:kotlin-stdlib",
     "//libraries/kotlin/reflect",
     "@lib//:slf4j-api",
-    "@lib//:kotlinx-coroutines-core-provided",
+    ":libraries_kotlinx_coroutines_core_provided",
     ":libraries_kotlinx_libraries-kotlinx-collections-immutable_provided",
   ]
 )
+
+jvm_library(
+  name = "core_test_lib",
+  testonly = True,
+  module_name = "intellij.textmate.core",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_core",
+  runtime_deps = [
+    ":core",
+    "//libraries/kotlinx/serialization/core:core_test_lib",
+    "//libraries/kotlinx/serialization/json:json_test_lib",
+    "//libraries/kotlin/reflect:reflect_test_lib",
+    "//libraries/kotlinx/coroutines/core",
+    "//libraries/kotlinx/coroutines/core:core_test_lib",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable",
+    "//libraries/kotlinx/collections-immutable:libraries-kotlinx-collections-immutable_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.textmate.core` end
+
+### auto-generated section `iml intellij.textmate.core` start
+exports_files([
+  "intellij.textmate.core.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.textmate.core` end

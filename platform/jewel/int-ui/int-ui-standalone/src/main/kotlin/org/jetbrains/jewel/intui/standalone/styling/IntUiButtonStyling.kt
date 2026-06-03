@@ -55,7 +55,7 @@ public val ButtonColors.Companion.Default: IntUiDefaultButtonColorFactory
 public object IntUiDefaultButtonColorFactory {
     public fun light(
         background: Brush = SolidColor(IntUiLightTheme.colors.blue(4)),
-        backgroundDisabled: Brush = SolidColor(IntUiLightTheme.colors.gray(12)),
+        backgroundDisabled: Brush = SolidColor(Color.Unspecified),
         backgroundFocused: Brush = SolidColor(IntUiLightTheme.colors.blue(4)),
         backgroundPressed: Brush = SolidColor(IntUiLightTheme.colors.blue(2)),
         backgroundHovered: Brush = SolidColor(IntUiLightTheme.colors.blue(3)),
@@ -65,7 +65,7 @@ public object IntUiDefaultButtonColorFactory {
         contentPressed: Color = IntUiLightTheme.colors.gray(14),
         contentHovered: Color = IntUiLightTheme.colors.gray(14),
         border: Brush = SolidColor(IntUiLightTheme.colors.blue(4)),
-        borderDisabled: Brush = SolidColor(IntUiLightTheme.colors.gray(12)),
+        borderDisabled: Brush = SolidColor(IntUiLightTheme.colors.gray(11)),
         borderFocused: Brush = SolidColor(IntUiLightTheme.colors.gray(14)),
         borderPressed: Brush = borderFocused,
         borderHovered: Brush = border,
@@ -90,17 +90,17 @@ public object IntUiDefaultButtonColorFactory {
 
     public fun dark(
         background: Brush = SolidColor(IntUiDarkTheme.colors.blue(6)),
-        backgroundDisabled: Brush = SolidColor(IntUiDarkTheme.colors.gray(5)),
+        backgroundDisabled: Brush = SolidColor(Color.Unspecified),
         backgroundFocused: Brush = SolidColor(IntUiDarkTheme.colors.blue(6)),
         backgroundPressed: Brush = SolidColor(IntUiDarkTheme.colors.blue(4)),
         backgroundHovered: Brush = SolidColor(IntUiDarkTheme.colors.blue(5)),
         content: Color = IntUiDarkTheme.colors.gray(14),
-        contentDisabled: Color = IntUiDarkTheme.colors.gray(8),
+        contentDisabled: Color = IntUiDarkTheme.colors.gray(6),
         contentFocused: Color = IntUiDarkTheme.colors.gray(14),
         contentPressed: Color = IntUiDarkTheme.colors.gray(14),
         contentHovered: Color = IntUiDarkTheme.colors.gray(14),
         border: Brush = SolidColor(IntUiDarkTheme.colors.blue(6)),
-        borderDisabled: Brush = SolidColor(IntUiDarkTheme.colors.gray(5)),
+        borderDisabled: Brush = SolidColor(IntUiDarkTheme.colors.gray(4)),
         borderFocused: Brush = SolidColor(IntUiDarkTheme.colors.gray(1)),
         borderPressed: Brush = borderFocused,
         borderHovered: Brush = border,
@@ -130,7 +130,7 @@ public val ButtonColors.Companion.Outlined: IntUiOutlinedButtonColorFactory
 public object IntUiOutlinedButtonColorFactory {
     public fun light(
         background: Brush = SolidColor(IntUiLightTheme.colors.gray(14)),
-        backgroundDisabled: Brush = SolidColor(IntUiLightTheme.colors.gray(12)),
+        backgroundDisabled: Brush = SolidColor(Color.Unspecified),
         backgroundFocused: Brush = background,
         backgroundPressed: Brush = SolidColor(IntUiLightTheme.colors.gray(13)),
         backgroundHovered: Brush = background,
@@ -140,7 +140,7 @@ public object IntUiOutlinedButtonColorFactory {
         contentPressed: Color = content,
         contentHovered: Color = content,
         border: Brush = SolidColor(IntUiLightTheme.colors.gray(9)),
-        borderDisabled: Brush = SolidColor(IntUiLightTheme.colors.gray(12)),
+        borderDisabled: Brush = SolidColor(IntUiLightTheme.colors.gray(11)),
         borderFocused: Brush = SolidColor(IntUiLightTheme.colors.blue(4)),
         borderPressed: Brush = SolidColor(IntUiLightTheme.colors.gray(7)),
         borderHovered: Brush = SolidColor(IntUiLightTheme.colors.gray(8)),
@@ -165,17 +165,17 @@ public object IntUiOutlinedButtonColorFactory {
 
     public fun dark(
         background: Brush = SolidColor(Color.Transparent),
-        backgroundDisabled: Brush = SolidColor(IntUiDarkTheme.colors.gray(5)),
+        backgroundDisabled: Brush = SolidColor(Color.Unspecified),
         backgroundFocused: Brush = background,
         backgroundPressed: Brush = SolidColor(IntUiDarkTheme.colors.gray(2)),
         backgroundHovered: Brush = SolidColor(Color.Unspecified),
         content: Color = IntUiDarkTheme.colors.gray(12),
-        contentDisabled: Color = IntUiDarkTheme.colors.gray(8),
+        contentDisabled: Color = IntUiDarkTheme.colors.gray(6),
         contentFocused: Color = IntUiDarkTheme.colors.gray(12),
         contentPressed: Color = IntUiDarkTheme.colors.gray(12),
         contentHovered: Color = IntUiDarkTheme.colors.gray(12),
         border: Brush = SolidColor(IntUiDarkTheme.colors.gray(5)),
-        borderDisabled: Brush = SolidColor(IntUiDarkTheme.colors.gray(5)),
+        borderDisabled: Brush = SolidColor(IntUiDarkTheme.colors.gray(4)),
         borderFocused: Brush = SolidColor(IntUiDarkTheme.colors.gray(2)),
         borderPressed: Brush = SolidColor(IntUiDarkTheme.colors.gray(7)),
         borderHovered: Brush = SolidColor(IntUiDarkTheme.colors.gray(7)),
@@ -214,3 +214,63 @@ public fun ButtonMetrics.Companion.outlined(
     borderWidth: Dp = 1.dp,
     focusOutlineExpand: Dp = Dp.Unspecified,
 ): ButtonMetrics = ButtonMetrics(cornerSize, padding, minSize, borderWidth, focusOutlineExpand)
+
+public val ButtonStyle.Companion.Slim: IntUiSlimButtonStyleFactory
+    get() = IntUiSlimButtonStyleFactory
+
+public object IntUiSlimButtonStyleFactory {
+    public val Default: IntUiSlimDefaultButtonStyleFactory
+        get() = IntUiSlimDefaultButtonStyleFactory
+
+    public val Outlined: IntUiSlimOutlinedButtonStyleFactory
+        get() = IntUiSlimOutlinedButtonStyleFactory
+}
+
+public object IntUiSlimDefaultButtonStyleFactory {
+    public fun light(
+        colors: ButtonColors = ButtonColors.Default.light(),
+        metrics: ButtonMetrics = ButtonMetrics.Slim.default(),
+        focusOutlineAlignment: Stroke.Alignment = Stroke.Alignment.Center,
+    ): ButtonStyle = ButtonStyle(colors, metrics, focusOutlineAlignment)
+
+    public fun dark(
+        colors: ButtonColors = ButtonColors.Default.dark(),
+        metrics: ButtonMetrics = ButtonMetrics.Slim.default(),
+        focusOutlineAlignment: Stroke.Alignment = Stroke.Alignment.Center,
+    ): ButtonStyle = ButtonStyle(colors, metrics, focusOutlineAlignment)
+}
+
+public object IntUiSlimOutlinedButtonStyleFactory {
+    public fun light(
+        colors: ButtonColors = ButtonColors.Outlined.light(),
+        metrics: ButtonMetrics = ButtonMetrics.Slim.outlined(),
+        focusOutlineAlignment: Stroke.Alignment = Stroke.Alignment.Center,
+    ): ButtonStyle = ButtonStyle(colors, metrics, focusOutlineAlignment)
+
+    public fun dark(
+        colors: ButtonColors = ButtonColors.Outlined.dark(),
+        metrics: ButtonMetrics = ButtonMetrics.Slim.outlined(),
+        focusOutlineAlignment: Stroke.Alignment = Stroke.Alignment.Center,
+    ): ButtonStyle = ButtonStyle(colors, metrics, focusOutlineAlignment)
+}
+
+public val ButtonMetrics.Companion.Slim: IntUiSlimButtonMetricsFactory
+    get() = IntUiSlimButtonMetricsFactory
+
+public object IntUiSlimButtonMetricsFactory {
+    public fun default(
+        cornerSize: CornerSize = CornerSize(4.dp),
+        padding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+        minSize: DpSize = DpSize(60.dp, 24.dp),
+        borderWidth: Dp = 1.dp,
+        focusOutlineExpand: Dp = 1.5.dp,
+    ): ButtonMetrics = ButtonMetrics(cornerSize, padding, minSize, borderWidth, focusOutlineExpand)
+
+    public fun outlined(
+        cornerSize: CornerSize = CornerSize(4.dp),
+        padding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+        minSize: DpSize = DpSize(60.dp, 24.dp),
+        borderWidth: Dp = 1.dp,
+        focusOutlineExpand: Dp = Dp.Unspecified,
+    ): ButtonMetrics = ButtonMetrics(cornerSize, padding, minSize, borderWidth, focusOutlineExpand)
+}

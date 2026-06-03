@@ -4,7 +4,13 @@ package com.intellij.vcs.commit
 import com.intellij.ide.ui.LafManagerListener
 import com.intellij.ide.ui.UISettings
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.DataProvider
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.actionSystem.impl.ActionButtonUtil
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.editor.colors.EditorColorsListener
@@ -40,6 +46,7 @@ import javax.swing.SwingConstants
 import javax.swing.UIManager
 import javax.swing.border.Border
 
+@ApiStatus.Internal
 abstract class NonModalCommitPanel(
   val project: Project,
   val commitActionsPanel: CommitActionsPanel = CommitActionsPanel(),
@@ -57,15 +64,19 @@ abstract class NonModalCommitPanel(
   private var commitInputBorder: CommitInputBorder? = null
 
   private val mainPanel: BorderLayoutPanel = object : BorderLayoutPanel(), UiDataProvider {
+    init {
+      isOpaque = false
+    }
+
     override fun uiDataSnapshot(sink: DataSink) {
       DataSink.uiDataSnapshot(sink, commitMessage)
       uiDataSnapshotFromProviders(sink)
     }
   }
 
-  protected val centerPanel: BorderLayoutPanel = JBUI.Panels.simplePanel()
+  protected val centerPanel: BorderLayoutPanel = JBUI.Panels.simplePanel().also { it.isOpaque = false }
 
-  private val bottomPanel: JBPanel<JBPanel<*>> = JBPanel<JBPanel<*>>(VerticalLayout(0))
+  private val bottomPanel: JBPanel<JBPanel<*>> = JBPanel<JBPanel<*>>(VerticalLayout(0)).also { it.isOpaque = false }
 
   private val actions = ActionManager.getInstance().getAction("ChangesView.CommitToolbar") as ActionGroup
   val toolbar: ActionToolbar = ActionManager.getInstance().createActionToolbar(COMMIT_TOOLBAR_PLACE, actions, true).apply {
@@ -99,9 +110,13 @@ abstract class NonModalCommitPanel(
     bottomPanel.add(commitAuthorComponent)
     bottomPanel.add(commitActionsPanel)
 
-    centerPanel
+    val upperPanel = JBUI.Panels.simplePanel()
+      .andTransparent()
       .addToTop(statusComponent)
       .addToCenter(commitMessagePanel)
+
+    centerPanel
+      .addToCenter(upperPanel)
       .addToBottom(bottomPanel)
 
     mainPanel.addToCenter(centerPanel)
@@ -231,11 +246,6 @@ abstract class NonModalCommitPanel(
     internal const val COMMIT_TOOLBAR_PLACE: String = "ChangesView.CommitToolbar"
     internal const val COMMIT_EDITOR_PLACE: String = "ChangesView.Editor"
     internal val COMMIT_OPTIONS_POPUP_MINIMUM_SIZE = 300
-
-    @ApiStatus.ScheduledForRemoval
-    @Deprecated("Extracted to a separate file",
-                replaceWith = ReplaceWith("showAbove(component)", "com.intellij.vcsUtil.showAbove"))
-    fun JBPopup.showAbove(component: JComponent) = VcsUIUtil.showPopupAbove(this, component)
   }
 }
 

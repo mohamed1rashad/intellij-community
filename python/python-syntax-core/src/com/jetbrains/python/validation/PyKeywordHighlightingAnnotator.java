@@ -23,9 +23,21 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.tree.TokenSet;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.jetbrains.python.PyTokenTypes;
-import com.jetbrains.python.ast.*;
+import com.jetbrains.python.ast.PyAstAnnotation;
+import com.jetbrains.python.ast.PyAstCaseClause;
+import com.jetbrains.python.ast.PyAstComprehensionElement;
+import com.jetbrains.python.ast.PyAstElementVisitor;
+import com.jetbrains.python.ast.PyAstFile;
+import com.jetbrains.python.ast.PyAstForStatement;
+import com.jetbrains.python.ast.PyAstFromImportStatement;
+import com.jetbrains.python.ast.PyAstFunction;
+import com.jetbrains.python.ast.PyAstImportStatement;
+import com.jetbrains.python.ast.PyAstMatchStatement;
+import com.jetbrains.python.ast.PyAstPrefixExpression;
+import com.jetbrains.python.ast.PyAstTypeAliasStatement;
+import com.jetbrains.python.ast.PyAstWithStatement;
 import com.jetbrains.python.highlighting.PyHighlighter;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.PyElementType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -86,6 +98,16 @@ public final class PyKeywordHighlightingAnnotator extends PyAnnotatorBase implem
     @Override
     public void visitPyTypeAliasStatement(@NotNull PyAstTypeAliasStatement node) {
       highlightKeyword(node, PyTokenTypes.TYPE_KEYWORD);
+    }
+
+    @Override
+    public void visitPyImportStatement(@NotNull PyAstImportStatement node) {
+      highlightKeyword(node, PyTokenTypes.LAZY_KEYWORD);
+    }
+
+    @Override
+    public void visitPyFromImportStatement(@NotNull PyAstFromImportStatement node) {
+      highlightKeyword(node, PyTokenTypes.LAZY_KEYWORD);
     }
 
     @Override

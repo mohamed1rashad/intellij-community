@@ -14,9 +14,14 @@ import com.intellij.platform.vcs.impl.shared.rpc.PartialChangesEvent
 import fleet.rpc.client.durable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
@@ -27,7 +32,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @OptIn(FlowPreview::class)
 @ApiStatus.Internal
 class PartialChangesHolder(project: Project, cs: CoroutineScope) {
-  private val mapping: MutableMap<FilePath, List<LocalRange>> = mutableMapOf()
+  private val mapping = ConcurrentHashMap<FilePath, List<LocalRange>>()
 
   val updates: SharedFlow<Unit>
 

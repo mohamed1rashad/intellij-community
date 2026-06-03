@@ -4,13 +4,21 @@ package com.intellij.internal.statistic.collectors.fus.actions.persistence
 import com.intellij.ide.actions.ToolwindowFusEventFields
 import com.intellij.internal.statistic.eventLog.EventLogGroup
 import com.intellij.internal.statistic.eventLog.FeatureUsageData
-import com.intellij.internal.statistic.eventLog.events.*
+import com.intellij.internal.statistic.eventLog.events.BooleanEventField
+import com.intellij.internal.statistic.eventLog.events.ClassEventField
+import com.intellij.internal.statistic.eventLog.events.EventField
+import com.intellij.internal.statistic.eventLog.events.EventFields
+import com.intellij.internal.statistic.eventLog.events.EventId2
+import com.intellij.internal.statistic.eventLog.events.FusInputEvent
+import com.intellij.internal.statistic.eventLog.events.ObjectEventField
+import com.intellij.internal.statistic.eventLog.events.PrimitiveEventField
+import com.intellij.internal.statistic.eventLog.events.StringEventField
+import com.intellij.internal.statistic.eventLog.events.VarargEventId
 import com.intellij.internal.statistic.eventLog.validator.rules.impl.CustomValidationRule
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
 import com.intellij.openapi.project.IncompleteDependenciesService.DependenciesState
 import com.intellij.openapi.util.text.StringUtil
 import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.annotations.NonNls
 
 @ApiStatus.Internal
 object ActionsEventLogGroup : CounterUsagesCollector() {
@@ -19,16 +27,10 @@ object ActionsEventLogGroup : CounterUsagesCollector() {
   const val ACTION_FINISHED_EVENT_ID: String = "action.finished"
 
   @JvmField
-  val GROUP: EventLogGroup = EventLogGroup("actions", 83)
+  val GROUP: EventLogGroup = EventLogGroup("actions", 84)
 
   @JvmField
   val ACTION_ID: PrimitiveEventField<String?> = ActionIdEventField("action_id")
-
-  @Deprecated("Introduced only for MLSE. Do not use.",
-              ReplaceWith("com.intellij.internal.statistic.collectors.fus.actions.persistence.ActionsEventLogGroup.ACTION_ID"))
-  @Suppress("FunctionName")
-  @JvmStatic
-  fun ActioID(@NonNls name: String): PrimitiveEventField<String?> = ActionIdEventField(name)
 
   private data class ActionIdEventField(override val name: String) : PrimitiveEventField<String?>() {
 
@@ -89,7 +91,7 @@ object ActionsEventLogGroup : CounterUsagesCollector() {
   @JvmField
   val ACTION_FINISHED: VarargEventId = registerActionEvent(
     GROUP, ACTION_FINISHED_EVENT_ID, EventFields.StartTime, ADDITIONAL, EventFields.Language, EventFields.DurationMs,
-    DUMB_START, RESULT, LOOKUP_ACTIVE, ToolwindowFusEventFields.TOOLWINDOW
+    DUMB_START, RESULT, LOOKUP_ACTIVE, ToolwindowFusEventFields.TOOLWINDOW, EventFields.FileType,
   )
 
   @JvmField

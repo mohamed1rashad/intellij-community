@@ -6,8 +6,8 @@ import com.intellij.openapi.util.InvalidDataException
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.platform.workspace.jps.JpsFileEntitySource
 import com.intellij.platform.workspace.jps.JpsGlobalFileEntitySource
-import com.intellij.platform.workspace.jps.entities.ModifiableSdkEntity
 import com.intellij.platform.workspace.jps.entities.SdkEntity
+import com.intellij.platform.workspace.jps.entities.SdkEntityBuilder
 import com.intellij.platform.workspace.jps.entities.SdkRoot
 import com.intellij.platform.workspace.jps.entities.SdkRootTypeId
 import com.intellij.platform.workspace.storage.EntityStorage
@@ -19,11 +19,9 @@ import com.intellij.util.containers.ConcurrentFactoryMap
 import org.jdom.Element
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.jps.model.serialization.JDomSerializationUtil
+import org.jetbrains.jps.model.serialization.JpsGlobalSettingsLoading.SDK_TABLE_COMPONENT_NAME
 import org.jetbrains.jps.model.serialization.java.JpsJavaModelSerializerExtension
 import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer
-
-@NonNls
-private const val SDK_TABLE_COMPONENT_NAME = "ProjectJdkTable"
 
 @NonNls
 private const val ELEMENT_JDK = "jdk"
@@ -76,7 +74,7 @@ class JpsSdkEntitySerializer(val entitySource: JpsGlobalFileEntitySource, privat
     return LoadingResult(mapOf(SdkEntity::class.java to sdkEntities))
   }
 
-  fun loadSdkEntity(sdkElement: Element, virtualFileManager: VirtualFileUrlManager ): ModifiableSdkEntity {
+  fun loadSdkEntity(sdkElement: Element, virtualFileManager: VirtualFileUrlManager ): SdkEntityBuilder {
     val sdkName = sdkElement.getChild(ELEMENT_NAME).getAttributeValue(ATTRIBUTE_VALUE)
     val sdkType = sdkElement.getChild(ELEMENT_TYPE).getAttributeValue(ATTRIBUTE_VALUE)
 
@@ -152,7 +150,7 @@ class JpsSdkEntitySerializer(val entitySource: JpsGlobalFileEntitySource, privat
                   sdkEntity.additionalData)
   }
 
-  fun saveSdkEntity(sdkRootElement: Element, sdkEntity: ModifiableSdkEntity) {
+  fun saveSdkEntity(sdkRootElement: Element, sdkEntity: SdkEntityBuilder) {
     saveSdkEntity(sdkRootElement,
                   sdkEntity.name,
                   sdkEntity.type,

@@ -1,4 +1,3 @@
-<!-- todo: register this as a content module (IJPL-210868); currently it's included via 'xi:include' tag -->
 <!--
   ~ Copyright 2000-2017 JetBrains s.r.o.
   ~
@@ -14,7 +13,8 @@
   ~ See the License for the specific language governing permissions and
   ~ limitations under the License.
   -->
-<idea-plugin>
+<idea-plugin visibility="public">
+
   <extensionPoints>
     <!--suppress PluginXmlValidity -->
     <extensionPoint qualifiedName="com.intellij.codeStyle.ReferenceAdjuster" beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
@@ -28,11 +28,13 @@
     <extensionPoint qualifiedName="com.intellij.psi.clsCustomNavigationPolicy" interface="com.intellij.psi.impl.compiled.ClsCustomNavigationPolicy" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.jvm.elementProvider" area="IDEA_PROJECT" interface="com.intellij.lang.jvm.facade.JvmElementProvider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.java.elementFinder" area="IDEA_PROJECT" interface="com.intellij.psi.PsiElementFinder" dynamic="true"/>
+    <extensionPoint qualifiedName="com.intellij.packageDirectoryProvider" area="IDEA_PROJECT" interface="com.intellij.psi.PackageDirectoryProvider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.classTypePointerFactory" interface="com.intellij.psi.ClassTypePointerFactory" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.customJavadocTagProvider" interface="com.intellij.psi.javadoc.CustomJavadocTagProvider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.javadocTagInfo" area="IDEA_PROJECT" interface="com.intellij.psi.javadoc.JavadocTagInfo" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.importFilter" interface="com.intellij.codeInsight.ImportFilter" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.javaMainMethodProvider" interface="com.intellij.codeInsight.runner.JavaMainMethodProvider" dynamic="true"/>
+    <extensionPoint qualifiedName="com.intellij.java.expressionTypeNullabilityPatcher" interface="com.intellij.codeInsight.JavaExpressionTypeNullabilityPatcher" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.superMethodsSearch" interface="com.intellij.util.QueryExecutor" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.deepestSuperMethodsSearch" interface="com.intellij.util.QueryExecutor" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.lang.jvm.multiReleaseSupport" interface="com.intellij.psi.util.JavaMultiReleaseModuleSupport" dynamic="true"/>
@@ -54,16 +56,6 @@
       <with attribute="implementationClass" implements="com.intellij.lang.jvm.JvmLanguageDumbAware"/>
     </extensionPoint>
 
-    <extensionPoint qualifiedName="org.jetbrains.uast.uastLanguagePlugin" interface="org.jetbrains.uast.UastLanguagePlugin" dynamic="true"/>
-    <extensionPoint qualifiedName="org.jetbrains.uast.analysis.uastAnalysisPlugin"
-                    interface="org.jetbrains.uast.analysis.UastAnalysisPlugin"
-                    dynamic="true"/>
-    <extensionPoint qualifiedName="org.jetbrains.uast.generate.uastCodeGenerationPlugin"
-                    interface="org.jetbrains.uast.generate.UastCodeGenerationPlugin"
-                    dynamic="true"/>
-    <extensionPoint qualifiedName="org.jetbrains.uast.evaluation.uastEvaluatorExtension"
-                    interface="org.jetbrains.uast.evaluation.UEvaluatorExtension"
-                    dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.jvm.declarationSearcher" beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
       <with attribute="implementationClass" implements="com.intellij.lang.jvm.source.JvmDeclarationSearcher"/>
     </extensionPoint>
@@ -78,9 +70,9 @@
                         serviceImplementation="com.intellij.codeInsight.TestFrameworksImpl"/>
     <applicationService serviceInterface="com.intellij.psi.PsiSubstitutorFactory"
                         serviceImplementation="com.intellij.psi.impl.PsiSubstitutorFactoryImpl"/>
-    <applicationService serviceInterface="com.intellij.pom.java.InternalPersistentJavaLanguageLevelReaderService"
+    <applicationService serviceInterface="com.intellij.pom.java.InternalPersistentJavaLanguageLevelReaderService" open="true"
                         serviceImplementation="com.intellij.pom.java.InternalPersistentJavaLanguageLevelReaderService$DefaultImpl"/>
-    <applicationService serviceInterface="com.intellij.psi.JavaModuleGraphHelper"
+    <applicationService serviceInterface="com.intellij.psi.JavaModuleGraphHelper" open="true"
                         serviceImplementation="com.intellij.psi.DumbJavaModuleGraphHelper"/>
 
     <projectService serviceInterface="com.intellij.psi.SmartTypePointerManager"
@@ -105,8 +97,9 @@
     <syntax.syntaxDefinition language="JAVA" implementationClass="com.intellij.java.frontback.psi.impl.syntax.JavaSyntaxDefinitionExtension"/>
     <syntax.syntaxDefinition language="JShellLanguage" implementationClass="com.intellij.java.frontback.psi.impl.syntax.JShellSyntaxDefinitionExtension"/>
 
-    <metaLanguage implementation="com.intellij.lang.jvm.JvmMetaLanguage"/>
+    <metaLanguageProvider implementation="com.intellij.lang.jvm.JvmMetaLanguage$Provider"/>
     <java.elementFinder implementation="com.intellij.psi.impl.PsiElementFinderImpl" id="java" order="first"/>
+
     <treeGenerator implementation="com.intellij.psi.impl.source.tree.JavaTreeGenerator"/>
     <itemPresentationProvider forClass="com.intellij.psi.PsiJavaModule"
                               implementationClass="com.intellij.psi.presentation.java.JavaModulePresentationProvider"/>
@@ -161,25 +154,16 @@
     <registryKey key="JDK8042508.bug.fixed" defaultValue="false"
                  description="Disable check for type variable until javac bug is fixed" />
 
-    <registryKey key="uast.evaluator.depth.limit" defaultValue="15"
-                 description="Maximal allowed depth for UAST TreeBasedEvaluator visitor"/>
-    <registryKey key="uast.evaluator.loop.iteration.limit" defaultValue="20"
-                 description="Maximal allowed iteration count for loop evaluation in the UAST TreeBasedEvaluator visitor"/>
-    <registryKey key="uast.references.by.usage" defaultValue="true"
-                 description="Enables UAST reference contributors that search for usages of variables in the opened file"/>
+    <registryKey key="java.dont.convert.digits.after.dollar.name" defaultValue="true"
+                 description="Skip digits after '$' in class names in class files"/>
+
     <registryKey key="java.folding.icons.for.control.flow"
                  defaultValue="true"
                  description="Add folding icons to the gutter for control flow statements"/>
-  </extensions>
-
-  <extensions defaultExtensionNs="org.jetbrains.uast">
-    <uastLanguagePlugin implementation="org.jetbrains.uast.java.JavaUastLanguagePlugin"/>
-    <analysis.uastAnalysisPlugin implementation="org.jetbrains.uast.java.analysis.JavaUastAnalysisPlugin"/>
-    <generate.uastCodeGenerationPlugin implementation="org.jetbrains.uast.java.generate.JavaUastCodeGenerationPlugin"/>
-  </extensions>
-
-  <extensions defaultExtensionNs="com.intellij">
-    <registryKey defaultValue="30" description="UAST usages graph building depth limit" key="uast.usage.graph.default.recursion.depth.limit"/>
+    <registryKey key="unsound.capture.conversion.java.spec.change" defaultValue="false"
+                 description="Capture in method reference return type is unsound, and the spec would be changed, see https://bugs.openjdk.org/browse/JDK-8170887"/>
+    <registryKey key="ide.goto.implementation.show.interfaces" defaultValue="true"
+                 description="Whether to show sub-interfaces when invoking the 'Go to Implementation' action (Ctrl+Alt+B) on an interface."/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij.jvm">

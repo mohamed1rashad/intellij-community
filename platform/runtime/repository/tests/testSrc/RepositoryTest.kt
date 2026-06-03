@@ -2,14 +2,17 @@
 package com.intellij.platform.runtime.repository
 
 import com.intellij.openapi.application.PathManager
-import com.intellij.platform.runtime.repository.impl.RuntimeModuleRepositoryImpl
-import com.intellij.platform.runtime.repository.serialization.RawRuntimeModuleDescriptor
-import com.intellij.platform.runtime.repository.serialization.RawRuntimeModuleRepositoryData
+import com.intellij.platform.runtime.repository.RuntimeModuleId.raw
+import com.intellij.platform.runtime.repository.serialization.RawRuntimeModuleDescriptor.create
 import com.intellij.platform.runtime.repository.serialization.RuntimeModuleRepositorySerialization
 import com.intellij.project.IntelliJProjectConfiguration.Companion.getLocalMavenRepo
 import com.intellij.testFramework.rules.TempDirectoryExtension
-import org.junit.jupiter.api.Assertions.*
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertNotNull
 import org.junit.jupiter.api.extension.RegisterExtension
 import org.junitpioneer.jupiter.cartesian.CartesianTest
 import java.nio.file.Path
@@ -24,30 +27,41 @@ class RepositoryTest {
   fun `resolved dependencies`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", emptyList(), emptyList()),
-      RawRuntimeModuleDescriptor.create("ij.bar", emptyList(), listOf("ij.foo")),
+      createModuleDescriptor("ij.foo", emptyList(), emptyList()),
+      createModuleDescriptor("ij.bar", emptyList(), listOf("ij.foo")),
     )
-    val bar = repository.getModule(RuntimeModuleId.raw("ij.bar"))
-    val foo = repository.getModule(RuntimeModuleId.raw("ij.foo"))
+    val barId = moduleId("ij.bar")
+    val bar = repository.getModule(barId)
+    val fooId = moduleId("ij.foo")
+    val foo = repository.getModule(fooId)
     assertEquals(listOf(foo), bar.dependencies)
+
+    val fooHeader = repository.findModuleHeader(fooId)
+    assertNotNull(fooHeader)
+    assertEquals("ij.foo", fooHeader.moduleId.name)
+    val barHeader = repository.findModuleHeader(barId)
+    assertEquals(emptyList<RuntimeModuleId>(), fooHeader.dependencies)
+    assertNotNull(barHeader)
+    assertEquals("ij.bar", barHeader.moduleId.name)
+    assertEquals(listOf(fooId), barHeader.dependencies)
   }
 
   @Test
   fun `unresolved dependency`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", emptyList(), emptyList()),
-      RawRuntimeModuleDescriptor.create("ij.bar", emptyList(), listOf("ij.foo", "unresolved")),
-      RawRuntimeModuleDescriptor.create("ij.baz", emptyList(), listOf("ij.bar")),
+      createModuleDescriptor("ij.foo", emptyList(), emptyList()),
+      createModuleDescriptor("ij.bar", emptyList(), listOf("ij.foo", "unresolved")),
+      createModuleDescriptor("ij.baz", emptyList(), listOf("ij.bar")),
     )
     fun RuntimeModuleId.assertUnresolved(vararg pathToFailed: RuntimeModuleId) {
       val result = repository.resolveModule(this)
       assertNull(result.resolvedModule)
       assertEquals(pathToFailed.toList(), result.failedDependencyPath)
     }
-    val unresolvedId = RuntimeModuleId.raw("unresolved")
-    val barId = RuntimeModuleId.raw("ij.bar")
-    val bazId = RuntimeModuleId.raw("ij.baz")
+    val unresolvedId = moduleId("unresolved")
+    val barId = moduleId("ij.bar")
+    val bazId = moduleId("ij.baz")
     unresolvedId.assertUnresolved(unresolvedId)
     barId.assertUnresolved(barId, unresolvedId)
     bazId.assertUnresolved(bazId, barId, unresolvedId)
@@ -56,19 +70,20 @@ class RepositoryTest {
       repository.getModule(bazId)
     }
     assertEquals("Cannot resolve module 'ij.baz': module 'unresolved' (<- 'ij.bar' <- 'ij.baz') is not found", exception.message)
+    assertEquals("ij.bar", repository.findModuleHeader(barId)?.moduleId?.name)
   }
 
   @Test
   fun `circular dependency`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", emptyList(), listOf("ij.bar")),
-      RawRuntimeModuleDescriptor.create("ij.bar", emptyList(), listOf("ij.foo")),
-      RawRuntimeModuleDescriptor.create("ij.baz", emptyList(), listOf("ij.bar")),
+      createModuleDescriptor("ij.foo", emptyList(), listOf("ij.bar")),
+      createModuleDescriptor("ij.bar", emptyList(), listOf("ij.foo")),
+      createModuleDescriptor("ij.baz", emptyList(), listOf("ij.bar")),
     )
-    val baz = repository.getModule(RuntimeModuleId.raw("ij.baz"))
-    val bar = repository.getModule(RuntimeModuleId.raw("ij.bar"))
-    val foo = repository.getModule(RuntimeModuleId.raw("ij.foo"))
+    val baz = repository.getModule(moduleId("ij.baz"))
+    val bar = repository.getModule(moduleId("ij.bar"))
+    val foo = repository.getModule(moduleId("ij.foo"))
     assertEquals(listOf(bar), baz.dependencies)
     assertEquals(listOf(foo), bar.dependencies)
     assertEquals(listOf(bar), foo.dependencies)
@@ -78,12 +93,12 @@ class RepositoryTest {
   fun `relative path`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", listOf("foo.jar"), emptyList()),
-      RawRuntimeModuleDescriptor.create("ij.bar", listOf("../bar/bar.jar"), emptyList()),
+      createModuleDescriptor("ij.foo", listOf("foo.jar"), emptyList()),
+      createModuleDescriptor("ij.bar", listOf("../bar/bar.jar"), emptyList()),
     )
-    val foo = repository.getModule(RuntimeModuleId.raw("ij.foo"))
+    val foo = repository.getModule(moduleId("ij.foo"))
     assertEquals(listOf(tempDirectory.rootPath.resolve("foo.jar")), foo.resourceRootPaths)
-    val bar = repository.getModule(RuntimeModuleId.raw("ij.bar"))
+    val bar = repository.getModule(moduleId("ij.bar"))
     assertEquals(listOf(tempDirectory.rootPath.parent.resolve("bar/bar.jar")), bar.resourceRootPaths)
   }
   
@@ -91,25 +106,25 @@ class RepositoryTest {
   fun `compute resource paths without resolving`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", listOf("foo.jar"), listOf("unresolved")),
+      createModuleDescriptor("ij.foo", listOf("foo.jar"), listOf("unresolved")),
     )
     assertEquals(listOf(tempDirectory.rootPath.resolve("foo.jar")), 
-                 repository.getModuleResourcePaths(RuntimeModuleId.raw("ij.foo")))
+                 repository.getModuleResourcePaths(moduleId("ij.foo")))
   }
 
   @Test
   fun `resource path macros`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", listOf("\$PROJECT_DIR$/foo.jar"), emptyList()),
-      RawRuntimeModuleDescriptor.create("ij.bar", listOf("${getLocalMavenRepo()}/bar/bar.jar"), emptyList()),
+      createModuleDescriptor("ij.foo", listOf($$"$PROJECT_DIR$/foo.jar"), emptyList()),
+      createModuleDescriptor("ij.bar", listOf("${getLocalMavenRepo()}/bar/bar.jar"), emptyList()),
     )
     
     //ensure that tempDirectory will be treated as the project root if 'idea.home.path' isn't specified explicitly
     tempDirectory.newFile("intellij.idea.community.main.iml")
     tempDirectory.newDirectory(".idea")
     
-    val foo = repository.getModule(RuntimeModuleId.raw("ij.foo"))
+    val foo = repository.getModule(moduleId("ij.foo"))
     val fooJarPath = foo.resourceRootPaths.single()
     //$PROJECT_DIR macro may be resolved differently depending on whether 'idea.home.path' property is specified or not 
     val possibleExpectedPaths = setOf(
@@ -118,23 +133,23 @@ class RepositoryTest {
     )
     assertTrue(fooJarPath in possibleExpectedPaths, "$fooJarPath is not in $possibleExpectedPaths")
     
-    val bar = repository.getModule(RuntimeModuleId.raw("ij.bar"))
+    val bar = repository.getModule(moduleId("ij.bar"))
     assertEquals(listOf(getLocalMavenRepo().resolve("bar/bar.jar")), bar.resourceRootPaths)
   }
 
   @Test
   fun `invalid macro usage`() {
     val incorrectPaths = listOf(
-      "\$UNKNOWN_MACRO$/foo.jar",
-      "\$PROJECT_DIR$-foo.jar",
-      "\$PROJECT_DIR$/../foo.jar",
+      $$"$UNKNOWN_MACRO$/foo.jar",
+      $$"$PROJECT_DIR$-foo.jar",
+      $$"$PROJECT_DIR$/../foo.jar",
     )
     for (path in incorrectPaths) {
       val repository = createRepository(
         tempDirectory.rootPath,
-        RawRuntimeModuleDescriptor.create("ij.foo", listOf(path), emptyList())
+        createModuleDescriptor("ij.foo", listOf(path), emptyList())
       )
-      val module = repository.getModule(RuntimeModuleId.raw("ij.foo"))
+      val module = repository.getModule(moduleId("ij.foo"))
       assertThrows(MalformedRepositoryException::class.java, { module.resourceRootPaths }, "Path $path is incorrect")
     }
   }
@@ -143,12 +158,12 @@ class RepositoryTest {
   fun `module classpath`() {
     val repository = createRepository(
       tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", listOf("foo.jar"), emptyList()),
-      RawRuntimeModuleDescriptor.create("ij.bar", listOf("bar.jar"), listOf("ij.foo")),
-      RawRuntimeModuleDescriptor.create("ij.baz", listOf("baz.jar"), listOf("ij.foo")),
-      RawRuntimeModuleDescriptor.create("ij.main", emptyList(), listOf("ij.bar", "ij.baz")),
+      createModuleDescriptor("ij.foo", listOf("foo.jar"), emptyList()),
+      createModuleDescriptor("ij.bar", listOf("bar.jar"), listOf("ij.foo")),
+      createModuleDescriptor("ij.baz", listOf("baz.jar"), listOf("ij.foo")),
+      createModuleDescriptor("ij.main", emptyList(), listOf("ij.bar", "ij.baz")),
     )
-    val classpath = repository.getModule(RuntimeModuleId.raw("ij.main")).moduleClasspath
+    val classpath = repository.getModule(moduleId("ij.main")).moduleClasspath
     assertEquals(listOf("bar.jar", "foo.jar", "baz.jar").map { tempDirectory.rootPath.resolve(it) }, classpath)
   }
 
@@ -157,55 +172,26 @@ class RepositoryTest {
     @CartesianTest.Values(strings = ["", "ij.foo", "ij.bar"]) storedBootstrapModule: String, 
     @CartesianTest.Values(booleans = [true, false]) loadFromCompact: Boolean
   ) {
+    val fooId = raw("ij.foo", RuntimeModuleId.LEGACY_JPS_MODULE_NAMESPACE)
     val descriptors = arrayOf(
-      RawRuntimeModuleDescriptor.create("ij.foo", listOf("foo.jar"), emptyList()),
-      RawRuntimeModuleDescriptor.create("ij.bar", listOf("bar.jar"), listOf("ij.foo")),
+      create(fooId, listOf("foo.jar"), emptyList()),
+      create(raw("ij.bar", RuntimeModuleId.LEGACY_JPS_MODULE_NAMESPACE), listOf("bar.jar"),
+      listOf(fooId)),
     )
     val basePath = tempDirectory.rootPath
     val bootstrapModuleName = storedBootstrapModule.takeIf { it.isNotEmpty() }
     val filePath: Path
     if (loadFromCompact) {
       filePath = basePath.resolve("module-descriptors.dat")
-      RuntimeModuleRepositorySerialization.saveToCompactFile(descriptors.asList(), bootstrapModuleName, filePath, 0)
+      RuntimeModuleRepositorySerialization.saveToCompactFile(descriptors.asList(), emptyList(), bootstrapModuleName, filePath, 0)
     }
     else {
       filePath = basePath.resolve("module-descriptors.jar")
-      RuntimeModuleRepositorySerialization.saveToJar(descriptors.asList(), bootstrapModuleName, filePath, 0)
+      RuntimeModuleRepositorySerialization.saveToJar(descriptors.asList(), emptyList(), bootstrapModuleName, filePath, 0)
     }
     val repository = RuntimeModuleRepository.create(filePath)
     assertEquals(listOf(basePath.resolve("bar.jar"), basePath.resolve("foo.jar")), repository.getBootstrapClasspath("ij.bar"))
   }
-  
-  @Test
-  fun `additional repositories`() {
-    val main = createRepository(
-      tempDirectory.rootPath,
-      RawRuntimeModuleDescriptor.create("ij.foo", listOf("foo.jar"), emptyList()),
-    ) as RuntimeModuleRepositoryImpl
-    val additional1Path = tempDirectory.rootPath.resolve("additional1")
-    val additional1 = createRawRepository(
-      additional1Path,
-      RawRuntimeModuleDescriptor.create("custom1.foo", listOf("custom1-foo.jar"), listOf("ij.foo")),
-      RawRuntimeModuleDescriptor.create("custom1.bar", listOf("custom1-bar.jar"), listOf("custom1.foo")),
-    )
-    val additional2Path = tempDirectory.rootPath.resolve("additional2")
-    val additional2 = createRawRepository(
-      additional2Path,
-      RawRuntimeModuleDescriptor.create("custom2", listOf("custom2.jar"), listOf("custom1.bar")),
-    )
-    main.loadAdditionalRepositories(listOf(additional1, additional2))
-    val moduleId = RuntimeModuleId.raw("custom2")
-    val classpath = main.getModule(moduleId).moduleClasspath
-    assertEquals(listOf(
-      additional2Path.resolve("custom2.jar"), 
-      additional1Path.resolve("custom1-bar.jar"), 
-      additional1Path.resolve("custom1-foo.jar"),
-      tempDirectory.rootPath.resolve("foo.jar"),
-    ), classpath)
-    assertEquals(listOf(additional2Path.resolve("custom2.jar")), main.getModuleResourcePaths(moduleId))
-  }
 
-  private fun createRawRepository(basePath: Path, vararg descriptors: RawRuntimeModuleDescriptor): RawRuntimeModuleRepositoryData {
-    return RawRuntimeModuleRepositoryData(descriptors.associateBy { it.id }, basePath, null)
-  }
+  private fun moduleId(moduleName: String): RuntimeModuleId = raw(moduleName, RuntimeModuleId.DEFAULT_NAMESPACE)
 }

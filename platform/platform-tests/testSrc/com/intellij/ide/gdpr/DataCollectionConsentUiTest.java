@@ -2,19 +2,16 @@
 package com.intellij.ide.gdpr;
 
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.gdpr.ui.consents.AiDataCollectionExternalSettings;
 import com.intellij.ide.gdpr.ui.consents.ConsentForcedState;
-import com.intellij.ide.gdpr.ui.consents.ConsentGroup;
-import com.intellij.ide.gdpr.ui.consents.ConsentGroupUi;
 import com.intellij.ide.gdpr.ui.consents.ConsentUi;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import com.intellij.ui.LicensingFacade;
-
-import java.util.List;
+import org.mockito.Mockito;
 
 public class DataCollectionConsentUiTest extends BasePlatformTestCase {
   private static final String CONSENT_ID_USAGE_STATS = "rsch.send.usage.stat";
   private static final String CONSENT_ID_TRACE_DATA_COM_COLLECTION = "ai.trace.data.collection.and.use.com.policy";
-  private static final String GROUP_CONSENT_ID_DATA_COLLECTION = "data.collection";
 
   private static void setupLicensingFacade(char customerAgreementOnDetailedDataSharing) {
     LicensingFacade licensingFacade = new LicensingFacade();
@@ -50,27 +47,6 @@ public class DataCollectionConsentUiTest extends BasePlatformTestCase {
     assertNull(DataCollectionAgreement.getInstance());
   }
 
-  public void testGroupForcedStateDescription() {
-    Consent fus = new Consent(CONSENT_ID_USAGE_STATS, Version.fromString("1.1"), "Send anonymous usage statistics", "text", false, false, "en");
-    Consent trace = new Consent(CONSENT_ID_TRACE_DATA_COM_COLLECTION, Version.fromString("1.0"), "Send detailed code-related data", "text", false, false, "en");
-    ConsentGroup group = new ConsentGroup(GROUP_CONSENT_ID_DATA_COLLECTION, List.of(fus, trace));
-
-    setupLicensingFacade('X');
-    ConsentGroupUi groupUi = ConsentSettingsUi.getConsentGroupUi(group);
-    assertNotNull(groupUi);
-    assertNull(groupUi.getForcedStateDescription());
-
-    setupLicensingFacade('N');
-    groupUi = ConsentSettingsUi.getConsentGroupUi(group);
-    assertNotNull(groupUi);
-    assertEquals(IdeBundle.message("gdpr.data.collection.consent.group.setting.disabled.warning.text"), groupUi.getForcedStateDescription());
-
-    setupLicensingFacade('Y');
-    groupUi = ConsentSettingsUi.getConsentGroupUi(group);
-    assertNotNull(groupUi);
-    assertEquals(IdeBundle.message("gdpr.data.collection.consent.group.setting.enabled.warning.text"), groupUi.getForcedStateDescription());
-  }
-
   public void testUsageStatisticsConsentForcedStateDependsOnAgreement() {
     Consent fus = new Consent(CONSENT_ID_USAGE_STATS, Version.fromString("1.1"), "Send anonymous usage statistics", "text", false, false, "en");
     ConsentUi ui = ConsentSettingsUi.getConsentUi(fus);
@@ -85,13 +61,17 @@ public class DataCollectionConsentUiTest extends BasePlatformTestCase {
     var state = ui.getForcedState();
     assertNotNull(state);
     assertInstanceOf(state, ConsentForcedState.AlwaysEnabled.class);
-    assertNull(state.getDescription());
+    assertEquals("Data collection has been enabled by your organization administrator.", state.getDescription());
   }
 
   public void testTraceDataCollectionConsentForcedStateDependsOnAgreement() {
     Consent trace = new Consent(CONSENT_ID_TRACE_DATA_COM_COLLECTION, Version.fromString("1.0"), "Send detailed code-related data", "text", false,
                         false, "en");
     ConsentUi ui = ConsentSettingsUi.getConsentUi(trace);
+
+    AiDataCollectionExternalSettings mockSettings = Mockito.mock(AiDataCollectionExternalSettings.class);
+    Mockito.doReturn(false).when(mockSettings).isForciblyDisabled();
+    AiDataCollectionExternalSettings.overrideForTest(mockSettings, getTestRootDisposable());
 
     setupLicensingFacade('X');
     assertNull(ui.getForcedState());
@@ -100,12 +80,43 @@ public class DataCollectionConsentUiTest extends BasePlatformTestCase {
     var state = ui.getForcedState();
     assertNotNull(state);
     assertInstanceOf(state, ConsentForcedState.ExternallyDisabled.class);
-    assertNull(state.getDescription());
+    assertEquals("Data collection has been disabled by your organization administrator.", state.getDescription());
 
     setupLicensingFacade('Y');
     state = ui.getForcedState();
     assertNotNull(state);
     assertInstanceOf(state, ConsentForcedState.AlwaysEnabled.class);
-    assertNull(state.getDescription());
+    assertEquals("Data collection has been enabled by your organization administrator.", state.getDescription());
+  }
+
+  public void testTraceConsentForcedDisabledWhenAiaPluginAbsent() {
+    Consent trace = new Consent(CONSENT_ID_TRACE_DATA_COM_COLLECTION, Version.fromString("1.0"), "Send detailed code-related data", "text", false,
+                                false, "en");
+    ConsentUi ui = ConsentSettingsUi.getConsentUi(trace);
+
+    for (char agreementChar : new char[]{'X', 'N', 'Y'}) {
+      setupLicensingFacade(agreementChar);
+      var state = ui.getForcedState();
+      assertNotNull("TRACE consent must be force-disabled when AIA plugin is absent (agreement='" + agreementChar + "')", state);
+      assertInstanceOf(state, ConsentForcedState.ExternallyDisabled.class);
+      assertEquals(IdeBundle.message("gdpr.consent.trace.requires.ai.assistant"), state.getDescription());
+    }
+  }
+
+  public void testTraceConsentForcedDisabledWhenAiaForciblyDisabled() {
+    Consent trace = new Consent(CONSENT_ID_TRACE_DATA_COM_COLLECTION, Version.fromString("1.0"), "Send detailed code-related data", "text", false,
+                                false, "en");
+    ConsentUi ui = ConsentSettingsUi.getConsentUi(trace);
+
+    AiDataCollectionExternalSettings mockSettings = Mockito.mock(AiDataCollectionExternalSettings.class);
+    Mockito.doReturn(true).when(mockSettings).isForciblyDisabled();
+    Mockito.doReturn("Disabled by organization").when(mockSettings).getForciblyDisabledDescription();
+    AiDataCollectionExternalSettings.overrideForTest(mockSettings, getTestRootDisposable());
+
+    setupLicensingFacade('X');
+    var state = ui.getForcedState();
+    assertNotNull(state);
+    assertInstanceOf(state, ConsentForcedState.ExternallyDisabled.class);
+    assertEquals("Disabled by organization", state.getDescription());
   }
 }

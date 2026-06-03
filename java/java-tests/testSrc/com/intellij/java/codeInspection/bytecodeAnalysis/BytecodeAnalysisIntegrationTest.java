@@ -1,7 +1,11 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.java.codeInspection.bytecodeAnalysis;
 
-import com.intellij.codeInsight.*;
+import com.intellij.codeInsight.AnnotationUtil;
+import com.intellij.codeInsight.ExternalAnnotationsManager;
+import com.intellij.codeInsight.ExternalAnnotationsManagerImpl;
+import com.intellij.codeInsight.InferredContractAnnotationsLineMarkerProvider;
+import com.intellij.codeInsight.ModCommandAwareExternalAnnotationsManager;
 import com.intellij.codeInsight.daemon.GutterMark;
 import com.intellij.codeInsight.daemon.LineMarkerSettings;
 import com.intellij.codeInsight.daemon.impl.LineMarkerSettingsImpl;
@@ -16,14 +20,28 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.roots.*;
+import com.intellij.openapi.roots.AnnotationOrderRootType;
+import com.intellij.openapi.roots.ContentEntry;
+import com.intellij.openapi.roots.LibraryOrderEntry;
+import com.intellij.openapi.roots.ModifiableRootModel;
+import com.intellij.openapi.roots.OrderEntry;
 import com.intellij.openapi.roots.libraries.Library;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaRecursiveElementVisitor;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameValuePair;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiParameter;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiFormatUtil;
@@ -38,7 +56,13 @@ import one.util.streamex.EntryStream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,7 +93,6 @@ public class BytecodeAnalysisIntegrationTest extends LightJavaCodeInsightFixture
           libModel.commit();
         }
       }
-      Registry.get(ProjectBytecodeAnalysis.NULLABLE_METHOD).setValue(true, module);
     }
 
     @Override
@@ -117,7 +140,7 @@ public class BytecodeAnalysisIntegrationTest extends LightJavaCodeInsightFixture
     checkHasGutter("java.lang.String",
                    """
                      <html><p>External annotations available. Full signature:
-                     <pre><code><span style="color:#000000;">String</span><span style="">(</span><b><span style="color:#808000;">@</span><a href="psi_element://org.jetbrains.annotations.NotNull"><span style="color:#808000;">NotNull</span></a></b> <span style="color:#000080;font-weight:bold;">char</span><span style="">[]</span><span style="">,</span>
+                     <pre><code><span style="color:#000000;">String</span><span style="">(</span><span style="color:#000080;font-weight:bold;">char</span> <span style="color:#808000;">@</span><span style="color:#808000;">NotNull</span> <span style="">[]</span><span style="">,</span>
                      <span style="color:#000080;font-weight:bold;">int</span><span style="">,</span>
                      <span style="color:#000080;font-weight:bold;">int</span><span style="">)</span></code></pre></html>""");
   }
@@ -132,7 +155,7 @@ public class BytecodeAnalysisIntegrationTest extends LightJavaCodeInsightFixture
       .map(GutterMark::getTooltipText)
       .filter(Objects::nonNull)
       .map(s -> s.replaceAll(" +", " ").replace("&nbsp;", " ").replace("&quot;", "'").replace("&gt;", ">"))
-      .collect(Collectors.toSet());
+      .collect(Collectors.toCollection(LinkedHashSet::new));
     assertThat(gutters).contains(expectedText);
   }
 
@@ -216,7 +239,7 @@ public class BytecodeAnalysisIntegrationTest extends LightJavaCodeInsightFixture
   }
 
   @SuppressWarnings("unused")
-  public void _testExportInferredAnnotations() {
+  public void testExportInferredAnnotations() {
     PsiPackage rootPackage = JavaPsiFacade.getInstance(getProject()).findPackage("");
     assertNotNull(rootPackage);
     ServiceContainerUtil.registerExtension(ApplicationManager.getApplication(), BytecodeAnalysisSuppressor.EP_NAME, TEST_SUPPRESSOR,
@@ -278,10 +301,10 @@ public class BytecodeAnalysisIntegrationTest extends LightJavaCodeInsightFixture
         }
       }
 
-      private void annotate(Map<String, Map<String, PsiNameValuePair[]>> annotations,
-                            PsiModifierListOwner owner,
-                            String annotationFQN,
-                            PsiNameValuePair[] attributes) {
+      private static void annotate(Map<String, Map<String, PsiNameValuePair[]>> annotations,
+                                   PsiModifierListOwner owner,
+                                   String annotationFQN,
+                                   PsiNameValuePair[] attributes) {
         String key = PsiFormatUtil.getExternalName(owner, false, Integer.MAX_VALUE);
         annotations.computeIfAbsent(key, k -> new TreeMap<>()).put(annotationFQN, attributes);
       }
@@ -317,7 +340,12 @@ public class BytecodeAnalysisIntegrationTest extends LightJavaCodeInsightFixture
 
   @Nullable
   private PsiAnnotation findExternalAnnotation(PsiModifierListOwner owner, String fqn) {
-    return ExternalAnnotationsManager.getInstance(getProject()).findExternalAnnotation(owner, fqn);
+    ExternalAnnotationsManager manager = ExternalAnnotationsManager.getInstance(getProject());
+    PsiAnnotation annotation = manager.findExternalAnnotation(owner, fqn);
+    if (annotation == null) {
+      annotation = manager.findExternalTypeAnnotation(owner, "", fqn);
+    }
+    return annotation;
   }
 
   private abstract static class PackageVisitor extends JavaRecursiveElementVisitor {

@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.fileEditor.ex
 
 import com.intellij.openapi.components.serviceAsync
@@ -18,7 +18,7 @@ import com.intellij.openapi.util.Pair
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.docking.DockContainer
 import com.intellij.util.concurrency.annotations.RequiresEdt
-import org.jetbrains.annotations.ApiStatus.Experimental
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.awt.Component
 import java.util.concurrent.CompletableFuture
@@ -112,7 +112,7 @@ abstract class FileEditorManagerEx : FileEditorManager() {
   abstract fun getSelectedEditorWithProvider(file: VirtualFile): FileEditorWithProvider?
 
   /**
-   * Closes all files in active splitter (window).
+   * Closes all files in the active splitter (window).
    * @see com.intellij.ui.docking.DockManager.getContainers
    * @see com.intellij.ui.docking.DockContainer.closeAll
    */
@@ -155,6 +155,11 @@ abstract class FileEditorManagerEx : FileEditorManager() {
       .toTypedArray()
   }
 
+  @ApiStatus.Experimental
+  fun openFile(file: VirtualFile, options: FileEditorOpenRequest = FileEditorOpenRequest()): FileEditorComposite {
+    return openFile(file, options.targetWindow, buildFileEditorOpenOptions(options))
+  }
+
   @Deprecated(message = "Use openFile()", ReplaceWith("openFile(file, window, options)"), level = DeprecationLevel.ERROR)
   fun openFileWithProviders(file: VirtualFile,
                             focusEditor: Boolean,
@@ -170,11 +175,18 @@ abstract class FileEditorManagerEx : FileEditorManager() {
     return openFile(file = file, window = window, options = FileEditorOpenOptions(requestFocus = focusEditor)).retrofit()
   }
 
+  /**
+   * For external plugins use the [openFile] overload with [FileEditorOpenRequest] parameter.
+   */
+  @Internal
   abstract fun openFile(file: VirtualFile,
                         window: EditorWindow?,
                         options: FileEditorOpenOptions = FileEditorOpenOptions()): FileEditorComposite
 
-  @Experimental
+  /**
+   * For external plugins use the [openFile] overload with [FileEditorOpenRequest] parameter.
+   */
+  @Internal
   abstract suspend fun openFile(file: VirtualFile, options: FileEditorOpenOptions = FileEditorOpenOptions()): FileEditorComposite
 
   abstract fun isChanged(editor: EditorComposite): Boolean
@@ -182,6 +194,8 @@ abstract class FileEditorManagerEx : FileEditorManager() {
   abstract fun getNextWindow(window: EditorWindow): EditorWindow?
 
   abstract fun getPrevWindow(window: EditorWindow): EditorWindow?
+
+  open fun updateFileName(file: VirtualFile) {}
 
   open fun refreshIcons() {}
 
@@ -194,7 +208,6 @@ abstract class FileEditorManagerEx : FileEditorManager() {
   }
 
   @Internal
-  @Experimental
   open suspend fun waitForTextEditors() {
   }
 }

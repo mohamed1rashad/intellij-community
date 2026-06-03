@@ -25,7 +25,14 @@ import org.jdom.Element
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.components.*
+import org.jetbrains.kotlin.analysis.api.components.declarationScope
+import org.jetbrains.kotlin.analysis.api.components.directlyOverriddenSymbols
+import org.jetbrains.kotlin.analysis.api.components.expressionType
+import org.jetbrains.kotlin.analysis.api.components.isSubtypeOf
+import org.jetbrains.kotlin.analysis.api.components.lowerBoundIfFlexible
+import org.jetbrains.kotlin.analysis.api.components.scope
+import org.jetbrains.kotlin.analysis.api.components.semanticallyEquals
+import org.jetbrains.kotlin.analysis.api.components.syntheticJavaPropertiesScope
 import org.jetbrains.kotlin.analysis.api.resolution.KaErrorCallInfo
 import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.successfulVariableAccessCall
@@ -55,11 +62,28 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.java.propertyNamesByAccessorName
 import org.jetbrains.kotlin.name.FqNameUnsafe
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.name.render
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtReturnExpression
+import org.jetbrains.kotlin.psi.KtSafeQualifiedExpression
+import org.jetbrains.kotlin.psi.KtSuperExpression
+import org.jetbrains.kotlin.psi.KtVisitorVoid
+import org.jetbrains.kotlin.psi.createExpressionByPattern
 import org.jetbrains.kotlin.psi.psiUtil.endOffset
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelectorOrThis
-import org.jetbrains.kotlin.renderer.render
 import org.jetbrains.kotlin.synthetic.canBePropertyAccessor
 import org.jetbrains.kotlin.types.Variance
 import org.jetbrains.kotlin.utils.KotlinExceptionWithAttachments
@@ -124,7 +148,7 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
 
             val receiverType =
                 callableReferenceExpression.resolveToCall()
-                    ?.successfulFunctionCallOrNull()?.partiallyAppliedSymbol?.dispatchReceiver?.type?.lowerBoundIfFlexible()
+                    ?.successfulFunctionCallOrNull()?.dispatchReceiver?.type?.lowerBoundIfFlexible()
                     ?: callableReferenceExpression.receiverType?.lowerBoundIfFlexible() ?: return
 
             val syntheticProperty = getSyntheticProperty(propertyNames, receiverType) ?: return
@@ -203,7 +227,7 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
             val returnType = successfulFunctionCallSymbol.returnType.lowerBoundIfFlexible()
 
             // For extension functions, receiver type taken such way is null
-            val receiverType = resolvedFunctionCall.partiallyAppliedSymbol.dispatchReceiver?.type?.lowerBoundIfFlexible() ?: return
+            val receiverType = resolvedFunctionCall.dispatchReceiver?.type?.lowerBoundIfFlexible() ?: return
 
             val syntheticProperty = getSyntheticProperty(propertyNames, receiverType) ?: return
             val syntheticPropertyName = syntheticProperty.name.asString()
@@ -245,7 +269,7 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
 
             if (!canConvert(successfulFunctionCallSymbol, callExpression, receiverType, syntheticPropertyName)) return
 
-            if (!syntheticPropertyTypeEqualsToExpected( // When KT-66587 is fixed, call this only for getters. See KTIJ-29110
+            if (!syntheticPropertyTypeEqualsToExpected( // See KTIJ-29110
                     syntheticProperty,
                     returnType,
                     propertyAccessorKind
@@ -262,7 +286,6 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
 
             holder.problem(callExpression, getInspectionProblemText(propertyAccessorKind))
                 .highlight(problemHighlightType)
-                .range(TextRange(calleeExpression.startOffset, calleeExpression.endOffset).shiftRight(-calleeExpression.startOffset))
                 .fix(ReplaceWithPropertyAccessorFix(syntheticProperty.name, convertExpressionToBlockBodyData)).register()
         }
     }
@@ -389,7 +412,7 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
         }
 
         return if (valueArguments.isEmpty()) {
-            return if (PropertyUtilBase.isIsGetterName(methodName)) {
+            if (PropertyUtilBase.isIsGetterName(methodName)) {
                 PropertyAccessorKind.Getter.IsGetter
             } else {
                 PropertyAccessorKind.Getter.GetGetter
@@ -431,18 +454,17 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
     /**
      * Fixes the case from KTIJ-21051
      */
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun receiverOrItsAncestorsContainVisibleFieldWithSameName(receiverType: KaType, propertyName: String): Boolean {
         val fieldWithSameName = receiverType.scope?.declarationScope?.callables(Name.identifier(propertyName))
-            ?.filter { it is KaJavaFieldSymbol && it.visibility != KaSymbolVisibility.PRIVATE }
-            ?.singleOrNull()
+            ?.singleOrNull { it is KaJavaFieldSymbol && it.visibility != KaSymbolVisibility.PRIVATE }
 
         return fieldWithSameName != null
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun getSyntheticProperty(
         propertyNames: List<String>,
         receiverType: KaType
@@ -479,18 +501,17 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
         callReturnType: KaType,
         propertyAccessorKind: PropertyAccessorKind
     ): Boolean {
-        val propertyExpectedType = if (propertyAccessorKind is PropertyAccessorKind.Setter) {
-            propertyAccessorKind.valueArgumentExpression.expectedType ?: return false
-        } else {
-            callReturnType
-        }
-
         val syntheticPropertyReturnType = syntheticProperty.returnType.lowerBoundIfFlexible()
-        return syntheticPropertyReturnType.semanticallyEquals(propertyExpectedType)
+        if (propertyAccessorKind is PropertyAccessorKind.Setter) {
+            val parameterType = propertyAccessorKind.valueArgumentExpression.expressionType ?: return false
+            return parameterType.isSubtypeOf(syntheticPropertyReturnType)
+        } else {
+            return syntheticPropertyReturnType.semanticallyEquals(callReturnType)
+        }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun propertyResolvesToSyntheticProperty(
         callExpression: KtExpression,
         propertyAccessorKind: PropertyAccessorKind,
@@ -542,7 +563,6 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
             // by some variable or argument in the same scope
             if (qualifiedExpressionForSelector == null) {
                 val replacementReceiverType = resolvedCall.successfulVariableAccessCall()
-                    ?.partiallyAppliedSymbol
                     ?.dispatchReceiver
                     ?.type
                     ?.lowerBoundIfFlexible()
@@ -647,14 +667,14 @@ class UsePropertyAccessSyntaxInspection : LocalInspectionTool(), CleanupLocalIns
         ) KotlinBundle.message("use.of.setter.method.instead.of.property.access.syntax")
         else KotlinBundle.message("use.of.getter.method.instead.of.property.access.syntax")
 
-    val propertiesNotToReplace = NotPropertiesService.DEFAULT.map(::FqNameUnsafe).toMutableSet()
+    val propertiesNotToReplace: MutableSet<FqNameUnsafe> = NotPropertiesService.DEFAULT.map(::FqNameUnsafe).toMutableSet()
 
     // Serialized setting
     @Suppress("MemberVisibilityCanBePrivate")
-    var fqNameStrings = NotPropertiesService.DEFAULT.toMutableList()
+    var fqNameStrings: MutableList<String> = NotPropertiesService.DEFAULT.toMutableList()
 
     @Suppress("MemberVisibilityCanBePrivate")
-    var reportNonTrivialAccessors = false
+    var reportNonTrivialAccessors: Boolean = false
 
     override fun readSettings(node: Element) {
         super.readSettings(node)

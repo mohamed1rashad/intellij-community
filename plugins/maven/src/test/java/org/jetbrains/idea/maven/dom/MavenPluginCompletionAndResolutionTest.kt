@@ -9,6 +9,8 @@ import org.jetbrains.idea.maven.indices.MavenIndicesTestFixture
 import org.junit.Test
 
 class MavenPluginCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
+  override fun skipPluginResolution() = false
+
   override fun createIndicesFixture(): MavenIndicesTestFixture {
     return MavenIndicesTestFixture(dir, project, testRootDisposable,"plugins")
   }
@@ -81,7 +83,8 @@ class MavenPluginCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
 
 
     if (mavenVersionIsOrMoreThan("3.9.7")) {
-      assertCompletionVariants(projectPom, "2.0.2", "3.1", "3.10.1", "3.11.0", "3.13.0")
+      val v = projectsManager.projects[0].plugins.first { it.artifactId == "maven-compiler-plugin" }.version
+      assertCompletionVariants(projectPom, "2.0.2", "3.1", "3.10.1", "3.11.0", v)
     }
     else if (mavenVersionIsOrMoreThan("3.9.3")) {
       assertCompletionVariants(projectPom, "2.0.2", "3.1", "3.10.1", "3.11.0")
@@ -137,7 +140,6 @@ class MavenPluginCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        """.trimIndent())
 
     assertCompletionVariantsInclude(projectPom, RENDERING_TEXT,
-                                    "project",
                                     "maven-clean-plugin",
                                     "maven-jar-plugin",
                                     "maven-war-plugin",
@@ -198,7 +200,8 @@ class MavenPluginCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        """.trimIndent())
 
     if (mavenVersionIsOrMoreThan("3.9.7")) {
-      assertCompletionVariants(projectPom, RENDERING_TEXT, "2.0.2", "3.1", "3.10.1", "3.11.0", "3.13.0")
+      val v = projectsManager.projects[0].plugins.first { it.artifactId == "maven-compiler-plugin" }.version
+      assertCompletionVariants(projectPom, RENDERING_TEXT, "2.0.2", "3.1", "3.10.1", "3.11.0", v)
     }
     else if (mavenVersionIsOrMoreThan("3.9.3")) {
       assertCompletionVariants(projectPom, RENDERING_TEXT, "2.0.2", "3.1", "3.10.1", "3.11.0")
@@ -228,7 +231,7 @@ class MavenPluginCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                          </plugins>
                        </build>
                        """.trimIndent())
-    val pluginVersion = getDefaultPluginVersion("org.apache.maven:maven-compiler-plugin")
+    val pluginVersion = projectsManager.projects[0].plugins.first { it.artifactId == "maven-compiler-plugin" }.version
 
     val pluginPath =
       "plugins/org/apache/maven/plugins/maven-compiler-plugin/$pluginVersion/maven-compiler-plugin-$pluginVersion.pom"

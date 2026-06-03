@@ -2,7 +2,11 @@
 package com.intellij.platform.execution.serviceView;
 
 import com.intellij.execution.ExecutionBundle;
-import com.intellij.execution.services.*;
+import com.intellij.execution.services.ServiceEventListener;
+import com.intellij.execution.services.ServiceViewContributor;
+import com.intellij.execution.services.ServiceViewDescriptor;
+import com.intellij.execution.services.ServiceViewEmptyTreeSuggestion;
+import com.intellij.execution.services.ServiceViewManager;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.dnd.DnDManager;
 import com.intellij.ide.util.treeView.TreeState;
@@ -13,6 +17,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.platform.execution.serviceView.ServiceModel.ServiceViewItem;
 import com.intellij.platform.execution.serviceView.ServiceViewNavBarService.ServiceViewNavBarSelector;
@@ -37,16 +42,25 @@ import org.jetbrains.concurrency.AsyncPromise;
 import org.jetbrains.concurrency.Promise;
 import org.jetbrains.concurrency.Promises;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
-import java.awt.*;
+import java.awt.BorderLayout;
 import java.awt.event.InputEvent;
 import java.lang.ref.WeakReference;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.intellij.platform.execution.serviceView.ServiceViewDragHelper.getTheOnlyRootContributor;
 
@@ -60,6 +74,7 @@ final class ServiceTreeView extends ServiceView {
   private volatile ServiceViewItem myLastSelection;
   private boolean mySelected;
   private volatile Promise<?> myUpdateSelectionPromise;
+  private final AtomicReference<AsyncPromise<Void>> mySelectPromise = new AtomicReference<>();
 
   ServiceTreeView(@NotNull Project project, @NotNull ServiceViewModel model, @NotNull ServiceViewUi ui, @NotNull ServiceViewState state) {
     super(new BorderLayout(), project, model, ui);
@@ -157,23 +172,44 @@ final class ServiceTreeView extends ServiceView {
     return doSelect(service, contributorClass, false);
   }
 
-  private Promise<Void> selectSafe(@NotNull Object service, @NotNull Class<?> contributorClass) {
-    return doSelect(service, contributorClass, true);
+  private void selectSafe(@NotNull Object service, @NotNull Class<?> contributorClass) {
+    doSelect(service, contributorClass, true);
   }
 
   private Promise<Void> doSelect(@NotNull Object service, @NotNull Class<?> contributorClass, boolean safe) {
+    cancelSelect();
+
     ServiceViewItem selectedItem = myLastSelection;
     if (selectedItem == null || !selectedItem.getValue().equals(service)) {
       AsyncPromise<Void> result = new AsyncPromise<>();
+      mySelectPromise.set(result);
+
       Promise<TreePath> pathPromise =
         safe ? myTreeModel.findPathSafe(service, contributorClass) : myTreeModel.findPath(service, contributorClass);
+      Ref<Promise<?>> selectPromiseRef = new Ref<>(null);
+
+      result.onError(t -> {
+        if (t instanceof CancellationException) {
+          if (pathPromise instanceof AsyncPromise<?> p) p.cancel();
+          if (selectPromiseRef.get() instanceof AsyncPromise<?> p) p.cancel();
+        }
+        else if (mySelectPromise.compareAndSet(result, null)) {
+          selectFirstItemIfNeeded();
+        }
+      });
+
       pathPromise
         .onError(result::setError)
         .onSuccess(path -> {
-          TreeUtil.promiseSelect(myTree, new PathSelectionVisitor(path))
+          if (mySelectPromise.get() != result) return;
+
+          Promise<?> selectPromise = TreeUtil.promiseSelect(myTree, new PathSelectionVisitor(path));
+          selectPromiseRef.set(selectPromise);
+          selectPromise
             .onError(result::setError)
             .onSuccess(selectedPath -> {
               result.setResult(null);
+              mySelectPromise.compareAndSet(result, null);
               cancelSelectionUpdate();
             });
           cancelSelectionUpdate();
@@ -261,7 +297,7 @@ final class ServiceTreeView extends ServiceView {
     ServiceViewItem newSelection;
     ServiceViewDescriptor newDescriptor;
     if (selected.size() == 1) {
-      newSelection = selected.get(0);
+      newSelection = selected.getFirst();
       newDescriptor = newSelection.getViewDescriptor();
     }
     else {
@@ -295,7 +331,11 @@ final class ServiceTreeView extends ServiceView {
   }
 
   private void selectFirstItemIfNeeded() {
+    if (isSelectInProgress()) return;
+
     AppUIExecutor.onUiThread().expireWith(this).submit(() -> {
+      if (isSelectInProgress()) return;
+
       List<ServiceViewItem> selected = getSelectedItems();
       if (selected.isEmpty()) {
         ServiceViewItem item = ContainerUtil.getFirstItem(getModel().getRoots());
@@ -447,6 +487,18 @@ final class ServiceTreeView extends ServiceView {
     if (selectPromise instanceof AsyncPromise) {
       ((AsyncPromise<?>)selectPromise).cancel();
     }
+  }
+
+  private void cancelSelect() {
+    AsyncPromise<Void> result = mySelectPromise.getAndSet(null);
+    if (result != null) {
+      result.cancel();
+    }
+  }
+
+  private boolean isSelectInProgress() {
+    AsyncPromise<Void> result = mySelectPromise.get();
+    return result != null && result.getState() == Promise.State.PENDING;
   }
 
   private static void setEmptyText(JComponent component, StatusText emptyText) {

@@ -4,10 +4,9 @@ package com.intellij.execution.impl;
 import com.intellij.execution.BeforeRunTask;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.RunConfiguration;
-import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.WithoutOwnBeforeRunSteps;
 import com.intellij.execution.runners.ProgramRunner;
-import com.intellij.execution.ui.RunConfigurationFragmentedEditor;
+import com.intellij.execution.ui.RunnerAndConfigurationAwareSettingsEditor;
 import com.intellij.execution.ui.RunnerAndConfigurationSettingsEditor;
 import com.intellij.execution.ui.TargetAwareRunConfigurationEditor;
 import com.intellij.openapi.actionSystem.DataKey;
@@ -20,8 +19,8 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.BorderLayout;
 import java.util.List;
 
 public final class ConfigurationSettingsEditorWrapper extends SettingsEditor<RunnerAndConfigurationSettings>
@@ -189,9 +188,8 @@ public final class ConfigurationSettingsEditorWrapper extends SettingsEditor<Run
   public static SettingsEditor<RunnerAndConfigurationSettings> createWrapper(@NotNull RunnerAndConfigurationSettings settings) {
     SettingsEditor<?> configurationEditor = settings.getConfiguration().getConfigurationEditor();
     //noinspection unchecked
-    return configurationEditor instanceof RunConfigurationFragmentedEditor<?>
-           ? new RunnerAndConfigurationSettingsEditor(settings,
-                                                      (RunConfigurationFragmentedEditor<RunConfigurationBase<?>>)configurationEditor)
+    return configurationEditor instanceof RunnerAndConfigurationAwareSettingsEditor
+           ? new RunnerAndConfigurationSettingsEditor(settings, configurationEditor)
            : new ConfigurationSettingsEditorWrapper(settings, (SettingsEditor<RunConfiguration>)configurationEditor);
   }
 }

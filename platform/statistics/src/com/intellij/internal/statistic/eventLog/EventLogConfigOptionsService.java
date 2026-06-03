@@ -2,7 +2,6 @@
 package com.intellij.internal.statistic.eventLog;
 
 import com.intellij.internal.statistic.config.EventLogOptions;
-import com.intellij.internal.statistic.eventLog.validator.storage.EventLogMetadataLoader;
 import com.intellij.internal.statistic.eventLog.validator.storage.persistence.EventLogMetadataSettingsPersistence;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
@@ -12,7 +11,10 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
 
-import static com.intellij.internal.statistic.config.EventLogOptions.*;
+import static com.intellij.internal.statistic.config.EventLogOptions.DATA_THRESHOLD;
+import static com.intellij.internal.statistic.config.EventLogOptions.GROUP_ALERT_THRESHOLD;
+import static com.intellij.internal.statistic.config.EventLogOptions.GROUP_THRESHOLD;
+import static com.intellij.internal.statistic.config.EventLogOptions.tryParseInt;
 
 @Service
 public final class EventLogConfigOptionsService {
@@ -23,14 +25,6 @@ public final class EventLogConfigOptionsService {
 
   public static EventLogConfigOptionsService getInstance() {
     return ApplicationManager.getApplication().getService(EventLogConfigOptionsService.class);
-  }
-
-  public void updateOptions(@NotNull String recorderId, @NotNull EventLogMetadataLoader loader) {
-    EventLogMetadataSettingsPersistence persisted = EventLogMetadataSettingsPersistence.getInstance();
-    Map<String, String> changedOptions = persisted.updateOptions(recorderId, loader.getOptionValues());
-    if (!changedOptions.isEmpty()) {
-      ApplicationManager.getApplication().getMessageBus().syncPublisher(TOPIC).optionsChanged(recorderId, changedOptions);
-    }
   }
 
   public @NotNull EventLogOptions getOptions(@NotNull String recorderId) {

@@ -16,12 +16,16 @@ import com.intellij.openapi.project.RootsChangeRescanningInfo
 import com.intellij.openapi.project.rootManager
 import com.intellij.openapi.roots.ModulePackageIndex
 import com.intellij.openapi.roots.ModuleRootManager
-import com.intellij.openapi.roots.SingleFileSourcesTracker
 import com.intellij.openapi.roots.SourceFolder
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.*
+import com.intellij.psi.JavaDirectoryService
+import com.intellij.psi.PsiDirectory
+import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiFileFactory
+import com.intellij.psi.PsiManager
+import com.intellij.psi.PsiPackage
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.GlobalSearchScopesCore
 import com.intellij.util.Query
@@ -36,7 +40,6 @@ import org.jetbrains.kotlin.idea.KotlinFileType
 import org.jetbrains.kotlin.idea.base.codeInsight.KotlinNameSuggester
 import org.jetbrains.kotlin.idea.base.facet.kotlinSourceRootType
 import org.jetbrains.kotlin.idea.base.facet.platform.platform
-import org.jetbrains.kotlin.idea.base.util.K1ModeProjectStructureApi
 import org.jetbrains.kotlin.idea.base.util.invalidateProjectRoots
 import org.jetbrains.kotlin.idea.base.util.isAndroidModule
 import org.jetbrains.kotlin.idea.base.util.quoteIfNeeded
@@ -61,11 +64,10 @@ fun PsiDirectory.getPackage(): PsiPackage? = JavaDirectoryService.getInstance()!
 private fun PsiDirectory.getNonRootFqNameOrNull(): FqName? = getPackage()?.qualifiedName?.let(::FqName)
 
 fun PsiFile.getFqNameByDirectory(): FqName {
-    val singleFileSourcesTracker = SingleFileSourcesTracker.getInstance(project)
     val vFile = virtualFile ?: return FqName.ROOT
-    val singleFileSourcePackageName = singleFileSourcesTracker.getPackageNameForSingleFileSource(vFile)
-    singleFileSourcePackageName?.let { return FqName(it) }
-    return parent?.getNonRootFqNameOrNull() ?: FqName.ROOT
+    return packageNameForSingleFileSource?.invoke(vFile.parent)
+        ?: parent?.getNonRootFqNameOrNull()
+        ?: FqName.ROOT
 }
 
 fun PsiDirectory.getFqNameByDirectoryOrRoot(): FqName = getNonRootFqNameOrNull() ?: FqName.ROOT
@@ -78,16 +80,21 @@ fun PsiDirectory.getFqNameWithImplicitPrefix(): FqName? {
 
 fun PsiDirectory.getImplicitPackagePrefix(): FqName? {
     return sourceRoot?.takeIf { !it.hasExplicitPackagePrefix(project) }?.let { sourceRoot ->
-        @OptIn(K1ModeProjectStructureApi::class)
         PerModulePackageCacheService.getInstance(project).getImplicitPackagePrefix(sourceRoot)
     }
 }
 
+private var packageNameForSingleFileSource: ((VirtualFile) -> FqName?)? = null
+
 @TestOnly
 fun PsiDirectory.setImplicitPackagePrefix(fqName: FqName?) {
     sourceRoot?.let {
-        @OptIn(K1ModeProjectStructureApi::class)
         PerModulePackageCacheService.getInstance(project).setImplicitPackagePrefix(it, fqName)
+    }
+    packageNameForSingleFileSource = if (fqName != null) {
+        { if (it == sourceRoot) fqName else null }
+    }  else {
+        null
     }
 }
 

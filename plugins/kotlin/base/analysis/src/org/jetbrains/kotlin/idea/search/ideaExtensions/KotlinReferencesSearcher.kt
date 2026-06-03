@@ -8,10 +8,25 @@ import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.util.Computable
 import com.intellij.openapi.util.TextRange
-import com.intellij.psi.*
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiReference
+import com.intellij.psi.PsiReferenceBase
+import com.intellij.psi.SmartPointerManager
+import com.intellij.psi.SmartPsiElementPointer
+import com.intellij.psi.createSmartPointer
 import com.intellij.psi.impl.cache.CacheManager
-import com.intellij.psi.search.*
+import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.LocalSearchScope
+import com.intellij.psi.search.PsiSearchHelper
+import com.intellij.psi.search.RequestResultProcessor
+import com.intellij.psi.search.SearchRequestCollector
+import com.intellij.psi.search.SearchScope
+import com.intellij.psi.search.SearchSession
+import com.intellij.psi.search.UsageSearchContext
 import com.intellij.psi.search.searches.MethodReferencesSearch
+import com.intellij.psi.search.searches.MethodReferencesSearch.search
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.descendantsOfType
 import com.intellij.util.Processor
@@ -49,7 +64,24 @@ import org.jetbrains.kotlin.idea.search.ideaExtensions.KotlinReferencesSearchOpt
 import org.jetbrains.kotlin.idea.search.isOnlyKotlinSearch
 import org.jetbrains.kotlin.idea.search.usagesSearch.operators.DestructuringDeclarationReferenceSearcher
 import org.jetbrains.kotlin.idea.search.usagesSearch.operators.OperatorReferenceSearcher
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassBody
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtEnumEntry
+import org.jetbrains.kotlin.psi.KtEnumEntrySuperclassReferenceExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtImportDirective
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtPrimaryConstructor
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtValueArgumentName
 import org.jetbrains.kotlin.psi.psiUtil.containingClass
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedElementSelector
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
@@ -238,7 +270,7 @@ class KotlinReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
                     }
                 }
 
-                if (!(elementToSearchPointer.element is KtElement && runReadAction { isOnlyKotlinSearch(effectiveSearchScope) })) {
+                if (runReadAction { elementToSearchPointer.element is KtElement && !isOnlyKotlinSearch(effectiveSearchScope) }) {
                     longTasks.add {
                         DumbService.getInstance(queryParameters.project).runReadActionInSmartMode(Runnable {
                             element?.element?.let(::searchLightElements)
@@ -399,23 +431,14 @@ class KotlinReferencesSearcher : QueryExecutorBase<PsiReference, ReferencesSearc
                 .filterIsInstance<KtParameter>()
                 .flatMap { it.toLightElements() }
                 .toList()
-            val namedElements = lightMethods.filterDataClassComponentsIfDisabled(kotlinOptions)
+            val namedElements = lightMethods.filterDataClassComponentsIfDisabled(kotlinOptions).filterIsInstance<PsiMethod>()
             for (element in namedElements) {
-                searchMethodAware(element)
-            }
-        }
-
-        @RequiresReadLock
-        private fun searchMethodAware(element: PsiNamedElement) {
-            if (element is PsiMethod) {
                 val pointer = element.createSmartPointer()
                 longTasks.add {
                     runReadAction { pointer.element }?.let {
-                        MethodReferencesSearch.search(it, queryParameters.effectiveSearchScope, true).forEach(consumer)
+                        search(it, queryParameters.effectiveSearchScope, true).forEach(consumer)
                     }
                 }
-            } else {
-                searchNamedElement(element)
             }
         }
 

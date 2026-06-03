@@ -10,6 +10,7 @@ import com.intellij.openapi.observable.util.or
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.ui.validation.WHEN_PROPERTY_CHANGED
 import com.intellij.platform.eel.provider.localEel
+import com.intellij.python.pytools.Version
 import com.intellij.ui.dsl.builder.Panel
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.util.asDisposable
@@ -17,28 +18,34 @@ import com.intellij.util.ui.launchOnShow
 import com.jetbrains.python.PyBundle.message
 import com.jetbrains.python.Result
 import com.jetbrains.python.TraceContext
-import com.jetbrains.python.errorProcessing.ErrorSink
 import com.jetbrains.python.errorProcessing.PyResult
 import com.jetbrains.python.newProject.collector.InterpreterStatisticsInfo
 import com.jetbrains.python.newProjectWizard.projectPath.ProjectPathFlows
 import com.jetbrains.python.sdk.ModuleOrProject
 import com.jetbrains.python.sdk.add.collector.PythonNewInterpreterAddedCollector
-import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode.*
+import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode.BASE_CONDA
+import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode.CUSTOM
+import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode.PROJECT_UV
+import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode.PROJECT_VENV
 import com.jetbrains.python.sdk.add.v2.conda.selectCondaEnvironment
 import com.jetbrains.python.sdk.add.v2.uv.UvInterpreterSection
-import com.jetbrains.python.sdk.add.v2.uv.uvCreator
 import com.jetbrains.python.sdk.add.v2.venv.setupVirtualenv
 import com.jetbrains.python.statistics.InterpreterCreationMode
 import com.jetbrains.python.statistics.InterpreterTarget
 import com.jetbrains.python.statistics.InterpreterType
 import com.jetbrains.python.util.ShowingMessageErrorSync
 import com.jetbrains.python.venvReader.VirtualEnvReader
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.awt.Component
 
 interface PySdkPanelBuilder {
@@ -62,7 +69,6 @@ interface PySdkPanelBuilder {
  * If `onlyAllowedInterpreterTypes` then only these types are displayed. All types displayed otherwise
  */
 internal class PythonSdkPanelBuilderAndSdkCreator(
-  private val errorSink: ErrorSink,
   private val module: Module? = null,
   private val limitExistingEnvironments: Boolean = true,
 ) : PySdkPanelBuilder, PySdkCreator {
@@ -95,15 +101,16 @@ internal class PythonSdkPanelBuilderAndSdkCreator(
   private lateinit var model: PythonMutableTargetAddInterpreterModel<PathHolder.Eel>
 
   override fun buildPanel(outerPanel: Panel, projectPathFlows: ProjectPathFlows) {
-    model = PythonLocalAddInterpreterModel(projectPathFlows, FileSystem.Eel(localEel))
+    model = PythonLocalAddInterpreterModel(projectPathFlows, EelFileSystem(localEel))
     model.navigator.selectionMode = selectedMode
     uvSection = UvInterpreterSection(model, module, selectedMode, propertyGraph)
 
     custom = PythonAddCustomInterpreter(
       model = model,
       module = module,
-      errorSink = ShowingMessageErrorSync,
-      limitExistingEnvironments = limitExistingEnvironments
+      errorSink = module?.project?.let { ShowingMessageErrorSync.withProject(it) } ?: ShowingMessageErrorSync,
+      limitExistingEnvironments = limitExistingEnvironments,
+      bestGuessCreateSdkInfo = CompletableDeferred(value = null)
     )
 
     val validationRequestor = WHEN_PROPERTY_CHANGED(selectedMode)
@@ -121,7 +128,7 @@ internal class PythonSdkPanelBuilderAndSdkCreator(
         title = message("sdk.create.python.version"),
         selectedSdkProperty = model.state.baseInterpreter,
         validationRequestor = validationRequestor,
-        onPathSelected = model::addManuallyAddedInterpreter
+        onPathSelected = model::addManuallyAddedSystemPython
       ) {
         visibleIf(_projectVenv)
       }
@@ -133,7 +140,7 @@ internal class PythonSdkPanelBuilderAndSdkCreator(
           validationRequestor = validationRequestor,
           labelText = message("sdk.create.custom.venv.executable.path", "conda"),
           missingExecutableText = message("sdk.create.custom.venv.missing.text", "conda"),
-          installAction = createInstallCondaFix(model, errorSink),
+          installAction = createInstallCondaFix(model),
         )
       }.visibleIf(_baseConda)
 
@@ -152,7 +159,7 @@ internal class PythonSdkPanelBuilderAndSdkCreator(
   }
 
   override fun onShownInitialization(scopingComponent: Component) {
-    scopingComponent.launchOnShow("${this::class.java} onShown initialization", TraceContext(message("tracecontext.new.project.wizard"), null)) {
+    scopingComponent.launchOnShow("${this::class.java} onShown initialization", TraceContext(message("trace.context.new.project.wizard"), null)) {
       initMutex.withLock {
         supervisorScope {
           initialize(this@supervisorScope)
@@ -161,7 +168,7 @@ internal class PythonSdkPanelBuilderAndSdkCreator(
     }
   }
 
-  private fun initialize(scope: CoroutineScope) {
+  private suspend fun initialize(scope: CoroutineScope) {
     model.initialize(scope)
 
     pythonBaseVersionComboBox.initialize(scope, model.baseInterpreters)
@@ -192,8 +199,8 @@ internal class PythonSdkPanelBuilderAndSdkCreator(
         model.setupVirtualenv(venvFolder, moduleOrProject)
       }
       BASE_CONDA -> model.selectCondaEnvironment(moduleOrProject, base = true)
-      PROJECT_UV -> model.uvCreator(module).getOrCreateSdkWithBackground(moduleOrProject)
-      CUSTOM -> custom.currentSdkManager.getOrCreateSdkWithBackground(moduleOrProject)
+      PROJECT_UV -> uvSection.getUvCreator().setupSdk(moduleOrProject)
+      CUSTOM -> custom.currentSdkManager.setupSdk(moduleOrProject)
     }.getOr { return it }
 
     val statistics = withContext(Dispatchers.EDT) { createStatisticsInfo() }

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.combined
 
 import com.intellij.diff.DiffContext
@@ -12,8 +12,14 @@ import com.intellij.diff.tools.util.base.TextDiffViewerUtil
 import com.intellij.diff.tools.util.text.SmartTextDiffProvider
 import com.intellij.diff.util.DiffUtil
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.actionSystem.*
-import com.intellij.openapi.actionSystem.ex.ActionUtil
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.Constraints
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ex.ActionUtil.copyFrom
 import com.intellij.openapi.diff.DiffBundle.message
 import com.intellij.openapi.editor.Editor
@@ -161,46 +167,36 @@ internal class CombinedHighlightPolicySettingAction(settings: TextDiffSettingsHo
 internal class CombinedEditorSettingsActionGroup(private val settings: TextDiffSettingsHolder.TextDiffSettings,
                                                  private val foldingModels: () -> List<FoldingModelSupport>,
                                                  editors: () -> List<Editor>) : SetEditorSettingsActionGroup(settings, editors) {
-  init {
-    templatePresentation.putClientProperty(ActionUtil.HIDE_DROPDOWN_ICON, true)
-  }
 
   override fun getChildren(e: AnActionEvent?): Array<AnAction> {
-    val diffModesSettingsGroup = ActionManager.getInstance().getAction(IdeActions.GROUP_DIFF_EDITOR_MODES)
-    val editorSettingsGroup = ActionManager.getInstance().getAction(IdeActions.GROUP_DIFF_EDITOR_SETTINGS)
-    val ignorePolicyGroup = CombinedIgnorePolicySettingAction(settings).actions.apply {
-      add(Separator.create(message("option.ignore.policy.group.name")), Constraints.FIRST)
-    }
-    val highlightPolicyGroup = CombinedHighlightPolicySettingAction(settings).actions.apply {
-      add(Separator.create(message("option.highlighting.policy.group.name")), Constraints.FIRST)
-    }
-
     val isRightToolbarPlace = e != null && e.place.endsWith(ActionPlaces.DIFF_RIGHT_TOOLBAR)
     val isGutterPlace = e != null && !isRightToolbarPlace
 
-    val actions = mutableListOf<AnAction>()
-    if (isRightToolbarPlace) {
-      actions.add(diffModesSettingsGroup)
-    }
-    actions.add(editorSettingsGroup)
-    actions.add(CombinedToggleExpandByDefaultAction(settings, foldingModels))
-    actions.addAll(myActions)
-    actions.add(Separator.getInstance())
-    actions.add(ignorePolicyGroup)
-    actions.add(Separator.getInstance())
-    actions.add(highlightPolicyGroup)
-    actions.add(Separator.getInstance())
-    actions.add(ActionManager.getInstance().getAction(IdeActions.ACTION_CONTEXT_HELP))
-
-    if (isGutterPlace) {
-      val gutterGroup = ActionManager.getInstance().getAction(IdeActions.GROUP_DIFF_EDITOR_GUTTER_POPUP) as ActionGroup
-      val result = arrayListOf(*gutterGroup.getChildren(e))
-      result.add(Separator.getInstance())
-      replaceOrAppend(result, editorSettingsGroup, DefaultActionGroup(actions))
-      return result.toTypedArray()
-    }
-
-    return actions.toTypedArray()
+    return buildList<AnAction> {
+      if (isGutterPlace) {
+        add(ActionManager.getInstance().getAction(IdeActions.GROUP_DIFF_EDITOR_GUTTER_POPUP))
+        add(appearanceGroup)
+        add(Separator.getInstance())
+        add(ActionManager.getInstance().getAction(IdeActions.ACTION_CONTEXT_HELP))
+      }
+      else {
+        if (isRightToolbarPlace) {
+          add(ActionManager.getInstance().getAction(IdeActions.GROUP_DIFF_EDITOR_MODES))
+          add(ActionManager.getInstance().getAction(IdeActions.GROUP_DIFF_EDITOR_SETTINGS))
+        }
+        add(CombinedToggleExpandByDefaultAction(settings, foldingModels))
+        add(CombinedIgnorePolicySettingAction(settings).actions.apply {
+          add(Separator.create(message("option.ignore.policy.group.name")), Constraints.FIRST)
+        })
+        add(Separator.getInstance())
+        add(CombinedHighlightPolicySettingAction(settings).actions.apply {
+          add(Separator.create(message("option.highlighting.policy.group.name")), Constraints.FIRST)
+        })
+        add(Separator.getInstance())
+        add(appearanceGroup)
+        add(ActionManager.getInstance().getAction(IdeActions.ACTION_CONTEXT_HELP))
+      }
+    }.toTypedArray()
   }
 }
 

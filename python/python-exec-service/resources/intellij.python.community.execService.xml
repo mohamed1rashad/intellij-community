@@ -1,21 +1,30 @@
-<idea-plugin>
+<idea-plugin visibility="public">
   <dependencies>
-    <module name="intellij.python.community"/>
     <module name="intellij.python.community.helpersLocator"/>
+    <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
+    <module name="intellij.python.community"/>
+    <module name="intellij.python.processOutput.common"/>
+    <!-- endregion -->
   </dependencies>
 
   <extensionPoints>
     <extensionPoint qualifiedName="Pythonid.execService.targetEnvironmentRequestHandler"
-                    interface="com.intellij.python.community.execService.spi.TargetEnvironmentRequestHandler"
+                    interface="com.intellij.python.community.execService.impl.TargetEnvironmentRequestHandler"
                     dynamic="true"/>
 
   </extensionPoints>
+  <extensions defaultExtensionNs="com.intellij">
+    <registryKey defaultValue="2"
+                 description="How many heavy processes to execute concurrently"
+                 key="python.execService.limit.heavy" restartRequired="true"/>
 
-  <extensions defaultExtensionNs="Pythonid">
-    <execService.targetEnvironmentRequestHandler
-      implementation="com.intellij.python.community.execService.impl.processLaunchers.DefaultTargetEnvironmentRequestHandler"
-      order="last"
-    />
+    <registryKey defaultValue="10"
+                 description="How many medium processes to execute concurrently"
+                 key="python.execService.limit.medium" restartRequired="true"/>
+
+    <registryKey defaultValue="100"
+                 description="How many light processes to execute concurrently"
+                 key="python.execService.limit.light" restartRequired="true"/>
   </extensions>
 
 </idea-plugin>

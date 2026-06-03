@@ -23,9 +23,16 @@ import org.jetbrains.jps.model.java.JdkVersionDetector;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -138,8 +145,8 @@ public class JavaHomeFinderBasic {
 
   private @NotNull Set<String> findInPATH() {
     try {
-      String pathVarString = mySystemInfo.getEnvironmentVariable("PATH");
-      if (pathVarString == null || pathVarString.isEmpty()) {
+      String pathVarString = mySystemInfo.getPathEnvVar();
+      if (pathVarString.isEmpty()) {
         return Collections.emptySet();
       }
 
@@ -158,6 +165,8 @@ public class JavaHomeFinderBasic {
           }
 
           dirsToCheck.addAll(listPossibleJdkInstallRootsFromHomes(parentFile));
+        }
+        catch (InvalidPathException ignored) {
         }
         catch (Exception e) {
           if (e instanceof ControlFlowException) throw e;

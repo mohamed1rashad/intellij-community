@@ -1,8 +1,14 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.ide.impl.wsl.ijent.nio
 
+import com.intellij.platform.eel.EelDescriptor
+import com.intellij.platform.eel.provider.EelDescriptorOwner
 import org.jetbrains.annotations.ApiStatus
-import java.nio.file.*
+import java.nio.file.FileStore
+import java.nio.file.FileSystem
+import java.nio.file.Path
+import java.nio.file.PathMatcher
+import java.nio.file.WatchService
 import java.nio.file.attribute.UserPrincipalLookupService
 
 /**
@@ -14,7 +20,8 @@ class IjentWslNioFileSystem internal constructor(
   internal val wslId: String,
   private val ijentFs: FileSystem,
   private val originalFs: FileSystem,
-) : FileSystem() {
+  override val eelDescriptor: EelDescriptor,
+) : FileSystem(), EelDescriptorOwner {
   override fun toString(): String = """${javaClass.simpleName}($provider)"""
 
   override fun close() {
@@ -62,5 +69,5 @@ class IjentWslNioFileSystem internal constructor(
     originalFs.userPrincipalLookupService
 
   override fun newWatchService(): WatchService =
-    originalFs.newWatchService()
+    ijentFs.newWatchService()
 }

@@ -1,16 +1,17 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.model
 
 import com.intellij.gradle.toolingExtension.util.GradleVersionSpecificsUtil.isBuildSrcAddedInEditableBuilds
 import com.intellij.gradle.toolingExtension.util.GradleVersionSpecificsUtil.isBuildSrcSyncedSeparately
 import com.intellij.gradle.toolingExtension.util.GradleVersionSpecificsUtil.isBuildTreePathAvailable
+import com.intellij.openapi.util.io.systemIndependentPath
 import org.gradle.tooling.internal.gradle.DefaultBuildIdentifier
 import org.gradle.tooling.model.gradle.BasicGradleProject
 import org.gradle.tooling.model.gradle.GradleBuild
 import org.gradle.tooling.model.internal.ImmutableDomainObjectSet
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.testFramework.annotations.GradleTestSource
-import org.jetbrains.plugins.gradle.tooling.VersionMatcherRule.BASE_GRADLE_VERSION
+import org.jetbrains.plugins.gradle.tooling.VersionMatcherRule.Companion.BASE_GRADLE_VERSION
 import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalBuildIdentifier
 import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalProjectIdentifier
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -26,7 +27,7 @@ import java.io.File
 class DefaultGradleLightBuildTest {
 
   @ParameterizedTest
-  @GradleTestSource("8.1, 8.2")
+  @GradleTestSource("8.1.1, 8.2.1")
   fun `test DefaultGradleLightBuild#convertGradleBuilds for simple build`(gradleVersion: GradleVersion) {
     // GIVEN
     val rootProject = mockGradleProject(
@@ -73,7 +74,7 @@ class DefaultGradleLightBuildTest {
   }
 
   @ParameterizedTest
-  @GradleTestSource("8.1, 8.2")
+  @GradleTestSource("8.1.1, 8.2.1")
   fun `test DefaultGradleLightBuild#convertGradleBuilds for composite build`(gradleVersion: GradleVersion) {
     // GIVEN
     val rootProject = mockGradleProject(path = ":", buildTreePath = ":", buildPath = "/rootBuild", gradleVersion = gradleVersion)
@@ -182,7 +183,7 @@ class DefaultGradleLightBuildTest {
    * It's worth running this test for 8.0, because before 8.2 identity path calculation for a project depends on the build hierarchy.
    */
   @ParameterizedTest
-  @GradleTestSource("8.0, $BASE_GRADLE_VERSION")
+  @GradleTestSource("8.0.2, $BASE_GRADLE_VERSION")
   fun `test converted buildSrc has a parent build since Gradle 8,0`(gradleVersion: GradleVersion) {
     val gradleRootProject = mockGradleProject(
       buildPath = "/rootBuild",
@@ -281,7 +282,7 @@ class DefaultGradleLightBuildTest {
    *```
    */
   @ParameterizedTest
-  @GradleTestSource("6.6, 7.6")
+  @GradleTestSource("6.6.1, 7.6.6")
   fun `test converted buildSrc does not have a parent before Gradle 8,0`(gradleVersion: GradleVersion) {
     val gradleRootProject = mockGradleProject(
       buildPath = "/rootBuild",
@@ -473,10 +474,11 @@ class DefaultGradleLightBuildTest {
     projectNames: List<String>,
     parent: DefaultGradleLightBuild? = null,
   ) {
-    assertEquals(File(buildPath).name, build.name) {
+    val expectedBuildFile = File(buildPath).absoluteFile
+    assertEquals(expectedBuildFile.name, build.name) {
       "Build name should be equal to its root project name: by default, it's the name of directory where settings.gradle(.kts) is located."
     }
-    assertEquals(buildPath, build.buildIdentifier.rootDir.path) {
+    assertEquals(expectedBuildFile.path, build.buildIdentifier.rootDir.path) {
       "The build directory specified in the build identifier should match the given path."
     }
     assertEquals(parent, build.parentBuild) {
@@ -508,7 +510,7 @@ class DefaultGradleLightBuildTest {
       "The project should have expected `identityPath`. It identifies the project, relatively to the settings file of the root build. " +
       "Before 8.2 it is calculated relying on the known hierarchy of builds and projects. After 8.2, it is taken from `buildTreePath`."
     }
-    assertEquals(projectPath, project.projectDirectory.path) {
+    assertEquals(projectPath, project.projectDirectory.systemIndependentPath) {
       "The project should be located in expected `projectDirectory`"
     }
     assertEquals(build.buildIdentifier.rootDir, project.projectIdentifier.buildIdentifier.rootDir) {

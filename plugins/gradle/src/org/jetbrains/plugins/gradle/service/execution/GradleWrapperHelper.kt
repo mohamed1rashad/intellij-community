@@ -17,6 +17,7 @@ import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings
 import org.jetbrains.plugins.gradle.util.GradleConstants
 import org.jetbrains.plugins.gradle.util.GradleUtil
 import java.io.File
+import java.nio.file.Paths
 import java.util.function.Supplier
 
 @ApiStatus.Internal
@@ -51,7 +52,7 @@ object GradleWrapperHelper {
 
   @JvmStatic
   @JvmOverloads
-  fun ensureInstalledWrapper(context: GradleExecutionContext, gradleVersion: GradleVersion? = null) {
+  fun ensureInstalledWrapper(context: GradleExecutionContextImpl, gradleVersion: GradleVersion? = null) {
 
     val settings = context.settings
     val projectPath = GradleUtil.determineRootProject(context.projectPath)
@@ -85,7 +86,7 @@ object GradleWrapperHelper {
 
         // if autoimport is active, it should be notified of new files creation as early as possible,
         // to avoid triggering unnecessary re-imports (caused by creation of wrapper)
-        VfsUtil.markDirtyAndRefresh(false, true, true, File(projectPath, "gradle"))
+        VfsUtil.markDirtyAndRefresh(false, true, true, Paths.get(projectPath, "gradle"))
 
         settings.wrapperPropertyFile = propertiesFile.get()
       }

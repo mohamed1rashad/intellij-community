@@ -5,6 +5,9 @@ import kotlin.coroutines.cancellation.CancellationException
 
 private val LOG = Logger.getInstance("any")
 
+fun rethrowControlFlowException(t: Throwable) { // API stub
+}
+
 class IncorrectPceHandlingWhenPceCaughtImplicitlyTests {
 
   // tests for ProcessCanceledException
@@ -19,6 +22,27 @@ class IncorrectPceHandlingWhenPceCaughtImplicitlyTests {
     }
     catch (<error descr="'com.intellij.openapi.progress.ProcessCanceledException' must be rethrown. It is thrown by 'throwPce()'.">e</error>: Exception) {
       // exception swallowed
+    }
+  }
+
+  fun testPceRethrown() {
+    try {
+      throwPce()
+    }
+    catch (e: Exception) {
+      // exception rethrown with platform fun
+      rethrowControlFlowException(e)
+    }
+  }
+
+  fun testPceRethrownAndLog() {
+    try {
+      throwPce()
+    }
+    catch (e: Exception) {
+      // exception rethrown with platform fun
+      rethrowControlFlowException(e)
+      LOG.info("Error occured", e)
     }
   }
 
@@ -64,7 +88,7 @@ class IncorrectPceHandlingWhenPceCaughtImplicitlyTests {
       throwPce()
     }
     catch (<error descr="'com.intellij.openapi.progress.ProcessCanceledException' must be rethrown. It is thrown by 'throwPce()'.">e</error>: Exception) {
-      LOG.<error descr="'com.intellij.openapi.progress.ProcessCanceledException' must not be logged. It is thrown by 'throwPce()'.">error("Error occurred: " + e.message)</error>
+      LOG.error("Error occurred: " + e.message)
     }
   }
 
@@ -173,7 +197,7 @@ class IncorrectPceHandlingWhenPceCaughtImplicitlyTests {
       throwPceInheritor()
     }
     catch (<error descr="'com.intellij.openapi.progress.ProcessCanceledException' inheritor must be rethrown. It is thrown by 'throwPceInheritor()'.">e</error>: Exception) {
-      LOG.<error descr="'com.intellij.openapi.progress.ProcessCanceledException' inheritor must not be logged. It is thrown by 'throwPceInheritor()'.">error("Error occurred: " + e.message)</error>
+      LOG.error("Error occurred: " + e.message)
     }
   }
 

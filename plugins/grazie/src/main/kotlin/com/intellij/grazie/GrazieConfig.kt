@@ -2,6 +2,7 @@
 package com.intellij.grazie
 
 import ai.grazie.nlp.langs.Language
+import ai.grazie.nlp.langs.LanguageISO
 import ai.grazie.rules.settings.TextStyle
 import ai.grazie.rules.tree.Parameter
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
@@ -20,10 +21,16 @@ import com.intellij.grazie.jlanguage.Lang
 import com.intellij.grazie.jlanguage.LangTool
 import com.intellij.grazie.remote.GrazieRemote.isAvailableLocally
 import com.intellij.grazie.rule.RuleIdeClient
+import com.intellij.grazie.spellcheck.hunspell.HunspellDictionary
 import com.intellij.grazie.text.Rule
 import com.intellij.grazie.utils.TextStyleDomain
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.SettingsCategory
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
+import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.util.ModificationTracker
 import com.intellij.util.application
@@ -31,13 +38,20 @@ import com.intellij.util.containers.CollectionFactory
 import com.intellij.util.xmlb.annotations.Property
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.VisibleForTesting
-import java.util.*
+import java.util.Collections
+import java.util.TreeMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.collections.orEmpty
 
-@State(name = "GraziConfig", presentableName = GrazieConfig.PresentableNameGetter::class, storages = [
-  Storage("grazie_global.xml"),
-  Storage(value = "grazi_global.xml", deprecated = true)
-], category = SettingsCategory.CODE)
+@State(
+  name = "GraziConfig",
+  presentableName = GrazieConfig.PresentableNameGetter::class,
+  storages = [
+    Storage("grazie_global.xml"),
+    Storage(value = "grazi_global.xml", deprecated = true)
+  ],
+  category = SettingsCategory.CODE,
+)
 class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationTracker {
   enum class Version : VersionedState.Version<State> {
     INITIAL,
@@ -59,12 +73,8 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
     override fun toString(): String = ordinal.toString()
 
     companion object {
-      val CURRENT = NEW_UI
+      val CURRENT: Version = NEW_UI
     }
-  }
-
-  init {
-    subscribe(GrazieScope.getInstance()) { syncOxfordSpelling() }
   }
 
   /**
@@ -116,6 +126,14 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
     val processing: Processing
       get() = explicitlyChosenProcessing ?: if (GrazieCloudConnector.isCloudEnabledByDefault()) Cloud else Local
 
+    val dictionaries: List<HunspellDictionary>
+      get() = enabledLanguages
+        .filter { it.iso != LanguageISO.EN && it.jLanguage != null }
+        .mapNotNull {
+          ProgressManager.checkCanceled()
+          it.dictionary
+        }
+
     override fun increment(): State = copy(version = version.next() ?: error("Attempt to increment latest version $version"))
 
     fun hasMissedLanguages(): Boolean {
@@ -135,8 +153,20 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
     }
 
     fun withLanguages(langs: Set<Lang>): State = copy(enabledLanguages = langs)
+    fun withCheckingContext(context: CheckingContext): State = copy(checkingContext = context)
     fun withAutoFix(autoFix: Boolean): State = copy(autoFix = autoFix)
-    fun withOxfordSpelling(useOxford: Boolean): State = copy(useOxfordSpelling = useOxford)
+    fun withOxfordSpelling(useOxfordSpelling: Boolean): State {
+      fun updateOxfordSpellingRules(useOxfordSpelling: Boolean, rules: Set<String>) = if (useOxfordSpelling) rules + ltOxfordRules else rules - ltOxfordRules
+
+      val newState = TextStyleDomain.entries.fold(this) { acc, domain ->
+        if (domain == TextStyleDomain.Other) {
+          acc.copy(userEnabledRules = updateOxfordSpellingRules(useOxfordSpelling, acc.userEnabledRules))
+        } else {
+          acc.withDomainEnabledRules(domain, updateOxfordSpellingRules(useOxfordSpelling, acc.domainEnabledRules[domain].orEmpty()))
+        }
+      }
+      return newState.copy(useOxfordSpelling = useOxfordSpelling)
+    }
     fun withParameter(domain: TextStyleDomain, language: Language, parameter: Parameter, value: String?): State {
       if (domain == TextStyleDomain.Other) {
         val newLangParams = TreeMap(parameters[language] ?: emptyMap())
@@ -192,9 +222,9 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
       else this.withDomainEnabledRules(domain, userEnabledRules).withDomainDisabledRules(domain, userDisabledRules)
     }
 
-    private fun getDomainEnabledRules(domain: TextStyleDomain) = domainEnabledRules[domain] ?: emptySet()
+    internal fun getDomainEnabledRules(domain: TextStyleDomain) = domainEnabledRules[domain] ?: emptySet()
 
-    private fun getDomainDisabledRules(domain: TextStyleDomain) = domainDisabledRules[domain] ?: emptySet()
+    internal fun getDomainDisabledRules(domain: TextStyleDomain) = domainDisabledRules[domain] ?: emptySet()
 
     fun withDomainEnabledRules(domain: TextStyleDomain, rules: Set<String>): State {
       val newRules = TreeMap(domainEnabledRules)
@@ -232,6 +262,9 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
   }
 
   companion object {
+    @JvmStatic
+    val ltOxfordRules: Set<String> = setOf("LanguageTool.EN.OXFORD_SPELLING_Z_NOT_S", "LanguageTool.EN.OXFORD_SPELLING_GRAM")
+
     private val defaultEnabledStrategies =
       Collections.unmodifiableSet(hashSetOf("nl.rubensten.texifyidea:Latex", "org.asciidoctor.intellij.asciidoc:AsciiDoc"))
 
@@ -250,6 +283,34 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
       return state.copy(userEnabledRules = convert(state.userEnabledRules), userDisabledRules = convert(state.userDisabledRules))
     }
 
+    @VisibleForTesting
+    fun migrateOxfordRuleIds(state: GrazieConfig.State): State {
+      fun findOxfordRulesToEnable(domain: TextStyleDomain): Set<String> {
+        fun getDisabledRules(domain: TextStyleDomain): Set<String> =
+          if (domain == TextStyleDomain.Other) state.userDisabledRules else state.getDomainDisabledRules(domain)
+        fun getEnabledRules(domain: TextStyleDomain): Set<String> =
+          if (domain == TextStyleDomain.Other) state.userEnabledRules else state.getDomainEnabledRules(domain)
+
+        val enabledOxfordRules = mutableSetOf<String>()
+        ltOxfordRules.forEach { rule ->
+          if (state.useOxfordSpelling && rule !in getDisabledRules(domain) && rule !in getEnabledRules(domain)) {
+            enabledOxfordRules.add(rule)
+          }
+        }
+        return enabledOxfordRules
+      }
+
+      return TextStyleDomain.entries.fold(state) { acc, domain ->
+        val rulesToEnable = findOxfordRulesToEnable(domain)
+        if (domain == TextStyleDomain.Other) {
+          acc.copy(userDisabledRules = acc.userDisabledRules - ltOxfordRules, userEnabledRules = acc.userEnabledRules + rulesToEnable)
+        } else {
+          acc.withDomainDisabledRules(domain, acc.domainDisabledRules[domain].orEmpty() - ltOxfordRules)
+            .withDomainEnabledRules(domain, acc.domainEnabledRules[domain].orEmpty() + rulesToEnable)
+        }
+      }
+    }
+
     fun subscribe(parent: Disposable, subscription: (State) -> Unit) {
       application.messageBus.connect(parent)
         .subscribe(CONFIG_STATE_TOPIC, object : GrazieStateLifecycle {
@@ -266,7 +327,7 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
 
     /** Update Grazie config state */
     @Synchronized
-    fun update(change: (State) -> State) = service<GrazieConfig>().loadState(change(get()))
+    fun update(change: (State) -> State): Unit = service<GrazieConfig>().loadState(change(get()))
 
     fun stateChanged(prevState: State, newState: State) {
       service<GrazieInitializerManager>().publisher.update(prevState, newState)
@@ -280,7 +341,7 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
   data class UserChangedRules(val enabled: Set<String>, val disabled: Set<String>)
 
   class PresentableNameGetter : com.intellij.openapi.components.State.NameGetter() {
-    override fun get() = GrazieBundle.message("grazie.config.name")
+    override fun get(): String = GrazieBundle.message("grazie.config.name")
   }
 
   private var myState = State()
@@ -294,30 +355,13 @@ class GrazieConfig : PersistentStateComponent<GrazieConfig.State>, ModificationT
     myModCount.incrementAndGet()
     val prevState = myState
     myState = migrateLTRuleIds(VersionedState.migrate(state))
+    myState = migrateOxfordRuleIds(myState)
     if (myState.enabledLanguages.none { it.isEnglish() }) {
       myState = myState.copy(enabledLanguages = myState.enabledLanguages + Lang.AMERICAN_ENGLISH)
     }
 
     if (prevState != myState) {
-      if (prevState.useOxfordSpelling != state.useOxfordSpelling) {
-        syncOxfordSpelling()
-      }
       stateChanged(prevState, myState)
-    }
-  }
-
-  private val oxfordSpellingLtRules = listOf("LanguageTool.EN.OXFORD_SPELLING_Z_NOT_S", "LanguageTool.EN.OXFORD_SPELLING_GRAM")
-  private fun syncOxfordSpelling() {
-    application.invokeLater {
-      update { state ->
-        val oxford = get().useOxfordSpelling
-        if (oxford) {
-          state.copy(userDisabledRules = state.userDisabledRules - oxfordSpellingLtRules)
-        }
-        else {
-          state.copy(userDisabledRules = state.userDisabledRules + oxfordSpellingLtRules)
-        }
-      }
     }
   }
 }

@@ -20,6 +20,7 @@ public final class KotlinHighlightingColors {
     public static final TextAttributesKey STRING_ESCAPE = createTextAttributesKey("KOTLIN_STRING_ESCAPE", DefaultLanguageHighlighterColors.VALID_STRING_ESCAPE);
     public static final TextAttributesKey INVALID_STRING_ESCAPE = createTextAttributesKey("KOTLIN_INVALID_STRING_ESCAPE", DefaultLanguageHighlighterColors.INVALID_STRING_ESCAPE);
     public static final TextAttributesKey OPERATOR_SIGN = createTextAttributesKey("KOTLIN_OPERATION_SIGN", DefaultLanguageHighlighterColors.OPERATION_SIGN);
+    public static final TextAttributesKey AMPERSAND = createTextAttributesKey("KOTLIN_AMPERSAND", OPERATOR_SIGN);
     public static final TextAttributesKey PARENTHESIS = createTextAttributesKey("KOTLIN_PARENTHESIS", DefaultLanguageHighlighterColors.PARENTHESES);
     public static final TextAttributesKey BRACES = createTextAttributesKey("KOTLIN_BRACES", DefaultLanguageHighlighterColors.BRACES);
     public static final TextAttributesKey BRACKETS = createTextAttributesKey("KOTLIN_BRACKETS", DefaultLanguageHighlighterColors.BRACKETS);
@@ -88,6 +89,7 @@ public final class KotlinHighlightingColors {
     public static final TextAttributesKey DEBUG_INFO = createTextAttributesKey("KOTLIN_DEBUG_INFO");
     public static final TextAttributesKey RESOLVED_TO_ERROR = createTextAttributesKey("KOTLIN_RESOLVED_TO_ERROR");
     public static final TextAttributesKey NAMED_ARGUMENT = createTextAttributesKey("KOTLIN_NAMED_ARGUMENT");
+    public static final TextAttributesKey CONTEXT_ARGUMENT = createTextAttributesKey("KOTLIN_CONTEXT_ARGUMENT", NAMED_ARGUMENT);
     public static final TextAttributesKey ANNOTATION_ATTRIBUTE_NAME_ATTRIBUTES = createTextAttributesKey("KOTLIN_ANNOTATION_ATTRIBUTE_NAME_ATTRIBUTES", JavaHighlightingColors.ANNOTATION_ATTRIBUTE_NAME_ATTRIBUTES);
 
     private KotlinHighlightingColors() {

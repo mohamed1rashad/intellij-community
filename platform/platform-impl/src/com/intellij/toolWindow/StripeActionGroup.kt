@@ -11,9 +11,22 @@ import com.intellij.ide.ui.customization.CustomActionsListener.Companion.fireSch
 import com.intellij.ide.ui.customization.CustomActionsSchema
 import com.intellij.idea.ActionsBundle
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.AnActionWrapper
+import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.IdeActions.GROUP_MAIN_TOOLBAR_CENTER
 import com.intellij.openapi.actionSystem.IdeActions.GROUP_MAIN_TOOLBAR_NEW_UI
+import com.intellij.openapi.actionSystem.KeepPopupOnPerform
+import com.intellij.openapi.actionSystem.PlatformDataKeys
+import com.intellij.openapi.actionSystem.Presentation
+import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.openapi.actionSystem.Toggleable
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction
 import com.intellij.openapi.actionSystem.impl.ActionButton
@@ -22,7 +35,12 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.RoamingType
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.service
 import com.intellij.openapi.keymap.impl.ui.Group
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
@@ -31,7 +49,11 @@ import com.intellij.openapi.wm.ToolWindowAnchor
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.wm.ex.ToolWindowManagerEx
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener
-import com.intellij.openapi.wm.impl.*
+import com.intellij.openapi.wm.impl.AbstractSquareStripeButton
+import com.intellij.openapi.wm.impl.SquareStripeButton
+import com.intellij.openapi.wm.impl.SquareStripeButtonLook
+import com.intellij.openapi.wm.impl.ToolWindowImpl
+import com.intellij.openapi.wm.impl.ToolWindowManagerImpl
 import com.intellij.ui.MouseDragHelper
 import com.intellij.ui.NewUI
 import com.intellij.util.PlatformUtils
@@ -39,10 +61,14 @@ import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.containers.CollectionFactory
 import com.intellij.util.containers.ConcurrentFactoryMap
 import com.intellij.util.containers.ContainerUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.intellij.lang.annotations.Language
 import org.jdom.Element
 import org.jetbrains.annotations.ApiStatus
@@ -79,18 +105,20 @@ class StripeActionGroup: ActionGroup(), DumbAware {
 
   private fun getOrder(twm: ToolWindowManagerEx, twId: String): Int =
     (twm.getLayout().getInfo(twId) ?: (twm as? ToolWindowManagerImpl)?.getEntry(twId)?.readOnlyWindowInfo)?.run {
+      //tw that is not on the stripe would be added to the end
+      val o = if (order == -1) 10 else order
       when (anchor) {
-        ToolWindowAnchor.LEFT -> order
-        ToolWindowAnchor.TOP -> 100 + order
-        ToolWindowAnchor.BOTTOM -> if (isSplit) 250 + order else 200 - order
-        ToolWindowAnchor.RIGHT -> if (isSplit) 300 + order else 350 - order
+        ToolWindowAnchor.LEFT -> o
+        ToolWindowAnchor.TOP -> 100 + o
+        ToolWindowAnchor.BOTTOM -> if (isSplit) 250 + o else 200 - o
+        ToolWindowAnchor.RIGHT -> if (isSplit) 300 + o else 350 - o
         else -> -1
       }
     } ?: -1
 
   private fun createAction(activateAction: ActivateToolWindowAction) = MyButtonAction(activateAction)
 
-  private class MyButtonAction(activateAction: ActivateToolWindowAction)
+  internal class MyButtonAction(activateAction: ActivateToolWindowAction)
     : AnActionWrapper(activateAction), DumbAware, Toggleable, CustomComponentAction {
     private var project: Project? = null
 
@@ -167,7 +195,7 @@ class StripeActionGroup: ActionGroup(), DumbAware {
     }
   }
 
-  private class MyMoreAction: DumbAwareAction("..."), CustomComponentAction {
+  internal class MyMoreAction: DumbAwareAction("..."), CustomComponentAction {
     override fun actionPerformed(e: AnActionEvent) {
     }
 
@@ -248,7 +276,7 @@ private class ButtonsRepaintService(project: Project, coroutineScope: CoroutineS
   }
 }
 
-private open class TogglePinActionBase(val toolWindowId: String)
+internal open class TogglePinActionBase(val toolWindowId: String)
   : DumbAwareAction(ActionsBundle.messagePointer("action.TopStripePinButton.text")) {
   init {
     templatePresentation.keepPopupOnPerform = KeepPopupOnPerform.IfPreferred
@@ -270,7 +298,7 @@ private open class TogglePinActionBase(val toolWindowId: String)
   }
 }
 
-private class TogglePinAction(toolWindowId: String): TogglePinActionBase(toolWindowId) {
+internal class TogglePinAction(toolWindowId: String): TogglePinActionBase(toolWindowId) {
   override fun update(e: AnActionEvent) {
     super.update(e)
     val pinned = Toggleable.isSelected(e.presentation)
@@ -283,7 +311,7 @@ private class TogglePinAction(toolWindowId: String): TogglePinActionBase(toolWin
 @Service
 @State(name = "SingleStripeButtonsState", storages = [Storage("window.state.xml", roamingType = RoamingType.DISABLED)])
 private class ButtonsStateService: PersistentStateComponent<Element> {
-  private val pinnedIds = linkedSetOf("Database", "Project", "Services")
+  private val pinnedIds = linkedSetOf("Database", "Project", "Services", "AIAssistant")
 
   fun isPinned(id: String): Boolean = id in pinnedIds
   fun setPinned(id: String, pinned: Boolean) {
@@ -331,6 +359,11 @@ class EnableStripeGroup : ToggleAction(), DumbAware {
     fun shouldSingleStripeBeEnabled() = NotRoamableUiSettings.getInstance().experimentalSingleStripe
 
     fun hasActionOnToolbar() = customizedGroup?.let { isActionGroupAdded(it, STRIPE_ACTION_GROUP_ID) } == true
+
+    @ApiStatus.Internal
+    fun pinButton(toolWindowId: String, pinned: Boolean) {
+      buttonState.setPinned(toolWindowId, pinned)
+    }
 
     @Suppress("SameParameterValue")
     private fun isActionGroupAdded(groupPath: List<String>, actionId: String): Boolean {

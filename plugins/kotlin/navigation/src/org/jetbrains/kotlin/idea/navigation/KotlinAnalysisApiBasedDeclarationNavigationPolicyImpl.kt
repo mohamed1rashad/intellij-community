@@ -3,8 +3,10 @@ package org.jetbrains.kotlin.idea.navigation
 
 import com.intellij.openapi.project.Project
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.CachedValuesManager
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaPlatformInterface
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisFromWriteAction
 import org.jetbrains.kotlin.analysis.api.permissions.KaAllowAnalysisOnEdt
@@ -29,27 +31,47 @@ import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.platform.TargetPlatform
 import org.jetbrains.kotlin.platform.isCommon
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KotlinDeclarationNavigationPolicy
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassLikeDeclaration
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtEnumEntry
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtParameterList
+import org.jetbrains.kotlin.psi.KtPrimaryConstructor
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtTypeAlias
+import org.jetbrains.kotlin.psi.KtTypeParameter
+import org.jetbrains.kotlin.psi.KtTypeParameterList
+import org.jetbrains.kotlin.psi.KtTypeParameterListOwner
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.psi.psiUtil.hasActualModifier
 import org.jetbrains.kotlin.psi.psiUtil.isExpectDeclaration
 import org.jetbrains.kotlin.psi.psiUtil.isExtensionDeclaration
+import org.jetbrains.kotlin.resolve.deprecation.DeprecationLevelValue
 import org.jetbrains.kotlin.types.Variance
 
 @ApiStatus.Internal
 open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclarationNavigationPolicy {
     override fun getNavigationElement(declaration: KtDeclaration): KtElement {
-        val ktFile = declaration.containingKtFile
-        if (!ktFile.isCompiled) return declaration
-        val project = ktFile.project
-        return when (val module = ktFile.getKaModule(project, useSiteModule = null) ) {
-            is KaLibraryModule -> getCorrespondingDeclarationInLibrarySourceOrBinaryCounterpart(
-                module.librarySources ?: return declaration,
-                declaration,
-                module
-            )
+        return CachedValuesManager.getProjectPsiDependentCache(declaration) { declaration ->
+            val ktFile = declaration.containingKtFile
+            if (!ktFile.isCompiled) return@getProjectPsiDependentCache declaration
+            val project = ktFile.project
+            when (val module = ktFile.getKaModule(project, useSiteModule = null) ) {
+                is KaLibraryModule -> getCorrespondingDeclarationInLibrarySourceOrBinaryCounterpart(
+                    module.librarySources ?: return@getProjectPsiDependentCache declaration,
+                    declaration,
+                    module
+                )
 
-            else -> declaration
+                else -> declaration
+            }
         }
     }
 
@@ -84,6 +106,32 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
             if (this?.hasActualModifier() != true) return true
         }
         return bool
+    }
+
+    private fun <D: KtDeclaration> Sequence<D>.bestNonDeprecatedPlatformCandidates(platform: TargetPlatform): List<D> {
+        val platformCandidates = filter { it.matchesWithPlatform(platform) }.toList()
+        val nonDeprecated =
+            platformCandidates.filter { !it.isDeprecated(allowWarning = false) }
+        return nonDeprecated.ifEmpty {
+            val deprecatedWithWarnings = platformCandidates.filter { !it.isDeprecated(allowWarning = true) }
+            deprecatedWithWarnings.ifEmpty { platformCandidates }
+        }
+    }
+
+    @OptIn(KaExperimentalApi::class)
+    private fun KtDeclaration.isDeprecated(allowWarning: Boolean): Boolean {
+        val declaration = this
+        @OptIn(KaAllowAnalysisFromWriteAction::class, KaAllowAnalysisOnEdt::class)
+        return allowAnalysisOnEdt {
+            allowAnalysisFromWriteAction {
+                analyze(declaration) {
+                    val symbol = declaration.symbol
+                    val deprecationStatus = symbol.deprecationStatus ?: return false
+                    val deprecationLevel = deprecationStatus.deprecationLevel
+                    !allowWarning || deprecationLevel != DeprecationLevelValue.WARNING
+                }
+            }
+        }
     }
 
     private fun getCorrespondingDeclarationInLibrarySourceOrBinaryCounterpart(
@@ -123,12 +171,16 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
         val project = module.project
         val targetPlatform = module.targetPlatform
 
-        val targetDeclaration =
-            getClassesByClassId(classId, project, scope).firstOrNull { it.matchesWithPlatform(targetPlatform) } ?:
-            getTypeAliasesByClassId(classId, project, scope).firstOrNull { it.matchesWithPlatform(targetPlatform) }
-        return targetDeclaration
-    }
+        getClassesByClassId(classId, project, scope)
+            .bestNonDeprecatedPlatformCandidates(targetPlatform)
+            .firstOrNull()
+            ?.let { return it }
 
+        getTypeAliasesByClassId(classId, project, scope)
+            .bestNonDeprecatedPlatformCandidates(targetPlatform)
+            .firstOrNull()
+            .let { return it }
+    }
 
     private fun getCorrespondingCallableDeclaration(
         declaration: KtCallableDeclaration,
@@ -154,9 +206,10 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
                         if (declaration !is KtNamedFunction && declaration !is KtProperty) return null
                         val callableId = CallableId(declaration.containingKtFile.packageFqName, declaration.nameAsName ?: return null)
                         val project = module.project
-                        val declarations = getTopLevelCallablesByName(declaration, callableId, project, scope)
+                        val declarations =
+                            getTopLevelCallablesByName(declaration, callableId, project, scope)
                         val targetPlatform = module.targetPlatform
-                        declarations.filter { it.matchesWithPlatform(targetPlatform) }
+                        declarations.bestNonDeprecatedPlatformCandidates(targetPlatform)
                     }
 
                     else -> {
@@ -172,7 +225,7 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
                                     ?.let { return it }
                             }
                         }
-                        declarations.asSequence()
+                        declarations
                     }
                 }
                 return chooseCallableCandidate(declaration, candidates)
@@ -180,7 +233,7 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
         }
     }
 
-    private fun chooseCallableCandidate(original: KtCallableDeclaration, candidates: Sequence<KtDeclaration>): KtCallableDeclaration? {
+    private fun chooseCallableCandidate(original: KtCallableDeclaration, candidates: List<KtDeclaration>): KtCallableDeclaration? {
         return when (original) {
             is KtConstructor<*> -> chooseCallableCandidate(original, candidates) { original, candidate ->
                 constructorsMatchesByPsi(original, candidate)
@@ -222,9 +275,12 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
         return true
     }
 
-    private fun valueParameterMatches(firstValueParamOwner: KtCallableDeclaration, secondValueParameOwner: KtCallableDeclaration): Boolean {
+    private fun valueParameterMatches(
+        firstValueParamOwner: KtCallableDeclaration,
+        secondValueParameterOwner: KtCallableDeclaration
+    ): Boolean {
         val firstValueParameters = firstValueParamOwner.valueParameters
-        val secondValueParameters = secondValueParameOwner.valueParameters
+        val secondValueParameters = secondValueParameterOwner.valueParameters
 
         if (firstValueParameters.size != secondValueParameters.size) return false
         for (i in firstValueParameters.indices) {
@@ -263,14 +319,14 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
 
     private fun compareCallableTypesByResolve(first: KtCallableDeclaration, second: KtCallableDeclaration): Boolean {
         // symbols should be rendered from corresponding sessions
-        val firstRendered = renderTypesForComparasion(first)
-        val secondRendered = renderTypesForComparasion(second)
+        val firstRendered = renderTypesForComparison(first)
+        val secondRendered = renderTypesForComparison(second)
         return firstRendered == secondRendered
     }
 
-    // Maybe called from EDT by IJ Platfrom :(
+    // Maybe called from EDT by IJ Platform :(
     @OptIn(KaAllowAnalysisOnEdt::class, KaExperimentalApi::class)
-    private fun renderTypesForComparasion(declaration: KtCallableDeclaration) = allowAnalysisOnEdt {
+    private fun renderTypesForComparison(declaration: KtCallableDeclaration) = allowAnalysisOnEdt {
         @OptIn(KaAllowAnalysisFromWriteAction::class)
         allowAnalysisFromWriteAction {
             analyze(declaration) {
@@ -290,7 +346,7 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
 
     private inline fun <reified C : KtCallableDeclaration> chooseCallableCandidate(
         original: C,
-        candidates: Sequence<KtDeclaration>,
+        candidates: List<KtDeclaration>,
         crossinline matchesByPsi: (C, C) -> Boolean
     ): C? {
         val filteredCandidates = candidates.filterIsInstance<C>().filter { matchesByPsi(original, it) }
@@ -300,6 +356,7 @@ open class KotlinAnalysisApiBasedDeclarationNavigationPolicyImpl : KotlinDeclara
             ?: filteredCandidates.firstOrNull()
     }
 
+    @OptIn(KaPlatformInterface::class)
     private fun KaModule.getContentScopeWithCommonDependencies(): Scope {
         val root = this
         if (targetPlatform.isCommon()) return Scope(listOf(root), contentScope)

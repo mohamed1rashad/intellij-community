@@ -2,6 +2,7 @@
 package com.intellij.platform.recentFiles.frontend.model
 
 import com.intellij.icons.AllIcons
+import com.intellij.ide.ui.UISettings
 import com.intellij.ide.vfs.VirtualFileId
 import com.intellij.ide.vfs.virtualFile
 import com.intellij.openapi.components.Service
@@ -14,8 +15,18 @@ import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.project.projectId
-import com.intellij.platform.recentFiles.frontend.*
-import com.intellij.platform.recentFiles.shared.*
+import com.intellij.platform.recentFiles.frontend.RecentFilesExcluder
+import com.intellij.platform.recentFiles.frontend.SwitcherVirtualFile
+import com.intellij.platform.recentFiles.frontend.createFilesSearchRequestRequest
+import com.intellij.platform.recentFiles.frontend.createFilesUpdateRequest
+import com.intellij.platform.recentFiles.frontend.createHideFilesRequest
+import com.intellij.platform.recentFiles.shared.FileChangeKind
+import com.intellij.platform.recentFiles.shared.FileSwitcherApi
+import com.intellij.platform.recentFiles.shared.RecentFileKind
+import com.intellij.platform.recentFiles.shared.RecentFilesCoroutineScopeProvider
+import com.intellij.platform.recentFiles.shared.RecentFilesEvent
+import com.intellij.platform.recentFiles.shared.RecentFilesState
+import com.intellij.platform.recentFiles.shared.SwitcherRpcDto
 import com.intellij.platform.util.coroutines.childScope
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -64,8 +75,13 @@ class FrontendRecentFilesModel(private val project: Project) {
   }
 
   private fun considerOpenedEditorWindowsForFiles(filteredModel: List<SwitcherVirtualFile>): List<SwitcherVirtualFile> {
+    // With the tabs disabled, switching between editor windows doesn't work anyway,
+    // so trying to associate the editors with the files just produces annoying duplicate entries. 
+    if (UISettings.getInstance().editorTabPlacement == UISettings.TABS_NONE) return filteredModel
+    
     val editorsByFile = (FileEditorManager.getInstance(project) as? FileEditorManagerImpl)
       ?.getSelectionHistoryList().orEmpty()
+      .filter { (_, editor) -> editor.isShowing }
       .groupBy(
         keySelector = { (file, _) -> file },
         valueTransform = { (_, editor) -> editor }

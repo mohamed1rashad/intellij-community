@@ -1,6 +1,10 @@
 package com.intellij.cce.interpreter
 
-import com.intellij.cce.core.*
+import com.intellij.cce.core.Lookup
+import com.intellij.cce.core.Session
+import com.intellij.cce.core.Suggestion
+import com.intellij.cce.core.SuggestionSource
+import com.intellij.cce.core.TokenProperties
 import com.intellij.cce.evaluable.AIA_PROBLEMS
 import com.intellij.cce.evaluation.data.Bindable
 import com.intellij.cce.evaluation.data.Binding
@@ -10,13 +14,11 @@ import com.intellij.cce.evaluation.data.EvalDataDescription
 /**
  * Feature invoker that add an abstraction layer over evaluation data storage format.
  */
-interface BindingFeatureInvoker : FeatureInvoker {
-  fun invoke(properties: TokenProperties): BoundEvalData
+interface BindingFeatureInvoker : AsyncFeatureInvoker {
+  suspend fun invoke(properties: TokenProperties): BoundEvalData
 
-  override fun callFeature(expectedText: String, offset: Int, properties: TokenProperties, sessionId: String): Session =
+  override suspend fun call(expectedText: String, offset: Int, properties: TokenProperties, sessionId: String): Session =
     invoke(properties).session(expectedText, offset, properties, sessionId)
-
-  override fun comparator(generated: String, expected: String): Boolean = true
 
   infix fun <T, B : Bindable<T>> B.bind(value: T): Binding<B> = Binding.create(this, value)
 }

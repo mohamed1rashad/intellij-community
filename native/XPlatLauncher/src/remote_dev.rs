@@ -1,10 +1,9 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, IsTerminal, Write};
+use std::env;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::{env, fs};
 
 use anyhow::{bail, Context, Result};
 #[allow(unused_imports)]
@@ -45,12 +44,12 @@ impl LaunchConfiguration for RemoteDevLaunchConfiguration {
             vm_options.push(format!("-D{key}={value}"));
         }
 
-        if let Some(command) = self.get_args().get(0) {
+        if let Some(command) = self.get_args().first() {
             match command.as_str() {
                 "remoteDevStatus" | "cwmHostStatus" => {
                     vm_options.retain(|opt| {
                         if opt.starts_with("-agentlib:jdwp=") {
-                            info!("Dropping debug option to prevent startup failure due to port conflict: {}", opt);
+                            info!("Dropping debug option to prevent startup failure due to port conflict: {opt}");
                             false
                         } else {
                             true
@@ -72,11 +71,15 @@ impl LaunchConfiguration for RemoteDevLaunchConfiguration {
         self.default.get_class_path()
     }
 
-    fn prepare_for_launch(&self) -> Result<(PathBuf, &str)> {
-        init_env_vars(&self.default).context("Preparing environment variables")?;
+    fn should_redirect_stdout(&self) -> bool {
+        self.default.should_redirect_stdout()
+    }
 
-        preload_native_libs(&self.default.ide_home).context("Preloading native libraries")?;
-        self.default.prepare_for_launch()
+    fn prepare_for_launch(&self, is_musl: bool) -> Result<(PathBuf, &str, Option<PathBuf>)> {
+        init_env_vars(&self.default).context("Preparing environment variables")?;
+        let extra_libs = preload_native_libs(&self.default.ide_home, is_musl).context("Preloading native libraries")?;
+        let (jre_home, main_class, _) = self.default.prepare_for_launch(is_musl)?;
+        Ok((jre_home, main_class, extra_libs))
     }
 }
 
@@ -253,19 +256,22 @@ impl RemoteDevLaunchConfiguration {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn get_ide_temp_directory(default: &DefaultLaunchConfiguration) -> Result<PathBuf> {
     Ok(default.user_caches_dir.join("tmp"))
 }
 
 #[cfg(not(target_os = "linux"))]
-fn setup_font_config(default: &DefaultLaunchConfiguration) -> Result<Option<(String, String)>> {
+fn setup_font_config(_default: &DefaultLaunchConfiguration) -> Result<Option<(String, String)>> {
     // fontconfig is Linux-specific
     Ok(None)
 }
 
 #[cfg(target_os = "linux")]
 fn setup_font_config(default: &DefaultLaunchConfiguration) -> Result<Option<(String, String)>> {
+    use std::fs::File;
     use std::hash::{Hash, Hasher};
+    use std::io::{BufRead, BufReader, BufWriter, Write};
 
     let ide_home_path = &default.ide_home;
     let source_font_config_file = ide_home_path.join("plugins/remote-dev-server/selfcontained/fontconfig/fonts.conf");
@@ -291,7 +297,7 @@ fn setup_font_config(default: &DefaultLaunchConfiguration) -> Result<Option<(Str
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source_font_config_file.hash(&mut hasher);
     let patched_dir = get_ide_temp_directory(default)?.join(format!("jbrd-fontconfig-{}", hasher.finish()));
-    fs::create_dir_all(&patched_dir).context("Creating directory for temporary fontconfig")?;
+    std::fs::create_dir_all(&patched_dir).context("Creating directory for temporary fontconfig")?;
 
     let patched_file_path = patched_dir.join("fonts.conf");
 
@@ -304,7 +310,7 @@ fn setup_font_config(default: &DefaultLaunchConfiguration) -> Result<Option<(Str
         let mut l = l.context("Failed to read fonts.conf file")?;
         l = l.replace("PATH_FONTS", &extra_fonts_path_config);
         l = l.replace("PATH_JBR", &extra_fonts_path_jbr);
-        writeln!(&mut writer, "{}", l).context("Failed to write patched fonts.conf file")?;
+        writeln!(&mut writer, "{l}").context("Failed to write patched fonts.conf file")?;
     }
 
     writer.flush().context("Failed to flush patched fonts.conf file")?;
@@ -329,7 +335,7 @@ impl std::fmt::Display for IjStarterCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let path = if self.is_project_path_required {"/path/to/project"} else { "" };
         let args = if self.is_arguments_required {"[arguments...]"} else { "" };
-        write!(f, "{} {}", path, args)
+        write!(f, "{path} {args}")
     }
 }
 
@@ -429,14 +435,14 @@ fn init_env_vars(default: &DefaultLaunchConfiguration) -> Result<()> {
         if let Ok(old_value) = env::var(key) {
             debug!("'{key}' has already been assigned the value {old_value}, overriding to {value}. \
                         Old value will be preserved for child processes.");
-            env::set_var(backup_key, old_value)
+            unsafe { env::set_var(backup_key, old_value) }
         }
         else {
             debug!("'{key}' was set to {value}. It will be unset for child processes.");
-            env::set_var(backup_key, "")
+            unsafe { env::set_var(backup_key, "") }
         }
 
-        env::set_var(key, value)
+        unsafe { env::set_var(key, value) }
     }
 
     Ok(())
@@ -451,26 +457,29 @@ fn parse_bool_env_var_optional(var_name: &str) -> Result<Option<bool>> {
     Ok(match env::var(var_name) {
         Ok(s) if s == "0" || s.eq_ignore_ascii_case("false") => Some(false),
         Ok(s) if s == "1" || s.eq_ignore_ascii_case("true") => Some(true),
-        Ok(s) if !s.is_empty() => bail!("Unsupported value '{}' for '{}' environment variable", s, var_name),
+        Ok(s) if !s.is_empty() => bail!("Unsupported value '{s}' for '{var_name}' environment variable"),
         _ => None,
     })
 }
 
 #[cfg(not(target_os = "linux"))]
-fn preload_native_libs(_ide_home_dir: &Path) -> Result<()> {
+fn preload_native_libs(_ide_home_dir: &Path, _: bool) -> Result<Option<PathBuf>> {
     // We don't ship self-contained libraries outside of Linux
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(target_os = "linux")]
-fn preload_native_libs(ide_home_dir: &PathBuf) -> Result<()> {
+fn preload_native_libs(ide_home_dir: &Path, is_musl: bool) -> Result<Option<PathBuf>> {
     use libloading::os::unix::Library;
     use std::collections::BTreeSet;
+    use std::fs::File;
     use std::mem;
+    use std::io::{BufRead, BufReader};
 
     let use_libs = parse_bool_env_var("REMOTE_DEV_SERVER_USE_SELF_CONTAINED_LIBS", true)?;
     if !use_libs {
-        return Ok(())
+        debug!("Loading self-contained libraries skipped");
+        return Ok(None)
     }
 
     debug!("Loading self-contained libraries");
@@ -481,12 +490,17 @@ fn preload_native_libs(ide_home_dir: &PathBuf) -> Result<()> {
     let self_contained_dir = &ide_home_dir.join("plugins/remote-dev-server/selfcontained/");
     if !self_contained_dir.is_dir() {
         error!("Self-contained dir not found at {self_contained_dir:?}. Only OS-provided libraries will be used.");
-        return Ok(());
+        return Ok(None);
     }
 
-    let libs_dir = &self_contained_dir.join("lib");
+    let libs_dir = self_contained_dir.join("lib");
     if !libs_dir.is_dir() {
         bail!("Self-contained dir is present at {self_contained_dir:?}, but lib dir is missing at {libs_dir:?}")
+    }
+
+    if is_musl && env::var_os("_IJ_PREV_LD_LIBRARY_PATH").is_none() {
+      debug!("musl patch is not yet applied");
+      return Ok(Some(libs_dir.clone()));
     }
 
     let lib_load_order_file = &self_contained_dir.join(if full_set { "lib-load-order" } else { "lib-load-order-limited" });
@@ -495,11 +509,9 @@ fn preload_native_libs(ide_home_dir: &PathBuf) -> Result<()> {
     }
 
     let mut provided_libs = BTreeSet::new();
-    let filter_extensions = vec![
-        "hmac".to_string()
-    ];
+    let filter_extensions = ["hmac".to_string()];
 
-    for f in fs::read_dir(libs_dir)? {
+    for f in std::fs::read_dir(&libs_dir)? {
         let entry = f?;
         let file_name = entry.file_name();
         let file_extension = entry.path().extension().map(|ext| ext.to_string_lossy().to_string());
@@ -532,14 +544,14 @@ fn preload_native_libs(ide_home_dir: &PathBuf) -> Result<()> {
     for soname in &ordered_libs_to_load {
         debug!("{soname}: trying to load");
 
-        let lib_file = &libs_dir.join(&soname);
+        let lib_file = &libs_dir.join(soname);
         if !lib_file.is_file() {
             bail!("{soname} needs to be loaded as self-contained, but is missing at {lib_file:?}");
         };
 
         unsafe {
-            let lib = Library::open(lib_file.to_str(), libc::RTLD_LAZY | libc::RTLD_GLOBAL)?;
-
+            let load_name = if is_musl { Some(soname.as_ref()) } else { lib_file.to_str() };
+            let lib = Library::open(load_name, libc::RTLD_LAZY | libc::RTLD_GLOBAL)?;
             // handle intentionally lost to keep the library loaded; RTLD_NODELETE is non-POSIX
             mem::forget(lib)
         }
@@ -573,12 +585,12 @@ fn preload_native_libs(ide_home_dir: &PathBuf) -> Result<()> {
 
     debug!("All self-contained libraries ({}) were loaded", ordered_libs_to_load.len());
 
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(target_os = "linux")]
 fn is_wsl2() -> bool {
-    fs::read_to_string("/proc/sys/kernel/osrelease")
+    std::fs::read_to_string("/proc/sys/kernel/osrelease")
         .map(|x| x.contains("WSL2"))
         .unwrap_or(false)
 }

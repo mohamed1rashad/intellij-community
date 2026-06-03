@@ -13,6 +13,7 @@ import com.intellij.openapi.vcs.VcsException;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.ChangesUtil;
 import com.intellij.openapi.vcs.changes.CommitContext;
+import com.intellij.openapi.vcs.changes.VcsFreezingProcess;
 import com.intellij.openapi.vcs.checkin.CheckinEnvironment;
 import com.intellij.openapi.vcs.ui.RefreshableOnComponent;
 import com.intellij.openapi.vfs.VfsUtilCore;
@@ -22,7 +23,11 @@ import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.MultiMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.idea.svn.*;
+import org.jetbrains.idea.svn.SvnBundle;
+import org.jetbrains.idea.svn.SvnProgressCanceller;
+import org.jetbrains.idea.svn.SvnUtil;
+import org.jetbrains.idea.svn.SvnVcs;
+import org.jetbrains.idea.svn.WorkingCopyFormat;
 import org.jetbrains.idea.svn.api.Depth;
 import org.jetbrains.idea.svn.api.ProgressEvent;
 import org.jetbrains.idea.svn.api.ProgressTracker;
@@ -32,7 +37,11 @@ import org.jetbrains.idea.svn.status.Status;
 import org.jetbrains.idea.svn.status.StatusType;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class SvnCheckinEnvironment implements CheckinEnvironment {
   private static final Logger LOG = Logger.getInstance(SvnCheckinEnvironment.class);
@@ -58,14 +67,19 @@ public final class SvnCheckinEnvironment implements CheckinEnvironment {
                         @NotNull Set<? super String> feedback) {
     MultiMap<Pair<Url, WorkingCopyFormat>, FilePath> map = SvnUtil.splitIntoRepositoriesMap(mySvnVcs, committables, Convertor.self());
 
-    for (Map.Entry<Pair<Url, WorkingCopyFormat>, Collection<FilePath>> entry : map.entrySet()) {
-      try {
-        doCommitOneRepo(entry.getValue(), comment, exception, feedback, entry.getKey().getSecond());
+    try {
+      ApplicationManager.getApplication().invokeAndWait(() -> VcsFreezingProcess.saveAndBlock(mySvnVcs.getProject()));
+      for (Map.Entry<Pair<Url, WorkingCopyFormat>, Collection<FilePath>> entry : map.entrySet()) {
+        try {
+          doCommitOneRepo(entry.getValue(), comment, exception, feedback, entry.getKey().getSecond());
+        }
+        catch (VcsException e) {
+          LOG.info(e);
+          exception.add(e);
+        }
       }
-      catch (VcsException e) {
-        LOG.info(e);
-        exception.add(e);
-      }
+    } finally {
+      ApplicationManager.getApplication().invokeAndWait(() -> VcsFreezingProcess.unblock(mySvnVcs.getProject()));
     }
   }
 

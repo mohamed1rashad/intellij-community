@@ -4,7 +4,14 @@ package org.jetbrains.plugins.gitlab.mergerequest.ui.editor
 import com.intellij.collaboration.async.collectScoped
 import com.intellij.collaboration.async.launchNow
 import com.intellij.collaboration.ui.codereview.diff.DiscussionsViewOption
-import com.intellij.collaboration.ui.codereview.editor.*
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewActiveRangesTracker
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewCommentableEditorModel
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewEditorGutterChangesRenderer
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewEditorGutterControlsRenderer
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewEditorInlayRangeOutlineUtils
+import com.intellij.collaboration.ui.codereview.editor.CodeReviewNavigableEditorViewModel
+import com.intellij.collaboration.ui.codereview.editor.ReviewInEditorUtil
+import com.intellij.collaboration.ui.codereview.editor.renderInlays
 import com.intellij.collaboration.ui.icon.IconsProvider
 import com.intellij.collaboration.util.HashingUtil
 import com.intellij.collaboration.util.getOrNull
@@ -23,11 +30,27 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.util.cancelOnDispose
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import org.jetbrains.plugins.gitlab.api.dto.GitLabUserDTO
+import org.jetbrains.plugins.gitlab.data.GitLabImageLoader
 import org.jetbrains.plugins.gitlab.mergerequest.GitLabMergeRequestsPreferences
 import org.jetbrains.plugins.gitlab.mergerequest.ui.GitLabProjectViewModel
+import org.jetbrains.plugins.gitlab.mergerequest.ui.editor.GitLabMergeRequestEditorReviewViewModel.FileReviewState
+import org.jetbrains.plugins.gitlab.util.GitLabBundle
 import org.jetbrains.plugins.gitlab.util.GitLabStatistics
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -55,26 +78,50 @@ internal class GitLabMergeRequestEditorReviewController(private val project: Pro
         .flatMapLatest {
           it?.currentMergeRequestReviewVm ?: flowOf(null)
         }.collectLatest { reviewVm ->
-          reviewVm?.getFileVm(file)?.collectScoped { fileVm ->
-            if (fileVm != null) supervisorScope {
-              val actionManager = serviceAsync<ActionManager>()
-              launchNow {
-                ReviewInEditorUtil.showReviewToolbarWithActions(
-                  reviewVm, editor,
-                  actionManager.getAction("CodeReview.PreviousComment"),
-                  actionManager.getAction("CodeReview.NextComment"),
-                )
-              }
-
-              val enabledFlow = reviewVm.discussionsViewOption.map { it != DiscussionsViewOption.DONT_SHOW }
-              val syncedFlow = reviewVm.localRepositorySyncStatus.map { it?.getOrNull()?.incoming != true }
-              combine(enabledFlow, syncedFlow) { enabled, synced -> enabled && synced }.distinctUntilChanged().collectLatest { enabled ->
-                if (enabled) showReview(fileVm, editor)
-              }
+          reviewVm?.getFileStateFlow(file)?.collectScoped { fileState ->
+            when (fileState) {
+              is FileReviewState.ReviewEnabled -> showReview(reviewVm, fileState.vm, editor)
+              FileReviewState.ReviewDisabledEmptyDiff -> showEmptyDiffNotification(reviewVm, editor)
+              FileReviewState.NotInReview -> return@collectScoped
             }
           }
         }
     }.cancelOnDispose(editorDisposable)
+  }
+
+  private suspend fun showReview(
+    reviewVm: GitLabMergeRequestEditorReviewViewModel,
+    fileVm: GitLabMergeRequestEditorReviewFileViewModel,
+    editor: EditorEx,
+  ): Nothing {
+    supervisorScope {
+      val actionManager = serviceAsync<ActionManager>()
+      launchNow {
+        ReviewInEditorUtil.showReviewToolbarWithActions(
+          reviewVm, editor,
+          actionManager.getAction("CodeReview.PreviousComment"),
+          actionManager.getAction("CodeReview.NextComment"),
+        )
+      }
+
+      val enabledFlow = reviewVm.discussionsViewOption.map { it != DiscussionsViewOption.DONT_SHOW }
+      val syncedFlow = reviewVm.localRepositorySyncStatus.map { it?.getOrNull()?.incoming != true }
+      combine(enabledFlow, syncedFlow) { enabled, synced -> enabled && synced }.distinctUntilChanged().collectLatest { enabled ->
+        if (enabled) showReview(fileVm, editor)
+      }
+      awaitCancellation()
+    }
+  }
+
+  private suspend fun showEmptyDiffNotification(reviewVm: GitLabMergeRequestEditorReviewViewModel, editor: Editor): Nothing {
+    val actionManager = serviceAsync<ActionManager>()
+    ReviewInEditorUtil.showReviewToolbarWithWarning(
+      reviewVm, editor,
+      actionManager.getAction("CodeReview.PreviousComment"),
+      actionManager.getAction("CodeReview.NextComment")
+    ) {
+      GitLabBundle.message("merge.request.editor.empty.patch.warning")
+    }
   }
 
   private suspend fun showReview(
@@ -85,7 +132,7 @@ internal class GitLabMergeRequestEditorReviewController(private val project: Pro
       val preferences = project.serviceAsync<GitLabMergeRequestsPreferences>()
       val reviewHeadContent = fileVm.headContent.mapNotNull { it?.result?.getOrThrow() }.first()
 
-      val model = GitLabMergeRequestEditorReviewUIModel(this, preferences, fileVm) showEditor@{ changeToShow, lineIdx ->
+      val model = GitLabMergeRequestEditorReviewUIModel(this, project, preferences, fileVm) showEditor@{ changeToShow, lineIdx ->
         val file = changeToShow.filePathAfter?.virtualFile ?: return@showEditor
         val fileOpenDescriptor = OpenFileDescriptor(project, file, lineIdx, 0)
         FileEditorManager.getInstance(project).openFileEditor(fileOpenDescriptor, true)
@@ -102,8 +149,15 @@ internal class GitLabMergeRequestEditorReviewController(private val project: Pro
         CodeReviewEditorGutterControlsRenderer.render(model, editor)
       }
       launchNow {
-        editor.renderInlays(model.inlays, HashingUtil.mappingStrategy(GitLabMergeRequestEditorMappedComponentModel::key)) {
-          createRenderer(it, fileVm.avatarIconsProvider)
+        val activeRangesTracker = CodeReviewActiveRangesTracker()
+        editor.renderInlays(
+          model.inlays,
+          HashingUtil.mappingStrategy(GitLabMergeRequestEditorMappedComponentModel::key)) { inlayModel ->
+          createRenderer(inlayModel, fileVm.avatarIconsProvider, fileVm.imageLoader, activeRangesTracker).also { inlayRenderer ->
+            launch {
+              CodeReviewEditorInlayRangeOutlineUtils.showInlayOutline(editor, model, inlayModel, inlayRenderer, activeRangesTracker)
+            }
+          }
         }
       }
 
@@ -122,16 +176,20 @@ internal class GitLabMergeRequestEditorReviewController(private val project: Pro
   private fun CoroutineScope.createRenderer(
     inlayModel: GitLabMergeRequestEditorMappedComponentModel,
     avatarIconsProvider: IconsProvider<GitLabUserDTO>,
+    imageLoader: GitLabImageLoader,
+    activeRangesTracker: CodeReviewActiveRangesTracker,
   ) =
     when (inlayModel) {
       is GitLabMergeRequestEditorMappedComponentModel.Discussion<*> ->
-        GitLabMergeRequestDiscussionInlayRenderer(this, project, inlayModel.vm, avatarIconsProvider,
+        GitLabMergeRequestDiscussionInlayRenderer(this, project, inlayModel, avatarIconsProvider,
+                                                  imageLoader, activeRangesTracker,
                                                   GitLabStatistics.MergeRequestNoteActionPlace.EDITOR)
       is GitLabMergeRequestEditorMappedComponentModel.DraftNote<*> ->
-        GitLabMergeRequestDraftNoteInlayRenderer(this, project, inlayModel.vm, avatarIconsProvider,
+        GitLabMergeRequestDraftNoteInlayRenderer(this, project, inlayModel, avatarIconsProvider,
+                                                 imageLoader, activeRangesTracker,
                                                  GitLabStatistics.MergeRequestNoteActionPlace.EDITOR)
       is GitLabMergeRequestEditorMappedComponentModel.NewDiscussion<*> ->
-        GitLabMergeRequestNewDiscussionInlayRenderer(this, project, inlayModel.vm, avatarIconsProvider,
+        GitLabMergeRequestNewDiscussionInlayRenderer(this, project, inlayModel, avatarIconsProvider, activeRangesTracker,
                                                      GitLabStatistics.MergeRequestNoteActionPlace.EDITOR, inlayModel::cancel)
 
     }

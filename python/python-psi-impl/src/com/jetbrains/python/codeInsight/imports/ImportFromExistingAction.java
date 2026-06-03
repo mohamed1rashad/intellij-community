@@ -11,7 +11,12 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileSystemItem;
 import com.intellij.util.ObjectUtils;
 import com.jetbrains.python.PyPsiBundle;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyElementGenerator;
+import com.jetbrains.python.psi.PyFromImportStatement;
+import com.jetbrains.python.psi.PyImportElement;
+import com.jetbrains.python.psi.PyQualifiedExpression;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -34,9 +39,9 @@ public class ImportFromExistingAction implements QuestionAction {
   private final boolean myImportLocally;
 
   /**
-   * @param target element to become qualified as imported.
-   * @param sources clauses of import to be used.
-   * @param name relevant name ot the target element (e.g. of identifier in an expression).
+   * @param target       element to become qualified as imported.
+   * @param sources      clauses of import to be used.
+   * @param name         relevant name ot the target element (e.g. of identifier in an expression).
    * @param insertBefore import statement should be inserted right before this element. However, if it aims at an insertion statement in
    *                     a group of inserts, a better insertion point belonging the group may be chosen, and it can be after the specified
    *                     node. If null, the position will be chosen automatically.
@@ -157,7 +162,14 @@ public class ImportFromExistingAction implements QuestionAction {
           AddImportHelper.addImportStatement(file, nameToImport, item.getAsName(), priority, myTarget, myInsertBefore);
         }
         if (item.getAsName() == null) {
-          myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), qualifiedName + "." + myName));
+          String referenceText = item.getQualifiedReferenceText();
+          if (referenceText != null) {
+            String qualifiedReference = qualifiedName.isEmpty() ? referenceText : qualifiedName + "." + referenceText;
+            myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), qualifiedReference));
+          }
+          else {
+            myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), qualifiedName + "." + myName));
+          }
         }
       }
       else {
@@ -168,6 +180,9 @@ public class ImportFromExistingAction implements QuestionAction {
           // "Update" scenario takes place inside injected fragments, for normal AST addToExistingImport() will be used instead
           AddImportHelper.addOrUpdateFromImportStatement(
             file, qualifiedName, item.getImportableName(), item.getAsName(), priority, myTarget, myInsertBefore);
+        }
+        if (item.getAsName() == null && item.getQualifiedReferenceText() != null) {
+          myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), item.getQualifiedReferenceText()));
         }
       }
     }
@@ -180,12 +195,24 @@ public class ImportFromExistingAction implements QuestionAction {
     // did user choose 'import' or 'from import'?
     PsiElement parent = importElement.getParent();
     if (parent instanceof PyFromImportStatement) {
-      AddImportHelper.addNameToFromImportStatement((PyFromImportStatement)parent, item.getImportableName(), item.getAsName());
+      if (item.getQualifiedReferenceText() != null) {
+        // The symbol is accessible via an already-imported module (e.g. "from . import src" → qualify as "src.MyClass")
+        PyElementGenerator gen = PyElementGenerator.getInstance(myTarget.getProject());
+        myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), item.getQualifiedReferenceText()));
+      }
+      else {
+        AddImportHelper.addNameToFromImportStatement((PyFromImportStatement)parent, item.getImportableName(), item.getAsName());
+      }
     }
     else { // just 'import'
       // all we need is to qualify our target
       PyElementGenerator gen = PyElementGenerator.getInstance(myTarget.getProject());
-      myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), importElement.getVisibleName() + "." + myName));
+      if (item.getQualifiedReferenceText() != null) {
+        myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), item.getQualifiedReferenceText()));
+      }
+      else {
+        myTarget.replace(gen.createExpressionFromText(LanguageLevel.forElement(myTarget), importElement.getVisibleName() + "." + myName));
+      }
     }
   }
 
@@ -201,5 +228,4 @@ public class ImportFromExistingAction implements QuestionAction {
       myOnDoneCallback.run();
     }
   }
-
 }

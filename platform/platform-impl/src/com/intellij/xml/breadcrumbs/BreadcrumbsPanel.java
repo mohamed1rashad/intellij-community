@@ -6,8 +6,10 @@ import com.intellij.codeWithMe.ClientId;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.CoroutinesKt;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.ClientEditorManager;
 import com.intellij.openapi.editor.Editor;
@@ -28,7 +30,11 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vcs.FileStatusListener;
 import com.intellij.openapi.vcs.FileStatusManager;
-import com.intellij.ui.*;
+import com.intellij.ui.DirtyUI;
+import com.intellij.ui.ExperimentalUI;
+import com.intellij.ui.Gray;
+import com.intellij.ui.RelativeFont;
+import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.breadcrumbs.BreadcrumbsProvider;
 import com.intellij.ui.components.breadcrumbs.Breadcrumbs;
 import com.intellij.ui.components.breadcrumbs.Crumb;
@@ -36,15 +42,25 @@ import com.intellij.util.concurrency.NonUrgentExecutor;
 import com.intellij.util.ui.MouseEventAdapter;
 import com.intellij.util.ui.StartupUiUtil;
 import com.intellij.util.ui.UIUtil;
-import com.intellij.util.ui.update.MergingUpdateQueue;
-import com.intellij.util.ui.update.UiNotifyConnector;
+import com.intellij.util.ui.update.DebouncedUpdates;
 import com.intellij.util.ui.update.Update;
+import com.intellij.util.ui.update.UpdateQueue;
+import kotlin.Unit;
+import kotlinx.coroutines.Dispatchers;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.JComponent;
+import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
 import java.beans.PropertyChangeEvent;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,7 +76,7 @@ public abstract class BreadcrumbsPanel extends JComponent implements Disposable 
   protected Editor myEditor;
   private Collection<RangeHighlighter> myHighlighed;
   protected boolean myUserCaretChange = true;
-  private final MergingUpdateQueue myQueue = new MergingUpdateQueue("Breadcrumbs.Queue", 200, true, breadcrumbs);
+  private final UpdateQueue<Unit> myQueue;
 
   private final List<BreadcrumbListener> myBreadcrumbListeners = new ArrayList<>();
 
@@ -107,18 +123,18 @@ public abstract class BreadcrumbsPanel extends JComponent implements Disposable 
       pane.getHorizontalScrollBar().setEnabled(false);
       setLayout(new BorderLayout());
       add(BorderLayout.CENTER, pane);
-
-      Disposer.register(this, UiNotifyConnector.installOn(breadcrumbs, myQueue));
     }
-
-    Disposer.register(this, myQueue);
 
     BreadcrumbsProvider.EP_NAME.addChangeListener(() -> updateCrumbsSync(), this);
     BreadcrumbsPresentationProvider.EP_NAME.addChangeListener(() -> updateCrumbsSync(), this);
 
-    if (ApplicationManager.getApplication().isHeadlessEnvironment()) {
-      myQueue.setPassThrough(true);
-    }
+    int delayMillis = ApplicationManager.getApplication().isHeadlessEnvironment() ? 0 : 200;
+
+    myQueue = DebouncedUpdates.<Unit>forComponent(breadcrumbs, "Breadcrumbs.Queue", delayMillis)
+      .withContext(CoroutinesKt.getEDT(Dispatchers.INSTANCE))
+      .restartTimerOnAdd(true)
+      .runLatest(ignored -> updateCrumbsAsync())
+      .cancelOnDispose(this);
 
     queueUpdate();
   }
@@ -191,16 +207,12 @@ public abstract class BreadcrumbsPanel extends JComponent implements Disposable 
 
   private void updateCrumbsAsync() {
     if (myEditor == null || myEditor.isDisposed()) return;
-    // this is EDT, so we need an explicit read action to correct dependencies correctly
-    ReadAction.run(() -> {
-      ReadAction
-        .nonBlocking(() -> computeCrumbs(myEditor.getCaretModel().getOffset()))
-        .withDocumentsCommitted(myProject)
-        .expireWith(this)
-        .coalesceBy(this)
-        .finishOnUiThread(ModalityState.any(), crumbs -> applyCrumbs(crumbs))
-        .submit(NonUrgentExecutor.getInstance());
-    });
+    ReadAction.nonBlocking(() -> computeCrumbs(myEditor.getCaretModel().getOffset()))
+      .withDocumentsCommitted(myProject)
+      .expireWith(this)
+      .coalesceBy(this)
+      .finishOnUiThread(ModalityState.any(), crumbs -> applyCrumbs(crumbs))
+      .submit(NonUrgentExecutor.getInstance());
   }
 
   private void applyCrumbs(Iterable<? extends Crumb> _crumbs) {
@@ -222,8 +234,7 @@ public abstract class BreadcrumbsPanel extends JComponent implements Disposable 
   }
 
   public void queueUpdate() {
-    myQueue.cancelAllUpdates();
-    myQueue.queue(myUpdate);
+    myQueue.queue(Unit.INSTANCE);
   }
 
   public void addBreadcrumbListener(BreadcrumbListener listener, Disposable parentDisposable) {
@@ -276,7 +287,9 @@ public abstract class BreadcrumbsPanel extends JComponent implements Disposable 
   protected void navigateToCrumb(Crumb crumb, boolean withSelection) {
     if (crumb instanceof NavigatableCrumb navigatableCrumb) {
       myUserCaretChange = false;
-      navigatableCrumb.navigate(myEditor, withSelection);
+      WriteIntentReadAction.run(() -> {
+        navigatableCrumb.navigate(myEditor, withSelection);
+      });
     }
   }
 

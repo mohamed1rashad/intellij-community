@@ -2,7 +2,11 @@
 
 package com.intellij.codeInsight.daemon.impl;
 
-import com.intellij.codeHighlighting.*;
+import com.intellij.codeHighlighting.MainHighlightingPassFactory;
+import com.intellij.codeHighlighting.Pass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassFactoryRegistrar;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassRegistrar;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
@@ -35,7 +39,7 @@ final class LocalInspectionsPassFactory implements MainHighlightingPassFactory,
     if (textRange == null){
       return new ProgressableTextEditorHighlightingPass.EmptyPass(psiFile.getProject(), editor.getDocument());
     }
-    TextRange visibleRange = HighlightingSessionImpl.getFromCurrentIndicator(psiFile).getVisibleRange();
+    TextRange visibleRange = DaemonCodeAnalyzerEx.getInstanceEx(psiFile.getProject()).getHighlightSessionFromCurrentIndicator(psiFile).getVisibleRange();
     return new LocalInspectionsPass(psiFile, editor.getDocument(), textRange, visibleRange, true, HighlightInfoUpdater.getInstance(psiFile.getProject()), true);
   }
 

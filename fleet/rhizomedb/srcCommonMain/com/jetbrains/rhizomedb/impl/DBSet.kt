@@ -1,8 +1,18 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.rhizomedb.impl
 
-import com.jetbrains.rhizomedb.*
-import fleet.util.reducible.ReduceDecision
+import com.jetbrains.rhizomedb.Add
+import com.jetbrains.rhizomedb.Attribute
+import com.jetbrains.rhizomedb.DbContext
+import com.jetbrains.rhizomedb.EID
+import com.jetbrains.rhizomedb.Entity
+import com.jetbrains.rhizomedb.IndexQuery
+import com.jetbrains.rhizomedb.Mut
+import com.jetbrains.rhizomedb.ReduceDecision
+import com.jetbrains.rhizomedb.Remove
+import com.jetbrains.rhizomedb.RetractAttribute
+import com.jetbrains.rhizomedb.mutate
+import com.jetbrains.rhizomedb.queryIndex
 
 internal data class DBSet<T : Any>(val eid: EID,
                                    val attr: Attribute<Any>) : MutableSet<T> {

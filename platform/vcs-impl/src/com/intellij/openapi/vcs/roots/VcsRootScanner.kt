@@ -4,12 +4,13 @@ package com.intellij.openapi.vcs.roots
 import com.intellij.ide.trustedProjects.TrustedProjects
 import com.intellij.ide.trustedProjects.TrustedProjectsListener
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.progress.checkCanceled
 import com.intellij.openapi.progress.coroutineToIndicator
 import com.intellij.openapi.project.InitialVfsRefreshService
 import com.intellij.openapi.project.Project
@@ -18,26 +19,31 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vcs.ProjectLevelVcsManager
 import com.intellij.openapi.vcs.VcsRootChecker
 import com.intellij.openapi.vcs.ex.ProjectLevelVcsManagerEx
+import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl
 import com.intellij.openapi.vcs.impl.VcsEP
 import com.intellij.openapi.vcs.impl.VcsInitObject
 import com.intellij.openapi.vcs.impl.VcsStartupActivity
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileVisitor
+import com.intellij.openapi.vfs.newvfs.NewVirtualFile
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.vcsUtil.VcsUtil
 import com.intellij.vfs.AsyncVfsEventsListener
 import com.intellij.vfs.AsyncVfsEventsPostProcessor
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.MissingResourceException
 import java.util.regex.Pattern
 import java.util.regex.PatternSyntaxException
-import kotlin.coroutines.coroutineContext
 import kotlin.time.Duration.Companion.seconds
 
 private val LOG = logger<VcsRootScanner>()
@@ -45,14 +51,17 @@ private val LOG = logger<VcsRootScanner>()
 @ApiStatus.Internal
 @Service(Service.Level.PROJECT)
 class VcsRootScanner(private val project: Project, coroutineScope: CoroutineScope) {
-  private val rootProblemNotifier = VcsRootProblemNotifier.createInstance(project)
+  private val rootProblemNotifier = VcsRootErrorsHandler.createInstance(project)
 
   private val scanRequests = MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
   init {
     AsyncVfsEventsPostProcessor.getInstance().addListener(object : AsyncVfsEventsListener {
       override suspend fun filesChanged(events: List<VFileEvent>) {
-        this@VcsRootScanner.filesChanged(events)
+        if (testShouldScheduleScan(events)) {
+          checkCanceled()
+          scheduleScan()
+        }
       }
     }, coroutineScope)
     VcsRootChecker.EXTENSION_POINT_NAME.addChangeListener(coroutineScope, ::scheduleScan)
@@ -67,7 +76,8 @@ class VcsRootScanner(private val project: Project, coroutineScope: CoroutineScop
             project.service<InitialVfsRefreshService>().awaitInitialVfsRefreshFinished()
 
             coroutineToIndicator {
-              rootProblemNotifier.rescanAndNotifyIfNeeded()
+              val errors = VcsRootErrorsFinder.getInstance(project).find()
+              rootProblemNotifier.fixAndNotifyIfNeeded(errors)
             }
           }
         }
@@ -78,18 +88,22 @@ class VcsRootScanner(private val project: Project, coroutineScope: CoroutineScop
     fun getInstance(project: Project): VcsRootScanner = project.service<VcsRootScanner>()
 
     @JvmStatic
-    fun visitDirsRecursivelyWithoutExcluded(project: Project,
-                                            root: VirtualFile,
-                                            visitIgnoredFoldersThemselves: Boolean,
-                                            processor: (VirtualFile) -> VirtualFileVisitor.Result) {
+    fun visitDirsRecursivelyWithoutExcluded(
+      project: Project,
+      root: VirtualFile,
+      visitIgnoredFoldersThemselves: Boolean,
+      processor: (VirtualFile) -> VirtualFileVisitor.Result,
+    ) {
       val fileIndex = ProjectRootManager.getInstance(project).fileIndex
       val depthLimit = VirtualFileVisitor.limit(Registry.intValue("vcs.root.detector.folder.depth"))
       val ignorePattern = parseDirIgnorePattern()
-      if (isUnderIgnoredDirectory(project, ignorePattern, if (visitIgnoredFoldersThemselves) root.parent else root)) {
+      // we don't want to load the whole world into VFS during scanning
+      val noCacheRoot = NewVirtualFile.asCacheAvoiding(root)
+      if (isUnderIgnoredDirectory(project, ignorePattern, if (visitIgnoredFoldersThemselves) noCacheRoot.parent else noCacheRoot)) {
         return
       }
 
-      VfsUtilCore.visitChildrenRecursively(root, object : VirtualFileVisitor<Unit?>(NO_FOLLOW_SYMLINKS, depthLimit) {
+      VfsUtilCore.visitChildrenRecursively(noCacheRoot, object : VirtualFileVisitor<Unit?>(NO_FOLLOW_SYMLINKS, depthLimit) {
         override fun visitFileEx(file: VirtualFile): Result {
           if (!file.isDirectory) {
             return CONTINUE
@@ -106,7 +120,7 @@ class VcsRootScanner(private val project: Project, coroutineScope: CoroutineScop
             return SKIP_CHILDREN
           }
 
-          if (ReadAction.compute<Boolean, RuntimeException> { project.isDisposed || !fileIndex.isInContent(file) }) {
+          if (runReadActionBlocking { project.isDisposed || !fileIndex.isInContent(file) }) {
             return SKIP_CHILDREN
           }
 
@@ -153,25 +167,37 @@ class VcsRootScanner(private val project: Project, coroutineScope: CoroutineScop
     }
   }
 
-  private suspend fun filesChanged(events: List<VFileEvent>) {
+  /**
+   * Check whether scanning is enabled and whether a VFS change has affected potential VCS roots.
+   */
+  private suspend fun testShouldScheduleScan(events: List<VFileEvent>): Boolean {
     val checkers = VcsRootChecker.EXTENSION_POINT_NAME.extensionList
     if (checkers.isEmpty()) {
-      return
+      return false
     }
 
+    if (!VcsUtil.shouldDetectVcsMappingsFor(project)) {
+      return false
+    }
+
+    var potentialVcsRootFound = false
     for (event in events) {
       val file = event.file
       if (file != null && file.isDirectory) {
-        coroutineContext.ensureActive()
+        checkCanceled()
         visitDirsRecursivelyWithoutExcluded(project = project, root = file, visitIgnoredFoldersThemselves = true) { dir ->
           if (isVcsDir(checkers, dir.name)) {
-            scheduleScan()
+            potentialVcsRootFound = true
             return@visitDirsRecursivelyWithoutExcluded VirtualFileVisitor.skipTo(file)
           }
           VirtualFileVisitor.CONTINUE
         }
+        if (potentialVcsRootFound) {
+          return true
+        }
       }
     }
+    return false
   }
 
   fun scheduleScan() {
@@ -213,7 +239,7 @@ class VcsRootScanner(private val project: Project, coroutineScope: CoroutineScop
 }
 
 private fun isIgnoredDirectory(project: Project, ignorePattern: Pattern?, dir: VirtualFile): Boolean {
-  if (ProjectLevelVcsManager.getInstance(project).isIgnored(dir)) {
+  if (ProjectLevelVcsManagerImpl.getInstanceImpl(project).isIgnoredFileRoot(dir)) {
     LOG.debug { "Skipping ignored dir: $dir" }
     return true
   }

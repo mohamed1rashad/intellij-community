@@ -1,6 +1,7 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.importing
 
+import com.google.gson.Gson
 import com.intellij.execution.executors.DefaultRunExecutor
 import com.intellij.execution.process.ProcessOutputType
 import com.intellij.openapi.application.ApplicationManager
@@ -13,7 +14,6 @@ import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
 import com.intellij.openapi.module.Module
 import org.assertj.core.api.Assertions.assertThat
-import com.google.gson.Gson
 import org.jetbrains.plugins.gradle.tooling.annotation.TargetVersions
 import org.jetbrains.plugins.gradle.util.GradleConstants
 import org.junit.Test
@@ -31,7 +31,7 @@ class GradleSystemPropertiesTest: GradleImportingTestCase() {
   }
 
   @Test
-  @TargetVersions("7.0.2")
+  @TargetVersions("7.0.x")
   fun `Given IDE system properties When executing any task Then those properties are passed to Gradle`() {
     val ideSystemProperties = mapOf("FOO" to "foo value", "FOO2" to "foo2 value")
     executeSimpleGradleTask(ideSystemProperties) { gradleSystemProperties ->

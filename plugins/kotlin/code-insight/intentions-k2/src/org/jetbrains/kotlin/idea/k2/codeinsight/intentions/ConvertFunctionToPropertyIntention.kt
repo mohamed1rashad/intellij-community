@@ -3,7 +3,12 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.intentions
 
 import com.intellij.codeInsight.intention.PriorityAction
 import com.intellij.codeInspection.util.IntentionFamilyName
-import com.intellij.modcommand.*
+import com.intellij.modcommand.ActionContext
+import com.intellij.modcommand.ModCommand
+import com.intellij.modcommand.ModPsiUpdater
+import com.intellij.modcommand.ModShowConflicts
+import com.intellij.modcommand.Presentation
+import com.intellij.modcommand.PsiBasedModCommandAction
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.psi.PsiElement
@@ -11,9 +16,16 @@ import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.PsiReference
 import com.intellij.psi.util.endOffset
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassifierSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.name
+import org.jetbrains.kotlin.analysis.api.symbols.receiverType
+import org.jetbrains.kotlin.analysis.api.types.KaType
+import org.jetbrains.kotlin.analysis.api.types.KaTypePointer
 import org.jetbrains.kotlin.asJava.namedUnwrappedElement
 import org.jetbrains.kotlin.idea.base.psi.getReturnTypeReference
 import org.jetbrains.kotlin.idea.base.psi.replaced
@@ -27,8 +39,16 @@ import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.load.java.propertyNameByGetMethodName
 import org.jetbrains.kotlin.name.Name
-import org.jetbrains.kotlin.psi.*
-import org.jetbrains.kotlin.psi.psiUtil.*
+import org.jetbrains.kotlin.psi.KtCallElement
+import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.psiUtil.containingClass
+import org.jetbrains.kotlin.psi.psiUtil.getParentOfTypeAndBranch
+import org.jetbrains.kotlin.psi.psiUtil.getStartOffsetIn
+import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.types.expressions.OperatorConventions.UNARY_OPERATION_NAMES
 
 private data class Context(
@@ -119,7 +139,7 @@ private fun KaSession.prepareContext(element: KtNamedFunction): Context? {
 
     val functionSymbol = element.symbol
     val affectedCallablesWithSelf = getAffectedCallables(functionSymbol)
-    
+
     val conflictCheckContext = ConflictCheckContext(
         conflicts = conflicts,
         getterName = newGetterName,
@@ -215,6 +235,7 @@ private fun convertFunctionToProperty(
                 )
                 convertFunction(it, context, moveCaret = it == mainElement)
             }
+
             is PsiMethod -> it.name = newGetterName
         }
     }
@@ -295,28 +316,50 @@ private fun checkValueArgumentsNotEmpty(callElement: KtCallElement, conflicts: M
     return false
 }
 
+@OptIn(KaExperimentalApi::class)
 private fun KaSession.addConflictIfSamePropertyFound(
-    callable: PsiNamedElement,
-    callableSymbol: KaCallableSymbol,
+    affectedCallable: PsiNamedElement,
+    initialElementFunctionSymbol: KaCallableSymbol,
     context: ConflictCheckContext
 ) {
-    if (callable is KtNamedFunction) {
-        callable.containingKtFile
-            .scopeContext(callable)
+    if (affectedCallable is KtNamedFunction) {
+        val containingSymbolType = (initialElementFunctionSymbol.containingSymbol as? KaClassifierSymbol)?.defaultType
+        val initialElementTypePointer = containingSymbolType?.createPointer() ?: return
+        val initialElementSymbolName = initialElementFunctionSymbol.name
+        affectedCallable.checkDeclarationConflict(initialElementTypePointer, initialElementSymbolName, context.conflicts)
+    } else if (affectedCallable is PsiMethod) {
+        affectedCallable.checkDeclarationConflict(context.getterName, context.conflicts, context.callables)
+    }
+}
+
+@OptIn(KaExperimentalApi::class)
+private fun KtNamedFunction.checkDeclarationConflict(
+    initialElementTypePointer: KaTypePointer<KaType>,
+    initialElementSymbolName: Name?,
+    conflicts: MutableMap<PsiElement, ModShowConflicts.Conflict>
+) {
+    val affectedCallable = this
+    // A separate `analyze` is needed to avoid KaBaseIllegalPsiException on analyzing the `affectedCallable` as `KtNamedFunction`
+    analyze(affectedCallable) {
+        val initialElementType = initialElementTypePointer.restore() ?: return@analyze
+        affectedCallable.containingKtFile
+            .scopeContext(affectedCallable)
             .compositeScope()
-            .callables { it == callableSymbol.name }
+            .callables { it == initialElementSymbolName }
             .filterIsInstance<KaPropertySymbol>()
             .find {
                 val receiverType = it.receiverType ?: return@find false
-                (callableSymbol.containingSymbol as? KaClassifierSymbol)?.defaultType?.semanticallyEquals(receiverType)
-                    ?: return@find false
+                initialElementType.semanticallyEquals(receiverType)
             }?.let { propertySymbol ->
                 propertySymbol.psi?.let { psiElement ->
-                    reportDeclarationConflict(context.conflicts, declaration = psiElement) { s -> KotlinBundle.message("0.already.exists", s) }
+                    reportDeclarationConflict(conflicts, declaration = psiElement) { s ->
+                        KotlinBundle.message(
+                            "0.already.exists",
+                            s
+                        )
+                    }
                 }
             }
-    } else if (callable is PsiMethod) {
-        callable.checkDeclarationConflict(context.getterName, context.conflicts, context.callables)
     }
 }
 
@@ -339,7 +382,7 @@ private fun getWritable(
     updater: ModPsiUpdater,
 ): Context {
     val (callables, elementsToChange, newName, _, newGetterName) = elementContext
-    
+
     val writableElementsToChange = ElementsToChange().apply {
         kotlinCalls.addAll(elementsToChange.kotlinCalls.map(updater::getWritable))
         kotlinRefsToRename.addAll(
@@ -355,7 +398,7 @@ private fun getWritable(
                 .mapNotNull(PsiElement::getReference)
         )
     }
-    
+
     return Context(
         callables = callables.map(updater::getWritable),
         elementsToChange = writableElementsToChange,

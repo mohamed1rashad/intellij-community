@@ -1,12 +1,19 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions.searcheverywhere;
 
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.actions.bigPopup.ShowFilterAction;
 import com.intellij.ide.actions.searcheverywhere.statistics.SearchEverywhereUsageTriggerCollector;
 import com.intellij.ide.util.gotoByName.SearchEverywhereConfiguration;
 import com.intellij.ide.util.scopeChooser.ScopeDescriptor;
 import com.intellij.internal.statistic.eventLog.events.EventFields;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.AnActionResult;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.ex.AnActionListener;
 import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy;
 import com.intellij.openapi.application.ApplicationManager;
@@ -21,16 +28,31 @@ import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import kotlin.jvm.functions.Function2;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Insets;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -126,7 +148,7 @@ public final class SearchEverywhereHeader {
     toolbar.setLayoutStrategy(ToolbarLayoutStrategy.NOWRAP_STRATEGY);
     JComponent toolbarComponent = toolbar.getComponent();
     toolbarComponent.setOpaque(false);
-    toolbarComponent.setBorder(JBUI.Borders.empty(2, 18, 2, 9));
+    toolbarComponent.setBorder(JBUI.Borders.empty(JBUI.CurrentTheme.BigPopup.headerToolbarInsets()));
     return toolbar;
   }
 
@@ -199,6 +221,18 @@ public final class SearchEverywhereHeader {
       result.add(createAllTab(contributors, onChanged));
     }
 
+    FileSearchEverywhereContributor originalMainFileContributor = null;
+
+    SearchEverywhereContributor<?> originalMainFileContributorWrapped = ContainerUtil.find(contributors, FilesTabSEContributor::isMainFilesContributor);
+    if (originalMainFileContributorWrapped != null) {
+      originalMainFileContributor = FilesTabSEContributor.asMainFilesContributorOrNull(originalMainFileContributorWrapped);
+    }
+
+    if (originalMainFileContributor != null) {
+      var otherFilesContributors = contributors.stream().filter(FilesTabSEContributor::isFilesTabContributor).toList();
+      originalMainFileContributor.linkFilesTabContributorsFrom(otherFilesContributors);
+    }
+
     List<SearchEverywhereContributor<?>> separateTabContributors;
     try {
       separateTabContributors = TabsCustomizationStrategy.getInstance().getSeparateTabContributors(contributors);
@@ -210,9 +244,15 @@ public final class SearchEverywhereHeader {
 
     for (SearchEverywhereContributor<?> contributor : separateTabContributors) {
       try {
-        if (FilesTabSEContributor.isMainFilesContributor(contributor)) {
+        FileSearchEverywhereContributor fileContributor = FilesTabSEContributor.asMainFilesContributorOrNull(contributor);
+        if (fileContributor != null) {
           var otherContributors =
             Stream.concat(Stream.of(contributor), contributors.stream().filter(FilesTabSEContributor::isFilesTabContributor)).toList();
+
+          if (originalMainFileContributor != null && originalMainFileContributor != fileContributor) {
+            fileContributor.linkFilesTabContributorsFrom(otherContributors);
+          }
+
           result.add(createTab(otherContributors, onChanged));
         }
         else {
@@ -382,6 +422,7 @@ public final class SearchEverywhereHeader {
     private final @NotNull List<SearchEverywhereContributor<?>> contributors;
     private final List<AnAction> actions;
     private final @Nullable SearchEverywhereToggleAction everywhereAction;
+    private final @Nullable ShowFilterAction myFilterAction;
     private final @Nullable PersistentSearchEverywhereContributorFilter<String> myContributorsFilter;
     private final @Nullable PersistentSearchEverywhereContributorFilter<?> myFilterToReset;
 
@@ -401,14 +442,30 @@ public final class SearchEverywhereHeader {
       this.actions = actions;
 
       everywhereAction = (SearchEverywhereToggleAction)ContainerUtil.find(actions, o -> o instanceof SearchEverywhereToggleAction);
+      myFilterAction = ContainerUtil.findInstance(actions, ShowFilterAction.class);
       myFilterToReset = actions.stream()
         .filter(a -> a instanceof SearchEverywhereFiltersAction)
         .findAny().map(a -> ((SearchEverywhereFiltersAction)a).getFilter())
         .orElse(null);
     }
 
+    @ApiStatus.Internal
+    public void closeFilterPopup() {
+      if (myFilterAction != null) myFilterAction.closeFilterPopup();
+    }
+
     public void setSelected(boolean selected) {
       isSelected = selected;
+
+      if (isSelected) {
+        for (SearchEverywhereContributor<?> c : contributors) {
+          FileSearchEverywhereContributor mainFileContributor = FilesTabSEContributor.asMainFilesContributorOrNull(c);
+          if (mainFileContributor != null) {
+            mainFileContributor.applyCurrentScopeToLinkedContributors();
+            break;
+          }
+        }
+      }
     }
 
     public @NotNull @NonNls String getID() {

@@ -23,8 +23,9 @@ import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JTable;
+import java.awt.Component;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -93,7 +94,7 @@ public final class SeverityRenderer extends ComboBoxTableRenderer<HighlightSever
   @Override
   protected Icon getIconFor(@NotNull HighlightSeverity value) {
     return value == EDIT_SEVERITIES
-           ? EmptyIcon.create(HighlightDisplayLevel.getEmptyIconDim())
+           ? EmptyIcon.create(HighlightDisplayLevel.Companion.getEmptyIconDim())
            : HighlightDisplayLevel.find(value).getIcon();
   }
 

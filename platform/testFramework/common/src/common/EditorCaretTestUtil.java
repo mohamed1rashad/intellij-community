@@ -2,16 +2,21 @@
 package com.intellij.testFramework.common;
 
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.editor.*;
+import com.intellij.openapi.editor.CaretModel;
+import com.intellij.openapi.editor.CaretState;
+import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.LogicalPosition;
+import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 @TestOnly
@@ -41,8 +46,7 @@ public final class EditorCaretTestUtil {
     }
   }
 
-  public record CaretAndSelectionState(List<CaretInfo> carets, @Nullable TextRange blockSelection) {
-
+  public record CaretAndSelectionState(@NotNull @Unmodifiable List<@NotNull CaretInfo> carets, @Nullable TextRange blockSelection) {
     /**
      * Returns true if current CaretAndSelectionState contains at least one caret or selection explicitly specified
      */
@@ -150,10 +154,10 @@ public final class EditorCaretTestUtil {
     if (blockSelectionStartMarker != null) {
       blockSelection = new TextRange(blockSelectionStartMarker.getStartOffset(), blockSelectionEndMarker.getStartOffset());
     }
-    return new CaretAndSelectionState(Arrays.asList(carets.toArray(new CaretInfo[0])), blockSelection);
+    return new CaretAndSelectionState(List.copyOf(carets), blockSelection);
   }
 
-  public static void setCaretsAndSelection(Editor editor, CaretAndSelectionState caretsState) {
+  public static void setCaretsAndSelection(@NotNull Editor editor, @NotNull CaretAndSelectionState caretsState) {
     CaretModel caretModel = editor.getCaretModel();
     List<CaretState> states = new ArrayList<>(caretsState.carets().size());
     for (CaretInfo caret : caretsState.carets()) {

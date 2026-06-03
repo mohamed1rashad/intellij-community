@@ -19,7 +19,8 @@ import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.containers.ContainerUtil;
-import com.jetbrains.python.psi.PyCallSiteExpression;
+import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
+import com.jetbrains.python.psi.PyCallSiteOwner;
 import com.jetbrains.python.psi.PyClass;
 import com.jetbrains.python.psi.PyPsiFacade;
 import org.jetbrains.annotations.NotNull;
@@ -29,6 +30,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static com.jetbrains.python.psi.types.PyTypeUtilKt.isAny;
+import static com.jetbrains.python.psi.types.PyTypeUtilKt.isUnknown;
+
 
 public class PyCollectionTypeImpl extends PyClassTypeImpl implements PyCollectionType {
   protected final @NotNull List<PyType> myElementTypes;
@@ -36,6 +40,9 @@ public class PyCollectionTypeImpl extends PyClassTypeImpl implements PyCollectio
 
   public PyCollectionTypeImpl(@NotNull PyClass source, boolean isDefinition, @NotNull List<? extends PyType> elementTypes) {
     super(source, isDefinition);
+    for (var argument : elementTypes) {
+      PyAnyType.validate(argument);
+    }
     myElementTypes = new ArrayList<>(elementTypes);
   }
 
@@ -45,11 +52,11 @@ public class PyCollectionTypeImpl extends PyClassTypeImpl implements PyCollectio
     if (isDefinition()) {
       return withUserDataCopy(new PyCollectionTypeImpl(getPyClass(), false, myElementTypes));
     }
-    return null;
+    return PyAnyType.getUnknown();
   }
 
   @Override
-  public @Nullable PyType getCallType(final @NotNull TypeEvalContext context, final @Nullable PyCallSiteExpression callSite) {
+  public @Nullable PyType getCallType(final @NotNull TypeEvalContext context, final @Nullable PyCallSiteOwner callSite) {
     return getReturnType(context);
   }
 
@@ -75,7 +82,7 @@ public class PyCollectionTypeImpl extends PyClassTypeImpl implements PyCollectio
   }
 
   @Override
-  public @NotNull PyClassLikeType toClass() {
+  public @NotNull PyClassType toClass() {
     return myIsDefinition ? this : withUserDataCopy(new PyCollectionTypeImpl(myClass, true, myElementTypes));
   }
 
@@ -108,14 +115,22 @@ public class PyCollectionTypeImpl extends PyClassTypeImpl implements PyCollectio
 
   @Override
   public @Nullable PyType getIteratedItemType() {
-    // TODO: Select the parameter type that matches T in Iterable[T]
+    if (myElementTypes.size() >= 2) {
+      if (!PyTypingTypeProvider.ITERABLE.equals(getClassQName())) {
+        TypeEvalContext context = TypeEvalContext.codeInsightFallback(getPyClass().getProject());
+        PyType asIterable = PyTypeUtil.convertToType(this, PyTypingTypeProvider.ITERABLE, getPyClass(), context);
+        if (asIterable instanceof PyCollectionType collectionType) {
+          return collectionType.getIteratedItemType();
+        }
+      }
+    }
     return ContainerUtil.getFirstItem(myElementTypes);
   }
 
   @Override
   public String toString() {
     return ((isValid() ? "" : "[INVALID] ") + "PyCollectionClassType: " + getClassQName()) +
-           "[" + StringUtil.join(getElementTypes(), ", ") + "]";
+           "[" + StringUtil.join(getElementTypes(), item -> isUnknown(item) ? "Unknown" : isAny(item) ? "Any" : item.toString(), ", ") + "]";
   }
 
   @Override

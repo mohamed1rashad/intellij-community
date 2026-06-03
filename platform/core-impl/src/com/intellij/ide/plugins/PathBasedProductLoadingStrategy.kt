@@ -26,13 +26,15 @@ internal class PathBasedProductLoadingStrategy : ProductLoadingStrategy() {
     customPluginDir: Path,
     bundledPluginDir: Path?,
     isUnitTestMode: Boolean,
+    isInDevServerMode: Boolean,
     isRunningFromSources: Boolean,
     zipPool: ZipEntryResolverPool,
     mainClassLoader: ClassLoader,
   ): Deferred<List<DiscoveredPluginsList>> {
-    return scope.loadPluginDescriptorsImpl(
+    return scope.loadPluginDescriptorsForPathBasedLoader(
       loadingContext = loadingContext,
       isUnitTestMode = isUnitTestMode,
+      isInDevServerMode = isInDevServerMode,
       isRunningFromSources = isRunningFromSources,
       mainClassLoader = mainClassLoader,
       zipPool = zipPool,
@@ -41,7 +43,5 @@ internal class PathBasedProductLoadingStrategy : ProductLoadingStrategy() {
     )
   }
 
-  override fun isOptionalProductModule(moduleId: String): Boolean = false
-
-  override fun findProductContentModuleClassesRoot(moduleId: PluginModuleId, moduleDir: Path): Path = moduleDir.resolve("$moduleId.jar")
+  override fun findProductContentModuleClassesRoot(moduleId: PluginModuleId, moduleDir: Path): Path = moduleDir.resolve("${moduleId.name}.jar")
 }

@@ -8,14 +8,19 @@ import com.intellij.ui.tabs.JBTabsPosition;
 import com.intellij.ui.tabs.TabInfo;
 import com.intellij.ui.tabs.TabsListener;
 import com.intellij.ui.tabs.impl.JBEditorTabs;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JTabbedPane;
+import javax.swing.SwingConstants;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.event.MouseListener;
 import java.util.concurrent.CopyOnWriteArraySet;
 
@@ -84,7 +89,8 @@ public class JBTabsPaneImpl implements TabbedPane {
     tabs.setTabsPosition(position);
   }
 
-  private static @NotNull JBTabsPosition swingConstantToEnum(int tabPlacement) {
+  @ApiStatus.Internal
+  public static @NotNull JBTabsPosition swingConstantToEnum(int tabPlacement) {
     return switch (tabPlacement) {
       case SwingConstants.TOP -> JBTabsPosition.top;
       case SwingConstants.BOTTOM -> JBTabsPosition.bottom;

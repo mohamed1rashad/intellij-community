@@ -8,13 +8,25 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiWhiteSpace
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
-import org.jetbrains.kotlin.analysis.api.components.*
+import org.jetbrains.kotlin.analysis.api.components.augmentedByWarningLevelAnnotations
+import org.jetbrains.kotlin.analysis.api.components.isAnyType
+import org.jetbrains.kotlin.analysis.api.components.isUnitType
+import org.jetbrains.kotlin.analysis.api.components.render
+import org.jetbrains.kotlin.analysis.api.components.resolveToCall
+import org.jetbrains.kotlin.analysis.api.components.resolveToSymbol
+import org.jetbrains.kotlin.analysis.api.components.smartCastInfo
+import org.jetbrains.kotlin.analysis.api.renderer.types.impl.KaTypeRendererForSource
 import org.jetbrains.kotlin.analysis.api.resolution.singleConstructorCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaClassLikeSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaEnumEntrySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPackageSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSamConstructorSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
 import org.jetbrains.kotlin.analysis.api.types.KaErrorType
 import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.analysis.api.types.KaUsualClassType
@@ -30,10 +42,33 @@ import org.jetbrains.kotlin.idea.codeinsights.impl.base.CallableReturnTypeUpdate
 import org.jetbrains.kotlin.idea.formatter.kotlinCustomSettings
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.name.SpecialNames
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtAnnotatedExpression
+import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstantExpression
+import org.jetbrains.kotlin.psi.KtDestructuringDeclarationEntry
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtFunctionLiteral
+import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtLabeledExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedDeclaration
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPsiUtil
+import org.jetbrains.kotlin.psi.KtScript
+import org.jetbrains.kotlin.psi.KtStringTemplateExpression
+import org.jetbrains.kotlin.psi.KtTypeReference
+import org.jetbrains.kotlin.psi.KtUnaryExpression
+import org.jetbrains.kotlin.psi.KtWhenExpression
 import org.jetbrains.kotlin.psi.psiUtil.endOffset
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
+import org.jetbrains.kotlin.types.Variance
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
@@ -266,9 +301,10 @@ private fun isMultilineLocalProperty(element: PsiElement): Boolean {
     return false
 }
 
+@OptIn(KaExperimentalApi::class)
 context(_: KaSession)
 private fun renderKtTypeHint(element: KtCallableDeclaration, multilineLocalProperty: Boolean): KaType? =
-    calculateAllTypes<KaType>(element) { declarationType, allTypes, cannotBeNull ->
+    calculateAllTypes(element) { declarationType, allTypes, _ ->
         if (declarationType is KaErrorType) return@calculateAllTypes null
 
         if (declarationType.isUnitType && multilineLocalProperty) {
@@ -291,7 +327,7 @@ private fun renderKtTypeHint(element: KtCallableDeclaration, multilineLocalPrope
             }
 
             else -> declarationType
-        }
+        }?.augmentedByWarningLevelAnnotations
 
         if (ktType != null && isUnclearType(ktType, element)) {
             ktType
@@ -309,7 +345,7 @@ private fun isUnclearType(type: KaType, element: KtCallableDeclaration): Boolean
     if (initializer is KtUnaryExpression && initializer.baseExpression is KtConstantExpression) return false
     if (initializer.smartCastInfo != null) return true
 
-    if (isConstructorCall(initializer)) {
+    if (isConstructorLikeCall(type, initializer) || isConstructorCall(initializer)) {
         return false
     }
 
@@ -355,6 +391,15 @@ private fun isConstructorCall(initializer: KtExpression?): Boolean {
 
     val constructorCall = resolveCall.singleConstructorCallOrNull()
     return constructorCall != null && (constructorCall.symbol.typeParameters.isEmpty() || callExpression.typeArgumentList != null)
+}
+
+@OptIn(KaExperimentalApi::class)
+context(_: KaSession)
+private fun isConstructorLikeCall(type: KaType, initializer: KtExpression?): Boolean {
+    val callExpression = initializer as? KtCallExpression ?: return false
+    val name = (callExpression.calleeExpression as? KtNameReferenceExpression)?.getReferencedName() ?: return false
+    val typeString = type.render(KaTypeRendererForSource.WITH_SHORT_NAMES, position = Variance.INVARIANT)
+    return name == typeString
 }
 
 context(_: KaSession)

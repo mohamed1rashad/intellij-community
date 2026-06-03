@@ -1,10 +1,228 @@
 # Jewel Release Notes
 
-## v0.31 (2025-10-14)
+## v0.36 (2026-04-27)
 
 | Min supported IJP versions | Compose Multiplatform version |
 |----------------------------|-------------------------------|
-| 2025.2.4, 2025.3 EAP       | 1.9.0                         |
+| 2025.3.4, 2026.1.1         | 1.10.0                        |
+
+### ⚠️ Important Changes
+
+* [**JEWEL-1024**](https://youtrack.jetbrains.com/issue/JEWEL-1024) Added 'dismissOnLoseFocus' property to SpeedSearchArea, allowing users to choose if they want to keep the input visible on lose focus ([#3361](https://github.com/JetBrains/intellij-community/pull/3361))
+  * This is important for cases that you want to use SpeedSearch as a filter
+
+
+### New features
+
+* [**JEWEL-1024**](https://youtrack.jetbrains.com/issue/JEWEL-1024) Added support for filtering Collections using SpeedSearchMatcher ([#3361](https://github.com/JetBrains/intellij-community/pull/3361))
+  * Check the '.filter()' extension functions available in the 'org.jetbrains.jewel.foundation.search' package
+
+* [**JEWEL-1069**](https://youtrack.jetbrains.com/issue/JEWEL-1069) Added a new button variant called `SlimButton`, which has both `DefaultSlimButton` and `OutlinedSlimButton` styles ([#3360](https://github.com/JetBrains/intellij-community/pull/3360))
+
+### Bug fixes
+
+* [**JEWEL-1024**](https://youtrack.jetbrains.com/issue/JEWEL-1024) Fixed an issue that was not triggering the 'onSelectedIndexesChange' call when the selection gets changed by the SpeedSearch ([#3361](https://github.com/JetBrains/intellij-community/pull/3361))
+* [**JEWEL-1223**](https://youtrack.jetbrains.com/issue/JEWEL-1223) "java.lang.IllegalArgumentException: Header cannot be empty" when editing an HTML table ([#3382](https://github.com/JetBrains/intellij-community/pull/3382))
+* [**JEWEL-1258**](https://youtrack.jetbrains.com/issue/JEWEL-1258) Fixed missing `remember` keys in `DefaultMarkdownBlockRenderer` and `GitHubTableBlockRenderer` that caused stale `onUrlClick` callbacks and `enabled` state when these values changed ([#3432](https://github.com/JetBrains/intellij-community/pull/3432))
+* [**JEWEL-1284**](https://youtrack.jetbrains.com/issue/JEWEL-1284) Fixed `SelectableLazyColumn` selecting items on click and on initial focus even when `SelectionMode.None` was set ([#3446](https://github.com/JetBrains/intellij-community/pull/3446))
+* [**JEWEL-368**](https://youtrack.jetbrains.com/issue/JEWEL-368) Fixed custom title bar mouse event (drag/press) not moving the window some times ([#3362](https://github.com/JetBrains/intellij-community/pull/3362))
+* [**JEWEL-921**](https://youtrack.jetbrains.com/issue/JEWEL-921) A series of modifiers are now more performant, since they now use `Modifier.Node` API: ([#3423](https://github.com/JetBrains/intellij-community/pull/3423))
+  * `trackWindowActivation`
+  * `trackComponentActivation`
+  * `trackActivation`
+  * `onActivated`
+  * `border`
+* [**JEWEL-1303**](https://youtrack.jetbrains.com/issue/JEWEL-1303) Cache instances to avoid repeated allocations during recomposition ([#3486](https://github.com/JetBrains/intellij-community/pull/3486))
+
+### Other
+
+* [**JEWEL-1297**](https://youtrack.jetbrains.com/issue/JEWEL-1297) Update Jewel release flow and Metalava API compatibility checks ([#3465](https://github.com/JetBrains/intellij-community/pull/3465))
+
+## v0.35 (2026-03-30)
+
+| Min supported IJP versions | Compose Multiplatform version |
+|----------------------------|-------------------------------|
+| 2025.3.3, 2026.1.1         | 1.10.0                        |
+
+### New features
+
+* **JEWEL-1069** Added a new button variant called `SlimButton`, which has both `DefaultSlimButton` and `OutlinedSlimButton` styles ([#3360](https://github.com/JetBrains/intellij-community/pull/3360))
+
+### Bug fixes
+
+* **JEWEL-1223** [JEWEL-1223](https://youtrack.jetbrains.com/issue/JEWEL-1223) "java.lang.IllegalArgumentException: Header cannot be empty" when editing an HTML table ([#3382](https://github.com/JetBrains/intellij-community/pull/3382))
+* **JEWEL-1272** [JEWEL-1272](https://youtrack.jetbrains.com/issue/JEWEL-1272) Fix FencedCodeBlock Binary Compatibility Crash ([#3437](https://github.com/JetBrains/intellij-community/pull/3437))
+* **JEWEL-1280** [JEWEL-1280](https://youtrack.jetbrains.com/issue/JEWEL-1280) Jewel painter: catch Exception instead of RuntimeException in tryLoadingResource ([#3443](https://github.com/JetBrains/intellij-community/pull/3443))
+* **JEWEL-1284** Fixed `SelectableLazyColumn` selecting items on click and on initial focus even when `SelectionMode.None` was set ([#3446](https://github.com/JetBrains/intellij-community/pull/3446))
+
+## v0.34 (2026-02-17)
+
+| Min supported IJP versions | Compose Multiplatform version | Standalone Version   |
+|----------------------------|-------------------------------|----------------------|
+| 2025.3.3, 2026.1 EAP       | 1.10.0                        | 0.34.0-253.31033.149 |
+
+### ⚠️ Important Changes
+
+* **JEWEL-1221** TabStrip is not using the HorizontallyScrollableContainer as it mandates some behavior that should not apply to the TabStrip ([#3376](https://github.com/JetBrains/intellij-community/pull/3376))
+  * All functionality should remain the same
+* **JEWEL-741** [Source breaking change!] The `mimeType: MimeType?` parameter name from `FencedCodeBlock` class was changed to `language: String?`, which takes the raw string for the code block language identifier. This won't introduce binary nor behavioural changes since `MimeType` is a value class that is seen as `String?` by the compiler ([#3171](https://github.com/JetBrains/intellij-community/pull/3171))
+* **JEWEL-954** Added popup advertisement support with new `PopupAd` component, `PopupAdStyle` theming, and `adContent` parameter to `PopupContainer` and `Menu` components ([#3358](https://github.com/JetBrains/intellij-community/pull/3358))
+* **JEWEL-1224** Bumped CMP version to 1.10.0
+
+### New features
+
+* **JEWEL-741** Markdown code blocks fall back to TextMate token-based highlighting when semantic highlighting is unavailable and the TextMate plugin is installed. ([#3171](https://github.com/JetBrains/intellij-community/pull/3171))
+* **JEWEL-954** Popups now have an ad content slot in which can be used to add a helper text to the menu ([#3358](https://github.com/JetBrains/intellij-community/pull/3358))
+* **JEWEL-992** Input Fields: Added automatic cursor hiding on macOS when typing. The cursor hides while typing and reappears when the mouse moves, matching the native macOS behavior seen in IntelliJ Platform text fields ([#3372](https://github.com/JetBrains/intellij-community/pull/3372))
+
+### Bug fixes
+
+* **JEWEL-1188** Fixed caret not moving when clicking in an editable combo box text field while its popup is visible ([#3352](https://github.com/JetBrains/intellij-community/pull/3352))
+* **JEWEL-1199** JewelComposePanelWrapper now handles focus on Swing Interop components without stealing the focus when it gets clicked/focused ([#3368](https://github.com/JetBrains/intellij-community/pull/3368))
+* **JEWEL-1240** Fixed improper positioning of the scrollbar in undecorated `TextArea`s ([#3391](https://github.com/JetBrains/intellij-community/pull/3391))
+* **JEWEL-741** Fixed a bug where the mime type string for the Go language was actually returning MimeType.YAML ([#3171](https://github.com/JetBrains/intellij-community/pull/3171))
+* **JEWEL-741** Fixed a bug where the `displayName` wasn't returning the correct display name for mime types that also defined a `role` ([#3171](https://github.com/JetBrains/intellij-community/pull/3171))
+
+### Deprecated API
+
+* **JEWEL-741** `MimeType` value class has been deprecated, along with all of its functions, variables and extensions ([#3171](https://github.com/JetBrains/intellij-community/pull/3171))
+* **JEWEL-741** `CodeHighlighter.highlight(code: String, mimeType: MimeType?)` has been deprecated. Please use `highlight(code: String, language: String)` ([#3171](https://github.com/JetBrains/intellij-community/pull/3171))
+
+## v0.33 (2025-12-19)
+
+| Min supported IJP versions | Compose Multiplatform version | Standalone Version |
+|----------------------------|-------------------------------|--------------------|
+| 2025.3.2, 2026.1 EAP       | 1.10.0-rc01                   | 0.33.0-253.29795   |
+
+Last release of 2025, with plenty of fixes and new features. See you in 2026! 👋
+
+### ⚠️ Important Changes
+
+* **JEWEL-941** If a Markdown paragraph contains only image components, it will use a `FlowRow` with `Image`s instead of inlines in `Text` ([#3285](https://github.com/JetBrains/intellij-community/pull/3285))
+    * This allows for better performance and for some nice visual polish, too
+* **JEWEL-1058** The default Markdown image resolver is now capable of resolving local images by a relative path from the source file, or by absolute path ([#3292](https://github.com/JetBrains/intellij-community/pull/3292))
+* **JEWEL-1136** ComboBoxes now only use the width required by the label if no width modifier is applied to them ([#3301](https://github.com/JetBrains/intellij-community/pull/3301))
+    * Note that it's highly recommended to set a fixed width to ensure UI consistency (i.e., always apply one of these modifiers: `width`, `widthIn`, `fillMaxWidth`, `weight`, ...)
+* **JEWEL-1185** Bumped CMP version to 1.10.0-rc01 ([#3329](https://github.com/JetBrains/intellij-community/pull/3329))
+
+### New features
+
+* **JEWEL-876** Improved default string resources handling for standalone ([#3289](https://github.com/JetBrains/intellij-community/pull/3289))
+    * We implemented the new `DynamicBundle` API to support loading string from resources in standalone
+    * This API is modeled after the IJPL's version of the same name
+* **JEWEL-1007** Updated `ComboBox` padding values to better match Swing ([#3290](https://github.com/JetBrains/intellij-community/pull/3290))
+* **JEWEL-1058** Introduced `ImageSourceResolver.default`, which allows setting the resolver capabilities (e.g., external URIs, .jar resources, and local images), as well as whether to log resolve issues ([#3292](https://github.com/JetBrains/intellij-community/pull/3292))
+* **JEWEL-1070** Annotated UI text parameters with the `@Nls` annotations for better IJPL tooling support ([#3292](https://github.com/JetBrains/intellij-community/pull/3292))
+* **JEWEL-1072** Added the experimental `EmbeddedToInlineCssStyleSvgPatchHint` painter hint to support rendering SVG files with embedded CSS class selectors exported from vector graphics editors ([#3335](https://github.com/JetBrains/intellij-community/pull/3335))
+    * Converts CSS <style> blocks with .className selectors to inline style attributes during SVG loading
+    * Supports CSS cascade (multiple classes, inline style precedence), minified CSS, comments, CDATA sections, and URL references for gradients/patterns
+    * Interactive showcase demo added to Icons panel demonstrating the feature
+    * For more information, see the `EmbeddedToInlineCssStyleSvgPatchHint` documentation and the [PR](https://github.com/JetBrains/intellij-community/pull/3335)
+* **JEWEL-1074** Support center and right alignment in HTML blocks embedded in Markdown ([#3313](https://github.com/JetBrains/intellij-community/pull/3313))
+
+### Bug fixes
+
+* **JEWEL-553** Fixed `TabStrip` scrollbar to better align with Swing's ([#3289](https://github.com/JetBrains/intellij-community/pull/3289))
+  * In particular, `TabStrip` now only shows the scrollbar when the container is hovered
+* **JEWEL-941** Fixed Markdown images taking up too much space when they fail to load ([#3285](https://github.com/JetBrains/intellij-community/pull/3285))
+* **JEWEL-1007** Fixed `ListComboBox` to now visually match Swing when the list is empty ([#3290](https://github.com/JetBrains/intellij-community/pull/3290))
+* **JEWEL-1013, JEWEL-1016** Fixed missing popup shadows for CMP-based popups ([#3253](https://github.com/JetBrains/intellij-community/pull/3253))
+    * This does not affect native popups, as they delegate the shadow drawing to the OS and they always had the correct shadow
+* **JEWEL-1057** Fixed a bug in decorated window action icons (close, maximize, and minimize) where they weren't properly showing on Linux targets ([#3310](https://github.com/JetBrains/intellij-community/pull/3310))
+* **JEWEL-1061** Fixed several issues with buttons, most of which only impact split buttons ([#3283](https://github.com/JetBrains/intellij-community/pull/3283))
+    * Fixed a bug with `*SplitButton`s where the chevron would get squashed if the button wasn't wide enough to fit both the main and secondary content
+    * Fixed a bug with `*SplitButton`s where the divider height was limited, and would not grow with the button's height if it gets taller than the minimum height
+    * Fixed several bugs with `*Button` colours in standalone, especially in the disabled state, to realign them with Swing
+    * Fixed the semantics role of the secondary action in `*SplitButton`s to be the same as in Swing
+    * Fixed the modifier passed to `*SplitButton`s being applied to the wrong level, causing all sorts of unexpected behaviour (e.g., if you set a height, the button's visual height would not grow)
+* **JEWEL-1067** Fixed synchronised scrolling behavior for Markdown ([#3287](https://github.com/JetBrains/intellij-community/pull/3287))
+* **JEWEL-1143** Fixed missing support for hovered and pressed states in `TextField` and `TextArea` styling ([#3334](https://github.com/JetBrains/intellij-community/pull/3334))
+    * Note that, due to [JEWEL-1193](https://youtrack.jetbrains.com/issue/JEWEL-1193), the hover state _for now_ only works on focused text fields/areas
+* **JEWEL-1146** Fixed a Markdown issue where HTML images would not get rendered when there's nothing else in a paragraph ([#3311](https://github.com/JetBrains/intellij-community/pull/3311))
+* **JEWEL-1155** Fixed a Markdown tables issue where a cell's content would draw beyond the cell bounds when it's too wide for the cell ([#3317](https://github.com/JetBrains/intellij-community/pull/3317))
+* **JEWEL-1158, JEWEL-1159** Fixed multiple issues with text context menus ([#3322](https://github.com/JetBrains/intellij-community/pull/3322))
+    * Fixed a crash with the context menu when a `SelectionContainer` has no selection
+        * The copy/cut context menu items should not show/be enabled in that case, but due to [CMP-9329](https://youtrack.jetbrains.com/issue/CMP-9329) the copy menu was always visible
+        * When the copy or cut actions are clicked, there is a crash
+        * Making sure the actions are disabled if visible when the selection is empty fixes the issue
+    * Fixed a bug where, in the IDE, the `BasicTextField` context menu would not show a Paste action when it should
+        * This was because of an undocumented CMP requirement causing an internal casting to fail
+    * Fixed a bug where the context menu could show as empty in some cases, such as the one described above
+        * Now, it checks whether it's empty before showing; it only shows if there are any items.
+        * As an additional cosmetic improvement, we now show a divider in the context menu between _Cut_/_Copy_/_Paste_, and _Select All_.
+    * Fixed a cosmetic issue where the disabled shortcuts and icons in menu items were not appropriately looking disabled
+* **JEWEL-1163, JEWEL-1165** Fixed context menu issues with native custom renderer ([#3324](https://github.com/JetBrains/intellij-community/pull/3324))
+    * Fixed the positioning logic on `BasicTextField`s context menus
+    * Fixed spurious calls to `onGloballyPositioned` when the popup container (Swing `JDialog`, or IJP's `JBPopup`) gets dismissed
+    * Fixed issues where the "Key Up" event from the click that displayed the popup was immediately dismissing it
+
+### Deprecated API
+
+* **JEWEL-1067** `ScrollingSynchronizer#scrollToLine` is now marked as non-extendable (`@ApiStatus.NonExtendable`), in favor of new methods `ScrollingSynchronizer#scrollToCoordinate` and `ScrollingSynchronizer#findYCoordinateToScroll` ([#3287](https://github.com/JetBrains/intellij-community/pull/3287))
+
+## v0.32.1 (2025-12-01)
+
+| Min supported IJP versions | Compose Multiplatform version | Standalone Version   |
+|----------------------------|-------------------------------|----------------------|
+| 2025.3, (2026.1)           | 1.10.0-alpha01                | 0.32.1-253.28294.285 |
+
+Hotfix release for an issue introduced by CMP 1.10.0-alpha01.
+
+### Bug fixes
+* **JEWEL-1160** Disabled the (broken) new context menus API introduced in Compose Foundation
+  * The CMP flag was enabled in 1.10.0-alpha01 and causes context menus to be broken across Jewel, as we do not support
+    the new API yet (we're still missing work on the CMP side to be able to adopt it)
+  * CMP disables the flag in 1.10.0-alpha03, but we've postponed bumping the CMP version to the 0.33 release due to other
+    issues in later CMP 1.10.0 builds that need to be addressed
+* **JEWEL-1158, JEWEL-1159** Fixed multiple issues with text context menus
+  * The copy/cut context menu items should not show/be enabled in that case, but due to [CMP-9329](https://youtrack.jetbrains.com/issue/CMP-9329) the copy menu is always visible
+    * When the copy or cut actions are clicked, there is a crash
+    * Making sure the actions are disabled if visible when the selection is empty fixes the issue
+  * Fixed a bug where, in the IDE, the `BasicTextField` context menu would not show a Paste action when it should
+    * This was because of an undocumented CMP requirement causing an internal casting to fail
+  * Fixed a bug where the context menu could show as empty in some cases, such as the one described above.
+    * Now, it checks whether it's empty before showing; it only shows if there are any items.
+    * As an additional cosmetic improvement, we now show a divider in the context menu between _Cut_/_Copy_/_Paste_, and _Select All_.
+  * Fixed a cosmetic issue where the disabled shortcuts and icons in menu items were not appropriately looking disabled.
+
+## v0.32 (2025-11-25)
+
+| Min supported IJP versions | Compose Multiplatform version | Standalone Version   |
+|----------------------------|-------------------------------|----------------------|
+| 2025.3, (2026.1)           | 1.10.0-alpha01                | 0.32.0-253.28294.205 |
+
+This is a small release, not too much going on. But we still shipped a big improvement to Markdown rendering, which now supports some basic HTML too!
+
+### ⚠️ Important Changes
+
+* **This version is not available on IJP 252** since there has not been any 252 release since the Jewel 0.31 release.
+  * The upcoming IJP 2026.1 will include all changes from this version.
+* The CMP version is now [1.10.0-beta01](https://kotlinlang.org/docs/multiplatform/whats-new-compose-110.html) (new major version)
+* **JEWEL-1043** A few deprecated Markdown APIs have been hidden to promote new non-deprecated overloads ([#3267](https://github.com/JetBrains/intellij-community/pull/3267))
+  * The change is non-breaking, both in terms of binary and source compatibility
+* **IJPL-214896** The Compose Runtime dependency has been moved out of the `intellij.libraries.compose.foundation.desktop` module and into the `intellij.libraries.compose.runtime.desktop` module
+  * You will likely need to add that to your plugin's `plugin.xml` dependencies
+  * If you use Jewel in a plugin built through the IntelliJ Platform Gradle plugin, you'll also need to add a `bundledModule` dependency entry until the plugin includes it in the `composeUI` helper
+
+### New features
+
+* **JEWEL-1018** Added `SpeedSearchableComboBox` component that supports speed search ([#3250](https://github.com/JetBrains/intellij-community/pull/3250))
+  * It is available inside a `SpeedSearchArea` and has a similar syntax to a normal `ListComboBox`
+* **JEWEL-1043** Added initial support for basic HTML in the Markdown renderer ([#3267](https://github.com/JetBrains/intellij-community/pull/3267))
+  * Supported tags: `h1..6`, `b`/`strong`, `i`/`em`, `s`/`strike`/`del`, `p`, `br`, `code`, `pre`, `ol`/`ul`/`li`, `a`, `img`, `table`/`th`/`tr`/`td`
+  * Supported scroll syncing for code blocks and lists
+  * Attributes and custom CSS styling are out of scope of this feature
+  * Known issue: ordered and unordered list items use the top-level style regardless of their actual level (JEWEL-1056)
+  * Known issue: horizontal alignments are not supported yet (JEWEL-1074)
+
+### Bug fixes
+ * **JEWEL-1054** Fixed a race condition with selection management in the dropdown component if used in a non-canonical way
+
+## v0.31 (2025-10-14)
+
+| Min supported IJP versions | Compose Multiplatform version | Standalone Version                    |
+|----------------------------|-------------------------------|---------------------------------------|
+| 2025.2.4, 2025.3 EAP       | 1.9.0                         | 0.31.0-253.28086.58, 0.31.0-252.27409 |
 
 ### ⚠️ Important Changes
 
@@ -53,9 +271,9 @@
 
 ## v0.30 (2025-09-04)
 
-| Supported IJP versions | Compose Multiplatform version |
-|------------------------|-------------------------------|
-| 2025.2.2+, 2025.1.5+   | 1.9.0-beta03                  |
+| Supported IJP versions | Compose Multiplatform version | Standalone Version                 |
+|------------------------|-------------------------------|------------------------------------|
+| 2025.2.2+, 2025.1.5+   | 1.9.0-beta03                  | 0.30.0-252.26252, 0.30.0-251.28458 |
 
 ### ⚠️ Important Changes
 
@@ -160,9 +378,9 @@
 
 ## v0.29 (2025-07-22)
 
-| Supported IJP versions | Compose Multiplatform version |
-|------------------------|-------------------------------|
-| 2025.2.1+, 2025.1.4.1+ | 1.8.2                         |
+| Supported IJP versions | Compose Multiplatform version | Standalone Version                 |
+|------------------------|-------------------------------|------------------------------------|
+| 2025.2.1+, 2025.1.4.1+ | 1.8.2                         | 0.29.0-252.24604, 0.29.0-251.27828 |
 
 ### ⚠️ Important Changes
 
@@ -262,9 +480,9 @@
 
 ## v0.28 (2025-05-16)
 
-| Supported IJP versions             | Compose Multiplatform version |
-|------------------------------------|-------------------------------|
-| 2025.2 EAP1+, 2025.1.1+, 2024.3.6+ | 1.8.0-alpha04                 |
+| Supported IJP versions             | Compose Multiplatform version | Standalone Version                                                     |
+|------------------------------------|-------------------------------|------------------------------------------------------------------------|
+| 2025.2 EAP1+, 2025.1.1+, 2024.3.6+ | 1.8.0-alpha04                 | 0.28.0-243.27100, 0.28.0-251.26137, 0.28.0-252.12274, 0.28.0-252.15920 |
 
 > [!IMPORTANT]
 > Jewel 0.28 is the first Jewel version to be published since the migration into the IJP codebase.

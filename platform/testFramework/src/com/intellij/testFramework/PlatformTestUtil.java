@@ -1,12 +1,16 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.testFramework;
 
 import com.intellij.concurrency.ThreadContext;
 import com.intellij.diagnostic.CoroutineDumperKt;
 import com.intellij.diagnostic.ThreadDumper;
-import com.intellij.execution.*;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.Executor;
+import com.intellij.execution.ExecutorRegistry;
+import com.intellij.execution.Location;
+import com.intellij.execution.ProgramRunnerUtil;
+import com.intellij.execution.PsiLocation;
+import com.intellij.execution.RunManager;
 import com.intellij.execution.actions.ConfigurationContext;
 import com.intellij.execution.actions.RunConfigurationProducer;
 import com.intellij.execution.configurations.GeneralCommandLine;
@@ -28,7 +32,14 @@ import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.AbstractTreeStructure;
 import com.intellij.model.psi.PsiSymbolReferenceService;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionUiKind;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.PerformWithDocumentsCommitted;
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
@@ -42,6 +53,7 @@ import com.intellij.openapi.extensions.ProjectExtensionPointName;
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
+import com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers;
 import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
 import com.intellij.openapi.fileTypes.FileTypes;
@@ -51,7 +63,13 @@ import com.intellij.openapi.paths.WebReference;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.ui.Queryable;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.Ref;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.io.NioFiles;
 import com.intellij.openapi.util.text.StringUtil;
@@ -59,17 +77,25 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileFilter;
 import com.intellij.openapi.vfs.ex.temp.TempFileSystem;
+import com.intellij.openapi.vfs.newvfs.ManagingFS;
 import com.intellij.platform.testFramework.core.FileComparisonFailedError;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.PsiRecursiveElementWalkingVisitor;
 import com.intellij.psi.PsiReference;
-import com.intellij.psi.impl.DocumentCommitThread;
 import com.intellij.psi.impl.source.resolve.reference.impl.PsiMultiReference;
+import com.intellij.testFramework.common.TestApplicationKt;
 import com.intellij.testFramework.fixtures.IdeaTestExecutionPolicy;
 import com.intellij.ui.ClientProperty;
 import com.intellij.ui.tree.AsyncTreeModel;
-import com.intellij.util.*;
+import com.intellij.util.Alarm;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.ReflectionUtil;
+import com.intellij.util.SingleAlarm;
+import com.intellij.util.SmartList;
+import com.intellij.util.SystemProperties;
+import com.intellij.util.ThrowableRunnable;
+import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.AppScheduledExecutorService;
 import com.intellij.util.concurrency.ThreadingAssertions;
@@ -81,15 +107,21 @@ import com.intellij.util.ui.EDT;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import junit.framework.AssertionFailedError;
-import kotlin.Unit;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.SystemDependent;
+import org.jetbrains.annotations.SystemIndependent;
+import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.concurrency.Promise;
 import org.junit.AssumptionViolatedException;
 
-import javax.swing.*;
+import javax.swing.JTree;
+import javax.swing.ListModel;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
-import java.awt.*;
+import java.awt.AWTEvent;
+import java.awt.EventQueue;
 import java.awt.event.InvocationEvent;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -103,13 +135,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.*;
+import java.util.function.BiPredicate;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -117,7 +162,12 @@ import static com.intellij.openapi.util.text.StringUtil.splitByLines;
 import static com.intellij.testFramework.UsefulTestCase.assertSameLines;
 import static com.intellij.util.containers.ContainerUtil.sorted;
 import static java.util.Objects.requireNonNull;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 @SuppressWarnings({"UseOfSystemOutOrSystemErr", "UIUtilDispatchAllInvocationEventsInTests"})
 public final class PlatformTestUtil {
@@ -179,15 +229,19 @@ public final class PlatformTestUtil {
   }
 
   public static @NotNull String print(@NotNull JTree tree, boolean withSelection) {
-    return print(tree, new TreePath(tree.getModel().getRoot()), withSelection, null, null);
+    return print(tree, new TreePath(tree.getModel().getRoot()), withSelection, null, null, null);
   }
 
   public static @NotNull String print(@NotNull JTree tree, @NotNull TreePath path, @Nullable Queryable.PrintInfo printInfo, boolean withSelection) {
-    return print(tree, path,  withSelection, printInfo, null);
+    return print(tree, path,  withSelection, printInfo, null, null);
   }
 
   public static @NotNull String print(@NotNull JTree tree, boolean withSelection, @Nullable Predicate<? super String> nodePrintCondition) {
-    return print(tree, new TreePath(tree.getModel().getRoot()), withSelection, null, nodePrintCondition);
+    return print(tree, new TreePath(tree.getModel().getRoot()), withSelection, null, nodePrintCondition, null);
+  }
+
+  public static @NotNull String print(@NotNull JTree tree, boolean withSelection, @Nullable Predicate<? super String> nodePrintCondition, @Nullable Function<PrintNodeInfo, PrintChildrenResult> beforeChildren) {
+    return print(tree, new TreePath(tree.getModel().getRoot()), withSelection, null, nodePrintCondition, beforeChildren);
   }
 
   private static String print(
@@ -195,10 +249,12 @@ public final class PlatformTestUtil {
     TreePath path,
     boolean withSelection,
     @Nullable Queryable.PrintInfo printInfo,
-    @Nullable Predicate<? super String> nodePrintCondition
+    @Nullable Predicate<? super String> nodePrintCondition,
+    @Nullable Function<PrintNodeInfo, PrintChildrenResult> beforeChildren
   ) {
     var strings = new ArrayList<String>();
-    printImpl(tree, path, strings, 0, withSelection, printInfo, nodePrintCondition);
+    Predicate<Pair<Object, String>> condition = nodePrintCondition == null ? null : pair -> nodePrintCondition.test(pair.second);
+    printImpl(tree, path, strings, 0, withSelection, printInfo, condition, beforeChildren);
     return String.join("\n", strings);
   }
 
@@ -209,13 +265,14 @@ public final class PlatformTestUtil {
     int level,
     boolean withSelection,
     @Nullable Queryable.PrintInfo printInfo,
-    @Nullable Predicate<? super String> nodePrintCondition
+    @Nullable Predicate<Pair<Object, String>> nodePrintCondition,
+    @Nullable Function<@NotNull PrintNodeInfo, @NotNull PrintChildrenResult> beforeChildren
   ) {
     var pathComponent = path.getLastPathComponent();
     var userObject = TreeUtil.getUserObject(pathComponent);
     var nodeText = toString(userObject, printInfo);
 
-    if (nodePrintCondition != null && !nodePrintCondition.test(nodeText)) {
+    if (nodePrintCondition != null && !nodePrintCondition.test(new Pair<>(userObject, nodeText))) {
       return;
     }
 
@@ -224,7 +281,15 @@ public final class PlatformTestUtil {
 
     var expanded = tree.isExpanded(path);
     var childCount = tree.getModel().getChildCount(pathComponent);
-    if (childCount > 0) {
+
+    PrintChildrenResult printChildrenResult = null;
+    PrintChildrenResult.ChildrenAction childrenAction = PrintChildrenResult.ChildrenAction.VISIT;
+    if (beforeChildren != null) {
+      printChildrenResult = beforeChildren.apply(new PrintNodeInfo(userObject, nodeText, childCount));
+      childrenAction = requireNonNull(printChildrenResult).Action;
+    }
+
+    if (childCount > 0 && childrenAction != PrintChildrenResult.ChildrenAction.REMOVE) {
       buff.append(expanded ? '-' : '+');
     }
 
@@ -242,9 +307,17 @@ public final class PlatformTestUtil {
     strings.add(buff.toString());
 
     if (expanded) {
-      for (var i = 0; i < childCount; i++) {
-        var childPath = path.pathByAddingChild(tree.getModel().getChild(pathComponent, i));
-        printImpl(tree, childPath, strings, level + 1, withSelection, printInfo, nodePrintCondition);
+      if (childrenAction == PrintChildrenResult.ChildrenAction.REPLACE) {
+        assert printChildrenResult.ReplacementText != null : "Expected children replacement text for REPLACE_CHILDREN action, but got null";
+        buff.setLength(0);
+        buff.repeat(' ', level + 1);
+        buff.append(printChildrenResult.ReplacementText);
+        strings.add(buff.toString());
+      } else if (childrenAction == PrintChildrenResult.ChildrenAction.VISIT) {
+        for (var i = 0; i < childCount; i++) {
+          var childPath = path.pathByAddingChild(tree.getModel().getChild(pathComponent, i));
+          printImpl(tree, childPath, strings, level + 1, withSelection, printInfo, nodePrintCondition, beforeChildren);
+        }
       }
     }
   }
@@ -347,14 +420,13 @@ public final class PlatformTestUtil {
       TimeoutUtil.sleep(5);
       TestOnlyThreading.releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(() -> {
         UIUtil.dispatchAllInvocationEvents();
-        return Unit.INSTANCE;
       });
     }
   }
 
   public static void waitForCallback(@NotNull ActionCallback callback) {
     var future = new CompletableFuture<>();
-    callback.doWhenDone(() -> future.complete(null)).doWhenRejected(__ -> future.complete(null));
+    callback.doWhenDone(() -> future.complete(null)).doWhenRejected(_ -> future.complete(null));
     waitForFuture(future);
   }
 
@@ -381,7 +453,6 @@ public final class PlatformTestUtil {
       if (promise.getState() == Promise.State.PENDING) {
         TestOnlyThreading.releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(() -> {
           UIUtil.dispatchAllInvocationEvents();
-          return Unit.INSTANCE;
         });
       }
       try {
@@ -463,7 +534,7 @@ public final class PlatformTestUtil {
         var laterInvoked = new AtomicBoolean();
         app.invokeLater(() -> laterInvoked.set(true));
         dispatchAllInvocationEventsInIdeEventQueue();
-        waitForAllDocumentsCommitted(10, TimeUnit.SECONDS);
+        TestApplicationKt.waitForAllDocumentsCommitted(10, TimeUnit.SECONDS);
         assertTrue(laterInvoked.get());
 
         TimeoutUtil.sleep(sleptAlready ? 10 : delay);
@@ -515,7 +586,6 @@ public final class PlatformTestUtil {
             eventQueue.dispatchEvent(event);
           }
         }
-        return Unit.INSTANCE;
       });
       return null;
     });
@@ -695,8 +765,7 @@ public final class PlatformTestUtil {
    * method {@code PerformanceTestInfoImpl#withMetricsCollector}.
    * @see BenchmarkTestInfo#start()
    */
-  // to warn about not calling .assertTiming() in the end
-  @Contract(pure = true)
+  @Contract(pure = true) // to warn about not calling .assertTiming() in the end
   public static @NotNull BenchmarkTestInfo newBenchmark(@NotNull String launchName, @NotNull ThrowableRunnable<?> test) {
     return newBenchmarkWithVariableInputSize(launchName, 1, () -> {
       test.run();
@@ -758,9 +827,12 @@ public final class PlatformTestUtil {
   }
 
   public static void waitForAllBackgroundActivityToCalmDown() {
+    // A more liberal threshold helps avoid unnecessary waits if only tiny userspace slices occur.
+    // Configurable via system property: idea.test.waitForAllBackgroundCalm.userMsThreshold (default: 10 ms).
+    long thresholdMs = Long.getLong("idea.test.waitForAllBackgroundCalm.userMsThreshold", 10L);
     for (var i = 0; i < 50; i++) {
       var data = CpuUsageData.measureCpuUsage(() -> TimeoutUtil.sleep(100));
-      if (!data.hasAnyActivityBesides(Thread.currentThread())) {
+      if (!data.hasAnyActivityBesides(Thread.currentThread(), Math.max(0L, thresholdMs))) {
         break;
       }
     }
@@ -826,6 +898,8 @@ public final class PlatformTestUtil {
     @Nullable Function<VirtualFile, String> fileNameMapper
   ) throws IOException {
     FileDocumentManager.getInstance().saveAllDocuments();
+    //Async Iops, if any in progress, may ruin the comparison -- flush them:
+    flushAllPendingVFSUpdates();
 
     var childrenAfter = dirExpected.getChildren();
     shallowCompare(dirExpected, childrenAfter);
@@ -864,8 +938,22 @@ public final class PlatformTestUtil {
   }
 
   public static void assertFilesEqual(@NotNull VirtualFile fileExpected, @NotNull VirtualFile fileActual) throws IOException {
-    var actual = fileText(fileActual);
-    var expected = fileText(fileExpected);
+    var actual = BinaryFileTypeDecompilers.getInstance().allowDecompilerSlowOperation(() -> {
+      try {
+        return fileText(fileActual);
+      }
+      catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    });
+    var expected = BinaryFileTypeDecompilers.getInstance().allowDecompilerSlowOperation(() -> {
+      try {
+        return fileText(fileExpected);
+      }
+      catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    });
     if (expected == null || actual == null) {
       assertArrayEquals(fileExpected.getPath(), fileExpected.contentsToByteArray(), fileActual.contentsToByteArray());
     }
@@ -874,6 +962,23 @@ public final class PlatformTestUtil {
         "Text mismatch in the file " + fileExpected.getName(), expected, actual,
         fileActual.getUserData(VfsTestUtil.TEST_DATA_FILE_PATH));
     }
+  }
+
+  /**
+   * Flushes IO operations pending in VFS, if any.
+   * Use before transition from VFS to File/Path, or before launching an external process that uses the file(s) modified via VFS.
+   */
+  public static void flushAllPendingVFSUpdates() throws IOException {
+    ManagingFS.getInstance().flushPendingUpdates();
+  }
+
+  /**
+   * Flushes IO operations pending in VFS (if any) for the given file.
+   * Use before transition from VFS to File/Path, or before launching an external process that uses the file previously modified
+   * via VFS.
+   */
+  public static void flushPendingVFSUpdatesFor(@NotNull VirtualFile file) throws IOException {
+    ManagingFS.getInstance().flushPendingUpdates(file);
   }
 
   private static String fileText(@NotNull VirtualFile file) throws IOException {
@@ -1393,16 +1498,5 @@ public final class PlatformTestUtil {
         "; FJP configured parallelism=" + ForkJoinPool.getCommonPoolParallelism() +
         "; FJP actual common pool parallelism=" + ForkJoinPool.commonPool().getParallelism());
     }
-  }
-
-  @TestOnly
-  public static void waitForAllDocumentsCommitted(long timeout, @NotNull TimeUnit timeUnit) {
-    var documentCommitThread = DocumentCommitThread.getInstance();
-    TestOnlyThreading.releaseTheAcquiredWriteIntentLockThenExecuteActionAndTakeWriteIntentLockBack(() -> {
-      documentCommitThread.waitForAllCommits(timeout, timeUnit);
-      return Unit.INSTANCE;
-    });
-    // some callbacks on document commit might require EDT. So we forcibly dispatch pending events to run these callbacks
-    dispatchAllInvocationEventsInIdeEventQueue();
   }
 }

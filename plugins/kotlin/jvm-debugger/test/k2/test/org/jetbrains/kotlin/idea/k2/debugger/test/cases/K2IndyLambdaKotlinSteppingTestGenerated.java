@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.k2.debugger.test.cases;
 
@@ -1323,6 +1323,11 @@ public abstract class K2IndyLambdaKotlinSteppingTestGenerated extends AbstractK2
             runTest("../testData/stepping/custom/breakpointOnLambdaWithLocalFun.kt");
         }
 
+        @TestMetadata("breakpointOnLineWithLambdaStart.kt")
+        public void testBreakpointOnLineWithLambdaStart() throws Exception {
+            runTest("../testData/stepping/custom/breakpointOnLineWithLambdaStart.kt");
+        }
+
         @TestMetadata("breakpointOnWhen.kt")
         public void testBreakpointOnWhen() throws Exception {
             runTest("../testData/stepping/custom/breakpointOnWhen.kt");
@@ -1708,6 +1713,11 @@ public abstract class K2IndyLambdaKotlinSteppingTestGenerated extends AbstractK2
             runTest("../testData/stepping/custom/skipSimpleGetters.kt");
         }
 
+        @TestMetadata("smartStepIntoAnonymousObjectReceiver.kt")
+        public void testSmartStepIntoAnonymousObjectReceiver() throws Exception {
+            runTest("../testData/stepping/custom/smartStepIntoAnonymousObjectReceiver.kt");
+        }
+
         @TestMetadata("smartStepIntoAsyncLambda.kt")
         public void testSmartStepIntoAsyncLambda() throws Exception {
             runTest("../testData/stepping/custom/smartStepIntoAsyncLambda.kt");
@@ -1748,6 +1758,11 @@ public abstract class K2IndyLambdaKotlinSteppingTestGenerated extends AbstractK2
             runTest("../testData/stepping/custom/smartStepIntoEmptyConstructor.kt");
         }
 
+        @TestMetadata("smartStepIntoEnumEqualityFun.kt")
+        public void testSmartStepIntoEnumEqualityFun() throws Exception {
+            runTest("../testData/stepping/custom/smartStepIntoEnumEqualityFun.kt");
+        }
+
         @TestMetadata("smartStepIntoFunWithContext.kt")
         public void testSmartStepIntoFunWithContext() throws Exception {
             runTest("../testData/stepping/custom/smartStepIntoFunWithContext.kt");
@@ -1758,9 +1773,19 @@ public abstract class K2IndyLambdaKotlinSteppingTestGenerated extends AbstractK2
             runTest("../testData/stepping/custom/smartStepIntoFunWithDefaultArgs.kt");
         }
 
+        @TestMetadata("smartStepIntoFunWithDestructuring.kt")
+        public void testSmartStepIntoFunWithDestructuring() throws Exception {
+            runTest("../testData/stepping/custom/smartStepIntoFunWithDestructuring.kt");
+        }
+
         @TestMetadata("smartStepIntoFunWithInlineParameter.kt")
         public void testSmartStepIntoFunWithInlineParameter() throws Exception {
             runTest("../testData/stepping/custom/smartStepIntoFunWithInlineParameter.kt");
+        }
+
+        @TestMetadata("smartStepIntoGenericWithValueClassAsParameter.kt")
+        public void testSmartStepIntoGenericWithValueClassAsParameter() throws Exception {
+            runTest("../testData/stepping/custom/smartStepIntoGenericWithValueClassAsParameter.kt");
         }
 
         @TestMetadata("smartStepIntoInlineFun.kt")
@@ -1776,6 +1801,11 @@ public abstract class K2IndyLambdaKotlinSteppingTestGenerated extends AbstractK2
         @TestMetadata("smartStepIntoInlineLambda.kt")
         public void testSmartStepIntoInlineLambda() throws Exception {
             runTest("../testData/stepping/custom/smartStepIntoInlineLambda.kt");
+        }
+
+        @TestMetadata("smartStepIntoInlineLambdaReceiverParameter.kt")
+        public void testSmartStepIntoInlineLambdaReceiverParameter() throws Exception {
+            runTest("../testData/stepping/custom/smartStepIntoInlineLambdaReceiverParameter.kt");
         }
 
         @TestMetadata("smartStepIntoInlineLambdasInFunctionsWithSameName.kt")
@@ -1866,6 +1896,11 @@ public abstract class K2IndyLambdaKotlinSteppingTestGenerated extends AbstractK2
         @TestMetadata("smartStepIntoLocalFun.kt")
         public void testSmartStepIntoLocalFun() throws Exception {
             runTest("../testData/stepping/custom/smartStepIntoLocalFun.kt");
+        }
+
+        @TestMetadata("smartStepIntoMethodHandle.kt")
+        public void testSmartStepIntoMethodHandle() throws Exception {
+            runTest("../testData/stepping/custom/smartStepIntoMethodHandle.kt");
         }
 
         @TestMetadata("smartStepIntoMethodReference.kt")

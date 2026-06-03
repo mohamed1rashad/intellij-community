@@ -1,11 +1,21 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.siyeh.ipp.concatenation;
 
 import com.intellij.modcommand.ActionContext;
 import com.intellij.modcommand.ModCommand;
 import com.intellij.modcommand.Presentation;
 import com.intellij.modcommand.PsiBasedModCommandAction;
-import com.intellij.psi.*;
+import com.intellij.openapi.project.DumbAware;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiFragment;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLiteralExpression;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiPolyadicExpression;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiTemplate;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -17,7 +27,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * @author Bas Leijdekkers
  */
-public final class CopyConcatenatedStringToClipboardIntention extends PsiBasedModCommandAction<PsiElement> {
+public final class CopyConcatenatedStringToClipboardIntention extends PsiBasedModCommandAction<PsiElement> implements DumbAware {
   public CopyConcatenatedStringToClipboardIntention() {
     super(PsiElement.class);
   }

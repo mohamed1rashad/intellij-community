@@ -12,7 +12,6 @@ import com.intellij.notification.Notifications;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.LangDataKeys;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -21,10 +20,19 @@ import com.intellij.openapi.editor.colors.EditorColorsUtil;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.fileTypes.FileTypes;
-import com.intellij.openapi.progress.*;
+import com.intellij.openapi.progress.PerformInBackgroundOption;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiBinaryFile;
+import com.intellij.psi.PsiDirectory;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
@@ -241,7 +249,7 @@ public final class TextPrintHandler extends PrintActionHandler {
   }
 
   static TextPainter initTextPainter(final PsiFile psiFile) {
-    return ReadAction.compute(() -> doInitTextPainter(psiFile));
+    return ReadAction.computeBlocking(() -> doInitTextPainter(psiFile));
   }
 
   private static TextPainter doInitTextPainter(final PsiFile psiFile) {
@@ -258,11 +266,9 @@ public final class TextPrintHandler extends PrintActionHandler {
   private static TextPainter initTextPainter(final @NotNull DocumentEx doc, final @NotNull Project project,
                                              final @NotNull String fileName) {
     final TextPainter[] res = new TextPainter[1];
-    ApplicationManager.getApplication().runReadAction(
-      () -> {
-        res[0] = doInitTextPainter(doc, project, fileName);
-      }
-    );
+    ReadAction.runBlocking(() -> {
+      res[0] = doInitTextPainter(doc, project, fileName);
+    });
     return res[0];
   }
 

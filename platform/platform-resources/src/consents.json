@@ -21,17 +21,10 @@
     "accepted": "false"
   },
   {
-    "consentId": "ai.trace.data.collection.and.use.noncom.policy",
+    "consentId": "ea.auto.report",
     "version": "1.0",
-    "text": "This includes an expanded range of IDE data with associated code snippets, such as AI feature usage, run configurations, and terminal commands. This data will be used for product improvement and model training purposes. Find more details <a href=\"https://www.jetbrains.com/legal/docs/terms/product_data_collection/\">here</a>.",
-    "printableName": "Send detailed code-related data",
-    "accepted": "false"
-  },
-  {
-    "consentId": "ai.trace.data.collection.and.use.com.policy",
-    "version": "1.0",
-    "text": "This includes an expanded range of IDE data with associated code snippets, such as AI feature usage, run configurations, and terminal commands. This data will be used for product improvement and model training purposes. Find more details <a href=\"https://www.jetbrains.com/legal/docs/terms/product_data_collection/\">here</a>.",
-    "printableName": "Send detailed code-related data",
+    "text": "These reports may include exception details, code fragments, and system info.<br/><br/>I acknowledge that JetBrains s.r.o. may process my personal data (if contained in the error reports), and may engage <a href=\"https://www.jetbrains.com/legal/privacy/third-parties.html\" target=\"_blank\">third parties</a> in such processing. More details about the processing are in <a href=\"https://www.jetbrains.com/legal/docs/privacy/privacy/\" target=\"_blank\">JetBrains Privacy Notice</a>.",
+    "printableName": "Send error reports to JetBrains automatically",
     "accepted": "false"
   }
 ]

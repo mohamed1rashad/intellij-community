@@ -2,8 +2,7 @@
 package com.intellij.codeInspection.nullable;
 
 import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo;
-import com.intellij.codeInsight.options.JavaInspectionButtons;
-import com.intellij.codeInsight.options.JavaInspectionControls;
+import com.intellij.codeInsight.options.JavaConfigurationDialogKind;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.LocalQuickFixOnPsiElement;
 import com.intellij.codeInspection.ProblemDescriptor;
@@ -11,6 +10,7 @@ import com.intellij.codeInspection.options.OptPane;
 import com.intellij.codeInspection.options.OptionController;
 import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.java.JavaBundle;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.PsiElement;
@@ -20,11 +20,17 @@ import com.intellij.psi.PsiParameter;
 import com.intellij.psi.impl.search.JavaNullMethodArgumentUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.usageView.UsageInfo;
-import com.intellij.usages.*;
+import com.intellij.usages.Usage;
+import com.intellij.usages.UsageInfo2UsageAdapter;
+import com.intellij.usages.UsageSearcher;
+import com.intellij.usages.UsageTarget;
+import com.intellij.usages.UsageViewManager;
+import com.intellij.usages.UsageViewPresentation;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import static com.intellij.codeInspection.options.OptPane.checkbox;
 import static com.intellij.codeInspection.options.OptPane.pane;
@@ -41,14 +47,26 @@ public class NullableStuffInspection extends NullableStuffInspectionBase {
       checkbox("REPORT_NOTNULL_PARAMETER_OVERRIDES_NULLABLE", JavaBundle.message("inspection.nullable.problems.method.overrides.notnull.option")),
       checkbox("REPORT_NOT_ANNOTATED_METHOD_OVERRIDES_NOTNULL", JavaBundle.message("inspection.nullable.problems.method.overrides.option"),
                checkbox("IGNORE_EXTERNAL_SUPER_NOTNULL", JavaBundle.message("inspection.nullable.problems.ignore.external.notnull"))),
+      checkbox("REPORT_NOT_ANNOTATED_INSTANTIATION_NOT_NULL_TYPE", JavaBundle.message("inspection.nullable.problems.method.non.annotated.type.argument.option")),
       checkbox("REPORT_NOTNULL_PARAMETERS_OVERRIDES_NOT_ANNOTATED", JavaBundle.message("inspection.nullable.problems.notnull.overrides.option")),
       checkbox("REPORT_NOT_ANNOTATED_GETTER", JavaBundle.message("inspection.nullable.problems.not.annotated.getters.for.annotated.fields")),
       checkbox("REPORT_NULLS_PASSED_TO_NOT_NULL_PARAMETER", JavaBundle.message("inspection.nullable.problems.notnull.parameters.with.null.literal.option")),
       checkbox("REPORT_NULLABILITY_ANNOTATION_ON_LOCALS", JavaBundle.message("inspection.nullable.problems.nullability.on.locals")),
       checkbox("REPORT_NOT_NULL_TO_NULLABLE_CONFLICTS_IN_ASSIGNMENTS", JavaBundle.message(
         "inspection.nullable.problems.notnull.to.nullable.assignment.conflicts")),
-      JavaInspectionControls.button(JavaInspectionButtons.ButtonKind.NULLABILITY_ANNOTATIONS)
+      checkbox("REPORT_REDUNDANT_NULLABILITY_ANNOTATION_IN_THE_SCOPE_OF_ANNOTATED_CONTAINER", JavaBundle.message(
+        "inspection.nullable.problems.redundant.nullability.inside.container")),
+      JavaConfigurationDialogKind.NULLABILITY_ANNOTATIONS.button()
     );
+  }
+
+  @Override
+  public @Nullable @Nls String getStaticDescription() {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      return "";
+    } else {
+      return null;
+    }
   }
 
   @Override

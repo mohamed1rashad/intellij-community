@@ -17,13 +17,17 @@ package com.intellij.refactoring.ui;
 
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.refactoring.RefactoringBundle;
-import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.ui.dsl.listCellRenderer.BuilderKt;
 import com.intellij.util.ui.DialogUtil;
 import com.intellij.util.ui.UpDownHandler;
 
-import javax.swing.*;
+import javax.swing.AbstractAction;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.ListCellRenderer;
 import javax.swing.event.ChangeEvent;
-import java.awt.*;
+import java.awt.BorderLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
@@ -65,7 +69,7 @@ public class ComboBoxVisibilityPanel<V> extends VisibilityPanelBase<V> {
   }
 
   protected ListCellRenderer<?> getRenderer() {
-    return SimpleListCellRenderer.<V>create("", myNamesMap::get);
+    return BuilderKt.textListCellRenderer("", myNamesMap::get);
   }
 
   public ComboBoxVisibilityPanel(@NlsContexts.Label String name, V[] options) {

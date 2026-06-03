@@ -5,29 +5,90 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
-import com.intellij.psi.util.*;
-import com.intellij.util.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.HierarchicalMethodSignature;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.LambdaUtil;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
+import com.intellij.psi.PsiAnnotationMethod;
+import com.intellij.psi.PsiAnnotationOwner;
+import com.intellij.psi.PsiAnnotationParameterList;
+import com.intellij.psi.PsiArrayInitializerMemberValue;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiConstantEvaluationHelper;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiLambdaExpression;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameValuePair;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiParameterList;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiResolveHelper;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.util.CachedValueProvider;
+import com.intellij.psi.util.CachedValuesManager;
+import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.ParameterizedCachedValue;
+import com.intellij.psi.util.ParameterizedCachedValueProvider;
+import com.intellij.psi.util.PsiModificationTracker;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.BitUtil;
+import com.intellij.util.Consumer;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.Processors;
+import com.intellij.util.ReflectionUtil;
+import com.intellij.util.SmartList;
 import com.intellij.util.containers.ConcurrentFactoryMap;
 import com.intellij.util.containers.ContainerUtil;
 import org.intellij.lang.annotations.MagicConstant;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.lang.annotation.Annotation;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Target;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Stream;
 
 @ApiStatus.NonExtendable
 public class AnnotationUtil {
-  public static final String NULLABLE = "org.jetbrains.annotations.Nullable";
-  public static final String UNKNOWN_NULLABILITY = "org.jetbrains.annotations.UnknownNullability";
-  public static final String NOT_NULL = "org.jetbrains.annotations.NotNull";
-  public static final String NOT_NULL_BY_DEFAULT = "org.jetbrains.annotations.NotNullByDefault";
+  public static final @NlsSafe String NULLABLE = "org.jetbrains.annotations.Nullable";
+  public static final @NlsSafe String NULLABLE_SHORT = "Nullable";
+  public static final @NlsSafe String UNKNOWN_NULLABILITY = "org.jetbrains.annotations.UnknownNullability";
+  public static final @NlsSafe String NOT_NULL = "org.jetbrains.annotations.NotNull";
+  public static final @NlsSafe String NOT_NULL_SHORT = "NotNull";
+  public static final @NlsSafe String NOT_NULL_BY_DEFAULT = "org.jetbrains.annotations.NotNullByDefault";
 
   public static final String J_SPECIFY_NON_NULL = "org.jspecify.annotations.NonNull";
   public static final String J_SPECIFY_NULLABLE = "org.jspecify.annotations.Nullable";
+  public static final String J_SPECIFY_NULL_MARKED = "org.jspecify.annotations.NullMarked";
+  public static final String J_SPECIFY_NULL_UNMARKED = "org.jspecify.annotations.NullUnmarked";
 
   public static final String NON_NLS = "org.jetbrains.annotations.NonNls";
   public static final String NLS = "org.jetbrains.annotations.Nls";
@@ -339,8 +400,14 @@ public class AnnotationUtil {
 
     if (BitUtil.isSet(flags, CHECK_EXTERNAL)) {
       Project project = listOwner.getProject();
-      if (ExternalAnnotationsManager.getInstance(project).findExternalAnnotation(listOwner, annotationFQN) != null) {
+      ExternalAnnotationsManager manager = ExternalAnnotationsManager.getInstance(project);
+      if (manager.findExternalAnnotation(listOwner, annotationFQN) != null) {
         return true;
+      }
+      if (BitUtil.isSet(flags, CHECK_TYPE)) {
+        if (manager.findExternalTypeAnnotation(listOwner, "", annotationFQN) != null) {
+          return true;
+        }
       }
     }
 
@@ -543,11 +610,11 @@ public class AnnotationUtil {
   }
 
   public static boolean isInferredAnnotation(@NotNull PsiAnnotation annotation) {
-    return InferredAnnotationsManager.getInstance(annotation.getProject()).isInferredAnnotation(annotation);
+    return InferredAnnotationsManager.isInferredAnnotation(annotation);
   }
 
   public static boolean isExternalAnnotation(@NotNull PsiAnnotation annotation) {
-    return ExternalAnnotationsManager.getInstance(annotation.getProject()).isExternalAnnotation(annotation);
+    return ExternalAnnotationsManager.isExternal(annotation);
   }
 
   public static @Nullable @NlsSafe String getStringAttributeValue(@NotNull PsiAnnotation anno, final @Nullable String attributeName) {
@@ -721,16 +788,6 @@ public class AnnotationUtil {
   @ApiStatus.ScheduledForRemoval
   public static boolean isAnnotated(@NotNull PsiModifierListOwner listOwner, @NotNull String annotationFQN, boolean checkHierarchy) {
     return isAnnotated(listOwner, annotationFQN, flags(checkHierarchy, true, true));
-  }
-
-  /** @deprecated use {@link #isAnnotated(PsiModifierListOwner, String, int)} */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval
-  public static boolean isAnnotated(@NotNull PsiModifierListOwner listOwner,
-                                    @NotNull String annotationFQN,
-                                    boolean checkHierarchy,
-                                    boolean skipExternal) {
-    return isAnnotated(listOwner, annotationFQN, flags(checkHierarchy, skipExternal, skipExternal));
   }
 
   @Flags

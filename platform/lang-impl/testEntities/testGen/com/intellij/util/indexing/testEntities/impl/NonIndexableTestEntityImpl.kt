@@ -1,7 +1,16 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.util.indexing.testEntities.impl
 
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.ConnectionId
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
+import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
+import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
@@ -9,20 +18,18 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
-import com.intellij.util.indexing.testEntities.ModifiableNonIndexableTestEntity
 import com.intellij.util.indexing.testEntities.NonIndexableTestEntity
+import com.intellij.util.indexing.testEntities.NonIndexableTestEntityBuilder
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class NonIndexableTestEntityImpl(private val dataSource: NonIndexableTestEntityData) : NonIndexableTestEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class NonIndexableTestEntityImpl(private val dataSource: NonIndexableTestEntityData) : NonIndexableTestEntity,
+                                                                                                WorkspaceEntityBase(dataSource) {
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -43,8 +50,8 @@ internal class NonIndexableTestEntityImpl(private val dataSource: NonIndexableTe
   }
 
 
-  internal class Builder(result: NonIndexableTestEntityData?) : ModifiableWorkspaceEntityBase<NonIndexableTestEntity, NonIndexableTestEntityData>(
-    result), ModifiableNonIndexableTestEntity {
+  internal class Builder(result: NonIndexableTestEntityData?) :
+    ModifiableWorkspaceEntityBase<NonIndexableTestEntity, NonIndexableTestEntityData>(result), NonIndexableTestEntityBuilder {
     internal constructor() : this(NonIndexableTestEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -57,16 +64,14 @@ internal class NonIndexableTestEntityImpl(private val dataSource: NonIndexableTe
           error("Entity NonIndexableTestEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
       index(this, "root", this.root)
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -102,7 +107,6 @@ internal class NonIndexableTestEntityImpl(private val dataSource: NonIndexableTe
         changedProperty.add("entitySource")
 
       }
-
     override var root: VirtualFileUrl
       get() = getEntityData().root
       set(value) {
@@ -115,6 +119,7 @@ internal class NonIndexableTestEntityImpl(private val dataSource: NonIndexableTe
 
     override fun getEntityClass(): Class<NonIndexableTestEntity> = NonIndexableTestEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -123,14 +128,13 @@ internal class NonIndexableTestEntityData : WorkspaceEntityData<NonIndexableTest
 
   internal fun isRootInitialized(): Boolean = ::root.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<NonIndexableTestEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<NonIndexableTestEntity> {
     val modifiable = NonIndexableTestEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): NonIndexableTestEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -149,9 +153,8 @@ internal class NonIndexableTestEntityData : WorkspaceEntityData<NonIndexableTest
     return NonIndexableTestEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return NonIndexableTestEntity(root, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return NonIndexableTestEntity(root, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -162,9 +165,7 @@ internal class NonIndexableTestEntityData : WorkspaceEntityData<NonIndexableTest
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as NonIndexableTestEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.root != other.root) return false
     return true
@@ -173,9 +174,7 @@ internal class NonIndexableTestEntityData : WorkspaceEntityData<NonIndexableTest
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as NonIndexableTestEntityData
-
     if (this.root != other.root) return false
     return true
   }

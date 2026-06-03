@@ -1,11 +1,18 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.application;
 
 import com.intellij.codeInsight.completion.CompletionParameters;
 import com.intellij.execution.ExecutionBundle;
-import com.intellij.execution.configurations.ConfigurationUtil;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
-import com.intellij.execution.ui.*;
+import com.intellij.execution.ui.CommonJavaFragments;
+import com.intellij.execution.ui.CommonParameterFragments;
+import com.intellij.execution.ui.ConfigurationModuleSelector;
+import com.intellij.execution.ui.DefaultJreSelector;
+import com.intellij.execution.ui.JrePathEditor;
+import com.intellij.execution.ui.ModuleClasspathCombo;
+import com.intellij.execution.ui.SettingsEditorFragment;
+import com.intellij.execution.ui.TagButton;
+import com.intellij.execution.ui.TargetPathFragment;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Editor;
@@ -24,8 +31,10 @@ import com.intellij.util.ui.GridBag;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.event.MouseListener;
 import java.util.Collection;
 import java.util.Collections;
@@ -71,6 +80,17 @@ public final class JavaApplicationSettingsEditor extends JavaSettingsEditorBase<
                                                      configuration.setImplicitClassConfiguration(value);
                                                      updateMainClassFragment(configuration.isImplicitClassConfiguration());
                                                    }));
+    // "Do not use module path" option availability in background to avoid calling indexes from EDT
+    if (!getProject().isDefault()) {
+      SettingsEditorFragment<ApplicationConfiguration, TagButton> fragment =
+        SettingsEditorFragment.createTag("app.use.module.path",
+                                         ExecutionBundle.message("do.not.use.module.path.tag"),
+                                         ExecutionBundle.message("group.java.options"),
+                                         configuration -> !configuration.isUseModulePath(),
+                                         (configuration, value) -> configuration.setUseModulePath(!value));
+      fragments.add(fragment);
+    }
+
     fragments.add(commonParameterFragments.programArguments());
     fragments.add(new TargetPathFragment<>());
     fragments.add(commonParameterFragments.createRedirectFragment());

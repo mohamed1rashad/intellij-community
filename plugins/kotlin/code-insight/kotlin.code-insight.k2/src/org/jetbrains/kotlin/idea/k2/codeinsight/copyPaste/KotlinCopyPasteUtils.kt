@@ -18,7 +18,6 @@ import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
 import org.jetbrains.kotlin.psi.psiUtil.elementsInRange
 import org.jetbrains.kotlin.utils.exceptions.errorWithAttachment
 import org.jetbrains.kotlin.utils.exceptions.withPsiEntry
-import kotlin.collections.flatMap
 
 internal val KaSymbol.isExtension: Boolean get() = this is KaCallableSymbol && isExtension
 
@@ -35,8 +34,8 @@ internal fun <T> Collection<T>.toSortedStringSet(): Set<String> = map { it.toStr
 /**
  * In the resulting map symbols that cannot be imported (e.g., local symbols) are associated with `null` key.
  */
-context(_: KaSession)
 @OptIn(KaIdeApi::class)
+context(_: KaSession)
 internal fun KtReference.getResolvedSymbolsGroupedByImportableFqName(): Map<FqName?, List<KaSymbol>> = resolveToImportableSymbols()
     .groupBy { symbol -> symbol.importableFqName }
 

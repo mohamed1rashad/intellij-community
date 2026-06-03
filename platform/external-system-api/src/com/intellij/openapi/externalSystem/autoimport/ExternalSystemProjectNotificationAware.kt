@@ -65,13 +65,10 @@ interface ExternalSystemProjectNotificationAware {
       return project.getService(ExternalSystemProjectNotificationAware::class.java)
     }
 
-    @Deprecated("Use ExternalSystemProjectNotificationAware#TOPIC directly")
-    fun whenNotificationChanged(project: Project, listener: () -> Unit) {
-      whenNotificationChanged(project, null, listener)
-    }
-
-    @Deprecated("Use ExternalSystemProjectNotificationAware#TOPIC directly")
-    fun whenNotificationChanged(project: Project, parentDisposable: Disposable?, listener: () -> Unit) {
+    /**
+     * Don't use in new code, will be removed along with [isNotificationVisibleProperty].
+     */
+    private fun whenNotificationChanged(project: Project, parentDisposable: Disposable?, listener: () -> Unit) {
       val aProject = project
       val messageBus = ApplicationManager.getApplication().messageBus
       val connection = messageBus.connect(parentDisposable ?: project)

@@ -1,54 +1,49 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:Experimental
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.java.impl.dependencySubstitution.impl
 
 import com.intellij.java.impl.dependencySubstitution.LibraryMavenCoordinateEntity
-import com.intellij.java.impl.dependencySubstitution.ModifiableLibraryMavenCoordinateEntity
+import com.intellij.java.impl.dependencySubstitution.LibraryMavenCoordinateEntityBuilder
 import com.intellij.java.library.MavenCoordinates
 import com.intellij.platform.workspace.jps.entities.LibraryEntity
-import com.intellij.platform.workspace.jps.entities.ModifiableLibraryEntity
+import com.intellij.platform.workspace.jps.entities.LibraryEntityBuilder
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
-import com.intellij.platform.workspace.storage.annotations.Parent
 import com.intellij.platform.workspace.storage.impl.EntityLink
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.extractOneToOneParent
-import com.intellij.platform.workspace.storage.impl.updateOneToOneParentOfChild
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.instrumentation.MutableEntityStorageInstrumentation
+import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
-import org.jetbrains.annotations.ApiStatus.Experimental
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
 @OptIn(WorkspaceEntityInternalApi::class)
-internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryMavenCoordinateEntityData) : LibraryMavenCoordinateEntity, WorkspaceEntityBase(
-  dataSource) {
+internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryMavenCoordinateEntityData) : LibraryMavenCoordinateEntity,
+                                                                                                            WorkspaceEntityBase(dataSource) {
 
   private companion object {
     internal val LIBRARY_CONNECTION_ID: ConnectionId = ConnectionId.create(LibraryEntity::class.java,
                                                                            LibraryMavenCoordinateEntity::class.java,
-                                                                           ConnectionId.ConnectionType.ONE_TO_ONE, false)
-
-    private val connections = listOf<ConnectionId>(
-      LIBRARY_CONNECTION_ID,
-    )
+                                                                           ConnectionId.ConnectionType.ONE_TO_ONE,
+                                                                           false)
+    private val connections = listOf<ConnectionId>(LIBRARY_CONNECTION_ID)
 
   }
 
   override val library: LibraryEntity
-    get() = snapshot.extractOneToOneParent(LIBRARY_CONNECTION_ID, this)!!
-
+    get() = snapshot.instrumentation.getParent(LIBRARY_CONNECTION_ID, this) as? LibraryEntity
+            ?: error("Parent library not found for LibraryMavenCoordinateEntity")
   override val coordinates: MavenCoordinates
     get() {
       readField("coordinates")
@@ -66,8 +61,9 @@ internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryM
   }
 
 
-  internal class Builder(result: LibraryMavenCoordinateEntityData?) : ModifiableWorkspaceEntityBase<LibraryMavenCoordinateEntity, LibraryMavenCoordinateEntityData>(
-    result), ModifiableLibraryMavenCoordinateEntity {
+  internal class Builder(result: LibraryMavenCoordinateEntityData?) :
+    ModifiableWorkspaceEntityBase<LibraryMavenCoordinateEntity, LibraryMavenCoordinateEntityData>(result),
+    LibraryMavenCoordinateEntityBuilder {
     internal constructor() : this(LibraryMavenCoordinateEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -80,15 +76,13 @@ internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryM
           error("Entity LibraryMavenCoordinateEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -99,7 +93,7 @@ internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryM
         error("Field WorkspaceEntity#entitySource should be initialized")
       }
       if (_diff != null) {
-        if (_diff.extractOneToOneParent<WorkspaceEntityBase>(LIBRARY_CONNECTION_ID, this) == null) {
+        if (_diff.instrumentation.getParentBuilder(LIBRARY_CONNECTION_ID, this) == null) {
           error("Field LibraryMavenCoordinateEntity#library should be initialized")
         }
       }
@@ -134,17 +128,17 @@ internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryM
         changedProperty.add("entitySource")
 
       }
-
-    override var library: ModifiableLibraryEntity
+    override var library: LibraryEntityBuilder
       get() {
         val _diff = diff
         return if (_diff != null) {
-          @OptIn(EntityStorageInstrumentationApi::class)
-          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(LIBRARY_CONNECTION_ID, this) as? ModifiableLibraryEntity)
-          ?: (this.entityLinks[EntityLink(false, LIBRARY_CONNECTION_ID)]!! as ModifiableLibraryEntity)
+          ((_diff as MutableEntityStorageInstrumentation).getParentBuilder(LIBRARY_CONNECTION_ID, this) as? LibraryEntityBuilder)
+          ?: (this.entityLinks[EntityLink(false, LIBRARY_CONNECTION_ID)] as? LibraryEntityBuilder)
+          ?: error("library is null for LibraryMavenCoordinateEntity")
         }
         else {
-          this.entityLinks[EntityLink(false, LIBRARY_CONNECTION_ID)]!! as ModifiableLibraryEntity
+          (this.entityLinks[EntityLink(false, LIBRARY_CONNECTION_ID)] as? LibraryEntityBuilder)
+          ?: error("library is null for LibraryMavenCoordinateEntity")
         }
       }
       set(value) {
@@ -154,18 +148,17 @@ internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryM
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(true, LIBRARY_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
+// else you're attaching a new entity to an existing entity that is not modifiable
           _diff.addEntity(value as ModifiableWorkspaceEntityBase<WorkspaceEntity, *>)
         }
         if (_diff != null && (value !is ModifiableWorkspaceEntityBase<*, *> || value.diff != null)) {
-          _diff.updateOneToOneParentOfChild(LIBRARY_CONNECTION_ID, this, value)
+          _diff.instrumentation.addChild(LIBRARY_CONNECTION_ID, value, this)
         }
         else {
           if (value is ModifiableWorkspaceEntityBase<*, *>) {
             value.entityLinks[EntityLink(true, LIBRARY_CONNECTION_ID)] = this
           }
-          // else you're attaching a new entity to an existing entity that is not modifiable
-
+// else you're attaching a new entity to an existing entity that is not modifiable
           this.entityLinks[EntityLink(false, LIBRARY_CONNECTION_ID)] = value
         }
         changedProperty.add("library")
@@ -182,22 +175,22 @@ internal class LibraryMavenCoordinateEntityImpl(private val dataSource: LibraryM
 
     override fun getEntityClass(): Class<LibraryMavenCoordinateEntity> = LibraryMavenCoordinateEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
 internal class LibraryMavenCoordinateEntityData : WorkspaceEntityData<LibraryMavenCoordinateEntity>() {
-  lateinit var coordinates: MavenCoordinates
+  public lateinit var coordinates: MavenCoordinates
 
   internal fun isCoordinatesInitialized(): Boolean = ::coordinates.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<LibraryMavenCoordinateEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<LibraryMavenCoordinateEntity> {
     val modifiable = LibraryMavenCoordinateEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): LibraryMavenCoordinateEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -209,17 +202,16 @@ internal class LibraryMavenCoordinateEntityData : WorkspaceEntityData<LibraryMav
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.java.impl.dependencySubstitution.LibraryMavenCoordinateEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.java.impl.dependencySubstitution.LibraryMavenCoordinateEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return LibraryMavenCoordinateEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
     return LibraryMavenCoordinateEntity(coordinates, entitySource) {
-      parents.filterIsInstance<ModifiableLibraryEntity>().singleOrNull()?.let { this.library = it }
+      parents.filterIsInstance<LibraryEntityBuilder>().singleOrNull()?.let { this.library = it }
     }
   }
 
@@ -232,9 +224,7 @@ internal class LibraryMavenCoordinateEntityData : WorkspaceEntityData<LibraryMav
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as LibraryMavenCoordinateEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.coordinates != other.coordinates) return false
     return true
@@ -243,9 +233,7 @@ internal class LibraryMavenCoordinateEntityData : WorkspaceEntityData<LibraryMav
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as LibraryMavenCoordinateEntityData
-
     if (this.coordinates != other.coordinates) return false
     return true
   }

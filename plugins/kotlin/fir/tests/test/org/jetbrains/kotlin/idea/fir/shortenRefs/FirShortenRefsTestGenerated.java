@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.fir.shortenRefs;
 
@@ -99,6 +99,16 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
                 runTest("../../idea/tests/testData/shortenRefsFir/calls/extenstionFunctionReceiverNotShortened.kt");
             }
 
+            @TestMetadata("functionFromNestedObject.kt")
+            public void testFunctionFromNestedObject() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/calls/functionFromNestedObject.kt");
+            }
+
+            @TestMetadata("functionFromNestedObject_ImportNestedClasses.kt")
+            public void testFunctionFromNestedObject_ImportNestedClasses() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/calls/functionFromNestedObject_ImportNestedClasses.kt");
+            }
+
             @TestMetadata("functionInSameFile.kt")
             public void testFunctionInSameFile() throws Exception {
                 runTest("../../idea/tests/testData/shortenRefsFir/calls/functionInSameFile.kt");
@@ -132,6 +142,11 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
             @TestMetadata("nestedClassConstructor.kt")
             public void testNestedClassConstructor() throws Exception {
                 runTest("../../idea/tests/testData/shortenRefsFir/calls/nestedClassConstructor.kt");
+            }
+
+            @TestMetadata("nestedClassConstructor_ImportNestedClasses.kt")
+            public void testNestedClassConstructor_ImportNestedClasses() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/calls/nestedClassConstructor_ImportNestedClasses.kt");
             }
 
             @TestMetadata("nestedClassConstructor_imported.kt")
@@ -226,6 +241,124 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
         }
 
         @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("../../idea/tests/testData/shortenRefsFir/companionReference")
+        public static class CompanionReference extends AbstractFirShortenRefsTest {
+            @java.lang.Override
+            @org.jetbrains.annotations.NotNull
+            public final KotlinPluginMode getPluginMode() {
+                return KotlinPluginMode.K2;
+            }
+
+            private void runTest(String testDataFilePath) throws Exception {
+                KotlinTestUtils.runTest(this::doTestWithMuting, this, testDataFilePath);
+            }
+
+            @TestMetadata("callableRefsOnCompanion.kt")
+            public void testCallableRefsOnCompanion() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/callableRefsOnCompanion.kt");
+            }
+
+            @TestMetadata("classLiteralOnCompanion.kt")
+            public void testClassLiteralOnCompanion() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/classLiteralOnCompanion.kt");
+            }
+
+            @TestMetadata("classObject.kt")
+            public void testClassObject() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/classObject.kt");
+            }
+
+            @TestMetadata("companionReferenceInsideOfClass.kt")
+            public void testCompanionReferenceInsideOfClass() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/companionReferenceInsideOfClass.kt");
+            }
+
+            @TestMetadata("companionReferenceInsideOfClass_conflict.kt")
+            public void testCompanionReferenceInsideOfClass_conflict() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/companionReferenceInsideOfClass_conflict.kt");
+            }
+
+            @TestMetadata("removeCompanionRefInCalleeExpression.kt")
+            public void testRemoveCompanionRefInCalleeExpression() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/removeCompanionRefInCalleeExpression.kt");
+            }
+
+            @TestMetadata("removeCompanionRefWithQualifiedReceiverInCalleeExpression.kt")
+            public void testRemoveCompanionRefWithQualifiedReceiverInCalleeExpression() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/removeCompanionRefWithQualifiedReceiverInCalleeExpression.kt");
+            }
+
+            @TestMetadata("shortCompanionRefInsideShortenedCall.kt")
+            public void testShortCompanionRefInsideShortenedCall() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/companionReference/shortCompanionRefInsideShortenedCall.kt");
+            }
+        }
+
+        @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution")
+        public static class ContextSensitiveResolution extends AbstractFirShortenRefsTest {
+            @java.lang.Override
+            @org.jetbrains.annotations.NotNull
+            public final KotlinPluginMode getPluginMode() {
+                return KotlinPluginMode.K2;
+            }
+
+            private void runTest(String testDataFilePath) throws Exception {
+                KotlinTestUtils.runTest(this::doTestWithMuting, this, testDataFilePath);
+            }
+
+            @TestMetadata("enumEntryFeatureDisabled.kt")
+            public void testEnumEntryFeatureDisabled() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryFeatureDisabled.kt");
+            }
+
+            @TestMetadata("enumEntryFromDifferentPackage.kt")
+            public void testEnumEntryFromDifferentPackage() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryFromDifferentPackage.kt");
+            }
+
+            @TestMetadata("enumEntryInEquality.kt")
+            public void testEnumEntryInEquality() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryInEquality.kt");
+            }
+
+            @TestMetadata("enumEntryInFunctionParameter.kt")
+            public void testEnumEntryInFunctionParameter() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryInFunctionParameter.kt");
+            }
+
+            @TestMetadata("enumEntryInVariableDeclaration.kt")
+            public void testEnumEntryInVariableDeclaration() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryInVariableDeclaration.kt");
+            }
+
+            @TestMetadata("enumEntryInWhenCondition.kt")
+            public void testEnumEntryInWhenCondition() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryInWhenCondition.kt");
+            }
+
+            @TestMetadata("enumEntryNoExpectedType.kt")
+            public void testEnumEntryNoExpectedType() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/enumEntryNoExpectedType.kt");
+            }
+
+            @TestMetadata("sealedSubObjectInFunctionParameter.kt")
+            public void testSealedSubObjectInFunctionParameter() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/sealedSubObjectInFunctionParameter.kt");
+            }
+
+            @TestMetadata("sealedSubObjectInVariableDeclaration.kt")
+            public void testSealedSubObjectInVariableDeclaration() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/sealedSubObjectInVariableDeclaration.kt");
+            }
+
+            @TestMetadata("sealedSubObjectNoExpectedType.kt")
+            public void testSealedSubObjectNoExpectedType() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/contextSensitiveResolution/sealedSubObjectNoExpectedType.kt");
+            }
+        }
+
+        @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("../../idea/tests/testData/shortenRefsFir/fakeRootPackage")
         public static class FakeRootPackage extends AbstractFirShortenRefsTest {
             @java.lang.Override
@@ -257,6 +390,11 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
                 KotlinTestUtils.runTest(this::doTestWithMuting, this, testDataFilePath);
             }
 
+            @TestMetadata("AlreadyImportedEnum.kt")
+            public void testAlreadyImportedEnum() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/quailfiers/AlreadyImportedEnum.kt");
+            }
+
             @TestMetadata("AlreadyImportedNestedType.kt")
             public void testAlreadyImportedNestedType() throws Exception {
                 runTest("../../idea/tests/testData/shortenRefsFir/quailfiers/AlreadyImportedNestedType.kt");
@@ -267,9 +405,19 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
                 runTest("../../idea/tests/testData/shortenRefsFir/quailfiers/Enum.kt");
             }
 
+            @TestMetadata("FilteredNestedType.kt")
+            public void testFilteredNestedType() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/quailfiers/FilteredNestedType.kt");
+            }
+
             @TestMetadata("NestedTypeInSameFile.kt")
             public void testNestedTypeInSameFile() throws Exception {
                 runTest("../../idea/tests/testData/shortenRefsFir/quailfiers/NestedTypeInSameFile.kt");
+            }
+
+            @TestMetadata("NestedTypeInSameFile_ImportNestedClasses.kt")
+            public void testNestedTypeInSameFile_ImportNestedClasses() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/quailfiers/NestedTypeInSameFile_ImportNestedClasses.kt");
             }
 
             @TestMetadata("NotImportedNestedType.kt")
@@ -419,6 +567,11 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
                 runTest("../../idea/tests/testData/shortenRefsFir/types/ParameterTypeNestedTypeWithoutPackageNotShorten.kt");
             }
 
+            @TestMetadata("ParameterTypeNestedType_ImportNestedClasses.kt")
+            public void testParameterTypeNestedType_ImportNestedClasses() throws Exception {
+                runTest("../../idea/tests/testData/shortenRefsFir/types/ParameterTypeNestedType_ImportNestedClasses.kt");
+            }
+
             @TestMetadata("ParameterTypeNonImportedClass.kt")
             public void testParameterTypeNonImportedClass() throws Exception {
                 runTest("../../idea/tests/testData/shortenRefsFir/types/ParameterTypeNonImportedClass.kt");
@@ -522,6 +675,85 @@ public abstract class FirShortenRefsTestGenerated extends AbstractFirShortenRefs
         @TestMetadata("visitorConflict.kt")
         public void testVisitorConflict() throws Exception {
             runTest("../../idea/tests/testData/shortenRefs/this/visitorConflict.kt");
+        }
+    }
+
+    @RunWith(JUnit3RunnerWithInners.class)
+    @TestMetadata("../../idea/tests/testData/shortenRefs/java")
+    public static class Java extends AbstractFirShortenRefsTest {
+        @java.lang.Override
+        @org.jetbrains.annotations.NotNull
+        public final KotlinPluginMode getPluginMode() {
+            return KotlinPluginMode.K2;
+        }
+
+        private void runTest(String testDataFilePath) throws Exception {
+            KotlinTestUtils.runTest(this::doTestWithMuting, this, testDataFilePath);
+        }
+
+        @TestMetadata("filteredClassImport.kt")
+        public void testFilteredClassImport() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/filteredClassImport.kt");
+        }
+
+        @TestMetadata("filteredClassNoImports.kt")
+        public void testFilteredClassNoImports() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/filteredClassNoImports.kt");
+        }
+
+        @TestMetadata("innerClassImport.kt")
+        public void testInnerClassImport() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/innerClassImport.kt");
+        }
+
+        @TestMetadata("innerClassNoImports.kt")
+        public void testInnerClassNoImports() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/innerClassNoImports.kt");
+        }
+
+        @TestMetadata("innerClassOnDemandImport.kt")
+        public void testInnerClassOnDemandImport() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/innerClassOnDemandImport.kt");
+        }
+
+        @TestMetadata("redundantGrandParentClassQualifier.kt")
+        public void testRedundantGrandParentClassQualifier() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/redundantGrandParentClassQualifier.kt");
+        }
+
+        @TestMetadata("redundantGrandParentClassQualifierAmbiguous.kt")
+        public void testRedundantGrandParentClassQualifierAmbiguous() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/redundantGrandParentClassQualifierAmbiguous.kt");
+        }
+
+        @TestMetadata("staticClassNoImports.kt")
+        public void testStaticClassNoImports() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/staticClassNoImports.kt");
+        }
+
+        @TestMetadata("staticClassOnDemandImport.kt")
+        public void testStaticClassOnDemandImport() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/staticClassOnDemandImport.kt");
+        }
+
+        @TestMetadata("staticFieldNoImports.kt")
+        public void testStaticFieldNoImports() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/staticFieldNoImports.kt");
+        }
+
+        @TestMetadata("staticFieldOnDemandImport.kt")
+        public void testStaticFieldOnDemandImport() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/staticFieldOnDemandImport.kt");
+        }
+
+        @TestMetadata("staticMethodNoImports.kt")
+        public void testStaticMethodNoImports() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/staticMethodNoImports.kt");
+        }
+
+        @TestMetadata("staticMethodOnDemandImport.kt")
+        public void testStaticMethodOnDemandImport() throws Exception {
+            runTest("../../idea/tests/testData/shortenRefs/java/staticMethodOnDemandImport.kt");
         }
     }
 }

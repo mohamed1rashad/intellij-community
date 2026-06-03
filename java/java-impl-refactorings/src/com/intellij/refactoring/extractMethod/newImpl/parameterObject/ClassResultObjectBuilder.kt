@@ -1,7 +1,13 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.extractMethod.newImpl.parameterObject
 
-import com.intellij.psi.*
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiDeclarationStatement
+import com.intellij.psi.PsiElementFactory
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiVariable
 import com.intellij.psi.util.PsiTreeUtil
 import com.siyeh.ig.psiutils.TypeUtils
 
@@ -12,9 +18,10 @@ class ClassResultObjectBuilder(private val pojoClass: PsiClass): ResultObjectBui
     }
 
     private fun createPojoClass(variables: List<PsiVariable>): PsiClass {
-      val project = variables.first().project
+      val context = variables.first()
+      val project = context.project
       val factory = PsiElementFactory.getInstance(project)
-      val pojoClass = factory.createClass("Result")
+      val pojoClass = factory.createClass(ResultObjectBuilder.findSafeName(context))
       variables.forEach { variable ->
         val field = factory.createField(variable.name!!, variable.type)
         field.modifierList?.setModifierProperty(PsiModifier.PUBLIC, true)

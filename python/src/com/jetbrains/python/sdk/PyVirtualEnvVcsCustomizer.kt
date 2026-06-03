@@ -2,7 +2,13 @@
 package com.jetbrains.python.sdk
 
 import com.intellij.openapi.application.runReadAction
-import com.intellij.openapi.components.*
+import com.intellij.openapi.components.BaseState
+import com.intellij.openapi.components.PersistentStateComponent
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.State
+import com.intellij.openapi.components.Storage
+import com.intellij.openapi.components.StoragePathMacros
+import com.intellij.openapi.components.service
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.module.ModuleUtil
 import com.intellij.openapi.options.UiDslUnnamedConfigurable
@@ -29,11 +35,10 @@ internal class PyVirtualEnvVcsCustomizer : VcsEnvCustomizer() {
       else -> if (context.type != ExecutableType.LOCAL) return
     }
 
-    if (PythonSdkUtil.isVirtualEnv(sdk) || PythonSdkUtil.isConda(sdk)) {
+    val pyRichSdk = sdk.pyRichSdk()
+    if (pyRichSdk.isActivatable) {
       // in case of virtualenv sdk on unix we activate virtualenv
-      if (sdk.homePath != null) {
-        envs.putAll(PySdkUtil.activateVirtualEnv(sdk))
-      }
+      envs.putAll(PySdkUtil.activateVirtualEnv(sdk))
     }
   }
 

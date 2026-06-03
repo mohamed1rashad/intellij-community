@@ -17,19 +17,17 @@ import com.intellij.testFramework.UsefulTestCase
 import com.intellij.testFramework.assertEqualsToFile
 import junit.framework.TestCase
 import org.jetbrains.kotlin.diagnostics.Severity
-import org.jetbrains.kotlin.diagnostics.rendering.DefaultErrorMessages
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.base.plugin.KotlinPluginMode
 import org.jetbrains.kotlin.idea.base.test.InTextDirectivesUtils
-import org.jetbrains.kotlin.idea.caches.resolve.analyzeWithContent
 import org.jetbrains.kotlin.idea.codeinsight.api.classic.inspections.AbstractKotlinInspection
 import org.jetbrains.kotlin.idea.test.DirectiveBasedActionUtils.K1_ACTIONS_LIST_DIRECTIVE
 import org.jetbrains.kotlin.idea.test.DirectiveBasedActionUtils.K2_ACTIONS_LIST_DIRECTIVE
 import org.jetbrains.kotlin.psi.KtFile
-import org.jetbrains.kotlin.resolve.diagnostics.Diagnostics
 import java.io.File
 import kotlin.test.assertTrue
 
+data class Diagnostic(val message: String, val severity: Severity)
 
 object DirectiveBasedActionUtils {
     const val DISABLE_ERRORS_DIRECTIVE: String = "// DISABLE_ERRORS"
@@ -46,7 +44,8 @@ object DirectiveBasedActionUtils {
      * - all other quickfixes with names not mentioned in "//ACTION" are not available.
      * When no "// ACTION" directives are present in the file, quickfixes are not checked.
      */
-    const val K1_ACTIONS_LIST_DIRECTIVE: String = "// ACTION:"
+    const val ACTION_DIRECTIVE: String = "// ACTION:"
+    const val K1_ACTIONS_LIST_DIRECTIVE: String = ACTION_DIRECTIVE
     const val K2_ACTIONS_LIST_DIRECTIVE: String = "// K2_ACTIONS_LIST:"
     const val IGNORE_IRRELEVANT_ACTIONS_DIRECTIVE: String = "// IGNORE_IRRELEVANT_ACTIONS"
 
@@ -59,7 +58,7 @@ object DirectiveBasedActionUtils {
     fun checkForUnexpectedErrors(
         file: KtFile,
         directive: String = ERROR_DIRECTIVE,
-        diagnosticsProvider: (KtFile) -> Diagnostics = { it.analyzeWithContent().diagnostics }
+        diagnosticsProvider: (KtFile) -> List<Diagnostic>
     ) {
         if (InTextDirectivesUtils.findLinesWithPrefixesRemoved(file.text, DISABLE_ERRORS_DIRECTIVE).isNotEmpty()) {
             return
@@ -72,7 +71,7 @@ object DirectiveBasedActionUtils {
         file: KtFile,
         disabledByDefault: Boolean = true,
         directiveName: String = Severity.WARNING.name,
-        diagnosticsProvider: (KtFile) -> Diagnostics = { it.analyzeWithContent().diagnostics }
+        diagnosticsProvider: (KtFile) -> List<Diagnostic>
     ) {
         if (disabledByDefault && InTextDirectivesUtils.findLinesWithPrefixesRemoved(file.text, ENABLE_WARNINGS_DIRECTIVE).isEmpty() ||
             !disabledByDefault && InTextDirectivesUtils.findLinesWithPrefixesRemoved(file.text, DISABLE_WARNINGS_DIRECTIVE).isNotEmpty()
@@ -85,7 +84,7 @@ object DirectiveBasedActionUtils {
 
     private fun checkForUnexpected(
         file: KtFile,
-        diagnosticsProvider: (KtFile) -> Diagnostics,
+        diagnosticsProvider: (KtFile) -> List<Diagnostic>,
         directive: String,
         name: String,
         severity: Severity,
@@ -97,7 +96,7 @@ object DirectiveBasedActionUtils {
         val diagnostics = diagnosticsProvider(file)
         val actual = diagnostics
             .filter { it.severity == severity }
-            .map { "$directive ${DefaultErrorMessages.render(it).replace("\n", "<br>")}" }
+            .map { "$directive ${it.message.replace("\n", "<br>")}" }
             .sorted()
 
         if (actual.isEmpty() && expected.isEmpty()) return

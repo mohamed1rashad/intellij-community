@@ -1,10 +1,10 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.execution.dashboard.splitApi.frontend;
 
-import com.google.common.collect.Sets;
 import com.intellij.execution.ExecutionBundle;
 import com.intellij.execution.Executor;
 import com.intellij.execution.RunContentDescriptorId;
+import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.dashboard.RunDashboardManagerProxy;
 import com.intellij.execution.dashboard.RunDashboardService;
 import com.intellij.execution.dashboard.RunDashboardUiManager;
@@ -22,7 +22,7 @@ import com.intellij.openapi.application.AppUIExecutor;
 import com.intellij.openapi.extensions.ExtensionPointListener;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.Conditions;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.platform.execution.dashboard.BackendRunDashboardManagerState;
 import com.intellij.platform.execution.dashboard.RunDashboardManagerImpl;
@@ -35,19 +35,25 @@ import com.intellij.platform.ide.productMode.IdeProductMode;
 import com.intellij.ui.ClientProperty;
 import com.intellij.ui.components.JBPanelWithEmptyText;
 import com.intellij.ui.components.panels.NonOpaquePanel;
-import com.intellij.ui.content.*;
+import com.intellij.ui.content.Content;
+import com.intellij.ui.content.ContentFactory;
+import com.intellij.ui.content.ContentManager;
+import com.intellij.ui.content.ContentManagerEvent;
+import com.intellij.ui.content.ContentManagerListener;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Predicate;
+import java.util.function.BiPredicate;
 
 import static com.intellij.platform.execution.dashboard.splitApi.frontend.RunDashboardGroupingRule.GROUPING_RULE_EP_NAME;
 import static com.intellij.platform.execution.dashboard.splitApi.frontend.RunDashboardUiUtils.updateContentToolbar;
@@ -58,7 +64,7 @@ import static com.intellij.platform.execution.serviceView.ServiceViewImplementat
 public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
   private final Project myProject;
   private final ContentManager myContentManager;
-  private final ContentManagerListener myServiceContentManagerListener;
+  private final ServiceContentManagerListener myServiceContentManagerListener;
   private String myToolWindowId;
   private RunDashboardComponentWrapper myContentWrapper;
   private JComponent myEmptyContent;
@@ -69,7 +75,24 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
     ContentFactory contentFactory = ContentFactory.getInstance();
     myContentManager = contentFactory.createContentManager(new PanelContentUI(), false, project);
     myServiceContentManagerListener = new ServiceContentManagerListener();
-    myContentManager.addContentManagerListener(myServiceContentManagerListener);
+
+    if (Registry.is("ide.content.manager.listeners.order.fix")) {
+      myContentManager.addContentManagerListener(myServiceContentManagerListener);
+    }
+    else {
+      myContentManager.addContentManagerListener(new ContentManagerListener() {
+        @Override
+        public void contentAdded(@NotNull ContentManagerEvent event) {
+          myContentManager.removeContentManagerListener(this);
+          // Service content manager listener must be added later in order to be notified before RunManager's CloseListener,
+          // which disposes the content and clears its user data map.
+          // Otherwise, service content manager listener couldn't get run content descriptor for the removed content.
+          myContentManager.addContentManagerListener(myServiceContentManagerListener);
+          myServiceContentManagerListener.contentAdded(event);
+        }
+      });
+    }
+
     initExtensionPointListeners();
   }
 
@@ -127,25 +150,65 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
   }
 
   @Override
-  public @NotNull Predicate<Content> getReuseCondition() {
-    return Conditions.alwaysFalse();
+  public @NotNull BiPredicate<Content, @Nullable RunConfiguration> getReuseCondition() {
+    return (content, runConfiguration) -> {
+      if (IdeProductMode.isFrontend() || runConfiguration == null) return false;
+
+      RunConfiguration baseConfiguration = RunDashboardManagerImpl.getBaseConfiguration(runConfiguration);
+      RunConfiguration targetConfiguration = baseConfiguration != null ? baseConfiguration : runConfiguration;
+
+      RunDashboardManagerImpl runDashboardManager = RunDashboardManagerImpl.getInstance(myProject);
+      var service = ContainerUtil.find(runDashboardManager.getRunConfigurations(), s -> {
+        var descriptor = s.getDescriptor();
+        return descriptor != null && descriptor.getAttachedContent() == content;
+      });
+      return service != null && service.getConfigurationSettings().getConfiguration().equals(targetConfiguration);
+    };
   }
 
-  public void syncContentsFromBackend() {
+  /**
+   * Synchronizes content between the dashboard content manager and the run content manager
+   * based on the current set of run configuration types that should be shown in services.
+   * <p>
+   * Content is moved out of the dashboard when its run configuration type is removed from services.
+   * Content is moved into the dashboard when its run configuration type is added to services.
+   */
+  public boolean syncContentsFromBackend() {
     FrontendRunDashboardManager frontendManager = FrontendRunDashboardManager.getInstance(myProject);
-    List<@NotNull FrontendRunDashboardService> services = frontendManager.getServicePresentations();
-    Set<Content> actualContents = new HashSet<>(
-      ContainerUtil.mapNotNull(services,
-                               service -> {
-                                 var descriptor = frontendManager.getServiceRunContentDescriptor(service);
-                                 return descriptor != null ? descriptor.getAttachedContent() : null;
-                               }));
-    var managedContents = Set.of(myContentManager.getContents());
+    Set<String> types = frontendManager.getTypes();
 
-    var removed = Sets.difference(managedContents, actualContents);
-    moveRemovedContent(removed);
-    var added = Sets.difference(actualContents, managedContents);
-    moveAddedContent(added);
+    // Find content to remove from dashboard (type no longer in services)
+    Set<Content> managedContents = Set.of(myContentManager.getContents());
+    Set<Content> toRemove = new HashSet<>();
+    for (Content content : managedContents) {
+      RunContentDescriptor descriptor = RunContentManagerImpl.getRunContentDescriptorByContent(content);
+      if (descriptor == null) continue;
+
+      String typeId = descriptor.getRunConfigurationTypeId();
+      if (typeId != null && !types.contains(typeId)) {
+        toRemove.add(content);
+      }
+    }
+    moveRemovedContent(toRemove);
+
+    // Find content to add to dashboard (type now in services)
+    RunContentManager runContentManager = RunContentManager.getInstance(myProject);
+    Set<Content> toAdd = new HashSet<>();
+    for (RunContentDescriptor descriptor : runContentManager.getRunContentDescriptors()) {
+      String typeId = descriptor.getRunConfigurationTypeId();
+      if (typeId == null || !types.contains(typeId)) continue;
+
+      Content content = descriptor.getAttachedContent();
+      if (content == null || managedContents.contains(content)) continue;
+
+      // Only add content that is not already being managed by the dashboard
+      if (content.getManager() != myContentManager) {
+        toAdd.add(content);
+      }
+    }
+    moveAddedContent(toAdd);
+
+    return !toRemove.isEmpty() || !toAdd.isEmpty();
   }
 
   private void moveRemovedContent(Collection<Content> contents) {
@@ -187,10 +250,10 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
       return;
     }
 
-    myContentManager.removeContentManagerListener(myServiceContentManagerListener);
+    myServiceContentManagerListener.trackSelection(false);
     myContentManager.setSelectedContent(content);
     updateContentToolbar(content, false);
-    myContentManager.addContentManagerListener(myServiceContentManagerListener);
+    myServiceContentManagerListener.trackSelection(true);
   }
 
   @Override
@@ -203,9 +266,9 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
       return;
     }
 
-    myContentManager.removeContentManagerListener(myServiceContentManagerListener);
+    myServiceContentManagerListener.trackSelection(false);
     myContentManager.removeFromSelection(content);
-    myContentManager.addContentManagerListener(myServiceContentManagerListener);
+    myServiceContentManagerListener.trackSelection(true);
   }
 
   @ApiStatus.Internal
@@ -249,6 +312,13 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
            || (ToolWindowId.RUN.equals(executor.getId()) && isShowLuxedRunToolwindowInServicesView());
   }
 
+  @Override
+  public void navigateToServiceOnRun(@NotNull RunContentDescriptorId descriptorId, Boolean focus) {
+    if (IdeProductMode.isFrontend()) return;
+    RunDashboardManagerImpl runDashboardManager = RunDashboardManagerImpl.getInstance(myProject);
+    runDashboardManager.navigateToServiceOnRun(descriptorId, focus);
+  }
+
   @ApiStatus.Internal
   @NotNull
   public RunDashboardComponentWrapper getContentWrapper() {
@@ -271,9 +341,12 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
 
   private final class ServiceContentManagerListener implements ContentManagerListener {
     private volatile Content myPreviousSelection = null;
+    private boolean myTrackSelection = true;
 
     @Override
     public void selectionChanged(@NotNull ContentManagerEvent event) {
+      if (!myTrackSelection) return;
+
       boolean onAdd = event.getOperation() == ContentManagerEvent.ContentOperation.add;
       Content content = event.getContent();
       if (onAdd) {
@@ -343,7 +416,23 @@ public final class RunDashboardUiManagerImpl implements RunDashboardUiManager {
       if (myPreviousSelection == content) {
         myPreviousSelection = null;
       }
-      FrontendRunDashboardManager.getInstance(myProject).detachServiceRunContentDescriptor(content);
+      if (IdeProductMode.isFrontend()) {
+        FrontendRunDashboardManager.getInstance(myProject).detachServiceRunContentDescriptor(content);
+        return;
+      }
+
+      // Call of RunDashboardManagerImpl is ok since we checked that it's not a frontend
+      RunDashboardManagerImpl runDashboardManager = RunDashboardManagerImpl.getInstance(myProject);
+
+      RunContentDescriptor descriptor = RunContentManagerImpl.getRunContentDescriptorByContent(content);
+      RunContentDescriptorId descriptorId = descriptor == null ? null : descriptor.getId();
+      if (descriptorId == null) return;
+
+      runDashboardManager.detachServiceRunContentDescriptor(descriptorId);
+    }
+
+    void trackSelection(boolean value) {
+      myTrackSelection = value;
     }
   }
 }

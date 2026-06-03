@@ -752,7 +752,7 @@ def dataframe_to_xml(df, name, roffset, coffset, rows, cols, format):
                 kind = df.dtype.kind
             except AttributeError:
                 try:
-                    kind = df.dtypes[0].kind
+                    kind = df.dtypes.iloc[0].kind
                 except (IndexError, KeyError, AttributeError):
                     kind = 'O'
             format = array_default_format(kind)
@@ -833,7 +833,7 @@ def array_data_to_xml(rows, cols, get_row, format):
     for row in range(rows):
         xml += "<row index=\"%s\"/>\n" % row
         for value in get_row(row):
-            xml += var_to_xml(value, '', format=format)
+            xml += var_to_xml(value, '')
     return xml
 
 

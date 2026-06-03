@@ -16,6 +16,7 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.asUnit
 import org.jetbrains.kotlin.idea.codeinsight.api.applicable.intentions.KotlinApplicableModCommandAction
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.ApplicabilityRange
+import org.jetbrains.kotlin.idea.codeinsight.utils.hasExplicitBackingField
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.intentions.AddAccessorUtils
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.intentions.AddAccessorUtils.addAccessors
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -45,7 +46,8 @@ internal abstract class AbstractAddAccessorIntention(
             element.containingClassOrObject?.hasExpectModifier() == true ||
             element.hasModifier(KtTokens.ABSTRACT_KEYWORD) ||
             element.hasModifier(KtTokens.LATEINIT_KEYWORD) ||
-            element.hasModifier(KtTokens.CONST_KEYWORD)
+            element.hasModifier(KtTokens.CONST_KEYWORD) ||
+            element.hasExplicitBackingField()
         ) {
             return false
         }
@@ -57,7 +59,6 @@ internal abstract class AbstractAddAccessorIntention(
         return true
     }
 
-    @OptIn(KaExperimentalApi::class)
     override fun KaSession.prepareContext(element: KtProperty): Unit? {
         if (element.isPropertyNotInitialized()) return null
         if (element.annotationEntries.isEmpty()) return Unit
@@ -68,7 +69,6 @@ internal abstract class AbstractAddAccessorIntention(
     }
 
     context(_: KaSession)
-    @OptIn(KaExperimentalApi::class)
     private fun KtProperty.isPropertyNotInitialized(): Boolean {
         // TODO: when KT-63221 is fixed use `diagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)` instead
         return containingKtFile.collectDiagnostics(KaDiagnosticCheckerFilter.ONLY_COMMON_CHECKERS)

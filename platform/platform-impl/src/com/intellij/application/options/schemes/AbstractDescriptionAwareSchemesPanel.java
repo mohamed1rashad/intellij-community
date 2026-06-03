@@ -21,9 +21,21 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
+import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.util.Arrays;
 
 @ApiStatus.Internal
@@ -58,11 +70,11 @@ public abstract class AbstractDescriptionAwareSchemesPanel<T extends Scheme> ext
         showDescription(getSelectedScheme());
       }
     });
-    myDescriptionTextField.registerKeyboardAction(__ -> {
+    myDescriptionTextField.registerKeyboardAction(_ -> {
       showDescription(getSelectedScheme());
       IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> IdeFocusManager.getGlobalInstance().requestFocus(getConfigurableFocusComponent(), true));
     }, ESC_KEY_STROKE, JComponent.WHEN_FOCUSED);
-    myDescriptionTextField.registerKeyboardAction(__ -> {
+    myDescriptionTextField.registerKeyboardAction(_ -> {
       applyDescription();
       IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> IdeFocusManager.getGlobalInstance().requestFocus(getConfigurableFocusComponent(), true));
     }, ENTER_KEY_STROKE, JComponent.WHEN_FOCUSED);

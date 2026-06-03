@@ -16,6 +16,7 @@ import org.jetbrains.idea.maven.server.MavenGoalExecutionResult
 import org.jetbrains.idea.maven.server.MavenServerConnector
 import org.jetbrains.idea.maven.utils.MavenUtil
 import java.io.File
+import java.nio.file.Path
 
 @ApiStatus.Internal
 class MavenFolderResolver(private val project: Project) {
@@ -54,7 +55,7 @@ class MavenFolderResolver(private val project: Project) {
       val projectMultiMap = MavenUtil.groupByBasedir(mavenProjectsToResolve, tree)
       for ((baseDir, mavenProjectsForBaseDir) in projectMultiMap.entrySet()) {
         console.startSourceGeneration(baseDir)
-        resolveFolders(baseDir, mavenProjectsForBaseDir, tree, progressReporter, console)
+        resolveFolders(Path.of(baseDir), mavenProjectsForBaseDir, tree, progressReporter, console)
         console.finishSourceGeneration(baseDir)
       }
     }
@@ -64,7 +65,7 @@ class MavenFolderResolver(private val project: Project) {
   }
 
   private suspend fun resolveFolders(
-    baseDir: String,
+    baseDir: Path,
     mavenProjects: Collection<MavenProject>,
     tree: MavenProjectsTree,
     progressReporter: RawProgressReporter,
@@ -96,7 +97,7 @@ class MavenFolderResolver(private val project: Project) {
     for (goalResult in goalResults) {
       val mavenProject = fileToProject.getOrDefault(goalResult.file, null)
       if (null != mavenProject && MavenUtil.shouldResetDependenciesAndFolders(goalResult.problems)) {
-        val changes = mavenProject.setFolders(goalResult.folders)
+        val changes = mavenProject.setFolders(goalResult.folders.mavenSources)
         tree.fireFoldersResolved(Pair.create(mavenProject, changes))
       }
     }

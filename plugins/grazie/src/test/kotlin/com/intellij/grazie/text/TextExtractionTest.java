@@ -1,29 +1,40 @@
 package com.intellij.grazie.text;
 
+import ai.grazie.text.exclusions.Exclusion;
 import com.intellij.grazie.ide.language.java.JavaTextExtractor;
 import com.intellij.grazie.ide.language.markdown.MarkdownTextExtractor;
+import com.intellij.grazie.rule.SentenceTokenizer;
 import com.intellij.ide.highlighter.JavaFileType;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.lang.injection.MultiHostInjector;
 import com.intellij.lang.injection.MultiHostRegistrar;
+import com.intellij.lang.xml.XMLLanguage;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.PlainTextFileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.registry.Registry;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileFactory;
+import com.intellij.psi.PsiLanguageInjectionHost;
+import com.intellij.psi.PsiLiteralExpression;
+import com.intellij.psi.PsiPlainText;
+import com.intellij.psi.SyntaxTraverser;
 import com.intellij.psi.impl.source.resolve.reference.impl.manipulators.StringLiteralManipulator;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.xml.XmlTag;
+import com.intellij.testFramework.PerformanceUnitTest;
 import com.intellij.testFramework.fixtures.BasePlatformTestCase;
 import com.intellij.tools.ide.metrics.benchmark.Benchmark;
 import com.intellij.util.containers.ContainerUtil;
 import kotlin.text.StringsKt;
 import one.util.streamex.IntStreamEx;
-import org.intellij.lang.regexp.RegExpLanguage;
 import org.intellij.plugins.markdown.lang.MarkdownFileType;
 import org.intellij.plugins.markdown.lang.MarkdownLanguage;
 import org.intellij.plugins.markdown.lang.psi.impl.MarkdownParagraph;
@@ -84,6 +95,43 @@ public class TextExtractionTest extends BasePlatformTestCase {
   public void testMarkdownInlineCode() {
     TextContent extracted = extractText("a.md", "you can use a number of predefined fields (e.g. `EventFields.InputEvent`)", 0);
     assertEquals("you can use a number of predefined fields (e.g. |)", unknownOffsets(extracted));
+  }
+
+  public void testSentenceTokenizationKeepsExclusionsPerSentence() {
+    TextContent content = extractText("a.md", "First **one** here. Second *two* there.", 3);
+    assertEquals("First one here. Second two there.", content.toString());
+    Assertions.assertArrayEquals(new int[]{6, 9, 23, 26}, content.markupOffsets());
+
+    List<SentenceTokenizer.Sentence> sentences = SentenceTokenizer.tokenize(content);
+    assertEquals(2, sentences.size());
+
+    SentenceTokenizer.Sentence first = sentences.getFirst();
+    assertEquals("First one here. ", first.text());
+    assertEquals(List.of(new Exclusion(6, Exclusion.Kind.Markup), new Exclusion(9, Exclusion.Kind.Markup)), first.exclusions());
+
+    SentenceTokenizer.Sentence second = sentences.get(1);
+    assertEquals("Second two there.", second.text());
+    assertEquals(List.of(new Exclusion(7, Exclusion.Kind.Markup), new Exclusion(10, Exclusion.Kind.Markup)), second.exclusions());
+  }
+
+  public void testInjectedMarkdownListBullet() {
+    String text = """
+      Something
+      ```markdown
+      ## Goals
+      - Primary outcomes the feature must deliver.
+      ```
+      """;
+    PsiFile file = myFixture.configureByText("a.md", text);
+    PsiElement injectedElement = InjectedLanguageManager.getInstance(getProject()).findInjectedElementAt(file, text.indexOf("- Primary"));
+    assertNotNull(injectedElement);
+
+    List<TextContent> contents = ContainerUtil.filter(
+      TextExtractor.findAllTextContents(injectedElement.getContainingFile().getViewProvider(), TextContent.TextDomain.ALL),
+      content -> content.toString().contains("Primary outcomes")
+    );
+    assertTrue(ContainerUtil.exists(contents, content -> content.toString().equals("Primary outcomes the feature must deliver.")));
+    assertFalse(ContainerUtil.exists(contents, content -> content.toString().contains("- Primary")));
   }
 
   public void testMergeAdjacentJavaComments() {
@@ -205,14 +253,21 @@ public class TextExtractionTest extends BasePlatformTestCase {
     assertEquals(offset, content.textOffsetToFile("abc         ".length()));
   }
 
-  public void testNoExtractionInInjectedFragments() {
-    InjectedLanguageManager.getInstance(getProject()).registerMultiHostInjector(new MultiHostInjector() {
+  public void testNonEditableFragmentsAreExcluded() {
+    InjectedLanguageManager injectedLanguageManager = InjectedLanguageManager.getInstance(getProject());
+    injectedLanguageManager.registerMultiHostInjector(new MultiHostInjector() {
       @Override
       public void getLanguagesToInject(@NotNull MultiHostRegistrar registrar, @NotNull PsiElement context) {
         if (context.getText().contains("xxx")) {
+          PsiLiteralExpression literal = (PsiLiteralExpression) context;
+          String value = (String) literal.getValue();
+          TextRange injectedRange = TextRange.from(
+            StringLiteralManipulator.getValueRange(literal).getStartOffset() + value.indexOf("xxx"),
+            3
+          );
           registrar
-            .startInjecting(RegExpLanguage.INSTANCE)
-            .addPlace(null, null, (PsiLanguageInjectionHost) context, StringLiteralManipulator.getValueRange((PsiLiteralExpression) context))
+            .startInjecting(XMLLanguage.INSTANCE)
+            .addPlace("%prefix", "%suffix", (PsiLanguageInjectionHost)context, injectedRange)
             .doneInjecting();
         }
       }
@@ -225,7 +280,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
 
     String text = "class C { String s = \" abc def xxx \"; }";
     PsiFile file = PsiFileFactory.getInstance(getProject()).createFileFromText("a.java", JavaFileType.INSTANCE, text, 0, true);
-    assertNull(TextExtractor.findTextAt(file, text.indexOf("def"), TextContent.TextDomain.ALL));
+    assertEquals("abc def xxx", TextExtractor.findTextAt(file, text.indexOf("def"), TextContent.TextDomain.ALL).toString());
   }
 
   public void testSplitPlainTextByParagraphsForMoreGranularChecking() {
@@ -243,6 +298,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     checkHtmlXml(false);
   }
 
+  @PerformanceUnitTest
   public void testLargeXmlPerformance() {
     String text = "<!DOCTYPE rules [\n" +
                   IntStreamEx.range(0, 1000).mapToObj(i -> "<!ENTITY pnct" + i + " \"x\">\n").joining() +
@@ -264,6 +320,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
       .start();
   }
 
+  @PerformanceUnitTest
   public void testLargeXmlWithUnclosedDoctypePerformance() {
     String text = "<!DOCTYPE rules [\n<!ENTITY some \"x\">\n<rules> " +
                   IntStreamEx.range(0, 10_000).mapToObj(i -> "<tag> content" + i + "</tag>\n").joining() +
@@ -334,6 +391,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     }
   }
 
+  @PerformanceUnitTest
   public void testBuildingPerformance_concatenation() {
     String text = "<a/>b".repeat(10_000);
     String expected = "b".repeat(10_000);
@@ -344,6 +402,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testBuildingPerformance_removingIndents() {
     String text = "  b\n".repeat(10_000);
     String expected = "b\n".repeat(10_000).trim();
@@ -355,6 +414,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testBuildingPerformance_removingHtml() {
     String text = "b<unknownTag>x</unknownTag>".repeat(10_000);
     String expected = "b".repeat(10_000);
@@ -366,6 +426,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testBuildingPerformance_removingNbsp() {
     String text = "b&nbsp;".repeat(10_000);
     String expected = StringsKt.trim("b ".repeat(10_000)).toString();
@@ -377,6 +438,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testBuildingPerformance_longTextFragment() {
     String line = "here's some relative long text that helps make this text fragment a bit longer than it could have been otherwise";
     String text = ("\n\n\n" + line).repeat(10_000);
@@ -389,6 +451,7 @@ public class TextExtractionTest extends BasePlatformTestCase {
     }).start();
   }
 
+  @PerformanceUnitTest
   public void testBuildingPerformance_complexPsi() {
     String link = "{@link foo.bar.goo1.goo2.goo3.goo4.goo5.goo6.goo7#zoo(x.x1.x2.x3,y.y1.y2.y3,z.z1.z2.z3)}";
     var text = "/** @return something if " + link.repeat(10_000) + " is not too expensive */";

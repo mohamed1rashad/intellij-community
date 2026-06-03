@@ -1,8 +1,13 @@
 // Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.compiler.impl;
 
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.compiler.*;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.compiler.CompileContext;
+import com.intellij.openapi.compiler.CompileTask;
+import com.intellij.openapi.compiler.CompilerMessageCategory;
+import com.intellij.openapi.compiler.FileProcessingCompiler;
+import com.intellij.openapi.compiler.JavaCompilerBundle;
+import com.intellij.openapi.compiler.ValidityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
@@ -86,7 +91,7 @@ public class FileProcessingCompilerAdapterTask implements CompileTask {
       CompilerUtil.runInContext(context, JavaCompilerBundle.message("progress.updating.caches"), () -> {
         final List<VirtualFile> vFiles = new ArrayList<>(processed.length);
         final List<Pair<FileProcessingCompiler.ProcessingItem, ValidityState>> toUpdate = new ArrayList<>(processed.length);
-        ApplicationManager.getApplication().runReadAction(() -> {
+        ReadAction.runBlocking(() -> {
           for (FileProcessingCompiler.ProcessingItem item : processed) {
             vFiles.add(item.getFile());
             toUpdate.add(Pair.create(item, item.getValidityState()));

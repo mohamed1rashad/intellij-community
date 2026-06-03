@@ -1,7 +1,6 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.indexing.events;
 
-import com.intellij.concurrency.ConcurrentCollectionFactory;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diagnostic.ThrottledLogger;
@@ -16,15 +15,30 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static com.intellij.concurrency.ConcurrentCollectionFactory.createConcurrentIntObjectMap;
 
 @Internal
 public class FilesToUpdateCollector {
   private static final Logger LOG = Logger.getInstance(FilesToUpdateCollector.class);
   private static final ThrottledLogger THROTTLED_LOG = new ThrottledLogger(LOG, 1000);
-  private final IntObjectMap<FileIndexingRequest> myFilesToUpdate = ConcurrentCollectionFactory.createConcurrentIntObjectMap();
+
+  //files are duplicated here: they are both in filesToUpdate and in dirtyFiles (already sorted by
+  // projects). Maybe it is worth merging that functionality -- so we could always query dirty
+  // files per project?
+  private final IntObjectMap<FileIndexingRequest> myFilesToUpdate = createConcurrentIntObjectMap();
 
   private final DirtyFiles myDirtyFiles = new DirtyFiles();
 
+  /** Increments on each change in myFilesToUpdate content -- i.e., it is 'version' of myFilesToUpdate content */
+  private final AtomicLong modificationCount = new AtomicLong(0);
+
+  /**
+   * @param containingProjects projects request.file is belong to. Used mostly for diagnostics
+   * @param dirtyQueueProjects projects request.file is belong to. Used to actually put the file into
+   *                           apt queue(s)
+   */
   public void scheduleForUpdate(@NotNull FileIndexingRequest request,
                                 @NotNull Set<Project> containingProjects,
                                 @NotNull Collection<? extends Project> dirtyQueueProjects) {
@@ -43,34 +57,39 @@ public class FilesToUpdateCollector {
     int fileId = request.getFileId();
     myDirtyFiles.addFile(dirtyQueueProjects, fileId);
     myFilesToUpdate.put(fileId, request);
+
+    modificationCount.incrementAndGet();
   }
 
   public @NotNull DirtyFiles getDirtyFiles() {
     return myDirtyFiles;
   }
 
-  public void removeScheduledFileFromUpdate(VirtualFile file) {
+  public void removeScheduledFileFromUpdate(@NotNull VirtualFile file) {
     int fileId = FileBasedIndex.getFileId(file);
     FileIndexingRequest alreadyScheduledFile = myFilesToUpdate.get(fileId);
     if (alreadyScheduledFile != null && !alreadyScheduledFile.isDeleteRequest()) {
       IndexingEventsLogger.tryLog("PULL_OUT_FROM_UPDATE", fileId);
       myFilesToUpdate.remove(fileId);
       myDirtyFiles.removeFile(fileId);
+      modificationCount.incrementAndGet();
     }
   }
 
   public void removeFileIdFromFilesScheduledForUpdate(int fileId) {
     myFilesToUpdate.remove(fileId);
     myDirtyFiles.removeFile(fileId);
+    modificationCount.incrementAndGet();
   }
 
   public void clear() {
     myDirtyFiles.clear();
     myFilesToUpdate.clear();
+    modificationCount.incrementAndGet();
   }
 
-  public boolean containsFileId(int fileId) {
-    return myFilesToUpdate.containsKey(fileId);
+  public long modificationCount(){
+    return modificationCount.get();
   }
 
   public Iterator<@NotNull FileIndexingRequest> getFilesToUpdateAsIterator() {
@@ -84,6 +103,10 @@ public class FilesToUpdateCollector {
   }
 
   public boolean isScheduledForUpdate(VirtualFile file) {
-    return myFilesToUpdate.containsKey(FileBasedIndex.getFileId(file));
+    return containsFileId(FileBasedIndex.getFileId(file));
+  }
+
+  public boolean containsFileId(int fileId) {
+    return myFilesToUpdate.containsKey(fileId);
   }
 }

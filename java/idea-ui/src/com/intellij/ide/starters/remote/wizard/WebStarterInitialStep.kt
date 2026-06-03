@@ -5,9 +5,38 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
 import com.intellij.ide.starters.JavaStartersBundle
 import com.intellij.ide.starters.local.StarterModuleBuilder
-import com.intellij.ide.starters.remote.*
-import com.intellij.ide.starters.shared.*
-import com.intellij.ide.starters.shared.ValidationFunctions.*
+import com.intellij.ide.starters.remote.SERVER_APPLICATION_TYPES
+import com.intellij.ide.starters.remote.SERVER_ARTIFACT_KEY
+import com.intellij.ide.starters.remote.SERVER_CONFIGURATION_FILE_FORMAT_TYPES
+import com.intellij.ide.starters.remote.SERVER_GROUP_KEY
+import com.intellij.ide.starters.remote.SERVER_LANGUAGES
+import com.intellij.ide.starters.remote.SERVER_LANGUAGE_LEVELS_KEY
+import com.intellij.ide.starters.remote.SERVER_LANGUAGE_LEVEL_KEY
+import com.intellij.ide.starters.remote.SERVER_NAME_KEY
+import com.intellij.ide.starters.remote.SERVER_PACKAGE_NAME_KEY
+import com.intellij.ide.starters.remote.SERVER_PACKAGING_TYPES
+import com.intellij.ide.starters.remote.SERVER_PROJECT_TYPES
+import com.intellij.ide.starters.remote.SERVER_VERSION_KEY
+import com.intellij.ide.starters.remote.WebStarterContext
+import com.intellij.ide.starters.remote.WebStarterContextProvider
+import com.intellij.ide.starters.remote.WebStarterModuleBuilder
+import com.intellij.ide.starters.remote.WebStarterServerOptions
+import com.intellij.ide.starters.shared.CommonStarterInitialStep
+import com.intellij.ide.starters.shared.DEFAULT_MODULE_ARTIFACT
+import com.intellij.ide.starters.shared.DEFAULT_MODULE_GROUP
+import com.intellij.ide.starters.shared.DEFAULT_MODULE_NAME
+import com.intellij.ide.starters.shared.DEFAULT_PACKAGE_NAME
+import com.intellij.ide.starters.shared.StarterAppPackaging
+import com.intellij.ide.starters.shared.StarterAppType
+import com.intellij.ide.starters.shared.StarterConfigFileFormat
+import com.intellij.ide.starters.shared.StarterLanguage
+import com.intellij.ide.starters.shared.StarterLanguageLevel
+import com.intellij.ide.starters.shared.StarterProjectType
+import com.intellij.ide.starters.shared.ValidationFunctions.CHECK_NOT_EMPTY
+import com.intellij.ide.starters.shared.ValidationFunctions.CHECK_NO_RESERVED_WORDS
+import com.intellij.ide.starters.shared.ValidationFunctions.CHECK_NO_WHITESPACES
+import com.intellij.ide.starters.shared.ValidationFunctions.CHECK_PACKAGE_NAME
+import com.intellij.ide.starters.shared.validateFormFields
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.ide.wizard.AbstractWizard
 import com.intellij.ide.wizard.withVisualPadding
@@ -29,9 +58,15 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.Ref
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.ui.InplaceButton
-import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.components.ActionLink
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.COLUMNS_MEDIUM
+import com.intellij.ui.dsl.builder.SegmentedButton
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.bindText
+import com.intellij.ui.dsl.builder.columns
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.util.concurrency.Semaphore
 import com.intellij.util.ui.AsyncProcessIcon
 import com.intellij.util.ui.UIUtil
@@ -62,6 +97,9 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
   private val languageLevelProperty: GraphProperty<StarterLanguageLevel> = propertyGraph.lazyProperty {
     starterContext.languageLevel ?: StarterLanguageLevel("unknown", "", "")
   }
+  private val configurationFileFormatProperty: GraphProperty<StarterConfigFileFormat> = propertyGraph.lazyProperty {
+    starterContext.configFileFormat ?: StarterConfigFileFormat("unknown", "")
+  }
 
   private var languageLevel: StarterLanguageLevel by languageLevelProperty
   private var packageName: String by packageNameProperty.trim()
@@ -77,11 +115,13 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
   private lateinit var projectTypesSelector: SegmentedButton<StarterProjectType>
   private lateinit var packagingTypesSelector: SegmentedButton<StarterAppPackaging>
   private lateinit var languagesSelector: SegmentedButton<StarterLanguage>
+  private lateinit var configurationFileFormatSelector: SegmentedButton<StarterConfigFileFormat>
 
   private var languages: List<StarterLanguage> = starterSettings.languages
   private var applicationTypes: List<StarterAppType> = starterSettings.applicationTypes
   private var projectTypes: List<StarterProjectType> = starterSettings.projectTypes
   private var packagingTypes: List<StarterAppPackaging> = starterSettings.packagingTypes
+  private var configurationFileFormatTypes: List<StarterConfigFileFormat> = starterSettings.configurationFileFormats
 
   @Volatile
   private var serverOptions: WebStarterServerOptions? = null
@@ -126,17 +166,16 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
     starterContext.applicationType = applicationTypeProperty.get()
     starterContext.includeExamples = exampleCodeProperty.get()
     starterContext.gitIntegration = gitProperty.get()
+    starterContext.configFileFormat = configurationFileFormatProperty.get()
 
     wizardContext.projectName = entityName
     wizardContext.setProjectFileDirectory(FileUtil.join(location, entityName))
 
-    val sdk = jdkIntentProperty.get().prepareJdk()
-    if (wizardContext.project == null) {
-      wizardContext.projectJdk = sdk
-    }
-    else {
-      moduleBuilder.moduleJdk = sdk
-    }
+    moduleBuilder.moduleJdk = wizardContext.projectJdk
+  }
+
+  override fun onStepLeaving() {
+    contentPanel.apply()
   }
 
   private fun suggestPackageName(): String {
@@ -153,9 +192,7 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
     progressIcon.toolTipText = JavaStartersBundle.message("message.state.connecting.and.retrieving.options")
 
     return panel {
-      row {
-        label(JavaStartersBundle.message("title.project.server.url.label"))
-
+      row(JavaStartersBundle.message("title.project.server.url.label")) {
         cell(serverUrlLink)
         cell(serverSettingsButton)
         cell(retryButton)
@@ -209,7 +246,7 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
       if (starterSettings.applicationTypes.isNotEmpty()) {
         row(JavaStartersBundle.message("title.project.app.type.label")) {
           applicationTypesModel.addAll(starterSettings.applicationTypes)
-          comboBox(applicationTypesModel, SimpleListCellRenderer.create("") { it?.title ?: "" })
+          comboBox(applicationTypesModel, textListCellRenderer("") { it.title })
             .bindItem(applicationTypeProperty)
             .columns(COLUMNS_MEDIUM)
         }.bottomGap(BottomGap.SMALL)
@@ -220,7 +257,7 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
       if (starterSettings.languageLevels.isNotEmpty()) {
         row(JavaStartersBundle.message("title.project.java.version.label")) {
           languageLevelsModel.addAll(starterSettings.languageLevels)
-          comboBox(languageLevelsModel, SimpleListCellRenderer.create("") { it?.title ?: "" })
+          comboBox(languageLevelsModel, textListCellRenderer("") { it.title })
             .bindItem(languageLevelProperty)
         }.bottomGap(BottomGap.SMALL)
       }
@@ -232,10 +269,19 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
         }.bottomGap(BottomGap.SMALL)
       }
 
+      if (starterSettings.configurationFileFormats.isNotEmpty()) {
+        row(JavaStartersBundle.message("title.project.config.file.format.label")) {
+          configurationFileFormatSelector = segmentedButton(starterSettings.configurationFileFormats) { text = it.title }
+            .bind(configurationFileFormatProperty)
+        }.bottomGap(BottomGap.SMALL)
+      }
+
       addSampleCodeUi()
 
       addFieldsAfter(this)
-    }.withVisualPadding()
+    }
+      .withVisualPadding()
+      .apply { registerValidators(parentDisposable) }
   }
 
   private fun createServerUrlLink(): ActionLink {
@@ -278,6 +324,10 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
     val passTechnologyName = if (starterSettings.languageLevels.size > 1) null else moduleBuilder.presentableName
     if (languageLevel.javaVersion.isNotBlank() &&
         !validateJdkIntentVersion(jdkIntentProperty, languageLevel.javaVersion, passTechnologyName)) {
+      return false
+    }
+
+    if (contentPanel.validateAll().isNotEmpty()) {
       return false
     }
 
@@ -510,6 +560,14 @@ open class WebStarterInitialStep(contextProvider: WebStarterContextProvider) : C
         languageProperty.set(correspondingOption ?: languages.first())
         languagesSelector.items = languages
         this.languages = languages
+      }
+    }
+    serverOptions.extractOption(SERVER_CONFIGURATION_FILE_FORMAT_TYPES) { configurationFileFormatTypes ->
+      if (configurationFileFormatTypes.isNotEmpty() && configurationFileFormatTypes != this.configurationFileFormatTypes &&::configurationFileFormatSelector.isInitialized) {
+        val correspondingOption = configurationFileFormatTypes.find { it.id == configurationFileFormatProperty.get().id }
+        configurationFileFormatProperty.set(correspondingOption ?: configurationFileFormatTypes.first())
+        configurationFileFormatSelector.items = configurationFileFormatTypes
+        this.configurationFileFormatTypes = configurationFileFormatTypes
       }
     }
 

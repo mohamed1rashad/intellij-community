@@ -32,7 +32,8 @@
 
     <!--Auto-reload-->
     <projectService serviceInterface="com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTracker"
-                    serviceImplementation="com.intellij.openapi.externalSystem.autoimport.AutoImportProjectTracker"/>
+                    serviceImplementation="com.intellij.openapi.externalSystem.autoimport.AutoImportProjectTracker"
+                    open="true"/>
     <projectService serviceInterface="com.intellij.openapi.externalSystem.autoimport.ExternalSystemProjectTrackerSettings"
                     serviceImplementation="com.intellij.openapi.externalSystem.autoimport.AutoImportProjectTrackerSettings"/>
     <projectService
@@ -119,13 +120,13 @@
 
     <streamProviderFactory implementation="com.intellij.openapi.externalSystem.configurationStore.ExternalSystemStreamProviderFactory"/>
 
-    <moduleService serviceInterface="com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager"
-                   serviceImplementation="com.intellij.openapi.externalSystem.service.project.ExternalSystemModulePropertyManagerBridge"/>
+    <projectService serviceInterface="com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManagerFactory"
+                    serviceImplementation="com.intellij.openapi.externalSystem.service.project.ExternalSystemModulePropertyManagerFactoryImpl"/>
 
     <applicationService serviceInterface="com.intellij.openapi.roots.ExternalProjectSystemRegistry"
                         serviceImplementation="com.intellij.openapi.externalSystem.service.ExternalProjectSystemRegistryImpl" overrides="true"/>
 
-    <applicationService serviceInterface="com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkProvider"
+    <applicationService serviceInterface="com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkProvider" open="true"
                         serviceImplementation="com.intellij.openapi.externalSystem.service.execution.DefaultExternalSystemJdkProvider"/>
 
     <!--Experimental-->
@@ -149,6 +150,14 @@
     <recoveryAction implementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalSystemRecoveryAction"/>
 
     <externalSystemRecoveryContributor implementation="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectDataRecoveryContributor$Factory"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsManagerImpl"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.service.project.manage.SourceFolderManagerImpl"/>
+    <projectSettings service="com.intellij.openapi.project.ExternalStorageConfigurationManagerImpl"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.autolink.UnlinkedProjectNotificationAware"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.autolink.UnlinkedProjectSettings"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.autoimport.AutoImportProjectTrackerSettings"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.autoimport.AutoImportProjectTracker"/>
+    <projectSettings service="com.intellij.openapi.externalSystem.service.project.manage.ExternalProjectsDataStorage"/>
   </extensions>
   <applicationListeners>
     <listener class="com.intellij.openapi.externalSystem.service.project.trusted.ExternalSystemTrustedListener"
@@ -165,4 +174,3 @@
               activeInHeadlessMode="true" activeInTestMode="false"/>
   </applicationListeners>
 </idea-plugin>
-

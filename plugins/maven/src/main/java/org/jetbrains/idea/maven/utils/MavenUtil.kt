@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.utils
 
 import com.intellij.codeInsight.actions.ReformatCodeProcessor
@@ -10,20 +10,23 @@ import com.intellij.execution.configurations.CompositeParameterTargetedValue
 import com.intellij.execution.configurations.ParametersList
 import com.intellij.execution.configurations.SimpleJavaParameters
 import com.intellij.ide.fileTemplates.FileTemplateManager
+import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationType
 import com.intellij.notification.Notifications
 import com.intellij.openapi.application.*
-import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.application.PathManager.getSystemDir
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
 import com.intellij.openapi.application.impl.LaterInvocator
+import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.externalSystem.ExternalSystemModulePropertyManager.Companion.getInstance
 import com.intellij.openapi.externalSystem.model.ProjectSystemId
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkException
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemJdkUtil
 import com.intellij.openapi.externalSystem.service.execution.InvalidJavaHomeException
 import com.intellij.openapi.externalSystem.service.execution.InvalidSdkException
+import com.intellij.openapi.externalSystem.service.execution.getJavaHomeForEel
 import com.intellij.openapi.externalSystem.service.project.trusted.ExternalSystemTrustedProjectDialog
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
@@ -32,6 +35,7 @@ import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.DumbService.Companion.isDumbAware
 import com.intellij.openapi.project.Project
@@ -49,6 +53,7 @@ import com.intellij.openapi.util.registry.Registry.Companion.`is`
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.*
 import com.intellij.platform.eel.EelApi
+import com.intellij.platform.eel.EelDescriptor
 import com.intellij.platform.eel.EelPlatform
 import com.intellij.platform.eel.LocalEelApi
 import com.intellij.platform.eel.fs.getPath
@@ -70,7 +75,6 @@ import org.jdom.JDOMException
 import org.jdom.Namespace
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
-import org.jetbrains.annotations.TestOnly
 import org.jetbrains.idea.maven.MavenVersionAwareSupportExtension
 import org.jetbrains.idea.maven.buildtool.MavenSyncConsole
 import org.jetbrains.idea.maven.dom.MavenDomUtil
@@ -111,7 +115,9 @@ import java.util.stream.Stream
 import java.util.zip.CRC32
 import javax.xml.parsers.ParserConfigurationException
 import javax.xml.parsers.SAXParserFactory
-import kotlin.io.path.exists
+import javax.xml.stream.XMLInputFactory
+import javax.xml.stream.XMLStreamException
+import javax.xml.stream.XMLStreamReader
 import kotlin.io.path.isDirectory
 
 object MavenUtil {
@@ -130,7 +136,6 @@ object MavenUtil {
     "http://maven.apache.org/EXTENSIONS/1.1.0",
     "http://maven.apache.org/EXTENSIONS/1.2.0"
   )
-  private val runnables: MutableSet<Runnable?> = Collections.newSetFromMap<Runnable?>(IdentityHashMap<Runnable?, Boolean?>())
   const val INTELLIJ_PLUGIN_ID: String = "org.jetbrains.idea.maven"
 
   @ApiStatus.Experimental
@@ -143,6 +148,7 @@ object MavenUtil {
   val SYSTEM_ID: ProjectSystemId = ProjectSystemId(MAVEN_NAME_UPCASE)
   const val MAVEN_NOTIFICATION_GROUP: String = MAVEN_NAME
   const val SETTINGS_XML: String = "settings.xml"
+  const val TOOLCHAINS_XML: String = "toolchains.xml"
   const val DOT_M2_DIR: String = ".m2"
   const val ENV_M2_HOME: String = "M2_HOME"
   const val M2_DIR: String = "m2"
@@ -209,58 +215,8 @@ object MavenUtil {
   }
 
   fun invokeLater(p: Project, state: ModalityState, r: Runnable) {
-    startTestRunnable(r)
-    ApplicationManager.getApplication().invokeLater(Runnable {
-      runAndFinishTestRunnable(r)
-    }, state, p.getDisposed())
+    ApplicationManager.getApplication().invokeLater(r, state, p.getDisposed())
   }
-
-
-  private fun startTestRunnable(r: Runnable?) {
-    if (!ApplicationManager.getApplication().isUnitTestMode()) return
-    synchronized(runnables) {
-      runnables.add(r)
-    }
-  }
-
-  private fun runAndFinishTestRunnable(r: Runnable) {
-    if (!ApplicationManager.getApplication().isUnitTestMode()) {
-      r.run()
-      return
-    }
-
-    try {
-      r.run()
-    }
-    finally {
-      synchronized(runnables) {
-        runnables.remove(r)
-      }
-    }
-  }
-
-  @TestOnly
-  fun noUncompletedRunnables(): Boolean {
-    synchronized(runnables) {
-      return runnables.isEmpty()
-    }
-  }
-
-  fun cleanAllRunnables() {
-    synchronized(runnables) {
-      runnables.clear()
-    }
-  }
-
-  @get:TestOnly
-  val uncompletedRunnables: MutableList<Runnable?>
-    get() {
-      val result: MutableList<Runnable?>
-      synchronized(runnables) {
-        result = ArrayList<Runnable?>(runnables)
-      }
-      return result
-    }
 
   @JvmStatic
   fun invokeAndWait(p: Project, r: Runnable) {
@@ -268,34 +224,31 @@ object MavenUtil {
   }
 
   fun invokeAndWait(p: Project?, state: ModalityState, r: Runnable) {
-    startTestRunnable(r)
-    ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(Runnable { runAndFinishTestRunnable(r) }, p), state)
+    ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(r, p), state)
   }
 
 
   @JvmStatic
   fun invokeAndWaitWriteAction(p: Project, r: Runnable) {
-    startTestRunnable(r)
     if (ApplicationManager.getApplication().isWriteAccessAllowed()) {
-      runAndFinishTestRunnable(r)
+      r.run()
     }
     else if (ApplicationManager.getApplication().isDispatchThread()) {
       ApplicationManager.getApplication().runWriteAction(r)
     }
     else {
       ApplicationManager.getApplication().invokeAndWait(DisposeAwareRunnable.create(
-        Runnable { ApplicationManager.getApplication().runWriteAction(Runnable { runAndFinishTestRunnable(r) }) }, p),
+        Runnable { ApplicationManager.getApplication().runWriteAction(r) }, p),
                                                         ModalityState.defaultModalityState())
     }
   }
 
   fun runDumbAware(project: Project, r: Runnable) {
-    startTestRunnable(r)
     if (isDumbAware(r)) {
-      runAndFinishTestRunnable(r)
+      r.run()
     }
     else {
-      DumbService.getInstance(project).runWhenSmart(DisposeAwareRunnable.create(Runnable { runAndFinishTestRunnable(r) }, project))
+      DumbService.getInstance(project).runWhenSmart(DisposeAwareRunnable.create(r, project))
     }
   }
 
@@ -309,8 +262,7 @@ object MavenUtil {
       runDumbAware(project, runnable)
     }
     else {
-      startTestRunnable(runnable)
-      StartupManager.getInstance(project).runAfterOpened(Runnable { runAndFinishTestRunnable(runnable) })
+      StartupManager.getInstance(project).runAfterOpened(runnable)
     }
   }
 
@@ -346,7 +298,70 @@ object MavenUtil {
   }
 
   fun groupByBasedir(projects: Collection<MavenProject>, tree: MavenProjectsTree): MultiMap<String, MavenProject> {
-    return ContainerUtil.groupBy<String, MavenProject>(projects, NullableFunction { getBaseDir(tree.findRootProject(it).directoryFile).toString() })
+    return ContainerUtil.groupBy<String, MavenProject>(projects,
+                                                       NullableFunction { getBaseDir(tree.findRootProject(it).directoryFile).toString() })
+  }
+
+
+  private fun isDotMvnRoot(dir: VirtualFile): Boolean {
+    val child = dir.findChild(".mvn")
+    if (child != null && child.isDirectory()) {
+      if (MavenLog.LOG.isTraceEnabled) {
+        MavenLog.LOG.trace("found .mvn in " + child)
+      }
+      return true
+    }
+    return false
+  }
+
+  private fun isRootPomXmlMvnRoot(dir: VirtualFile): Boolean {
+    val child = dir.findChild("pom.xml")
+    if (child != null && child.isFile) {
+      if (MavenLog.LOG.isTraceEnabled) {
+        MavenLog.LOG.trace("found pom.xml in $child, checking for root")
+      }
+      try {
+        child.inputStream.use {
+          val factory = XMLInputFactory.newFactory()
+          try {
+            factory.setProperty("http://apache.org/xml/features/disallow-doctype-decl", true)
+            factory.setProperty("http://xml.org/sax/features/external-general-entities", false)
+            factory.setProperty("http://xml.org/sax/features/external-parameter-entities", false)
+          }
+          catch (_: IllegalArgumentException) {
+          }
+          val parser = factory.createXMLStreamReader(it)
+          if (parser.nextTag() != XMLStreamReader.START_ELEMENT
+              || parser.getLocalName() != "project") {
+            if (MavenLog.LOG.isTraceEnabled) {
+              MavenLog.LOG.trace("pom.xml in $child, is invalid pom xml")
+            }
+            return false
+          }
+          for (i in 0 until parser.getAttributeCount()) {
+            if ("root" == parser.getAttributeLocalName(i)) {
+              val value = parser.getAttributeValue(i).toBoolean()
+              if (MavenLog.LOG.isTraceEnabled) {
+                MavenLog.LOG.trace("pom.xml in $child root=$value")
+              }
+              return value
+            }
+          }
+          if (MavenLog.LOG.isTraceEnabled) {
+            MavenLog.LOG.trace("pom.xml in $child does not contain root tag")
+          }
+          return false
+
+        }
+      }
+      catch (_: IOException) {
+        return false
+      }
+      catch (_: XMLStreamException) {
+        return false
+      }
+    }
+    return false
   }
 
   @JvmStatic
@@ -354,37 +369,18 @@ object MavenUtil {
     var baseDir = if (file.isDirectory() || file.getParent() == null) file else file.getParent()
     var dir = baseDir
     do {
-      val child = dir.findChild(".mvn")
-
-      if (child != null && child.isDirectory()) {
-        if (MavenLog.LOG.isTraceEnabled()) {
-          MavenLog.LOG.trace("found .mvn in " + child)
-        }
+      if (isDotMvnRoot(dir) || isRootPomXmlMvnRoot(dir)) {
         baseDir = dir
         break
       }
     }
     while ((dir.getParent().also { dir = it }) != null)
     if (MavenLog.LOG.isTraceEnabled()) {
-      MavenLog.LOG.trace("return " + baseDir + " as baseDir")
+      MavenLog.LOG.trace("return $baseDir as baseDir")
     }
     return baseDir
   }
 
-  @JvmStatic
-  fun findProfilesXmlFile(pomFile: VirtualFile?): VirtualFile? {
-    if (pomFile == null) return null
-    val parent = pomFile.getParent()
-    if (parent == null || !parent.isValid()) return null
-    return parent.findChild(MavenConstants.PROFILES_XML)
-  }
-
-  fun getProfilesXmlNioFile(pomFile: VirtualFile?): Path? {
-    if (pomFile == null) return null
-    val parent = pomFile.getParent()
-    if (parent == null) return null
-    return parent.toNioPath().resolve(MavenConstants.PROFILES_XML)
-  }
 
   @JvmStatic
   fun <T, U> collectFirsts(pairs: List<Pair<T, U>>): List<T> {
@@ -536,19 +532,9 @@ object MavenUtil {
     val manager = FileTemplateManager.getInstance(project)
     val fileTemplate = manager.getJ2eeTemplate(templateName)
     val allProperties = manager.getDefaultProperties()
-    if (!interactive) {
-      allProperties.putAll(properties)
-    }
+    allProperties.putAll(properties)
     allProperties.putAll(conditions!!)
     var text = fileTemplate.getText(allProperties)
-    val pattern = Pattern.compile("\\$\\{(.*?)}")
-    val matcher = pattern.matcher(text)
-    val builder = StringBuilder()
-    while (matcher.find()) {
-      matcher.appendReplacement(builder, "\\$" + StringUtil.toUpperCase(matcher.group(1)) + "\\$")
-    }
-    matcher.appendTail(builder)
-    text = builder.toString()
 
     val template = TemplateManager.getInstance(project).createTemplate("", "", text) as TemplateImpl
     for (i in 0..<template.getSegmentsCount()) {
@@ -1122,10 +1108,12 @@ object MavenUtil {
   }
 
   /**
-   * @param path any path pointing to an environment where the repository should be searched.
+   * @param descriptor EelDescriptor pointing to an environment where the repository should be searched.
    */
   @JvmStatic
-  fun resolveDefaultLocalRepository(path: Path?): Path {
+  @ApiStatus.Obsolete
+  //do not use it, used only in Path macros contributors, waits for IJPL-234144 to be rewrited
+  fun resolveDefaultLocalRepositoryForJpsMacros(descriptor: EelDescriptor?): Path {
     val mavenRepoLocal = System.getProperty(MAVEN_REPO_LOCAL)
 
     if (mavenRepoLocal != null) {
@@ -1139,12 +1127,16 @@ object MavenUtil {
       return Path.of(forcedM2Home)
     }
 
-    val api = if (path == null || path.getEelDescriptor() is LocalEelDescriptor) localEel else path.getEelApiBlocking()
+    val api = if (descriptor == null || descriptor is LocalEelDescriptor) localEel else descriptor.toEelApiBlocking()
     val m2DirPath = api.resolveM2Dir()
     val settingsPath: Path = m2DirPath.resolve(SETTINGS_XML)
     val defaultRepo = m2DirPath.resolve(REPOSITORY_DIR)
 
-    val repoPath = getRepositoryFromSettings(settingsPath) ?: return defaultRepo
+    val repoPath = getRepositoryFromSettings(settingsPath, Properties())
+    if (repoPath == null ||
+        repoPath.contains($$"${")) { //no property resolution for JPS projects
+      return defaultRepo
+    }
     return api.fs.getPath(repoPath).asNioPath()
   }
 
@@ -1231,16 +1223,16 @@ object MavenUtil {
     return path
   }
 
-  internal fun doResolveLocalRepository(userSettingsFile: Path?, globalSettingsFile: Path?): Path? {
+  internal suspend fun doResolveLocalRepository(userSettingsFile: Path?, globalSettingsFile: Path?, properties: Properties?): Path? {
     if (userSettingsFile != null) {
-      val fromUserSettings: String? = getRepositoryFromSettings(userSettingsFile)
+      val fromUserSettings: String? = getRepositoryFromSettings(userSettingsFile, properties)
       if (!StringUtil.isEmpty(fromUserSettings)) {
         return Path.of(fromUserSettings)
       }
     }
 
     if (globalSettingsFile != null) {
-      val fromGlobalSettings: String? = getRepositoryFromSettings(globalSettingsFile)
+      val fromGlobalSettings: String? = getRepositoryFromSettings(globalSettingsFile, properties)
       if (!StringUtil.isEmpty(fromGlobalSettings)) {
         return Path.of(fromGlobalSettings)
       }
@@ -1250,18 +1242,34 @@ object MavenUtil {
   }
 
   @JvmStatic
-  fun getRepositoryFromSettings(file: Path): String? {
-    try {
-      val repository: Element? = getRepositoryElement(file)
+  fun getRepositoryFromSettings(file: Path, props: Properties?): String? {
+    val propertiesToResolve = props ?: MavenServerUtil.collectSystemProperties()
 
-      if (repository == null) {
-        return null
-      }
-      val text = repository.getText()
-      if (isEmptyOrSpaces(text)) {
-        return null
-      }
-      return expandProperties(text!!.trim { it <= ' ' })
+    val repository = try {
+      getRepositoryElement(file)
+    }
+    catch (e: IOException) {
+      MavenLog.LOG.debug("Cannot read file $file", e)
+      return null
+    }catch (e: JDOMException) {
+      MavenLog.LOG.warn("Cannot read file $file", e)
+      return null
+    }
+
+    if (repository == null) {
+      return null
+    }
+    val text = repository.getText()
+    if (isEmptyOrSpaces(text)) {
+      return null
+    }
+    return expandProperties(text!!.trim { it <= ' ' }, propertiesToResolve)
+  }
+
+  suspend fun getRepositoryFromSettings(file: Path): String? {
+    try {
+      val api = file.getEelDescriptor().toEelApi()
+      return getRepositoryFromSettings(file, MavenEelUtil.getMavenProperties(api))
     }
     catch (e: Exception) {
       return null
@@ -1336,8 +1344,39 @@ object MavenUtil {
   @Throws(IOException::class, JDOMException::class)
   private fun getDomRootElement(file: Path?): Element? {
     if (file == null) return null
-    val reader = InputStreamReader(Files.newInputStream(file), StandardCharsets.UTF_8)
-    return JDOMUtil.load(reader)
+    return MavenSettingsDomReader.getInstance().read(file)
+  }
+
+  @Service(Service.Level.APP)
+  private class MavenSettingsDomReader {
+    private val relay: DiskQueryRelay<Path, Element?> = DiskQueryRelay { file ->
+      Files.newInputStream(file).use { stream ->
+        JDOMUtil.load(InputStreamReader(stream, StandardCharsets.UTF_8))
+      }
+    }
+
+    @Throws(IOException::class, JDOMException::class)
+    fun read(file: Path): Element? {
+      try {
+        return relay.accessDiskWithCheckCanceled(file)
+      }
+      catch (e: RuntimeException) {
+        // accessDiskWithCheckCanceled propagates Future.get() failures via ExceptionUtil.rethrow,
+        // which wraps the ExecutionException in a RuntimeException. Restore the original cause
+        // so callers can match on IOException/JDOMException.
+        val cause = (e.cause as? ExecutionException)?.cause ?: throw e
+        ExceptionUtil.rethrowUnchecked(cause)
+        when (cause) {
+          is IOException -> throw cause
+          is JDOMException -> throw cause
+          else -> throw e
+        }
+      }
+    }
+
+    companion object {
+      fun getInstance(): MavenSettingsDomReader = service<MavenSettingsDomReader>()
+    }
   }
 
   private fun getElementWithRegardToNamespace(parent: Element?, childName: String?, namespaces: MutableList<String?>): Element? {
@@ -1645,7 +1684,8 @@ object MavenUtil {
   }
 
   @JvmStatic
-  fun getIdeaVersionToPassToMavenProcess(): String = ApplicationInfoImpl.getShadowInstance().getMajorVersion() + "." + ApplicationInfoImpl.getShadowInstance().getMinorVersion()
+  fun getIdeaVersionToPassToMavenProcess(): String =
+    ApplicationInfoImpl.getShadowInstance().getMajorVersion() + "." + ApplicationInfoImpl.getShadowInstance().getMinorVersion()
 
   @JvmStatic
   fun isPomFileName(fileName: String): Boolean {
@@ -1731,7 +1771,9 @@ object MavenUtil {
     }
 
     val mavenProjectsManager = MavenProjectsManager.getInstance(project)
-    if (mavenProjectsManager.findProject(file) != null) return true
+    if (mavenProjectsManager.isMavenizedProject) {
+      if (mavenProjectsManager.findProject(file) != null) return true
+    }
 
     return ReadAction.compute<Boolean, RuntimeException>(ThrowableComputable {
       if (project.isDisposed()) return@ThrowableComputable false
@@ -1834,25 +1876,44 @@ object MavenUtil {
       if (res != null && res.getSdkType() is JavaSdkType) {
         return res
       }
-      return JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk()
+      if (project.getEelDescriptor() != LocalEelDescriptor) {
+        return resolveJavaHomeSdk(project)
+      }
+      else {
+        return JavaAwareProjectJdkTableImpl.getInstanceEx().getInternalJdk()
+      }
     }
 
     if (name == MavenRunnerSettings.USE_JAVA_HOME) {
-      val javaHome = ExternalSystemJdkUtil.getJavaHome()
-      if (StringUtil.isEmptyOrSpaces(javaHome)) {
-        throw InvalidJavaHomeException(javaHome)
-      }
-      try {
-        return JavaSdk.getInstance().createJdk("", javaHome!!)
-      }
-      catch (e: IllegalArgumentException) {
-        throw InvalidJavaHomeException(javaHome)
-      }
+      return resolveJavaHomeSdk(project)
     }
 
     val projectJdk: Sdk? = getSdkByExactName(name)
     if (projectJdk != null) return projectJdk
     throw InvalidSdkException(name)
+  }
+
+  /**
+   * Resolves JAVA_HOME for the project's environment (local or remote via EEL).
+   */
+  private fun resolveJavaHome(project: Project): String? {
+    val eelDescriptor = project.getEelDescriptor()
+    return runBlockingCancellable {
+      getJavaHomeForEel(eelDescriptor)
+    }?.toString()
+  }
+
+  private fun resolveJavaHomeSdk(project: Project): Sdk {
+    val javaHome = resolveJavaHome(project)
+    if (javaHome.isNullOrBlank()) {
+      throw InvalidJavaHomeException(javaHome)
+    }
+    try {
+      return JavaSdk.getInstance().createJdk("", javaHome)
+    }
+    catch (_: IllegalArgumentException) {
+      throw InvalidJavaHomeException(javaHome)
+    }
   }
 
   private fun getSdkByExactName(name: String): Sdk? {
@@ -1894,7 +1955,7 @@ object MavenUtil {
   }
 
   fun suggestProjectSdk(project: Project): Sdk? {
-    val projectJdkTable = ProjectJdkTable.getInstance()
+    val projectJdkTable = ProjectJdkTable.getInstance(project)
     val sdkType = ExternalSystemJdkUtil.getJavaSdkType()
     return projectJdkTable.getSdksOfType(sdkType)
       .filterNotNull()
@@ -1924,14 +1985,6 @@ object MavenUtil {
   fun shouldKeepPreviousResolutionResults(readingProblems: Collection<MavenProjectProblem>): Boolean {
     return !shouldResetDependenciesAndFolders(readingProblems)
   }
-
-  @ApiStatus.ScheduledForRemoval
-  @Deprecated("use MavenUtil.resolveSuperPomFile")
-  fun getEffectiveSuperPom(project: Project, workingDir: String): VirtualFile? {
-    val distribution = MavenDistributionsCache.getInstance(project).getMavenDistribution(workingDir)
-    return resolveSuperPomFile(distribution.mavenHome, MavenConstants.SUPER_POM_4_0_XML)
-  }
-
 
   @JvmStatic
   @Deprecated("use MavenUtil.resolveSuperPomFile")
@@ -1978,20 +2031,33 @@ object MavenUtil {
   }
 
   @JvmStatic
-  fun isRunningFromSources(): Boolean {
-    return path != null && (path.endsWith("production") || path.parent.endsWith("production"))
-  }
+  fun isRunningFromSources(): Boolean = PluginManagerCore.isRunningFromSources()
 
+  @RequiresBackgroundThread
   fun isMaven410(xmlns: String?, schemaLocation: String?): Boolean {
     if (xmlns == null || schemaLocation == null) return false
-    val schemaLocations = schemaLocation.split(' ')
-    return (xmlns == MAVEN_4_XLMNS || xmlns == MAVEN_4_XLMNS_HTTPS)
-           && schemaLocations.all {
-      it == MAVEN_4_XLMNS ||
-      it == MAVEN_4_XLMNS_HTTPS ||
-      it == MAVEN_4_XSD ||
-      it == MAVEN_4_XSD_HTTPS
+    val xmlns410 = xmlns == MAVEN_4_XMLNS || xmlns == MAVEN_4_XMLNS_HTTPS
+    if (!xmlns410) return false
+    val schemaLocations = schemaLocation.split("\\s+".toRegex())
+      .filter { it.isNotBlank() }
+    return schemaLocations.all {
+      Maven4SchemaVersionChecker.is410Xsd(it)
     }
+  }
 
+  /**
+   * MNG-7805: Since Maven 4.0.0-alpha-7, modelVersion is optional and inferred from namespace.
+   * @return inferred modelVersion from xmlns, or null if not inferrable
+   */
+  @JvmStatic
+  fun inferModelVersionFromNamespace(xmlns: String?): String? {
+    if (xmlns == null) return null
+    val prefix = "http://maven.apache.org/POM/"
+    val prefixHttps = "https://maven.apache.org/POM/"
+    return when {
+      xmlns.startsWith(prefix) -> xmlns.removePrefix(prefix)
+      xmlns.startsWith(prefixHttps) -> xmlns.removePrefix(prefixHttps)
+      else -> null
+    }
   }
 }

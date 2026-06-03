@@ -1,22 +1,25 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.workspaceModel.ide.impl
 
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.components.serviceAsync
-import com.intellij.openapi.project.Project
-import com.intellij.platform.backend.workspace.WorkspaceModel
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.ConnectionId
+import com.intellij.platform.workspace.storage.EntitySource
+import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
+import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
+import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityData
-import com.intellij.platform.workspace.storage.impl.url.toVirtualFileUrl
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentation
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
-import com.intellij.workspaceModel.ide.ModifiableProjectRootEntity
 import com.intellij.workspaceModel.ide.ProjectRootEntity
-import java.nio.file.Path
+import com.intellij.workspaceModel.ide.ProjectRootEntityBuilder
 import org.jetbrains.annotations.ApiStatus.Internal
 
 @Internal
@@ -27,9 +30,7 @@ internal class ProjectRootEntityImpl(private val dataSource: ProjectRootEntityDa
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -50,8 +51,8 @@ internal class ProjectRootEntityImpl(private val dataSource: ProjectRootEntityDa
   }
 
 
-  internal class Builder(result: ProjectRootEntityData?) : ModifiableWorkspaceEntityBase<ProjectRootEntity, ProjectRootEntityData>(
-    result), ModifiableProjectRootEntity {
+  internal class Builder(result: ProjectRootEntityData?) : ModifiableWorkspaceEntityBase<ProjectRootEntity, ProjectRootEntityData>(result),
+                                                           ProjectRootEntityBuilder {
     internal constructor() : this(ProjectRootEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -64,16 +65,14 @@ internal class ProjectRootEntityImpl(private val dataSource: ProjectRootEntityDa
           error("Entity ProjectRootEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
       index(this, "root", this.root)
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -109,7 +108,6 @@ internal class ProjectRootEntityImpl(private val dataSource: ProjectRootEntityDa
         changedProperty.add("entitySource")
 
       }
-
     override var root: VirtualFileUrl
       get() = getEntityData().root
       set(value) {
@@ -122,6 +120,7 @@ internal class ProjectRootEntityImpl(private val dataSource: ProjectRootEntityDa
 
     override fun getEntityClass(): Class<ProjectRootEntity> = ProjectRootEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -130,14 +129,13 @@ internal class ProjectRootEntityData : WorkspaceEntityData<ProjectRootEntity>() 
 
   internal fun isRootInitialized(): Boolean = ::root.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<ProjectRootEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<ProjectRootEntity> {
     val modifiable = ProjectRootEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): ProjectRootEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -156,9 +154,8 @@ internal class ProjectRootEntityData : WorkspaceEntityData<ProjectRootEntity>() 
     return ProjectRootEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return ProjectRootEntity(root, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return ProjectRootEntity(root, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -169,9 +166,7 @@ internal class ProjectRootEntityData : WorkspaceEntityData<ProjectRootEntity>() 
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ProjectRootEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.root != other.root) return false
     return true
@@ -180,9 +175,7 @@ internal class ProjectRootEntityData : WorkspaceEntityData<ProjectRootEntity>() 
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as ProjectRootEntityData
-
     if (this.root != other.root) return false
     return true
   }

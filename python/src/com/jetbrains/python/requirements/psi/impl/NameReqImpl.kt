@@ -5,14 +5,23 @@ package com.jetbrains.python.requirements.psi.impl
 import com.intellij.extapi.psi.ASTWrapperPsiElement
 import com.intellij.lang.ASTNode
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.psi.ContributedReferenceHost
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiElementVisitor
+import com.intellij.psi.PsiReference
+import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.util.IncorrectOperationException
 import com.jetbrains.python.requirements.createVersionspec
-import com.jetbrains.python.requirements.psi.*
+import com.jetbrains.python.requirements.psi.Extras
+import com.jetbrains.python.requirements.psi.HashOption
+import com.jetbrains.python.requirements.psi.NameReq
+import com.jetbrains.python.requirements.psi.QuotedMarker
+import com.jetbrains.python.requirements.psi.SimpleName
+import com.jetbrains.python.requirements.psi.Versionspec
+import com.jetbrains.python.requirements.psi.Visitor
 
-class NameReqImpl(node: ASTNode) : ASTWrapperPsiElement(node), NameReq {
+class NameReqImpl(node: ASTNode) : ASTWrapperPsiElement(node), NameReq, ContributedReferenceHost {
   override val name: SimpleName
     get() = findNotNullChildByClass(SimpleName::class.java)
 
@@ -67,6 +76,15 @@ class NameReqImpl(node: ASTNode) : ASTWrapperPsiElement(node), NameReq {
                                                    node.replaceChild(oldVersionSpecNode, newVersionSpecNode)
                                                  }
                                                }
-                                             })
+    })
   }
+
+  /**
+   * `ASTWrapperPsiElement.getReferences()` returns an empty array unless the element opts into
+   * the reference-contributor pipeline by implementing [ContributedReferenceHost] and routing
+   * `getReferences` through [ReferenceProvidersRegistry]. Without this override,
+   * `RequirementsReferenceContributor`'s providers were registered but never invoked, so
+   * Ctrl-Click on package names did nothing.
+   */
+  override fun getReferences(): Array<PsiReference> = ReferenceProvidersRegistry.getReferencesFromProviders(this)
 }

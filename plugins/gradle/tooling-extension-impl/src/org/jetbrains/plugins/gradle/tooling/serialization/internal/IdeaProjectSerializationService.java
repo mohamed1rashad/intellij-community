@@ -6,17 +6,47 @@ import com.amazon.ion.IonType;
 import com.amazon.ion.IonWriter;
 import com.amazon.ion.system.IonReaderBuilder;
 import org.gradle.api.JavaVersion;
-import gnu.trove.TObjectHashingStrategy;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
 import org.gradle.tooling.internal.consumer.converters.BackwardsCompatibleIdeaModuleDependency;
-import org.gradle.tooling.model.*;
-import org.gradle.tooling.model.idea.*;
+import org.gradle.tooling.model.BuildIdentifier;
+import org.gradle.tooling.model.DomainObjectSet;
+import org.gradle.tooling.model.GradleModuleVersion;
+import org.gradle.tooling.model.GradleProject;
+import org.gradle.tooling.model.GradleTask;
+import org.gradle.tooling.model.ProjectIdentifier;
+import org.gradle.tooling.model.UnsupportedMethodException;
+import org.gradle.tooling.model.idea.IdeaCompilerOutput;
+import org.gradle.tooling.model.idea.IdeaContentRoot;
+import org.gradle.tooling.model.idea.IdeaDependency;
+import org.gradle.tooling.model.idea.IdeaJavaLanguageSettings;
+import org.gradle.tooling.model.idea.IdeaModule;
+import org.gradle.tooling.model.idea.IdeaModuleDependency;
+import org.gradle.tooling.model.idea.IdeaProject;
+import org.gradle.tooling.model.idea.IdeaSingleEntryLibraryDependency;
+import org.gradle.tooling.model.idea.IdeaSourceDirectory;
 import org.gradle.tooling.model.java.InstalledJdk;
 import org.gradle.util.GradleVersion;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.tooling.serialization.SerializationService;
-import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.*;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalBuildIdentifier;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalGradleModuleVersion;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalGradleProject;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalGradleTask;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaCompilerOutput;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaContentRoot;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaDependency;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaDependencyScope;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaJavaLanguageSettings;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaLanguageLevel;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaModule;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaModuleDependency;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaProject;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaSingleEntryLibraryDependency;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalIdeaSourceDirectory;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalInstalledJdk;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.InternalProjectIdentifier;
+import org.jetbrains.plugins.gradle.tooling.serialization.internal.adapter.Supplier;
 import org.jetbrains.plugins.gradle.tooling.util.GradleContainerUtil;
 import org.jetbrains.plugins.gradle.tooling.util.GradleVersionComparator;
 import org.jetbrains.plugins.gradle.tooling.util.IntObjectMap;
@@ -26,10 +56,27 @@ import org.jetbrains.plugins.gradle.tooling.util.ObjectCollector;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
 import static com.intellij.openapi.util.Comparing.compare;
-import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.*;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.OBJECT_ID_FIELD;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.assertFieldName;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.assertNotNull;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.createIonWriter;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readBoolean;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readFile;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readFileSet;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readInt;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.readString;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeBoolean;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeFile;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeFiles;
+import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamApiUtils.writeString;
 
 /**
  * @author Vladislav.Soroka
@@ -335,6 +382,9 @@ public final class IdeaProjectSerializationService implements SerializationServi
           writeProjectIdentifier(writer, context, gradleProject.getProjectIdentifier());
           writeFile(writer, "buildDirectory", gradleProject.getBuildDirectory());
           writeGradleProject(writer, "parent", context, gradleProject.getParent());
+          if (context.myGradleVersionComparator.isOrGreaterThan("8.2")) {
+            writeString(writer, "buildTreePath", gradleProject.getBuildTreePath());
+          }
 
           writer.setFieldName("children");
           writer.stepIn(IonType.LIST);
@@ -651,6 +701,9 @@ public final class IdeaProjectSerializationService implements SerializationServi
           gradleProject.setProjectIdentifier(readProjectIdentifier(reader, context));
           gradleProject.setBuildDirectory(readFile(reader, "buildDirectory"));
           gradleProject.setParent(readGradleProject(reader, context, "parent"));
+          if (context.myGradleVersionComparator.isOrGreaterThan("8.2")) {
+            gradleProject.setBuildTreePath(readString(reader, "buildTreePath"));
+          }
 
           reader.next();
           assertFieldName(reader, "children");
@@ -822,7 +875,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
     }
 
     private final ObjectCollector<IdeaProject, IOException> ideaProjectsCollector = new ObjectCollector<>(
-      new TObjectHashingStrategy<IdeaProject>() {
+      new ObjectCollector.Hasher<IdeaProject>() {
         @Override
         public int computeHashCode(IdeaProject object) {
           return object == null ? 0 : object.getName().hashCode();
@@ -845,7 +898,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
       });
 
     private final ObjectCollector<GradleProject, IOException> gradleProjectsCollector = new ObjectCollector<>(
-      new TObjectHashingStrategy<GradleProject>() {
+      new ObjectCollector.Hasher<GradleProject>() {
         @Override
         public int computeHashCode(GradleProject object) {
           return object == null ? 0 : object.getPath().hashCode();
@@ -860,7 +913,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
 
     private final ObjectCollector<IdeaCompilerOutput, IOException> ideaCompilerOutputCollector =
       new ObjectCollector<>(
-        new TObjectHashingStrategy<IdeaCompilerOutput>() {
+        new ObjectCollector.Hasher<IdeaCompilerOutput>() {
           @Override
           public int computeHashCode(IdeaCompilerOutput object) {
             return argsHashCode(object.getInheritOutputDirs(), object.getOutputDir(), object.getTestOutputDir());
@@ -876,7 +929,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
         });
 
     private final ObjectCollector<GradleTask, IOException> gradleTasksCollector = new ObjectCollector<>(
-      new TObjectHashingStrategy<GradleTask>() {
+      new ObjectCollector.Hasher<GradleTask>() {
         @Override
         public int computeHashCode(GradleTask object) {
           return object == null ? 0 : object.getPath().hashCode();
@@ -898,7 +951,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
 
     private final ObjectCollector<IdeaDependency, IOException> ideaDependenciesCollector =
       new ObjectCollector<>(
-        new TObjectHashingStrategy<IdeaDependency>() {
+        new ObjectCollector.Hasher<IdeaDependency>() {
           @Override
           public int computeHashCode(IdeaDependency object) {
             if (object == null) return 0;
@@ -957,7 +1010,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
 
     private final ObjectCollector<IdeaJavaLanguageSettings, IOException> ideaJavaLanguageSettingsCollector =
       new ObjectCollector<>(
-        new TObjectHashingStrategy<IdeaJavaLanguageSettings>() {
+        new ObjectCollector.Hasher<IdeaJavaLanguageSettings>() {
           @Override
           public int computeHashCode(final IdeaJavaLanguageSettings object) {
             return object == null ? 0 : argsHashCode(getLanguageLevel(object),
@@ -978,7 +1031,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
 
     private final ObjectCollector<ProjectIdentifier, IOException> projectIdentifiersCollector =
       new ObjectCollector<>(
-        new TObjectHashingStrategy<ProjectIdentifier>() {
+        new ObjectCollector.Hasher<ProjectIdentifier>() {
           @Override
           public int computeHashCode(ProjectIdentifier object) {
             return object == null ? 0 : object.getProjectPath().hashCode();
@@ -998,7 +1051,7 @@ public final class IdeaProjectSerializationService implements SerializationServi
 
     private final ObjectCollector<BuildIdentifier, IOException> buildIdentifiersCollector =
       new ObjectCollector<>(
-        new TObjectHashingStrategy<BuildIdentifier>() {
+        new ObjectCollector.Hasher<BuildIdentifier>() {
           @Override
           public int computeHashCode(BuildIdentifier object) {
             return object == null ? 0 : object.getRootDir().getPath().hashCode();

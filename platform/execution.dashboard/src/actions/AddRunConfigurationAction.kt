@@ -11,6 +11,7 @@ import com.intellij.execution.dashboard.RunDashboardManager
 import com.intellij.execution.impl.RunConfigurable
 import com.intellij.execution.impl.RunDialog
 import com.intellij.execution.impl.callNewConfigurationCreated
+import com.intellij.execution.services.ServiceViewAddActionContributor
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.remoting.ActionRemoteBehaviorSpecification
@@ -19,6 +20,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.NlsSafe
+import com.intellij.platform.execution.dashboard.RunDashboardServiceViewContributor
 import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.util.containers.ContainerUtil
 import java.util.function.Consumer
@@ -30,7 +32,13 @@ private val IGNORE_CASE_DISPLAY_NAME_COMPARATOR = Comparator<ConfigurationType> 
   t1.displayName.compareTo(t2.displayName, ignoreCase = true)
 }
 
-class AddRunConfigurationAction : DumbAwareAction(), ActionRemoteBehaviorSpecification.BackendOnly {
+class AddRunConfigurationAction :
+  DumbAwareAction(),
+  ActionRemoteBehaviorSpecification.BackendOnly,
+  ServiceViewAddActionContributor {
+
+  override fun getContributorClass(): Class<*> = RunDashboardServiceViewContributor::class.java
+
   override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
   override fun update(e: AnActionEvent) {

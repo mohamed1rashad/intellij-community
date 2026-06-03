@@ -1,4 +1,4 @@
-// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.fixtures;
 
 import com.google.common.base.Joiner;
@@ -25,18 +25,34 @@ import com.intellij.openapi.roots.OrderRootType;
 import com.intellij.openapi.roots.impl.FilePropertyPusher;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.StandardFileSystems;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiPolyVariantReference;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.ResolveResult;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.refactoring.RefactoringActionHandler;
-import com.intellij.testFramework.*;
-import com.intellij.testFramework.fixtures.*;
+import com.intellij.testFramework.IndexingTestUtil;
+import com.intellij.testFramework.LightProjectDescriptor;
+import com.intellij.testFramework.PsiTestUtil;
+import com.intellij.testFramework.TestDataPath;
+import com.intellij.testFramework.TestLoggerFactory;
+import com.intellij.testFramework.UsefulTestCase;
+import com.intellij.testFramework.VfsTestUtil;
+import com.intellij.testFramework.fixtures.CodeInsightTestFixture;
+import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
+import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory;
+import com.intellij.testFramework.fixtures.TempDirTestFixture;
+import com.intellij.testFramework.fixtures.TestFixtureBuilder;
 import com.intellij.testFramework.fixtures.impl.LightTempDirTestFixtureImpl;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usages.Usage;
@@ -45,7 +61,6 @@ import com.intellij.util.CommonProcessors.CollectProcessor;
 import com.intellij.util.IncorrectOperationException;
 import com.jetbrains.python.PythonLanguage;
 import com.jetbrains.python.PythonTestUtil;
-import com.jetbrains.python.codeInsight.completion.PyModuleNameCompletionContributor;
 import com.jetbrains.python.codeInsight.typing.PyBundledStubs;
 import com.jetbrains.python.codeInsight.typing.PyTypeShed;
 import com.jetbrains.python.documentation.PyDocumentationSettings;
@@ -53,7 +68,12 @@ import com.jetbrains.python.documentation.PyTypeRenderer.Feature;
 import com.jetbrains.python.documentation.PythonDocumentationProvider;
 import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.namespacePackages.PyNamespacePackagesService;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyTypedElement;
+import com.jetbrains.python.psi.PyUtil;
+import com.jetbrains.python.psi.impl.IntentionalUnstubbing;
 import com.jetbrains.python.psi.impl.PyFileImpl;
 import com.jetbrains.python.psi.impl.PythonLanguageLevelPusher;
 import com.jetbrains.python.psi.search.PySearchUtilBase;
@@ -65,7 +85,13 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.Assert;
 
 import java.io.File;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
 
 
@@ -82,7 +108,8 @@ public abstract class PyTestCase extends UsefulTestCase {
     super.setUp();
 
     IdeaTestFixtureFactory factory = IdeaTestFixtureFactory.getFixtureFactory();
-    TestFixtureBuilder<IdeaProjectTestFixture> fixtureBuilder = factory.createLightFixtureBuilder(getProjectDescriptor(), getTestName(false));
+    TestFixtureBuilder<IdeaProjectTestFixture> fixtureBuilder =
+      factory.createLightFixtureBuilder(getProjectDescriptor(), getTestName(false));
     final IdeaProjectTestFixture fixture = fixtureBuilder.getFixture();
     myFixture = IdeaTestFixtureFactory.getFixtureFactory().createCodeInsightFixture(fixture, createTempDirFixture());
     myFixture.setTestDataPath(getTestDataPath());
@@ -96,7 +123,6 @@ public abstract class PyTestCase extends UsefulTestCase {
         if (myFixture.getModule() != null) {
           PyNamespacePackagesService.getInstance(myFixture.getModule()).resetAllNamespacePackages();
         }
-        PyModuleNameCompletionContributor.ENABLED = true;
         setLanguageLevel(null);
 
         myFixture.tearDown();
@@ -104,6 +130,7 @@ public abstract class PyTestCase extends UsefulTestCase {
       }
 
       FilePropertyPusher.EP_NAME.findExtensionOrFail(PythonLanguageLevelPusher.class).flushLanguageLevelCache();
+      IntentionalUnstubbing.resetForciblyUnstubbedFileSet();
     }
     catch (Throwable e) {
       addSuppressedException(e);
@@ -224,7 +251,7 @@ public abstract class PyTestCase extends UsefulTestCase {
   protected void runWithAdditionalClassEntryInSdkRoots(@NotNull VirtualFile directory, @NotNull Runnable runnable) {
     final Sdk sdk = PythonSdkUtil.findPythonSdk(myFixture.getModule());
     assertNotNull(sdk);
-    runWithAdditionalRoot(sdk, directory, OrderRootType.CLASSES, (__) -> runnable.run());
+    runWithAdditionalRoot(sdk, directory, OrderRootType.CLASSES, (_) -> runnable.run());
   }
 
   protected void runWithAdditionalClassEntryInSdkRoots(@NotNull String relativeTestDataPath, @NotNull Runnable runnable) {
@@ -324,7 +351,7 @@ public abstract class PyTestCase extends UsefulTestCase {
     return PsiDocumentManager.getInstance(myFixture.getProject()).getDocument(myFixture.getFile()).getText().indexOf(signature);
   }
 
-  private void setLanguageLevel(@Nullable LanguageLevel languageLevel) {
+  protected void setLanguageLevel(@Nullable LanguageLevel languageLevel) {
     Project project = myFixture.getProject();
     if (project != null) {
       PythonLanguageLevelPusher.setForcedLanguageLevel(project, languageLevel);
@@ -366,12 +393,18 @@ public abstract class PyTestCase extends UsefulTestCase {
   }
 
   protected static void assertNotParsed(PsiFile file) {
+    if (IntentionalUnstubbing.getForciblyUnstubbedFiles().contains(file)) {
+      return;
+    }
     assertInstanceOf(file, PyFileImpl.class);
     VirtualFile virtualFile = file.getVirtualFile();
     String path = virtualFile.getPath();
     String name = virtualFile.getName();
     String errorMessage = "Operations should have been performed on stubs but caused file to be parsed: " + path;
-    String tip = "As a starting point for an investigation, a breakpoint can be set in com.intellij.psi.impl.source.PsiFileImpl#loadTreeElement with a condition `getName().equals(\"" + name + "\")`.\nThen the stacktrace can be investigated to find the root cause.";
+    String tip =
+      "As a starting point for an investigation, a breakpoint can be set in com.intellij.psi.impl.source.PsiFileImpl#loadTreeElement with a condition `getName().equals(\"" +
+      name +
+      "\")`.\nThen the stacktrace can be investigated to find the root cause.";
     assertNull(errorMessage + "\n" + tip,
                ((PyFileImpl)file).getTreeElement());
   }
@@ -616,19 +649,49 @@ public abstract class PyTestCase extends UsefulTestCase {
     }
   }
 
-  public static void fixme(@NotNull String comment, @NotNull Class<? extends Throwable> c, @NotNull Runnable test) {
+  public static void fixme(@NotNull String comment,
+                           @NotNull Class<? extends Throwable> expectedErrorClass,
+                           @NotNull String anticipatedMessage,
+                           @NotNull Runnable test) {
     try {
       test.run();
     }
     catch (Throwable failedError) {
-      if (c.isInstance(failedError)) {
-        // fix-me tests are supposed to fail
-        return;
+      if (
+        expectedErrorClass.isInstance(failedError)
+        || failedError instanceof TestLoggerFactory.TestLoggerAssertionError testLoggerError
+           && expectedErrorClass.isInstance(testLoggerError.getCause())
+      ) {
+        if (failedError.getMessage().contains(anticipatedMessage)) {
+          // fix-me tests are supposed to fail
+          return;
+        }
+        throw new AssertionError(
+          "Test " +
+          comment +
+          " expected the incorrect error message '" +
+          anticipatedMessage +
+          "' was not found in actual message '" +
+          failedError.getMessage() +
+          "'",
+          failedError
+        );
       }
       throw failedError;
     }
     // the fix-me test passed -> the bug/feature was fixed!
-    fail("Test (" + comment + ") FIXED!");
+    fail("Test " + comment + " was previously failing and was suppressed, but now it passes");
+  }
+
+  protected static void withNewAnyTypeEnabled(@NotNull Runnable test) {
+    var key = Registry.get("python.type.any");
+    var previousValue = key.asBoolean();
+    try {
+      key.setValue(true);
+      test.run();
+    }
+    finally {
+      key.setValue(previousValue);
+    }
   }
 }
-

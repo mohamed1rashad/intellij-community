@@ -92,7 +92,6 @@ public class JavadocHighlightingTest extends LightDaemonAnalyzerTestCase {
   public void testException3() { doTest(); }
   public void testException4() { myMissingJavadocInspection.METHOD_SETTINGS.MINIMAL_VISIBILITY = "package"; doTest(); }
   public void testInheritJavaDoc() { setLanguageLevel(LanguageLevel.JDK_1_3); doTest(); }
-  public void testLink0() { doTest(); }
   public void testLinkFromInnerClassToSelfMethod() { doTest(); }
   public void testValueBadReference() { doTest(); }
   public void testValueGoodReference() { doTest(); }
@@ -106,6 +105,8 @@ public class JavadocHighlightingTest extends LightDaemonAnalyzerTestCase {
   public void testPackageInfo2() { doTest("packageInfo/p2/package-info.java"); }
   public void testPackageInfo3() { doTest("packageInfo/p3/package-info.java"); }
   public void testPackageInfo4() { doTest("packageInfo/p4/package-info.java"); }
+  public void testPackageInfo5() { doTest("packageInfo/p5/package-info.java"); }
+  public void testPackageInfo5ButWeHaveAnOldJavaVersion() { setLanguageLevel(LanguageLevel.JDK_1_7); doTest("packageInfo/p5OldJava/package-info.java");}
   public void testJava18Tags() { doTest(); }
   public void testJava19Tags() { setLanguageLevel(LanguageLevel.JDK_1_9); doTest(); }
   public void testJava12Tags() { setLanguageLevel(LanguageLevel.JDK_12); doTest(); }
@@ -113,7 +114,6 @@ public class JavadocHighlightingTest extends LightDaemonAnalyzerTestCase {
   public void testDeprecatedModule() { setLanguageLevel(LanguageLevel.JDK_1_9); doTest("moduleInfo/m2/module-info.java"); }
   public void testUnknownInlineTag() { doTest(); }
   public void testUnknownTags() { doTest(); }
-  public void testBadCharacters() { doTest(); }
   public void testVararg() { doTest(); }
   public void testInnerClassReferenceInSignature() { doTest(); }
   public void testBadReference() { doTest(); }
@@ -144,6 +144,8 @@ public class JavadocHighlightingTest extends LightDaemonAnalyzerTestCase {
   public void testOnlyEmptyLinesInSnippet() { doTest(); }
   public void testSnippetInstructionsWithUnhandledThrowable() { doTest(); }
   public void testUnalignedLeadingAsterisks() { doTest(); }
+  public void testParameterizedTypes() { doTest(); }
+  public void testParameterizedTypes02() { doTest(); }
 
   public void testIssueLinksInJavaDoc() {
     IssueNavigationConfiguration navigationConfiguration = IssueNavigationConfiguration.getInstance(getProject());

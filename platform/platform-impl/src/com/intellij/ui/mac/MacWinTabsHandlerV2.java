@@ -19,8 +19,13 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JRootPane;
+import java.awt.BorderLayout;
+import java.awt.Container;
+import java.awt.Graphics;
+import java.awt.Point;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -35,14 +40,16 @@ public final class MacWinTabsHandlerV2 extends MacWinTabsHandler {
   static @NotNull JComponent _createAndInstallHandlerComponent(@NotNull JRootPane rootPane) {
     JPanel tabsContainer = new JPanel(new BorderLayout()) {
       @Override
-      protected void paintComponent(Graphics g) {
-        InternalUICustomization customization = InternalUICustomization.getInstance();
-        if (customization != null && customization.paintProjectTabsContainer(this, g)) {
-          return;
-        }
-        super.paintComponent(g);
+      protected Graphics getComponentGraphics(Graphics g) {
+        return InternalUICustomization.runGlobalCGTransformWithInactiveFrameSupport(this, super.getComponentGraphics(g));
       }
     };
+
+    InternalUICustomization customization = InternalUICustomization.getInstance();
+    if (customization != null) {
+      customization.registerWindowBackgroundComponent(tabsContainer);
+    }
+
     tabsContainer.setVisible(false);
 
     rootPane.putClientProperty(WINDOW_TABS_CONTAINER, tabsContainer);

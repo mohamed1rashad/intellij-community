@@ -80,8 +80,8 @@ f:com.intellij.diff.tools.combined.CombinedDiffKeysKt
 - *sf:getDISABLE_LOADING_BLOCKS():com.intellij.openapi.util.Key
 *:com.intellij.diff.tools.combined.CombinedDiffManager
 - *sf:Companion:com.intellij.diff.tools.combined.CombinedDiffManager$Companion
-- a:createProcessor(java.lang.String):com.intellij.diff.tools.combined.CombinedDiffComponentProcessor
-- bs:createProcessor$default(com.intellij.diff.tools.combined.CombinedDiffManager,java.lang.String,I,java.lang.Object):com.intellij.diff.tools.combined.CombinedDiffComponentProcessor
+- a:createProcessor(java.lang.String,java.util.List,java.util.List):com.intellij.diff.tools.combined.CombinedDiffComponentProcessor
+- bs:createProcessor$default(com.intellij.diff.tools.combined.CombinedDiffManager,java.lang.String,java.util.List,java.util.List,I,java.lang.Object):com.intellij.diff.tools.combined.CombinedDiffComponentProcessor
 *f:com.intellij.diff.tools.combined.CombinedDiffManager$Companion
 - f:getInstance(com.intellij.openapi.project.Project):com.intellij.diff.tools.combined.CombinedDiffManager
 *:com.intellij.diff.tools.combined.CombinedDiffModelListener
@@ -169,7 +169,7 @@ e:com.intellij.diff.tools.util.base.IgnorePolicy
 - *sf:IGNORE_LANGUAGE_SPECIFIC_CHANGES:com.intellij.diff.tools.util.base.IgnorePolicy
 *:com.intellij.diff.util.CombinedDiffToggle
 - *sf:Companion:com.intellij.diff.util.CombinedDiffToggle$Companion
-- s:getDEFAULT():com.intellij.diff.util.CombinedDiffToggle
+- *s:getDEFAULT():com.intellij.diff.util.CombinedDiffToggle
 - a:isCombinedDiffEnabled():Z
 - a:setCombinedDiffEnabled(Z):V
 *f:com.intellij.diff.util.CombinedDiffToggle$Companion

@@ -1,10 +1,8 @@
 com/intellij/application/options/schemes/SchemesCombo$MySchemeListItem
 com/intellij/diagnostic/ActivityCategory
-com/intellij/ide/RecentProjectColorInfo
 com/intellij/ide/actions/cache/RecoveryScope
 com/intellij/ide/errorTreeView/NewErrorTreeViewPanel$MessageViewState
 com/intellij/ide/gdpr/ConsentAttributes
-com/intellij/ide/plugins/IdeaPluginDescriptorImpl
 com/intellij/ide/plugins/marketplace/MarketplacePluginDownloadService
 com/intellij/ide/ui/LafReference
 com/intellij/ide/ui/laf/UIThemeExportableBean
@@ -13,7 +11,6 @@ com/intellij/openapi/editor/colors/Groups
 com/intellij/openapi/editor/impl/CaretImpl
 com/intellij/openapi/editor/markup/AnalyzerStatus
 com/intellij/openapi/fileEditor/impl/EditorCompositeListener
-com/intellij/openapi/fileEditor/impl/FileEditorOpenOptions
 com/intellij/openapi/fileEditor/impl/text/TextEditorComponent
 com/intellij/openapi/keymap/impl/ActionProcessor
 com/intellij/openapi/options/newEditor/AbstractEditor

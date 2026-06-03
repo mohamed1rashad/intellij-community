@@ -1,9 +1,9 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.importing.syncAction
 
-import com.intellij.platform.testFramework.assertion.listenerAssertion.ListenerAssertion
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.use
+import com.intellij.platform.testFramework.assertion.listenerAssertion.ListenerAssertion
 import org.jetbrains.plugins.gradle.importing.TestModel
 import org.jetbrains.plugins.gradle.importing.TestModelProvider
 import org.jetbrains.plugins.gradle.service.project.GradlePartialResolverPolicy
@@ -15,6 +15,9 @@ class GradlePartialSyncTest : GradlePartialSyncTestCase() {
 
   @Test
   fun `test partial Gradle sync consistency`() {
+    val projectInfo = multiModuleProjectInfo()
+    initProject(projectInfo)
+
     Disposer.newDisposable().use { disposable ->
 
       lateinit var resultResolverContext: ProjectResolverContext
@@ -34,9 +37,8 @@ class GradlePartialSyncTest : GradlePartialSyncTestCase() {
         }
       }
 
-      initMultiModuleProject()
       importProject()
-      assertMultiModuleProjectStructure()
+      assertProjectStructure(projectInfo)
 
       modelFetchCompletionAssertion.assertListenerFailures()
       modelFetchCompletionAssertion.assertListenerState(1) {
@@ -91,7 +93,7 @@ class GradlePartialSyncTest : GradlePartialSyncTestCase() {
         }
       }
 
-      assertMultiModuleProjectStructure()
+      assertProjectStructure(projectInfo)
       Assertions.assertEquals(projectDataStructure, getProjectDataStructure()) {
         "The project data structure shouldn't be changed after the partial Gradle sync"
       }

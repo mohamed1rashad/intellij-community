@@ -1,13 +1,30 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion.command.commands
 
-import com.intellij.codeInsight.completion.command.*
+import com.intellij.codeInsight.completion.command.CommandCompletionProviderContext
+import com.intellij.codeInsight.completion.command.CommandCompletionUnsupportedOperationException
+import com.intellij.codeInsight.completion.command.CommandProvider
+import com.intellij.codeInsight.completion.command.CompletionCommand
+import com.intellij.codeInsight.completion.command.HighlightInfoLookup
+import com.intellij.codeInsight.completion.command.MyEditor
 import com.intellij.codeInsight.completion.command.configuration.ApplicationCommandCompletionService
+import com.intellij.codeInsight.completion.command.createInjectedEditor
 import com.intellij.codeInsight.daemon.HighlightDisplayKey
-import com.intellij.codeInsight.daemon.impl.*
+import com.intellij.codeInsight.daemon.impl.DaemonProgressIndicator
+import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.daemon.impl.HighlightInfo.IntentionActionDescriptor
+import com.intellij.codeInsight.daemon.impl.HighlightVisitorBasedInspection
+import com.intellij.codeInsight.daemon.impl.IntentionActionFilter
+import com.intellij.codeInsight.daemon.impl.ProblemDescriptorWithReporterName
+import com.intellij.codeInsight.daemon.impl.SeverityRegistrar
+import com.intellij.codeInsight.daemon.impl.ShowIntentionsPass
 import com.intellij.codeInsight.daemon.impl.ShowIntentionsPass.IntentionsInfo
-import com.intellij.codeInsight.intention.*
+import com.intellij.codeInsight.intention.CommonIntentionAction
+import com.intellij.codeInsight.intention.CustomizableIntentionAction
+import com.intellij.codeInsight.intention.EmptyIntentionAction
+import com.intellij.codeInsight.intention.IntentionAction
+import com.intellij.codeInsight.intention.IntentionActionDelegate
+import com.intellij.codeInsight.intention.IntentionManager
 import com.intellij.codeInsight.intention.impl.CachedIntentions
 import com.intellij.codeInsight.intention.impl.IntentionActionWithTextCaching
 import com.intellij.codeInsight.intention.impl.ShowIntentionActionsHandler
@@ -19,6 +36,7 @@ import com.intellij.codeInspection.InspectionEngine
 import com.intellij.codeInspection.ProblemDescriptor
 import com.intellij.codeInspection.ProblemDescriptorBase
 import com.intellij.codeInspection.ProblemDescriptorUtil
+import com.intellij.codeInspection.ex.DynamicGroupTool
 import com.intellij.codeInspection.ex.GlobalInspectionToolWrapper
 import com.intellij.codeInspection.ex.InspectionProfileWrapper
 import com.intellij.codeInspection.ex.LocalInspectionToolWrapper
@@ -32,7 +50,6 @@ import com.intellij.lang.injection.InjectedLanguageManager
 import com.intellij.modcommand.ActionContext
 import com.intellij.modcommand.Presentation
 import com.intellij.modcommand.PsiBasedModCommandAction
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.thisLogger
@@ -41,7 +58,11 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.colors.CodeInsightColors
 import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.extensions.ExtensionPointName
-import com.intellij.openapi.progress.*
+import com.intellij.openapi.progress.EmptyProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.blockingContextToIndicator
+import com.intellij.openapi.progress.jobToIndicator
+import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.PossiblyDumbAware
@@ -241,7 +262,7 @@ internal class DirectIntentionCommandProvider : CommandProvider {
           val profileToUse = getInstance(psiFile.project).getCurrentProfile()
           val inspectionWrapper = InspectionProfileWrapper(profileToUse)
           val inspectionTools = getInspectionTools(inspectionWrapper, originalFile)
-          val lineRange = getLineRange(topLevelFile, topLevelOffset)
+          val lineRange = getLineRange(topLevelFile, topLevelCurrentOffset)
           val indicator = EmptyProgressIndicator()
           val inspectionResult = jobToIndicator(coroutineContext.job, indicator) {
             if (!isInjected) {
@@ -259,12 +280,26 @@ internal class DirectIntentionCommandProvider : CommandProvider {
           }
           for (entry: MutableMap.MutableEntry<LocalInspectionToolWrapper?, List<ProblemDescriptor?>?> in inspectionResult.entries) {
             val inspectionToolWrapper: LocalInspectionToolWrapper = entry.key ?: continue
-            val toolId = inspectionToolWrapper.shortName
             val descriptors: List<ProblemDescriptor?> = entry.value ?: continue
             for (descriptor in descriptors) {
+              val toolId = inspectionToolWrapper.shortName
               if (descriptor == null) continue
               val fixes = descriptor.fixes ?: continue
               if (descriptor !is ProblemDescriptorBase) continue
+              var additionalToolId: String? = null
+              if (descriptor is ProblemDescriptorWithReporterName) {
+                //let's try to find the original tool
+                val wrappers = inspectionTools.filter {
+                  ((it?.tool as? DynamicGroupTool)?.children ?: emptyList())
+                    .any { child -> child.shortName == descriptor.reportingToolShortName }
+                }
+                if (wrappers.size == 1) {
+                  additionalToolId = wrappers.first()?.shortName ?: continue
+                }
+                else {
+                  continue
+                }
+              }
               var textRange = descriptor.textRange ?: continue
               if (isInjected) {
                 textRange = injectedLanguageManager.injectedToHost(psiFile, textRange)
@@ -280,6 +315,7 @@ internal class DirectIntentionCommandProvider : CommandProvider {
               for (i in 0..<fixes.size) {
                 val action = QuickFixWrapper.wrap(descriptor, i)
                 if (action is EmptyIntentionAction) continue
+                if (action is CustomizableIntentionAction && !action.isSelectable) continue
                 if (intentionCommandSkipper != null && intentionCommandSkipper.skip(action, psiFile, currentOffset)) continue
                 if (!isInjected && !ShowIntentionActionsHandler.availableFor(topLevelFile, topLevelEditor, topLevelOffset, action)) continue
                 if (isInjected && action.asModCommandAction() == null) continue
@@ -289,7 +325,7 @@ internal class DirectIntentionCommandProvider : CommandProvider {
                 val icon = if (isInfo) AllIcons.Actions.IntentionBulbGrey else AllIcons.Actions.IntentionBulb
 
                 result[toolId + ":" + action.text] = CompletionCommandWithErrorLevel(DirectInspectionFixCompletionCommand(
-                  inspectionId = toolId,
+                  inspectionIds = if (additionalToolId == null) listOf(toolId) else listOf(toolId, additionalToolId),
                   presentableName = action.text,
                   priority = priority,
                   icon = icon,
@@ -361,16 +397,13 @@ internal class DirectIntentionCommandProvider : CommandProvider {
           val endOffset = fileDocument.getLineEndOffset(endLineNumber)
           val isInjected = topLevelFile != psiFile
           val indicator = DaemonProgressIndicator()
-          val errorHighlightings: List<HighlightInfo?>? = jobToIndicator(coroutineContext.job, indicator) {
-            ApplicationManager.getApplication().runReadAction<List<HighlightInfo?>?> {
-              HighlightVisitorBasedInspection.runAnnotatorsInGeneralHighlighting(topLevelFile,
+          val errorHighlightings: List<HighlightInfo?> = jobToIndicator(coroutineContext.job, indicator) {
+            HighlightVisitorBasedInspection.runAnnotatorsInGeneralHighlighting(topLevelFile,
                                                                                  startOffset,
                                                                                  endOffset,
                                                                                  ProperTextRange(startOffset, endOffset),
                                                                                  true, true, true)
-            }
           }
-          if (errorHighlightings == null) return@readAction
           var insideRange = getLineRange(topLevelFile, topLevelOffset)
           if (isInjected) {
             insideRange = insideRange.intersection(
@@ -384,7 +417,7 @@ internal class DirectIntentionCommandProvider : CommandProvider {
                 (isInjected && !insideRange.contains(TextRange(info.startOffset, info.endOffset)))) continue
             if (info.hasLazyQuickFixes()) {
               info.updateLazyFixesPsiTimeStamp(PsiModificationTracker.getInstance(psiFile.project).modificationCount)
-              lazyQuickFixUpdater.waitQuickFixesSynchronously(psiFile, editor, info)
+              lazyQuickFixUpdater.waitQuickFixesSynchronously(info, psiFile.getProject(), editor.getDocument())
             }
             val fixes: MutableList<IntentionActionDescriptor> = ArrayList()
             ShowIntentionsPass.addAvailableFixesForGroups(info, topLevelEditor, topLevelFile, fixes, -1, offset, false)
@@ -396,7 +429,7 @@ internal class DirectIntentionCommandProvider : CommandProvider {
               val suffix = "</html>"
               if (name.startsWith(prefix) && name.endsWith(suffix)) {
                 @Suppress("HardCodedStringLiteral")
-                name = name.substring(prefix.length, name.length - suffix.length)
+                name = name.replace(Regex("<[^>]+>"), "")
               }
               val command = DirectErrorFixCompletionCommand(presentableName = name,
                                                             priority = 100,

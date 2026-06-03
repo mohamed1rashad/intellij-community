@@ -5,13 +5,18 @@ import com.intellij.ide.actions.ToolWindowMoveAction.Anchor
 import com.intellij.ide.actions.ToolWindowViewModeAction.ViewMode
 import com.intellij.internal.statistic.collectors.fus.actions.persistence.ToolWindowCollector.ToolWindowUtilValidator
 import com.intellij.internal.statistic.eventLog.EventLogGroup
-import com.intellij.internal.statistic.eventLog.events.*
+import com.intellij.internal.statistic.eventLog.events.BooleanEventField
+import com.intellij.internal.statistic.eventLog.events.EnumEventField
+import com.intellij.internal.statistic.eventLog.events.EventFields
 import com.intellij.internal.statistic.eventLog.events.EventFields.Enum
+import com.intellij.internal.statistic.eventLog.events.FloatEventField
+import com.intellij.internal.statistic.eventLog.events.StringEventField
+import com.intellij.internal.statistic.eventLog.events.VarargEventId
 import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesCollector
 import com.intellij.toolWindow.ToolWindowEventSource
 
 internal object ToolWindowEventLogGroup : CounterUsagesCollector() {
-  private val GROUP = EventLogGroup("toolwindow", 63)
+  private val GROUP = EventLogGroup("toolwindow", 64)
 
   override fun getGroup(): EventLogGroup = GROUP
 

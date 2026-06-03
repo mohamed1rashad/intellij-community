@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions.runAnything;
 
 import com.intellij.execution.Executor;
@@ -8,16 +8,22 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.actions.GotoActionBase;
 import com.intellij.ide.actions.runAnything.activity.RunAnythingProvider;
 import com.intellij.ide.lightEdit.LightEdit;
-import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.actionSystem.ex.ActionRuntimeRegistrar;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.KeyboardModifierGestureShortcut;
+import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.actionSystem.ex.CustomComponentAction;
 import com.intellij.openapi.actionSystem.impl.ActionButton;
-import com.intellij.openapi.actionSystem.impl.ActionConfigurationCustomizer;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.client.ClientSystemInfo;
-import com.intellij.openapi.keymap.Keymap;
 import com.intellij.openapi.keymap.KeymapManager;
-import com.intellij.openapi.keymap.KeymapManagerListener;
+import com.intellij.openapi.keymap.KeymapUtil;
+import com.intellij.openapi.keymap.KeymapUtilKt;
 import com.intellij.openapi.keymap.MacKeymapUtil;
 import com.intellij.openapi.keymap.impl.ModifierKeyDoubleClickHandler;
 import com.intellij.openapi.options.advanced.AdvancedSettings;
@@ -25,19 +31,13 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.util.FontUtil;
-import com.intellij.util.JavaCoroutines;
-import kotlin.Unit;
-import kotlin.coroutines.Continuation;
-import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.awt.event.KeyEvent;
-import java.util.Collection;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import static com.intellij.openapi.keymap.KeymapUtil.getActiveKeymapShortcuts;
 
 public class RunAnythingAction extends AnAction implements CustomComponentAction, DumbAware {
   public static final String RUN_ANYTHING_ACTION_ID = "RunAnything";
@@ -45,28 +45,15 @@ public class RunAnythingAction extends AnAction implements CustomComponentAction
   /**
    * @deprecated this is an internal field, must not be used outside the class
    */
-  @SuppressWarnings("DeprecatedIsStillUsed") 
+  @SuppressWarnings("DeprecatedIsStillUsed")
   @Deprecated
   public static final AtomicBoolean SHIFT_IS_PRESSED = new AtomicBoolean(false);
   /**
    * @deprecated this is an internal field, must not be used outside the class
    */
-  @SuppressWarnings("DeprecatedIsStillUsed") 
+  @SuppressWarnings("DeprecatedIsStillUsed")
   @Deprecated
   public static final AtomicBoolean ALT_IS_PRESSED = new AtomicBoolean(false);
-
-  private static boolean ourDoubleCtrlRegistered;
-
-  static final class ShortcutTracker implements ActionConfigurationCustomizer,
-                                                ActionConfigurationCustomizer.AsyncLightCustomizeStrategy {
-    @Override
-    public @Nullable Object customize(@NotNull ActionRuntimeRegistrar actionRegistrar, @NotNull Continuation<? super Unit> $completion) {
-      return JavaCoroutines.suspendJava(jc -> {
-        initShortcutTracker();
-        jc.resume(Unit.INSTANCE);
-      }, $completion);
-    }
-  }
 
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
@@ -97,46 +84,24 @@ public class RunAnythingAction extends AnAction implements CustomComponentAction
     return ActionUpdateThread.BGT;
   }
 
-  private static void updateShortcut(KeymapManager keymapManager) {
-    if (!getActiveKeymapShortcuts(RUN_ANYTHING_ACTION_ID, keymapManager).hasShortcuts()) {
-      registerDblCtrlClick();
-    }
-    else if (ourDoubleCtrlRegistered) {
-      ModifierKeyDoubleClickHandler.getInstance().unregisterAction(RUN_ANYTHING_ACTION_ID);
-      ourDoubleCtrlRegistered = false;
-    }
-  }
-
-  private static void registerDblCtrlClick() {
-    if (!ourDoubleCtrlRegistered) {
-      ModifierKeyDoubleClickHandler.getInstance().registerAction(RUN_ANYTHING_ACTION_ID, KeyEvent.VK_CONTROL, -1, false);
-      ourDoubleCtrlRegistered = true;
-    }
-  }
-
-  private static void initShortcutTracker() {
+  @Internal
+  public static @Nullable String computeModifierShortcutText() {
+    ModifierKeyDoubleClickHandler doubleClickHandler = ModifierKeyDoubleClickHandler.getInstance();
     KeymapManager keymapManager = ApplicationManager.getApplication().getServiceIfCreated(KeymapManager.class);
     if (keymapManager != null) {
-      updateShortcut(keymapManager);
+      for (Shortcut shortcut : KeymapUtilKt.getActiveKeymapShortcuts(RUN_ANYTHING_ACTION_ID, keymapManager).getShortcuts()) {
+        if (shortcut instanceof KeyboardModifierGestureShortcut gestureShortcut &&
+            doubleClickHandler.isShortcutRegistered(RUN_ANYTHING_ACTION_ID, gestureShortcut)) {
+          return KeymapUtil.getShortcutText(gestureShortcut);
+        }
+      }
     }
-    ApplicationManager.getApplication().getMessageBus().connect().subscribe(KeymapManagerListener.TOPIC, new KeymapManagerListener() {
-      @Override
-      public void activeKeymapChanged(@Nullable Keymap keymap) {
-        if (keymap == null) {
-          registerDblCtrlClick();
-        }
-        else {
-          updateShortcut(KeymapManager.getInstance());
-        }
-      }
 
-      @Override
-      public void shortcutsChanged(@NotNull Keymap keymap, @NonNls @NotNull Collection<String> actionIds, boolean fromSettings) {
-        if (actionIds.contains(RUN_ANYTHING_ACTION_ID)) {
-          updateShortcut(KeymapManager.getInstance());
-        }
-      }
-    });
+    if (doubleClickHandler.isActionRegistered(RUN_ANYTHING_ACTION_ID)) {
+      return IdeBundle.message("double.ctrl.or.shift.shortcut",
+                               ClientSystemInfo.isMac() ? FontUtil.thinSpace() + MacKeymapUtil.CONTROL : "Ctrl"); //NON-NLS
+    }
+    return null;
   }
 
   @Override
@@ -155,12 +120,7 @@ public class RunAnythingAction extends AnAction implements CustomComponentAction
       }
 
       private static @Nullable String getShortcut() {
-        if (ourDoubleCtrlRegistered) {
-          return IdeBundle.message("double.ctrl.or.shift.shortcut",
-                                   ClientSystemInfo.isMac() ? FontUtil.thinSpace() + MacKeymapUtil.CONTROL : "Ctrl"); //NON-NLS
-        }
-        //keymap shortcut is added automatically
-        return null;
+        return computeModifierShortcutText();
       }
 
       @Override

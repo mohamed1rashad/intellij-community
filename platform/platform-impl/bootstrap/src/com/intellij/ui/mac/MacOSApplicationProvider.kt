@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui.mac
 
 import com.intellij.diagnostic.LoadingState
@@ -14,8 +14,13 @@ import com.intellij.idea.IdeStarter.Companion.openUriOnLoading
 import com.intellij.jna.JnaLoader
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.Application
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.CoroutineSupport
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.UiWithModelAccess
 import com.intellij.openapi.application.impl.ApplicationInfoImpl
+import com.intellij.openapi.application.ui
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.debug
@@ -30,6 +35,7 @@ import com.intellij.openapi.startup.StartupManager
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.platform.ide.CoreUiCoroutineScopeHolder
+import com.intellij.ui.AppIcon
 import com.intellij.ui.mac.foundation.Foundation
 import com.intellij.ui.mac.foundation.ID
 import com.intellij.util.concurrency.annotations.RequiresEdt
@@ -43,7 +49,6 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.awt.Desktop
 import java.awt.event.MouseEvent
-import java.io.File
 import java.net.URLDecoder
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JOptionPane
@@ -117,7 +122,7 @@ fun initMacApplication(mainScope: CoroutineScope) {
       return@setOpenFileHandler
     }
 
-    val list = files.map(File::toPath)
+    @Suppress("IO_FILE_USAGE") val list = files.map(java.io.File::toPath)
     if (LoadingState.COMPONENTS_LOADED.isOccurred) {
       val project = getNonDefaultProject()
       mainScope.launch {
@@ -253,6 +258,9 @@ private fun installProtocolHandler(desktop: Desktop, mainScope: CoroutineScope) 
     if (LoadingState.APP_STARTED.isOccurred) {
       mainScope.launch {
         CommandLineProcessor.processProtocolCommand(uriString)
+        CommandLineProcessor.findVisibleFrame()?.let { frame ->
+          AppIcon.getInstance().requestFocus(frame)
+        }
       }
     }
     else {

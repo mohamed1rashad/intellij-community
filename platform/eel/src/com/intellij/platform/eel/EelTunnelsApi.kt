@@ -19,6 +19,7 @@ import kotlin.time.Duration.Companion.seconds
  */
 @ApiStatus.Experimental
 sealed interface EelTunnelsApi {
+  val descriptor: EelDescriptor
   /**
    * Creates a remote UNIX socket forwarding. IJent listens for a connection on the remote machine, and when the connection
    * is accepted, the IDE communicates to the remote client via a pair of Kotlin channels.
@@ -276,7 +277,7 @@ sealed interface EelTunnelsApi {
   @ApiStatus.Internal
   suspend fun getAcceptorForRemotePort(@GeneratedBuilder args: GetAcceptorForRemotePort): ConnectionAcceptor
 
-  @ApiStatus.Internal
+  @ApiStatus.Experimental
   interface GetAcceptorForRemotePort : HostAddress {
     // TODO Make it look and feel like all other builders.
     val configureServerSocket: ConfigurableSocket.() -> Unit get() = {}
@@ -285,7 +286,7 @@ sealed interface EelTunnelsApi {
   /**
    * This is a representation of a remote server bound to [boundAddress].
    */
-  @ApiStatus.Internal
+  @ApiStatus.Experimental
   interface ConnectionAcceptor {
     /**
      * A channel of incoming connections to the remote server.
@@ -382,7 +383,8 @@ suspend fun <T> EelTunnelsApiHelpers.GetConnectionToRemotePort.withConnectionToR
   return try {
     val connectionResult = eelIt()
     closeWithExceptionHandling({ action(connectionResult) }, { connectionResult.close() })
-  } catch (e: EelConnectionError) {
+  }
+  catch (e: EelConnectionError) {
     errorHandler(e)
   }
 }
@@ -442,7 +444,8 @@ suspend fun <T> EelTunnelsApiHelpers.GetAcceptorForRemotePort.withAcceptorForRem
   return try {
     val connectionResult = eelIt()
     closeWithExceptionHandling({ action(connectionResult) }, { connectionResult.close() })
-  } catch (e: EelConnectionError) {
+  }
+  catch (e: EelConnectionError) {
     errorHandler(e)
   }
 }
@@ -463,33 +466,38 @@ sealed interface EelNetworkError : EelError
  * An error that can happen during the creation of a connection to a remote server
  */
 @ApiStatus.Experimental
-sealed class EelConnectionError(override val message: String) : EelNetworkError, IOException() {
+sealed class EelConnectionError : EelNetworkError, IOException {
+  constructor(message: String) : super(message)
+  constructor(message: String, cause: Throwable) : super(message, cause)
 
   /**
    * Returned when the remote host cannot create an object of a socket.
    */
   @ApiStatus.Experimental
   @Deprecated("Unlikely to happen, to be merged into `Other`")
-  open class SocketAllocationError(override val message: String) : EelConnectionError(message)
+  open class SocketAllocationError(message: String) : EelConnectionError(message)
 
   /**
    * Returned when there is a problem with resolve of the hostname.
    */
   @ApiStatus.Experimental
-  open class ResolveFailure(override val message: String) : EelConnectionError(message)
+  open class ResolveFailure(message: String) : EelConnectionError(message)
 
   /**
    * Returned when there was a problem with establishing a connection to a resolved server
    */
   @ApiStatus.Experimental
-  open class ConnectionProblem(override val message: String) : EelConnectionError(message)
+  open class ConnectionProblem(message: String) : EelConnectionError(message)
 
   /**
    * Unknown failure during a connection establishment
    */
   // TODO Rename to `Other`
   @ApiStatus.Experimental
-  open class UnknownFailure(override val message: String) : EelConnectionError(message)
+  open class UnknownFailure : EelConnectionError {
+    constructor(message: String) : super(message)
+    constructor(message: String, cause: Throwable) : super(message, cause)
+  }
 }
 
 

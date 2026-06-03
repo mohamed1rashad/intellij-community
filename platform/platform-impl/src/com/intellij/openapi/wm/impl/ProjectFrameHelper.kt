@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("LiftReturnOrAssignment")
 
 package com.intellij.openapi.wm.impl
@@ -47,7 +47,15 @@ import com.intellij.openapi.wm.impl.status.IdeStatusBarImpl
 import com.intellij.platform.ide.CoreUiCoroutineScopeHolder
 import com.intellij.platform.ide.menu.installAppMenuIfNeeded
 import com.intellij.platform.util.coroutines.childScope
-import com.intellij.ui.*
+import com.intellij.ui.ActionCenterBalloonLayout
+import com.intellij.ui.BalloonLayout
+import com.intellij.ui.BalloonLayoutImpl
+import com.intellij.ui.ClientProperty
+import com.intellij.ui.ExperimentalUI
+import com.intellij.ui.JBColor
+import com.intellij.ui.ScreenUtil
+import com.intellij.ui.WindowResizeListenerEx
+import com.intellij.ui.updateAppWindowIcon
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.io.SuperUserStatus.isSuperUser
 import com.intellij.util.ui.JBUI
@@ -55,7 +63,17 @@ import com.intellij.util.ui.StartupUiUtil
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.accessibility.AccessibleContextAccessor
 import com.jetbrains.WindowDecorations.CustomTitleBar
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.awt.BorderLayout
@@ -67,7 +85,12 @@ import java.awt.event.WindowEvent
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.accessibility.AccessibleContext
-import javax.swing.*
+import javax.swing.JComponent
+import javax.swing.JFrame
+import javax.swing.JPanel
+import javax.swing.RootPaneContainer
+import javax.swing.SwingUtilities
+import javax.swing.WindowConstants
 
 private const val INIT_BOUNDS_KEY = "InitBounds"
 
@@ -77,9 +100,10 @@ private val LOG: Logger
 abstract class ProjectFrameHelper internal constructor(
   val frame: IdeFrameImpl,
   loadingState: FrameLoadingState? = null,
+  internal val projectFrameTypeId: String? = null,
 ) : IdeFrameEx, AccessibleContextAccessor, UiDataProvider {
   @Internal
-  constructor(frame: IdeFrameImpl) : this(frame = frame, loadingState = null)
+  constructor(frame: IdeFrameImpl) : this(frame = frame, loadingState = null, projectFrameTypeId = null)
 
   @Suppress("SSBasedInspection")
   @Internal
@@ -94,6 +118,7 @@ abstract class ProjectFrameHelper internal constructor(
 
   private val glassPane: IdeGlassPaneImpl
   private val frameHeaderHelper: ProjectFrameCustomHeaderHelper
+  private val centerComponent: JComponent
 
   @Internal
   @JvmField
@@ -113,6 +138,8 @@ abstract class ProjectFrameHelper internal constructor(
     frame.addWindowListener(WindowCloseListener)
 
     val rootPane = IdeRootPane()
+    rootPane.setProjectFrameTypeId(projectFrameTypeId)
+    centerComponent = createCenterComponent()
     contentPane = createContentPane()
     rootPane.contentPane = contentPane
 
@@ -120,13 +147,10 @@ abstract class ProjectFrameHelper internal constructor(
     rootPane.overrideGlassPane(glassPane)
 
     InternalUICustomization.getInstance()?.attachIdeFrameBackgroundPainter(this, glassPane)
-
+    
     frame.doSetRootPane(rootPane)
 
     frameDecorator = IdeFrameDecorator.decorate(frame, glassPane, coroutineScope.childScope("IdeFrameDecorator"))
-    // NB!: the root pane must be set before decorator, which holds its own client properties in a root pane via
-    // [com.intellij.openapi.wm.impl.IdeFrameDecorator.notifyFrameComponents]
-    frameDecorator?.setStoredFullScreen(getReusedFullScreenState())
 
     IdeRootPaneBorderHelper.install(
       app = ApplicationManager.getApplication(),
@@ -175,12 +199,19 @@ abstract class ProjectFrameHelper internal constructor(
       }
     })
 
+    // NB!: the root pane must be set before decorator, which holds its own client properties in a root pane via
+    // [com.intellij.openapi.wm.impl.IdeFrameDecorator.notifyFrameComponents]
+    // Another important point is that the frame helper must be set before this,
+    // as it's used within (e.g., to initialize FloatingMenuBarFlavor).
+    frameDecorator?.setStoredFullScreen(getReusedFullScreenState())
+
     frame.background = JBColor.PanelBackground
     val balloonLayout = ActionCenterBalloonLayout(rootPane, JBUI.insets(8)).also {
       balloonLayout = it
     }
 
     ApplicationManager.getApplication().messageBus.connect(coroutineScope).subscribe(LafManagerListener.TOPIC, LafManagerListener {
+      IdeRootPaneBorderHelper.update(frame.rootPane)
       frame.background = JBColor.PanelBackground
       balloonLayout.queueRelayout()
     })
@@ -219,7 +250,7 @@ abstract class ProjectFrameHelper internal constructor(
       putClientProperty(UIUtil.NO_BORDER_UNDER_WINDOW_TITLE_KEY, true)
     }
 
-    contentPane.add(createCenterComponent(), BorderLayout.CENTER)
+    contentPane.add(centerComponent, BorderLayout.CENTER)
     return contentPane
   }
 
@@ -296,6 +327,7 @@ abstract class ProjectFrameHelper internal constructor(
 
     fun updateStatusBarVisibility(uiSettings: UISettings = UISettings.shadowInstance) {
       statusBar.isVisible = uiSettings.showStatusBar && !uiSettings.presentationMode
+      InternalUICustomization.getInstance()?.onStatusBarVisibilityChanged(centerComponent, statusBar.isVisible)
     }
     ApplicationManager.getApplication().messageBus.connect(coroutineScope).subscribe(UISettingsListener.TOPIC, UISettingsListener(::updateStatusBarVisibility))
     updateStatusBarVisibility()
@@ -509,6 +541,8 @@ abstract class ProjectFrameHelper internal constructor(
     if (!WindowManagerEx.getInstanceEx().isFrameReused(this)) {
       frame.doDispose()
     }
+
+    glassPane.removeAll()
   }
 
   @Suppress("unused")

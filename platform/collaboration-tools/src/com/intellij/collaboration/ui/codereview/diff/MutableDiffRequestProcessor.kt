@@ -22,16 +22,22 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.application.EdtImmediate
 import com.intellij.openapi.progress.checkCanceled
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vcs.changes.actions.diff.GoToChangePopupController
 import com.intellij.openapi.vcs.changes.actions.diff.PresentableGoToChangePopupAction
 import com.intellij.openapi.vcs.changes.ui.PresentableChange
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.awaitFocusSettlesDown
 import com.intellij.util.EventDispatcher
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
-import java.util.*
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
+import java.util.EventListener
 
 /**
  * A [DiffRequestProcessor] whose state is controlled externally
@@ -84,10 +90,18 @@ internal class MutableDiffRequestProcessor(project: Project) : DiffRequestProces
     }
   }
 
-  private fun <C : Any> Navigator<C>.getPopupAction() = object : PresentableGoToChangePopupAction<C>() {
-    override fun getChanges(): ListSelection<out C> = getCurrentList().let { ListSelection.createAt(it.list, it.selectedIndex) }
-    override fun onSelected(change: C) = select(change)
-    override fun getPresentation(change: C): PresentableChange? = getChangePresentation(change)
+  private fun <C : Any> Navigator<C>.getPopupAction() =
+    PresentableGoToChangePopupAction.create({ getCurrentList() }, getPopupController())
+
+  private fun <C : Any> Navigator<C>.getPopupController() =
+    object : GoToChangePopupController<C> {
+      override fun getPresentation(change: C): PresentableChange? {
+        return getChangePresentation(change)
+      }
+
+      override fun onSelected(change: C) {
+        select(change)
+      }
   }
 }
 

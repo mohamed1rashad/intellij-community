@@ -2,11 +2,9 @@
 package org.jetbrains.plugins.gradle.service.execution
 
 import com.intellij.openapi.externalSystem.model.execution.ExternalSystemTaskExecutionSettings
-import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskId
 import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
 import com.intellij.openapi.externalSystem.util.task.TaskExecutionSpec
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.util.UserDataHolderBase
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
@@ -14,6 +12,7 @@ import org.gradle.internal.buildconfiguration.DaemonJvmPropertiesConfigurator
 import org.gradle.util.GradleVersion
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.gradle.properties.GradleDaemonJvmPropertiesFile
+import org.jetbrains.plugins.gradle.service.GradleInstallationManager
 import org.jetbrains.plugins.gradle.service.execution.GradleExecutionHelper.AUTO_JAVA_HOME
 import org.jetbrains.plugins.gradle.settings.GradleProjectSettings
 import org.jetbrains.plugins.gradle.util.GradleBundle
@@ -48,7 +47,7 @@ object GradleDaemonJvmHelper {
 
   @JvmStatic
   fun isProjectUsingDaemonJvmCriteria(projectSettings: GradleProjectSettings): Boolean {
-    val gradleVersion = projectSettings.resolveGradleVersion()
+    val gradleVersion = GradleInstallationManager.guessGradleVersion(projectSettings) ?: GradleVersion.current()
     val externalProjectPath = Path.of(projectSettings.externalProjectPath)
     return isProjectUsingDaemonJvmCriteria(externalProjectPath, gradleVersion)
   }

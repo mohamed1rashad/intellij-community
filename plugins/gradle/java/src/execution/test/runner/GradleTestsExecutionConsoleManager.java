@@ -1,8 +1,19 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.execution.test.runner;
 
-import com.intellij.build.*;
-import com.intellij.build.events.*;
+import com.intellij.build.BuildContentManager;
+import com.intellij.build.BuildDescriptor;
+import com.intellij.build.BuildProgressListener;
+import com.intellij.build.BuildViewManager;
+import com.intellij.build.DefaultBuildDescriptor;
+import com.intellij.build.events.BuildEvent;
+import com.intellij.build.events.EventResult;
+import com.intellij.build.events.FailureResult;
+import com.intellij.build.events.FileMessageEvent;
+import com.intellij.build.events.FinishBuildEvent;
+import com.intellij.build.events.MessageEvent;
+import com.intellij.build.events.StartBuildEvent;
+import com.intellij.build.events.StartEvent;
 import com.intellij.build.events.impl.ProgressBuildEventImpl;
 import com.intellij.build.events.impl.StartBuildEventImpl;
 import com.intellij.execution.RunnerAndConfigurationSettings;
@@ -53,10 +64,11 @@ import org.jetbrains.plugins.gradle.execution.filters.ReRunTaskFilter;
 import org.jetbrains.plugins.gradle.execution.test.runner.events.GradleTestEventsProcessor;
 import org.jetbrains.plugins.gradle.execution.test.runner.events.GradleTestsExecutionConsoleOutputProcessor;
 import org.jetbrains.plugins.gradle.service.execution.GradleCommandLineUtil;
-import org.jetbrains.plugins.gradle.service.execution.GradleRunConfiguration;
 import org.jetbrains.plugins.gradle.service.project.GradleTasksIndices;
 import org.jetbrains.plugins.gradle.util.GradleBundle;
 import org.jetbrains.plugins.gradle.util.GradleConstants;
+
+import static org.jetbrains.plugins.gradle.settings.GradleExecutionSettings.RUN_AS_TEST_KEY;
 
 /**
  * @author Vladislav.Soroka
@@ -151,8 +163,8 @@ public final class GradleTestsExecutionConsoleManager
       consoleView.addMessageFilter(new ReRunTaskFilter((ExternalSystemExecuteTaskTask)task, env));
     }
 
-    Disposable disposable = Disposer.newDisposable(consoleView, "Gradle test runner build event listener disposable");
     BuildViewManager buildViewManager = project.getService(BuildViewManager.class);
+    Disposable disposable = Disposer.newDisposable(buildViewManager, "Gradle test runner build event listener disposable");
     project.getService(ExternalSystemRunConfigurationViewManager.class).addListener(new BuildProgressListener() {
       @Override
       public void onEvent(@NotNull Object buildId, @NotNull BuildEvent event) {
@@ -247,12 +259,12 @@ public final class GradleTestsExecutionConsoleManager
   public boolean isApplicableFor(@NotNull ExternalSystemTask task) {
     if (task instanceof ExternalSystemExecuteTaskTask taskTask) {
       if (StringUtil.equals(taskTask.getExternalSystemId().getId(), GradleConstants.SYSTEM_ID.getId())) {
-        var isRunAsTest = taskTask.getUserData(GradleRunConfiguration.RUN_AS_TEST_KEY);
+        var isRunAsTest = taskTask.getUserData(RUN_AS_TEST_KEY);
         if (ObjectUtils.chooseNotNull(isRunAsTest, false)) {
           return true;
         }
         if (hasTestTasks(taskTask)) {
-          taskTask.putUserData(GradleRunConfiguration.RUN_AS_TEST_KEY, true);
+          taskTask.putUserData(RUN_AS_TEST_KEY, true);
           return true;
         }
       }

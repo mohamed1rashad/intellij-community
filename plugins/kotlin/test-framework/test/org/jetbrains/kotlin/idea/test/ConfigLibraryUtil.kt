@@ -18,14 +18,15 @@ import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.intellij.openapi.roots.libraries.PersistentLibraryKind
 import com.intellij.openapi.roots.ui.configuration.libraryEditor.NewLibraryEditor
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.testFramework.IndexingTestUtil
 import com.intellij.util.PathUtil
 import com.intellij.util.io.jarFile
 import junit.framework.TestCase
 import kotlinx.coroutines.Job
+import org.jetbrains.kotlin.idea.artifacts.TestKotlinArtifacts
 import org.jetbrains.kotlin.idea.base.platforms.KotlinCommonLibraryKind
 import org.jetbrains.kotlin.idea.base.platforms.KotlinJavaScriptLibraryKind
-import org.jetbrains.kotlin.idea.artifacts.TestKotlinArtifacts
 import org.jetbrains.kotlin.idea.base.test.InTextDirectivesUtils
 import org.junit.jupiter.api.Test
 import org.junitpioneer.jupiter.RetryingTest
@@ -290,5 +291,7 @@ fun Library.ModifiableModel.addRoot(file: Path, kind: OrderRootType) {
 
 fun Library.ModifiableModel.addEmptyClassesRoot() {
     val jarFile = jarFile { }.generateInTempDir()
-    addRoot(jarFile.toFile(), OrderRootType.CLASSES)
+    VirtualFileManager.getInstance().refreshAndFindFileByNioPath(jarFile)
+
+    addRoot(jarFile, OrderRootType.CLASSES)
 }

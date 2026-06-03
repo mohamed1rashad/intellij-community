@@ -6,9 +6,11 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.UIManager;
 import javax.swing.plaf.UIResource;
-import java.awt.*;
+import java.awt.Dimension;
+import java.awt.Insets;
+import java.awt.Rectangle;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -17,7 +19,7 @@ import java.util.function.Supplier;
  * @author Konstantin Bulenkov
  */
 public class JBInsets extends Insets {
-  private final @Nullable Supplier<@Nullable Insets> unscaledSupplier;
+  private final @Nullable Supplier<? extends @Nullable Insets> unscaledSupplier;
   private final @NotNull Insets unscaledDefault;
 
   @ApiStatus.Internal
@@ -66,7 +68,7 @@ public class JBInsets extends Insets {
 
   @SuppressWarnings("UseDPIAwareInsets")
   private JBInsets(
-    @Nullable Supplier<@Nullable Insets> unscaledSupplier,
+    @Nullable Supplier<? extends @Nullable Insets> unscaledSupplier,
     @NotNull Insets unscaledDefault,
     int scaledTop,
     int scaledLeft,
@@ -130,7 +132,7 @@ public class JBInsets extends Insets {
   }
 
   @ApiStatus.Internal
-  public static @NotNull JBInsets create(@Nullable Supplier<@Nullable Insets> unscaledSupplier, @NotNull Insets unscaledDefault) {
+  public static @NotNull JBInsets create(@Nullable Supplier<? extends @Nullable Insets> unscaledSupplier, @NotNull Insets unscaledDefault) {
     // zero values will be overwritten by update()
     var result = new JBInsets(unscaledSupplier, unscaledDefault, 0, 0, 0, 0);
     result.update();
@@ -140,17 +142,17 @@ public class JBInsets extends Insets {
   /**
    * Returns unscaled insets
    */
-  public Insets getUnscaled() {
+  public @NotNull Insets getUnscaled() {
     var unscaled = unscaledNoCopy();
     //noinspection UseDPIAwareInsets
     return new Insets(unscaled.top, unscaled.left, unscaled.bottom, unscaled.right);
   }
 
-  public JBInsetsUIResource asUIResource() {
+  public @NotNull JBInsetsUIResource asUIResource() {
     return new JBInsetsUIResource(this);
   }
 
-  static boolean isZero(Insets insets) {
+  static boolean isZero(@NotNull Insets insets) {
     if (insets instanceof JBInsets jbInsets && jbInsets.unscaledSupplier != null) {
       return false; // Even if these are zero now, they can be non-zero later (e.g. if the theme is changed or compact mode toggled).
     }
@@ -168,7 +170,7 @@ public class JBInsets extends Insets {
    * @param dimension the size to increase
    * @param insets    the insets to add
    */
-  public static void addTo(@NotNull Dimension dimension, Insets insets) {
+  public static void addTo(@NotNull Dimension dimension, @Nullable Insets insets) {
     if (insets != null) {
       dimension.width += insets.left + insets.right;
       dimension.height += insets.top + insets.bottom;
@@ -179,7 +181,7 @@ public class JBInsets extends Insets {
    * @param dimension the size to decrease
    * @param insets    the insets to remove
    */
-  public static void removeFrom(@NotNull Dimension dimension, Insets insets) {
+  public static void removeFrom(@NotNull Dimension dimension, @Nullable Insets insets) {
     if (insets != null) {
       dimension.width -= insets.left + insets.right;
       dimension.height -= insets.top + insets.bottom;
@@ -190,7 +192,7 @@ public class JBInsets extends Insets {
    * @param rectangle the size to increase and the location to move
    * @param insets    the insets to add
    */
-  public static void addTo(@NotNull Rectangle rectangle, Insets insets) {
+  public static void addTo(@NotNull Rectangle rectangle, @Nullable Insets insets) {
     if (insets != null) {
       rectangle.x -= insets.left;
       rectangle.y -= insets.top;
@@ -203,7 +205,7 @@ public class JBInsets extends Insets {
    * @param rectangle the size to decrease and the location to move
    * @param insets    the insets to remove
    */
-  public static void removeFrom(@NotNull Rectangle rectangle, Insets insets) {
+  public static void removeFrom(@NotNull Rectangle rectangle, @Nullable Insets insets) {
     if (insets != null) {
       rectangle.x += insets.left;
       rectangle.y += insets.top;
@@ -223,20 +225,6 @@ public class JBInsets extends Insets {
   }
 
   /**
-   * Get safely unscaled Insets if the parameter is an instance of JBInsets.
-   *
-   * @param insets the insets to unwrap
-   * @return the unwrapped Insets
-   */
-  @ApiStatus.Internal
-  public static Insets unwrap(@NotNull Insets insets) {
-    if (insets instanceof JBInsets jbInsets) {
-      return jbInsets.getUnscaled();
-    }
-    return insets;
-  }
-
-  /**
    * Get the unscaled inset values.
    * <p>
    *   If the {@code insets} parameter value is not an instance of {@code JBInsets}, then it's assumed to be already unscaled.
@@ -246,7 +234,7 @@ public class JBInsets extends Insets {
    * @return the unscaled Insets
    */
   @ApiStatus.Internal
-  public static Insets unscale(@NotNull Insets insets) {
+  public static @NotNull Insets unscale(@NotNull Insets insets) {
     if (insets instanceof JBInsets jbInsets) {
       return jbInsets.getUnscaled();
     }
@@ -264,7 +252,11 @@ public class JBInsets extends Insets {
 
     @Override
     public @Nullable Insets get() {
-      return UIManager.getInsets(key);
+      var result = UIManager.getInsets(key);
+      if (result instanceof JBInsets jbInsets) { // the JBInsetsUIResource case
+        return jbInsets.unscaledNoCopy();
+      }
+      return result;
     }
 
     @Override

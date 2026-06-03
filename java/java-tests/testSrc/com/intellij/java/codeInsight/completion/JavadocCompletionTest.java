@@ -11,7 +11,11 @@ import com.intellij.codeInspection.javaDoc.JavadocDeclarationInspection;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.patterns.PlatformPatterns;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiReferenceBase;
+import com.intellij.psi.PsiReferenceProvider;
+import com.intellij.psi.PsiReferenceRegistrar;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.impl.source.resolve.reference.PsiReferenceRegistrarImpl;
 import com.intellij.psi.impl.source.resolve.reference.ReferenceProvidersRegistry;
@@ -250,13 +254,6 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
     assertTrue(getLookupElementStrings().containsAll(Arrays.asList("io", "lang", "util")));
   }
 
-  @NeedsIndex.Full
-  public void testQualifyClassReferenceInPackageStatement() {
-    configureByFile(getTestName(false) + ".java");
-    myFixture.type("\n");
-    checkResultByFile(getTestName(false) + "_after.java");
-  }
-
   public void test_suggest_param_names() {
     myFixture.configureByText("a.java", """
       class Foo {
@@ -288,6 +285,23 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
 
   @NeedsIndex.ForStandardLibrary
   public void test_fqns_in_package_info() {
+    IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_1_7,  ()-> {
+      myFixture.configureByText("package-info.java", """
+          /**
+           * {@link java.util.Map#putA<caret>}
+           */
+          """);
+      myFixture.complete(CompletionType.BASIC);
+      myFixture.checkResult("""
+          /**
+           * {@link java.util.Map#putAll(java.util.Map)}
+           */
+          """);
+    });
+  }
+
+  @NeedsIndex.ForStandardLibrary
+  public void test_fqns_in_package_info_modern_java() {
     myFixture.configureByText("package-info.java", """
       /**
        * {@link java.util.Map#putA<caret>}
@@ -296,9 +310,10 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
     myFixture.complete(CompletionType.BASIC);
     myFixture.checkResult("""
                             /**
-                             * {@link java.util.Map#putAll(java.util.Map)}
+                             * {@link java.util.Map#putAll(Map)}
                              */
-                            """);
+                            
+                            import java.util.Map;""");
   }
 
   public void test_suggest_same_param_descriptions() {
@@ -969,4 +984,17 @@ public class JavadocCompletionTest extends LightFixtureCompletionTestCase {
     assertTrue(ContainerUtil.and(strings, s -> s.startsWith("@")));
   }
 
+  @NeedsIndex.Full
+  public void testCompletionInPackageInfoDoc() {
+      configureByFile("package1/package-info.java");
+      myFixture.completeBasic();
+      checkResultByFile("package1/package-info.after.java");
+    }
+
+  @NeedsIndex.ForStandardLibrary
+  public void testCompletionInPackageInfoDoc2() {
+      configureByFile("package2/package-info.java");
+      myFixture.type("\n");
+      checkResultByFile("package2/package-info.after.java");
+    }
 }

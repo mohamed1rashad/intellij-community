@@ -25,13 +25,13 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import static com.intellij.platform.workspace.storage.impl.url.VirtualFileUrlImplKt.toVirtualFileUrl;
-import static com.intellij.workspaceModel.ide.ProjectRootEntityKt.unregisterProjectRootBlocking;
-
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+
+import static com.intellij.platform.workspace.storage.impl.url.VirtualFileUrlImplKt.toVirtualFileUrl;
+import static com.intellij.workspaceModel.ide.ProjectRootEntityKt.unregisterProjectRootBlocking;
 
 @ApiStatus.Internal
 public class DetachExternalProjectAction extends ExternalSystemNodeAction<ProjectData> {
@@ -83,22 +83,22 @@ public class DetachExternalProjectAction extends ExternalSystemNodeAction<Projec
   ) {
     String externalProjectPath = projectData.getLinkedExternalProjectPath();
 
-    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from local settings", __ -> {
+    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from local settings", _ -> {
       AbstractExternalSystemLocalSettings<?> localSettings = ExternalSystemApiUtil.getLocalSettings(project, projectSystemId);
       localSettings.forgetExternalProjects(Collections.singleton(externalProjectPath));
     });
 
-    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from system settings", __ -> {
+    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from system settings", _ -> {
       AbstractExternalSystemSettings<?, ?, ?> settings = ExternalSystemApiUtil.getSettings(project, projectSystemId);
       settings.unlinkExternalProject(externalProjectPath);
     });
 
-    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from data storage", __ -> {
+    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from data storage", _ -> {
       ExternalProjectsManagerImpl externalProjectsManager = ExternalProjectsManagerImpl.getInstance(project);
       externalProjectsManager.forgetExternalProjectData(projectSystemId, externalProjectPath);
     });
 
-    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from tool window", __ -> {
+    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from tool window", _ -> {
       if (projectNode != null) {
         ExternalSystemNode<?> group = projectNode.getGroup();
         if (group != null) {
@@ -107,7 +107,7 @@ public class DetachExternalProjectAction extends ExternalSystemNodeAction<Projec
       }
     });
 
-    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from workspace model", __ -> {
+    ExternalSystemTelemetryUtil.runWithSpan(projectSystemId, "Remove project from workspace model", _ -> {
       List<Module> orphanModules = collectExternalSystemModules(project, projectSystemId, externalProjectPath);
       if (!orphanModules.isEmpty()) {
         ProjectDataManagerImpl projectDataManager = ProjectDataManagerImpl.getInstance();

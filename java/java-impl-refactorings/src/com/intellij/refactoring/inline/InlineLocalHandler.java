@@ -4,17 +4,43 @@ package com.intellij.refactoring.inline;
 import com.intellij.codeInsight.ExceptionUtil;
 import com.intellij.java.JavaBundle;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
-import com.intellij.modcommand.*;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModCommand;
+import com.intellij.modcommand.ModCommandAction;
+import com.intellij.modcommand.ModCommandExecutor;
+import com.intellij.modcommand.ModPsiUpdater;
+import com.intellij.modcommand.Presentation;
 import com.intellij.openapi.actionSystem.Shortcut;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorColors;
-import com.intellij.openapi.editor.ex.EditorSettingsExternalizable;
+import com.intellij.openapi.editor.ex.EditorSettingsRefactoringOptionsProvider;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.LambdaUtil;
+import com.intellij.psi.PsiArrayAccessExpression;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiPatternVariable;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiResourceExpression;
+import com.intellij.psi.PsiTryStatement;
+import com.intellij.psi.PsiVariable;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.psi.controlFlow.AnalysisCanceledException;
 import com.intellij.psi.controlFlow.ControlFlowUtil;
 import com.intellij.psi.controlFlow.DefUseUtil;
@@ -40,7 +66,14 @@ import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import static java.util.Objects.requireNonNull;
 
@@ -136,7 +169,7 @@ public final class InlineLocalHandler extends JavaInlineActionHandler {
     }
     Project project = context.project();
     if (mode == InlineMode.CHECK_CONFLICTS || mode == InlineMode.ASK) {
-      if (refExpr == null || allRefs.size() == 1 || !EditorSettingsExternalizable.getInstance().isShowInlineLocalDialog()) {
+      if (refExpr == null || allRefs.size() == 1 || !EditorSettingsRefactoringOptionsProvider.getInstance().isShowInlineLocalDialog()) {
         mode = InlineMode.INLINE_ALL_AND_DELETE;
       } else {
         return createChooser(pattern, refExpr, allRefs);
@@ -252,7 +285,7 @@ public final class InlineLocalHandler extends JavaInlineActionHandler {
 
     if (mode == InlineMode.ASK) {
       if (refExpr != null && refsToInlineList.size() > 1 && refsToInlineList.contains(refExpr) &&
-          EditorSettingsExternalizable.getInstance().isShowInlineLocalDialog()) {
+          EditorSettingsRefactoringOptionsProvider.getInstance().isShowInlineLocalDialog()) {
         return createChooser(local, refExpr, refsToInlineList);
       }
       if (defToInline == local.getInitializer() && PsiUtil.skipParenthesizedExprDown(defToInline) instanceof PsiReferenceExpression ref &&
@@ -547,7 +580,7 @@ public final class InlineLocalHandler extends JavaInlineActionHandler {
            : RefactoringBundle.message("inline.variable.title");
   }
 
-  private static class InlineLocalStep implements ModCommandAction {
+  public static class InlineLocalStep implements ModCommandAction {
     private final @NotNull PsiVariable myVariable;
     private final @Nullable PsiReferenceExpression myRefExpr;
     private final @NotNull InlineMode myMode;
@@ -578,6 +611,10 @@ public final class InlineLocalHandler extends JavaInlineActionHandler {
         .withHighlighting(
           myMode == InlineMode.INLINE_ONE ? new TextRange[]{Objects.requireNonNull(myRefExpr).getTextRange()} :
           ContainerUtil.map2Array(myAllRefs, TextRange.EMPTY_ARRAY, PsiElement::getTextRange));
+    }
+
+    public @NotNull InlineMode getMode() {
+      return myMode;
     }
 
     @Override

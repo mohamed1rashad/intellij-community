@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.python.grazie` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "grazie_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "grazie",
   module_name = "intellij.python.grazie",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":grazie_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "//plugins/grazie",
     "//platform/core-api:core",
@@ -22,4 +17,26 @@ jvm_library(
     "//platform/core-impl",
   ]
 )
+
+jvm_library(
+  name = "grazie_test_lib",
+  testonly = True,
+  module_name = "intellij.python.grazie",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":grazie",
+    "//plugins/grazie:grazie_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//python:python-community-impl_test_lib",
+    "//platform/util:util_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.python.grazie` end
+
+### auto-generated section `iml intellij.python.grazie` start
+exports_files([
+  "intellij.python.grazie.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.python.grazie` end

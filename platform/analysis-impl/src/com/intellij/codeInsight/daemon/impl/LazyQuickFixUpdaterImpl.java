@@ -7,7 +7,6 @@ import com.intellij.codeInsight.quickfix.LazyQuickFixUpdater;
 import com.intellij.codeWithMe.ClientId;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.ClientEditorManager;
 import com.intellij.openapi.editor.Document;
@@ -21,8 +20,10 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.DocumentUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
+import com.intellij.util.concurrency.ThreadingAssertions;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
+import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
@@ -49,22 +50,22 @@ public final class LazyQuickFixUpdaterImpl implements LazyQuickFixUpdater {
 
   @Override
   @RequiresBackgroundThread
-  public void waitQuickFixesSynchronously(@NotNull PsiFile psiFile, @NotNull Editor editor, @NotNull HighlightInfo info) {
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
-    ReadAction.run(() -> {
+  public void waitQuickFixesSynchronously(@NotNull HighlightInfo info, @NotNull Project project, @NotNull Document document) {
+    ThreadingAssertions.assertBackgroundThread();
+
+    ReadAction.runBlocking(() -> {
       try {
-        info.computeQuickFixesSynchronously(psiFile, editor.getDocument());
+        info.computeQuickFixesSynchronously(project, document);
       }
       catch (ExecutionException | InterruptedException ignored) {
-
       }
     });
   }
 
   @Override
   public void startComputingNextQuickFixes(@NotNull PsiFile psiFile, @NotNull Editor editor, @NotNull ProperTextRange visibleRange) {
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
-    ApplicationManager.getApplication().assertReadAccessAllowed();
+    ThreadingAssertions.assertBackgroundThread();
+    ThreadingAssertions.assertReadAccess();
     Project project = psiFile.getProject();
     Document document = editor.getDocument();
     CodeInsightContext context = EditorContextManager.getEditorContext(editor, project);
@@ -85,6 +86,8 @@ public final class LazyQuickFixUpdaterImpl implements LazyQuickFixUpdater {
     }
   }
 
+  @RequiresBackgroundThread
+  @RequiresReadLock
   private void startLazyFixJobs(@NotNull Editor editor, @NotNull Project project, @NotNull CodeInsightContext context, int startOffset, int endOffset) {
     List<HighlightInfo> infos = new ArrayList<>();
     MarkupModelEx model = (MarkupModelEx)DocumentMarkupModel.forDocument(editor.getDocument(), project, true);
@@ -101,9 +104,11 @@ public final class LazyQuickFixUpdaterImpl implements LazyQuickFixUpdater {
     }
   }
 
+  @RequiresBackgroundThread
+  @RequiresReadLock
   private void startJob(@NotNull HighlightInfo info, @NotNull Editor editor, @NotNull Project project) {
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
-    ApplicationManager.getApplication().assertReadAccessAllowed();
+    ThreadingAssertions.assertBackgroundThread();
+    ThreadingAssertions.assertReadAccess();
     if (!enabled) {
       return;
     }
@@ -118,9 +123,11 @@ public final class LazyQuickFixUpdaterImpl implements LazyQuickFixUpdater {
 
   @TestOnly
   @RequiresEdt
-  public void waitForBackgroundJobIfStartedInTests(@NotNull PsiFile psiFile, @NotNull Editor editor, @NotNull HighlightInfo info, long timeout, @NotNull TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
-    ApplicationManager.getApplication().assertIsDispatchThread();
-    AppExecutorUtil.getAppExecutorService().submit(() -> waitQuickFixesSynchronously(psiFile, editor, info))
+  public void waitForBackgroundJobIfStartedInTests(@NotNull Project project,
+                                                   @NotNull Document document,
+                                                   @NotNull HighlightInfo info, long timeout, @NotNull TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+    ThreadingAssertions.assertEventDispatchThread();
+    AppExecutorUtil.getAppExecutorService().submit(() -> waitQuickFixesSynchronously(info, project, document))
     .get(timeout, unit);
   }
 }

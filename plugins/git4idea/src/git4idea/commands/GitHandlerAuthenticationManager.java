@@ -1,7 +1,12 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package git4idea.commands;
 
-import com.intellij.externalProcessAuthHelper.*;
+import com.intellij.externalProcessAuthHelper.AuthenticationGate;
+import com.intellij.externalProcessAuthHelper.AuthenticationMode;
+import com.intellij.externalProcessAuthHelper.ExternalProcessHandlerService;
+import com.intellij.externalProcessAuthHelper.NativeSshAuthService;
+import com.intellij.externalProcessAuthHelper.NativeSshGuiAuthenticator;
+import com.intellij.externalProcessAuthHelper.PassthroughAuthenticationGate;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -19,7 +24,11 @@ import externalApp.nativessh.NativeSshAskPassAppHandler;
 import git4idea.GitUtil;
 import git4idea.commit.signing.GpgAgentConfigurator;
 import git4idea.commit.signing.PinentryService;
-import git4idea.config.*;
+import git4idea.config.GitConfigUtil;
+import git4idea.config.GitExecutable;
+import git4idea.config.GitVcsApplicationSettings;
+import git4idea.config.GitVersion;
+import git4idea.config.GitVersionSpecialty;
 import git4idea.config.gpg.GitGpgConfigUtilsKt;
 import git4idea.http.GitAskPassAppHandler;
 import git4idea.repo.GitProjectConfigurationCache;
@@ -75,7 +84,7 @@ public final class GitHandlerAuthenticationManager implements AutoCloseable {
       boolean isConfigCommand = handler.getCommand() == GitCommand.CONFIG;
       if (isConfigCommand) return;
 
-      boolean shouldResetCredentialHelper = !useCredentialHelper &&
+      boolean shouldResetCredentialHelper = (!useCredentialHelper || handler.getIgnoreAuthenticationMode() == AuthenticationMode.NONE) &&
                                             GitVersionSpecialty.CAN_OVERRIDE_CREDENTIAL_HELPER_WITH_EMPTY.existsIn(version);
       if (shouldResetCredentialHelper) {
         handler.addConfigParameters("credential.helper=");
@@ -190,6 +199,7 @@ public final class GitHandlerAuthenticationManager implements AutoCloseable {
 
     GitCommand command = myHandler.getCommand();
     boolean isCommandSupported = command == GitCommand.COMMIT
+                                 || command == GitCommand.REVERT
                                  || command == GitCommand.TAG
                                  || command == GitCommand.MERGE
                                  || command == GitCommand.CHERRY_PICK
@@ -198,7 +208,8 @@ public final class GitHandlerAuthenticationManager implements AutoCloseable {
       return;
     }
 
-    if (!GpgAgentConfigurator.isEnabled(myProject, myHandler.myExecutable)
+    GitExecutable gitExecutable = myHandler.myExecutable;
+    if (!GpgAgentConfigurator.isEnabled(myProject, gitExecutable)
         || !GpgAgentConfigurator.getInstance(myProject).isConfigured()) {
       return;
     }
@@ -207,7 +218,13 @@ public final class GitHandlerAuthenticationManager implements AutoCloseable {
     if (repo == null) return;
 
     if (GitGpgConfigUtilsKt.isGpgSignEnabledCached(repo)) {
-      PinentryService.PinentryData pinentryData = PinentryService.getInstance(myProject).startSession();
+      PinentryService.PinentryData pinentryData;
+      if (gitExecutable instanceof GitExecutable.Eel gitExecutableEel) {
+        pinentryData = PinentryService.getInstance(myProject).startSession(gitExecutableEel.getEel());
+      }
+      else {
+        pinentryData = PinentryService.getInstance(myProject).startSession(null);
+      }
       if (pinentryData != null) {
         myHandler.addCustomEnvironmentVariable(PinentryService.PINENTRY_USER_DATA_ENV, pinentryData.toEnv());
         Disposer.register(myDisposable, () -> PinentryService.getInstance(myProject).stopSession());
@@ -219,8 +236,8 @@ public final class GitHandlerAuthenticationManager implements AutoCloseable {
                                            @NotNull ExternalProcessHandlerService<?> service) throws IOException {
     GitExecutable executable = myHandler.getExecutable();
     String scriptPath;
-    if (executable instanceof GitExecutable.Eel) {
-      EelApi eelApi = ((GitExecutable.Eel)executable).getEel();
+    if (executable instanceof GitExecutable.Eel gitExecutableEel) {
+      EelApi eelApi = gitExecutableEel.getEel();
       Path scriptFile = service.getCallbackScriptPath(eelApi, shouldUseBatchScript(executable), myDisposable);
       scriptPath = executable.convertFilePath(scriptFile);
     }

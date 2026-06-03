@@ -2,6 +2,7 @@ from typing import Any
 
 from django.contrib.admin.checks import InlineModelAdminChecks
 from django.contrib.admin.options import InlineModelAdmin
+from django.contrib.contenttypes.forms import BaseGenericInlineFormSet
 from django.db.models.base import Model
 
 class GenericInlineModelAdminChecks(InlineModelAdminChecks):
@@ -9,7 +10,12 @@ class GenericInlineModelAdminChecks(InlineModelAdminChecks):
     def _check_relation(self, obj: GenericInlineModelAdmin, parent_model: type[Model]) -> list[Any]: ...
 
 class GenericInlineModelAdmin(InlineModelAdmin):
+    ct_field: str
+    ct_fk_field: str
+    formset: type[BaseGenericInlineFormSet]  # type: ignore[assignment]
+
+class GenericStackedInline(GenericInlineModelAdmin):
     template: str
 
-class GenericStackedInline(GenericInlineModelAdmin): ...
-class GenericTabularInline(GenericInlineModelAdmin): ...
+class GenericTabularInline(GenericInlineModelAdmin):
+    template: str

@@ -30,7 +30,14 @@ import com.jetbrains.python.psi.PyFile;
 import com.jetbrains.python.psi.PyFunction;
 import com.jetbrains.python.run.targetBasedConfiguration.PyRunTargetVariant;
 import com.jetbrains.python.sdk.InvalidSdkException;
-import com.jetbrains.python.testing.*;
+import com.jetbrains.python.testing.ConfigurationTarget;
+import com.jetbrains.python.testing.PyAbstractTestConfiguration;
+import com.jetbrains.python.testing.PyAbstractTestFactory;
+import com.jetbrains.python.testing.PyTestConfiguration;
+import com.jetbrains.python.testing.PyTestFactory;
+import com.jetbrains.python.testing.PyTestFixtureAndParametrizedTest;
+import com.jetbrains.python.testing.PythonTestConfigurationType;
+import com.jetbrains.python.testing.TestRunnerService;
 import com.jetbrains.python.tools.sdkTools.SdkCreationType;
 import org.hamcrest.Matcher;
 import org.hamcrest.MatcherAssert;
@@ -52,8 +59,14 @@ import java.util.List;
 
 import static com.intellij.execution.testframework.sm.runner.ui.MockPrinter.fillPrinter;
 import static com.jetbrains.env.ut.PyScriptTestProcessRunner.TEST_TARGET_PREFIX;
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.*;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 /**
  * User : catherine
@@ -1269,6 +1282,38 @@ public final class PythonPyTestingTest extends PyEnvTestCase {
         assertFalse(stderr.contains(DEPRECATION_WARNING_STRING));
       }
     });
+  }
+
+  /**
+   * Test that parametrized tests with zero-length string arguments are rendered correctly
+   */
+  @Test
+  public void testParametrizedWithEmptyString() {
+    runPythonTest(
+      new PyProcessWithConsoleTestTask<PyTestTestProcessRunner>("/testRunner/env/pytest/parametrized", SdkCreationType.EMPTY_SDK) {
+
+        @NotNull
+        @Override
+        protected PyTestTestProcessRunner createProcessRunner() {
+          return new PyTestTestProcessRunner("test_empty_param.py", 0);
+        }
+
+        @Override
+        protected void checkTestResults(@NotNull final PyTestTestProcessRunner runner,
+                                        @NotNull final String stdout,
+                                        @NotNull final String stderr,
+                                        @NotNull final String all,
+                                        int exitCode) {
+          assertEquals("Parametrized test with empty string produced bad tree", """
+                      Test tree:
+                      [root](+)
+                      .test_empty_param(+)
+                      ..test_params(+)
+                      ...()(+)
+                      ...(other)(+)
+                      """, runner.getFormattedTestTree());
+        }
+      });
   }
 
   @NotNull

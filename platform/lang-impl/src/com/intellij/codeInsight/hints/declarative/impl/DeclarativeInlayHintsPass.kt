@@ -3,12 +3,19 @@ package com.intellij.codeInsight.hints.declarative.impl
 
 import com.intellij.codeHighlighting.EditorBoundHighlightingPass
 import com.intellij.codeInsight.hints.InlayHintsUtils
-import com.intellij.codeInsight.hints.declarative.*
-import com.intellij.openapi.editor.Document
+import com.intellij.codeInsight.hints.declarative.AboveLineIndentedPosition
+import com.intellij.codeInsight.hints.declarative.EndOfLinePosition
+import com.intellij.codeInsight.hints.declarative.InlayHintsCollector
+import com.intellij.codeInsight.hints.declarative.InlayHintsProvider
+import com.intellij.codeInsight.hints.declarative.InlayProviderPassInfo
+import com.intellij.codeInsight.hints.declarative.InlineInlayPosition
+import com.intellij.codeInsight.hints.declarative.OwnBypassCollector
+import com.intellij.codeInsight.hints.declarative.SharedBypassCollector
 import com.intellij.codeInsight.hints.declarative.impl.inlayRenderer.DeclarativeIndentedBlockInlayRenderer
 import com.intellij.codeInsight.hints.declarative.impl.inlayRenderer.DeclarativeInlayRenderer
 import com.intellij.codeInsight.hints.declarative.impl.inlayRenderer.DeclarativeInlayRendererBase
 import com.intellij.codeInsight.hints.presentation.InlayTextMetricsStorage
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.Inlay
 import com.intellij.openapi.editor.InlayModel
@@ -188,7 +195,7 @@ class DeclarativeInlayHintsPass(
       action: (line: Int,
                providerId: String,
                verticalPriority: Int,
-        // non-empty
+               // non-empty
                inlayData: List<InlayData>) -> Unit
     ) {
       if (isEmpty()) return
@@ -286,7 +293,7 @@ private fun Editor.getExistingInlays(sourceId: String, ignoredProviderIds: Set<S
   ),
 )
 
-/** @return `true` if a suitable inlay was found and updated; `false` otherwise. */
+/** @return an inlay suitable for an update; `null` otherwise. */
 private inline fun <M> findSuitableInlayAndRemoveFromDeleteList(
   offsetToExistingInlays: Int2ObjectOpenHashMap<out SmartList<out Inlay<out DeclarativeInlayRendererBase<M>>>>,
   groupKey: Int,
@@ -361,9 +368,9 @@ private fun shouldExecuteInBulkMode(
     eol.count { it.updateTarget == null } +
     aboveLine.count { it.updateTarget == null }
   }
-  val removals = existingInlays.inline.size +
-                 existingInlays.eol.size +
-                 existingInlays.aboveLine.size
+  val removals = existingInlays.inline.values.sumOf { it.size } +
+                 existingInlays.eol.values.sumOf { it.size } +
+                 existingInlays.aboveLine.values.sumOf { it.size }
   return adds + removals > INLAY_BATCH_MODE_THRESHOLD
 }
 

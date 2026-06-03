@@ -3,7 +3,7 @@ package com.jetbrains.python;
 
 import com.intellij.codeInsight.CodeInsightSettings;
 import com.intellij.codeInsight.completion.impl.CamelHumpMatcher;
-import com.jetbrains.python.codeInsight.completion.PyModuleNameCompletionContributor;
+import com.intellij.idea.TestFor;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.LanguageLevel;
 
@@ -13,7 +13,6 @@ public class PythonKeywordCompletionTest extends PyTestCase {
   @Override
   protected void setUp() throws Exception {
     super.setUp();
-    PyModuleNameCompletionContributor.ENABLED = false;
   }
 
   private void doTest() {
@@ -165,6 +164,12 @@ public class PythonKeywordCompletionTest extends PyTestCase {
       ),
       "as"
     );
+  }
+
+  @TestFor(issues = "PY-89189")
+  public void testNoAsInsideStringLiteral() {
+    assertDoesntContain(doTestByText("with patch(\"sample.<caret>\")"), "as");
+    assertDoesntContain(doTestByText("import foo\n\"bar <caret>\""), "as");
   }
 
   public void testElseInFor() {  // PY-6755
@@ -361,5 +366,98 @@ public class PythonKeywordCompletionTest extends PyTestCase {
 
       assertContainsElements(variants, PyNames.DEF, PyNames.WITH, PyNames.FOR);
       assertDoesntContain(variants, "some_variable", "some_function", "SomeClass");
+  }
+
+  // PY-46932
+  public void testAsyncKeywordConstructCompletion() {
+    List<String> variants = doTestByText("""
+                   some_variable = 42
+                   def some_function():
+                       pass
+                   class SomeClass:
+                       pass
+                   as<caret>
+                   """);
+
+    assertContainsElements(
+      variants,
+      PyNames.ASYNC + " " + PyNames.DEF,
+      PyNames.ASYNC + " " + PyNames.FOR,
+      PyNames.ASYNC + " " + PyNames.WITH
+    );
+  }
+
+  // PY-88664
+  public void testLazyOnTopLevel() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertContainsElements(doTestByText("<caret>"), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyInsideFunction() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertDoesntContain(doTestByText("""
+                                         def f():
+                                             <caret>
+                                         """), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyInsideClass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertDoesntContain(doTestByText("""
+                                         class C:
+                                             <caret>
+                                         """), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyInsideTry() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertDoesntContain(doTestByText("""
+                                         try:
+                                             <caret>
+                                         except ImportError:
+                                             pass
+                                         """), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyInsideExcept() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertDoesntContain(doTestByText("""
+                                         try:
+                                             pass
+                                         except ImportError:
+                                             <caret>
+                                         """), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyInsideFinally() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertDoesntContain(doTestByText("""
+                                         try:
+                                             pass
+                                         finally:
+                                             <caret>
+                                         """), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyInsideMatch() {
+    runWithLanguageLevel(LanguageLevel.PYTHON315, () ->
+      assertDoesntContain(doTestByText("""
+                                         x = 1
+                                         match x:
+                                             case 1:
+                                                 <caret>
+                                         """), PyNames.LAZY));
+  }
+
+  // PY-88664
+  public void testNoLazyBefore315() {
+    runWithLanguageLevel(LanguageLevel.PYTHON314, () ->
+      assertDoesntContain(doTestByText("<caret>"), PyNames.LAZY));
   }
 }

@@ -13,7 +13,12 @@ import org.jetbrains.kotlin.analysis.api.renderer.declarations.KaCallableReturnT
 import org.jetbrains.kotlin.analysis.api.renderer.declarations.KaDeclarationRenderer
 import org.jetbrains.kotlin.analysis.api.renderer.declarations.impl.KaDeclarationRendererForSource
 import org.jetbrains.kotlin.analysis.api.renderer.declarations.modifiers.renderers.KaRendererVisibilityModifierProvider
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaEnumEntrySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaJavaFieldSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaTypeAliasSymbol
 import org.jetbrains.kotlin.analysis.api.types.KaErrorType
 import org.jetbrains.kotlin.analysis.api.useSiteModule
 import org.jetbrains.kotlin.analysis.api.useSiteSession
@@ -23,7 +28,14 @@ import org.jetbrains.kotlin.idea.base.codeInsight.KotlinIconProvider.getIconFor
 import org.jetbrains.kotlin.idea.base.util.isImported
 import org.jetbrains.kotlin.idea.codeInsight.K2StatisticsInfoProvider
 import org.jetbrains.kotlin.idea.codeinsight.api.applicators.fixes.KotlinQuickFixFactory
-import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.*
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.AbstractImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.ArrayAccessorImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.ComponentFunctionImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.DelegateMethodImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.InvokeImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.IteratorImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.MismatchedArgumentsImportQuickFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.factories.UnresolvedNameReferenceImportQuickFixFactory
 import org.jetbrains.kotlin.idea.quickfix.AutoImportVariant
 import org.jetbrains.kotlin.idea.quickfix.ImportFixHelper
 import org.jetbrains.kotlin.idea.quickfix.ImportPrioritizer
@@ -40,12 +52,12 @@ object ImportQuickFixProvider : KotlinQuickFixFactory.IntentionBased<KaDiagnosti
     override fun KaSession.createQuickFixes(diagnostic: KaDiagnosticWithPsi<*>): List<IntentionAction> = getFixes(diagnostic)
 
     context(_: KaSession)
-    fun getFixes(diagnostic: KaDiagnosticWithPsi<*>): List<ImportQuickFix> {
+    fun getFixes(diagnostic: KaDiagnosticWithPsi<*>): List<IntentionAction> {
         return getFixes(setOf(diagnostic))
     }
 
     context(session: KaSession)
-    fun getFixes(diagnostics: Set<KaDiagnosticWithPsi<*>>): List<ImportQuickFix> {
+    fun getFixes(diagnostics: Set<KaDiagnosticWithPsi<*>>): List<IntentionAction> {
         val factories: List<AbstractImportQuickFixFactory> = listOf(
             UnresolvedNameReferenceImportQuickFixFactory,
             MismatchedArgumentsImportQuickFixFactory,
@@ -73,8 +85,8 @@ object ImportQuickFixProvider : KotlinQuickFixFactory.IntentionBased<KaDiagnosti
     context(_: KaSession)
     private fun getIconFor(candidate: ImportCandidate): Icon? = getIconFor(candidate.symbol)
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun renderCandidate(candidate: ImportCandidate): String = prettyPrint {
         val fqName = candidate.getFqName()
         if (
@@ -94,12 +106,12 @@ object ImportQuickFixProvider : KotlinQuickFixFactory.IntentionBased<KaDiagnosti
     internal fun KaSession.createImportFix(
         position: KtElement,
         data: ImportData,
-    ): ImportQuickFix {
+    ): IntentionAction {
         val text = ImportFixHelper.calculateTextForFix(
             data.importsInfo,
             suggestions = data.uniqueFqNameSortedImportCandidates.map { (candidate, _) -> candidate.getFqName() }
         )
-        return ImportQuickFix(position, text, data.importVariants)
+        return KotlinAddImportActionFactory.getInstance().createAddImportFix(position, text, data.importVariants)
     }
 
     context(_: KaSession)
@@ -108,7 +120,6 @@ object ImportQuickFixProvider : KotlinQuickFixFactory.IntentionBased<KaDiagnosti
         importCandidates: List<ImportCandidate>,
     ): ImportData? {
         if (importCandidates.isEmpty()) return null
-
         val containingKtFile = position.containingKtFile
 
         val defaultImports = containingKtFile.getDefaultImports(useSiteModule)
@@ -222,8 +233,8 @@ object ImportQuickFixProvider : KotlinQuickFixFactory.IntentionBased<KaDiagnosti
     private fun ImportCandidate.getFqName(): FqName =
         fqName ?: error("Unexpected null for fully-qualified name of importable symbol")
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     private fun createPriorityForImportCandidate(
         prioritizer: ImportPrioritizer,
         expressionImportWeigher: ExpressionImportWeigher,

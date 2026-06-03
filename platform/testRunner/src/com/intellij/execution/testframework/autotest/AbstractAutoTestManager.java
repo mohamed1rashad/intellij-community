@@ -30,7 +30,7 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -68,7 +68,11 @@ public abstract class AbstractAutoTestManager implements PersistentStateComponen
   private static void restart(@NotNull RunContentDescriptor descriptor) {
     descriptor.setActivateToolWindowWhenAdded(false);
     descriptor.setReuseToolWindowActivation(true);
-    ExecutionUtil.restart(descriptor);
+    ExecutionEnvironment env = getCurrentEnvironment(descriptor);
+    if (env != null) {
+      env.setAutoTriggered(true);
+      ExecutionUtil.restart(env);
+    }
   }
 
   private static void saveConfigurationState(@NotNull State state, @NotNull RunProfile profile) {

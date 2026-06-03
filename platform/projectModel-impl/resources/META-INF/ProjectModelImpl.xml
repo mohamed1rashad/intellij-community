@@ -2,7 +2,6 @@
   <extensionPoints>
     <extensionPoint name="additionalLibraryRootsProvider" interface="com.intellij.openapi.roots.AdditionalLibraryRootsProvider"
                     dynamic="true"/>
-    <extensionPoint name="projectExtension" interface="com.intellij.openapi.roots.ProjectExtension" area="IDEA_PROJECT" dynamic="true"/>
     <extensionPoint name="workspaceModel.moduleExtensionBridgeFactory"
                     interface="com.intellij.workspaceModel.ide.legacyBridge.ModuleExtensionBridgeFactory"
                     dynamic="true"/>
@@ -30,16 +29,19 @@
                         serviceImplementation="com.intellij.workspaceModel.ide.legacyBridge.WorkspaceModelLegacyBridgeImpl"/>
     <projectService serviceInterface="com.intellij.openapi.roots.TestModulePropertiesProvider"
                     serviceImplementation="com.intellij.workspaceModel.ide.impl.legacyBridge.module.roots.TestModulePropertiesBridgeProvider"/>
+    <projectService serviceInterface="com.intellij.workspaceModel.ide.ProjectSynchronizerUtil"
+                    serviceImplementation="com.intellij.workspaceModel.ide.impl.jps.serialization.ProjectSynchronizerUtilImpl"/>
     <!-- Global Workspace Model -->
     <applicationService serviceInterface="com.intellij.workspaceModel.ide.JpsGlobalModelSynchronizer"
-                        serviceImplementation="com.intellij.workspaceModel.ide.impl.jps.serialization.JpsGlobalModelSynchronizerImpl"/>
+                        serviceImplementation="com.intellij.workspaceModel.ide.impl.jps.serialization.JpsGlobalModelSynchronizerImpl"
+                        open="true"/>
     <!-- Global or Custom Workspace Model Libraries -->
     <workspace.bridgeInitializer
       implementation="com.intellij.workspaceModel.ide.impl.legacyBridge.library.GlobalAndCustomLibraryTableBridgeInitializer"/>
 
     <projectService serviceInterface="com.intellij.openapi.roots.FileIndexFacade"
                     serviceImplementation="com.intellij.openapi.roots.impl.ProjectFileIndexFacade"/>
-    <projectService serviceInterface="com.intellij.openapi.roots.ProjectFileIndex"
+    <projectService serviceInterface="com.intellij.openapi.roots.ProjectFileIndex" open="true"
                     serviceImplementation="com.intellij.openapi.roots.impl.ProjectFileIndexImpl"/>
     <projectService serviceInterface="com.intellij.workspaceModel.ide.EntitiesOrphanage"
                     serviceImplementation="com.intellij.workspaceModel.ide.impl.EntitiesOrphanageImpl"/>
@@ -49,7 +51,7 @@
     <projectService serviceImplementation="com.intellij.workspaceModel.ide.impl.JpsProjectLoadingManagerImpl"
                     serviceInterface="com.intellij.workspaceModel.ide.JpsProjectLoadingManager"/>
 
-    <projectService serviceInterface="com.intellij.openapi.module.AutomaticModuleUnloader"
+    <projectService serviceInterface="com.intellij.openapi.module.AutomaticModuleUnloader" open="true"
                     serviceImplementation="com.intellij.openapi.module.DummyAutomaticModuleUnloader"/>
     <projectService serviceInterface="com.intellij.workspaceModel.ide.legacyBridge.ModuleDependencyIndex" 
                     serviceImplementation="com.intellij.workspaceModel.ide.impl.legacyBridge.module.ModuleDependencyIndexImpl"/>
@@ -62,9 +64,6 @@
 
     <projectService serviceInterface="com.intellij.openapi.roots.impl.DirectoryIndex"
                     serviceImplementation="com.intellij.openapi.roots.impl.DirectoryIndexImpl" preload="true"/>
-
-    <moduleService serviceInterface="com.intellij.openapi.roots.ModuleFileIndex"
-                   serviceImplementation="com.intellij.openapi.roots.impl.ModuleFileIndexImpl"/>
 
     <workspaceModel.fileIndexContributor implementation="com.intellij.workspaceModel.core.fileIndex.impl.ContentRootFileIndexContributor"/>
     <workspaceModel.fileIndexContributor implementation="com.intellij.workspaceModel.core.fileIndex.impl.SourceRootFileIndexContributor"/>

@@ -1,34 +1,52 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.gradleJava.run
 
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.externalSystem.model.DataNode
+import com.intellij.openapi.externalSystem.model.project.ModuleData
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
 import com.intellij.openapi.module.Module
 import com.intellij.psi.PsiElement
 import com.intellij.psi.impl.source.tree.LeafPsiElement
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.resolution.KaCallableMemberCall
 import org.jetbrains.kotlin.analysis.api.resolution.singleCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.singleFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
+import org.jetbrains.kotlin.analysis.api.signatures.KaVariableSignature
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
+import org.jetbrains.kotlin.analysis.api.types.KaFlexibleType
 import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.fileClasses.javaFileFacadeFqName
 import org.jetbrains.kotlin.idea.base.util.module
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtScriptInitializer
+import org.jetbrains.kotlin.psi.KtStringTemplateExpression
+import org.jetbrains.kotlin.psi.KtValueArgument
+import org.jetbrains.kotlin.psi.KtValueArgumentList
 import org.jetbrains.kotlin.psi.psiUtil.getCallNameExpression
 import org.jetbrains.kotlin.psi.psiUtil.getParentOfType
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
+import org.jetbrains.plugins.gradle.execution.build.CachedModuleDataFinder
+import org.jetbrains.plugins.gradle.model.GradleExtension
 import org.jetbrains.plugins.gradle.service.execution.GradleRunConfiguration
+import org.jetbrains.plugins.gradle.service.project.data.GradleExtensionsDataService
 import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_PROJECT
 import org.jetbrains.plugins.gradle.service.resolve.GradleCommonClassNames.GRADLE_API_TASK_CONTAINER
 import org.jetbrains.plugins.gradle.util.GradleConstants.KOTLIN_DSL_SCRIPT_EXTENSION
 
 
 private const val GRADLE_KOTLIN_PROJECT_DELEGATE = "org.gradle.kotlin.dsl.support.delegates.ProjectDelegate"
+private const val GRADLE_KOTLIN_TASK_CONTAINER_SCOPE = "org.gradle.kotlin.dsl.TaskContainerScope"
 
 @ApiStatus.Internal
 fun isInGradleKotlinScript(psiElement: PsiElement): Boolean {
@@ -71,7 +89,9 @@ private fun findTaskNameInSurroundingCallExpression(element: PsiElement): String
         val functionCall = resolvedCall.singleFunctionCallOrNull() ?: return null
         if (!doesCustomizeTask(functionCall)) return null
         val nameArgument = functionCall.argumentMapping
-            .filter { it.value.name.identifier == "name" }
+            .filterValues { isStringParameterSignature(it) }
+            // IDEA-380456: uncomment, when parameter names in .class files are fixed. Now, the parameter is named as "var1", not "name".
+            //.filterValues { it.name.identifier == "name" }
             .keys.singleOrNull() ?: return null
         val taskName = nameArgument
             .evaluate()
@@ -116,13 +136,16 @@ private fun doesCustomizeTask(functionCall: KaCallableMemberCall<*, *>): Boolean
 private fun getReceiverClassFqName(functionCall: KaCallableMemberCall<*, *>): FqName? {
     val type = functionCall.partiallyAppliedSymbol.extensionReceiver?.type
         ?: functionCall.partiallyAppliedSymbol.dispatchReceiver?.type
-    return type?.symbol?.classId?.asSingleFqName()
+    val unwrappedType = if (type is KaFlexibleType) type.lowerBound else type
+
+    return unwrappedType?.symbol?.classId?.asSingleFqName()
 }
 
 private val taskContainerMethods = setOf("register", "create", "named", "registering", "creating")
+private val taskContainerFqNames = setOf(FqName(GRADLE_API_TASK_CONTAINER), FqName(GRADLE_KOTLIN_TASK_CONTAINER_SCOPE))
 
 private fun isMethodOfTaskContainer(methodName: String, fqClassName: FqName) =
-    fqClassName == FqName(GRADLE_API_TASK_CONTAINER)
+    fqClassName in taskContainerFqNames
             && methodName in taskContainerMethods
 
 private fun isMethodOfProject(methodName: String, fqClassName: FqName) =
@@ -130,24 +153,41 @@ private fun isMethodOfProject(methodName: String, fqClassName: FqName) =
             || fqClassName == FqName(GRADLE_KOTLIN_PROJECT_DELEGATE)
             || fqClassName == FqName("Build_gradle")) // Could be resolved instead of ProjectDelegate on Gradle 6.0
 
+private fun KaSession.isStringParameterSignature(signature: KaVariableSignature<KaValueParameterSymbol>): Boolean {
+    return signature.symbol.returnType
+        .withNullability(false)
+        .isStringType
+}
+
 fun KtNamedFunction.getKMPGradleConfigurationName(runTask: KotlinJvmRunTaskData): String =
     "${getConfigurationName()} [${runTask.targetName}]"
 
-fun KtNamedFunction.getConfigurationName(): String? = ReadAction.compute<Module, Throwable> { module }?.getSubprojectNameOfGradleRoot() ?: name
+fun KtNamedFunction.getConfigurationName(): String {
+    val gradleSubprojectName = ReadAction
+        .computeBlocking<Module?, Throwable> { module }
+        ?.getSubprojectNameOfGradleRoot()
 
-@RequiresReadLock
-fun kmpJvmGradleTaskParameters(function: KtNamedFunction): String = "${mainClassScriptParameter(function)} $quietParameter"
+    val fileName = ReadAction
+        .computeBlocking<String?, Throwable> { containingKtFile.virtualFile?.nameWithoutExtension }
+        ?.takeUnless { it.equals("main", ignoreCase = true) }
+
+    val functionName = name?.takeUnless { it.equals("main", ignoreCase = true) }
+
+    return listOfNotNull(gradleSubprojectName, fileName, functionName).joinToString(".")
+}
 
 @RequiresReadLock
 internal fun mainClassScriptParameter(function: KtFunction): String = "-DmainClass=${function.containingKtFile.javaFileFacadeFqName}"
 
 /**
- * Returns the name of the direct subproject of the Gradle root project in which this module is located in.
+ * Returns the qualified name of the direct subproject of the Gradle root project in which this module is located in.
  *
  * For example, for both modules "SomeKMPProject.composeApp.desktopMain" and "SomeKMPProject.composeApp.wasmJsMain"
- * the return value would be "composeApp".
+ * the return value would be "composeApp". Analogously, for "SomeKMPProject.app.desktopApp.desktopMain" the return
+ * value would be "app.desktopApp".
  */
-private fun Module.getSubprojectNameOfGradleRoot(): String? = name.split(".").getOrNull(1)
+private fun Module.getSubprojectNameOfGradleRoot(): String? =
+    name.split(".").takeIf { it.size >= 3 }?.run { subList(1, lastIndex) }?.joinToString(".")
 
 fun configureKmpJvmRunConfigurationFromMainFunction(
     configuration: GradleRunConfiguration,
@@ -159,11 +199,53 @@ fun configureKmpJvmRunConfigurationFromMainFunction(
     configuration.isDebugAllEnabled = false
     configuration.isDebugServerProcess = false
 
+    configuration.isComposeGradlePluginConfigured = runTask.isComposeGradlePluginConfigured
+    val scriptParameterList = when {
+        runTask.isComposeGradlePluginConfigured -> {
+            val mainFunctionClassFqn = ReadAction.compute<String, Throwable> { function.containingKtFile.javaFileFacadeFqName.asString() }
+            configuration.mainFunctionClassFqn = mainFunctionClassFqn
+            listOf(quietParameter)
+        }
+
+        else -> {
+            val mainClassParameter = ReadAction.compute<String, Throwable> { mainClassScriptParameter(function) }
+            listOf(mainClassParameter, quietParameter)
+        }
+    }
+
     configuration.settings.apply {
         externalProjectPath = ExternalSystemApiUtil.getExternalProjectPath(module)
         taskNames = listOf(runTask.taskName)
-        scriptParameters = ReadAction.compute<String, Throwable> { kmpJvmGradleTaskParameters(function) }
+        scriptParameters = scriptParameterList.joinToString(" ")
     }
 }
 
 private const val quietParameter: String = "--quiet"
+
+fun getGradleExtensions(moduleDataNode: DataNode<*>): List<GradleExtension>? =
+    ExternalSystemApiUtil.find(moduleDataNode, GradleExtensionsDataService.KEY)?.data?.extensions
+
+fun usesComposeGradlePlugin(mainModuleDataNode: DataNode<out ModuleData>): Boolean =
+    getGradleExtensions(mainModuleDataNode)?.any {
+        it.name == "compose" && it.typeFqn == "org.jetbrains.compose.ComposeExtension"
+    } == true
+
+fun Module.findMainModuleCachedData(): DataNode<out ModuleData>? = CachedModuleDataFinder.findMainModuleData(this)
+
+enum class KotlinGradlePluginType {
+    Jvm,
+    Multiplatform;
+
+    companion object {
+
+        fun getPluginType(moduleDataNode: DataNode<*>): KotlinGradlePluginType? {
+            val kotlinExtension = getGradleExtensions(moduleDataNode)?.singleOrNull { it.name == "kotlin" }
+            return when (kotlinExtension?.typeFqn) {
+                "org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension" -> Jvm
+                "org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension" -> Multiplatform
+                else -> null
+            }
+        }
+    }
+
+}

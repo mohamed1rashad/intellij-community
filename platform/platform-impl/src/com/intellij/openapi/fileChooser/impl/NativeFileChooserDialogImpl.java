@@ -17,7 +17,8 @@ import com.jetbrains.JBRFileDialog;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
+import java.awt.Component;
+import java.awt.FileDialog;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -93,7 +94,7 @@ final class NativeFileChooserDialogImpl implements FileChooserDialog, PathChoose
 
   @Override
   public VirtualFile @NotNull [] choose(@Nullable Project project, VirtualFile @NotNull ... toSelect) {
-    choose(toSelect.length > 0 ? toSelect[0] : null, __ -> { });
+    choose(toSelect.length > 0 ? toSelect[0] : null, _ -> { });
     FileChooserUsageCollector.log(this, myDescriptor, myChosenFiles);
     return myChosenFiles;
   }

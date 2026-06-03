@@ -1,8 +1,6 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins
 
-import com.fasterxml.jackson.core.JsonFactory
-import com.fasterxml.jackson.core.JsonGenerator
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModernApplicationStarter
@@ -12,10 +10,14 @@ import com.intellij.openapi.fileTypes.FileTypeManager
 import com.intellij.openapi.fileTypes.PlainTextLikeFileType
 import com.intellij.util.io.jackson.array
 import com.intellij.util.io.jackson.obj
+import com.intellij.util.io.jackson.writeStringField
 import com.intellij.util.lang.UrlClassLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import tools.jackson.core.JsonGenerator
+import tools.jackson.core.ObjectWriteContext
+import tools.jackson.core.json.JsonFactory
 import java.io.OutputStreamWriter
 import java.io.Writer
 import java.nio.charset.StandardCharsets
@@ -25,7 +27,7 @@ import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.relativeTo
 import kotlin.io.path.relativeToOrSelf
 
-private class BundledPluginsLister : ModernApplicationStarter() {
+internal class BundledPluginsLister : ModernApplicationStarter() {
   // not premain because FileTypeManager is used to report extensions
   override suspend fun start(args: List<String>) {
     try {
@@ -40,14 +42,14 @@ private class BundledPluginsLister : ModernApplicationStarter() {
         // noinspection UseOfSystemOutOrSystemErr
         OutputStreamWriter(System.out, StandardCharsets.UTF_8)
       }
-      JsonFactory().createGenerator(out).use { writer ->
+      JsonFactory().createGenerator(ObjectWriteContext.empty(), out).use { writer ->
         val plugins = PluginManagerCore.getPluginSet().enabledPlugins
         val layout = HashSet<LayoutItemDescriptor>()
         val pluginIds = ArrayList<String>(plugins.size)
         val homeDir = Path.of(PathManager.getHomePath())
 
         for (plugin in plugins) {
-          var jarFiles = plugin.jarFiles
+          var jarFiles = plugin.ownClassPath
           if (jarFiles == null && plugin.pluginId == PluginManagerCore.CORE_ID) {
             jarFiles = (plugin.classLoader as? UrlClassLoader)?.files
           }
@@ -71,7 +73,7 @@ private class BundledPluginsLister : ModernApplicationStarter() {
               else {
                 ProductInfoLayoutItemKind.moduleV2
               },
-              classPath = module.jarFiles?.map { file ->
+              classPath = module.ownClassPath?.map { file ->
                 file.relativeTo(homeDir).invariantSeparatorsPathString
               } ?: emptyList(),
             ))

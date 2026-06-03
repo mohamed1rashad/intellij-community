@@ -1,13 +1,27 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl
 
+import com.intellij.codeInsight.multiverse.isEventSystemEnabled
+import com.intellij.codeInsight.multiverse.isSharedSourceSupportEnabled
 import com.intellij.diagnostic.PluginException
 import com.intellij.lang.FileASTNode
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EditorLockFreeTyping
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.ReadAndWriteScope
+import com.intellij.openapi.application.ReadResult
+import com.intellij.openapi.application.TransactionGuard
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.readAndBackgroundWriteActionUndispatched
+import com.intellij.openapi.application.readAndEdtWriteActionUndispatched
+import com.intellij.openapi.application.runReadActionBlocking
+import com.intellij.openapi.application.useBackgroundWriteAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.diagnostic.trace
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.ex.DocumentEx
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -16,44 +30,66 @@ import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicatorProvider
 import com.intellij.openapi.progress.util.StandardProgressIndicatorBase
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ex.ProjectManagerEx
 import com.intellij.openapi.util.ProperTextRange
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.psi.*
+import com.intellij.psi.AbstractFileViewProvider
+import com.intellij.psi.FileViewProvider
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
+import com.intellij.psi.SingleRootFileViewProvider
+import com.intellij.psi.impl.source.tree.mvcc.InternalPsiVersioning
 import com.intellij.psi.text.BlockSupport
+import com.intellij.psi.util.PsiVersioningService
 import com.intellij.util.SmartList
-import com.intellij.util.concurrency.BoundedTaskExecutor
+import com.intellij.util.TimeoutUtil
 import com.intellij.util.concurrency.SequentialTaskExecutor
 import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.containers.CollectionFactory
 import com.intellij.util.ui.EDT
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.TestOnly
 import java.lang.ref.Reference
 import java.lang.ref.WeakReference
-import java.util.*
+import java.util.Objects
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 private val LOG = logger<DocumentCommitThread>()
 
 @ApiStatus.Internal
 class DocumentCommitThread : DocumentCommitProcessor, Disposable {
-  @Volatile
-  private var isDisposed = false
+  private val isDisposed
+    get() = myExecutor.isShutdown
   private val myExecutor = SequentialTaskExecutor.createSequentialApplicationPoolExecutor("Document Commit Pool")
-
-  private val commitInProgressCounter = AtomicInteger()
 
   // it does not make sense to commit several documents in parallel, as they end in write action, so they'll invalidate each other
   private val commitDispatcher = Dispatchers.Default.limitedParallelism(1, "Document commit dispatcher")
+
+  /**
+   * Asynchronous document commit is a sequence of read actions where each of them is followed by a write action.
+   *
+   * Assume that we just limit parallelism for such execution. Since write action will unconditionally switch to its own dispatcher,
+   * we basically allow concurrent execution of "read" parts of document commit.
+   * But these "read" parts will be inevitably invalidated when "write" part of some previous commit starts, hence we just wasted CPU on useless reads.
+   *
+   * With an additional semaphore, we do not allow other reads to start until the previous write action is finished.
+   * It has a side effect that at most one "read" part can run while the EDT holds a write-intent lock;
+   * but that is arguably the desirable behavior, as we know that a pending write action will invalidate all other possible "read" parts
+   */
+  private val commitDispatcherSuspender = Semaphore(1)
 
   companion object {
     @JvmStatic
@@ -65,13 +101,12 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
   }
 
   override fun dispose() {
-    (myExecutor as BoundedTaskExecutor).clearAndCancelAll()
-    isDisposed = true
+    myExecutor.shutdownNow()
   }
 
   override fun commitAsynchronously(
     project: Project,
-    documentManager: PsiDocumentManagerBase,
+    documentManager: PsiDocumentManagerEx,
     document: Document,
     reason: Any,
     modality: ModalityState,
@@ -81,7 +116,8 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
       return
     }
 
-    require(documentManager.myProject === project) { "Wrong project: $project; expected: ${documentManager.myProject}" }
+    @Suppress("SuspiciousPackagePrivateAccess")
+    require(documentManager.project === project) { "Wrong project: $project; expected: ${documentManager.project}" }
 
     TransactionGuard.getInstance().assertWriteSafeContext(modality)
 
@@ -110,10 +146,10 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
     val publishedDocumentCommitRequests: ConcurrentMap<Document, Job> = CollectionFactory.createConcurrentWeakMap()
   }
 
-  private fun commitDocumentWithCoroutines(document: Document, task: CommitTask, documentManager: PsiDocumentManagerBase) {
+  private fun commitDocumentWithCoroutines(document: Document, task: CommitTask, documentManager: PsiDocumentManagerEx) {
     val service = task.myProject.service<PerProjectDocumentCommitRegistry>()
     val job = service.scope.launch(commitDispatcher, start = CoroutineStart.LAZY) {
-      commitInProgressCounter.incrementAndGet()
+      commitDispatcherSuspender.acquire()
       try {
         // one needs to treat modalities carefully with background write action
         // to be safer, we perform commit in background write action only if this is a non-modal commit
@@ -131,7 +167,7 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
         }
       }
       finally {
-        commitInProgressCounter.decrementAndGet()
+        commitDispatcherSuspender.release()
       }
     }
     job.invokeOnCompletion {
@@ -144,7 +180,7 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
     job.start()
   }
 
-  private fun ReadAndWriteScope.doCommitInReadAndWriteScope(task: CommitTask, documentManager: PsiDocumentManagerBase): ReadResult<Unit> {
+  private fun ReadAndWriteScope.doCommitInReadAndWriteScope(task: CommitTask, documentManager: PsiDocumentManagerEx): ReadResult<Unit> {
     if (isExpired(task, documentManager)) {
       return value(Unit)
     }
@@ -157,7 +193,7 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
     }
   }
 
-  private fun isExpired(task: CommitTask, docManager: PsiDocumentManagerBase): Boolean {
+  private fun isExpired(task: CommitTask, docManager: PsiDocumentManagerEx): Boolean {
     return isDisposed || task.isExpired(docManager)
   }
 
@@ -168,7 +204,7 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
       "Must not call sync commit with unopened project: $project; Disposed: ${project.isDisposed()}; Open: ${project.isOpen()}"
     }
 
-    val documentManager = PsiDocumentManager.getInstance(project) as PsiDocumentManagerBase
+    val documentManager = PsiDocumentManager.getInstance(project) as PsiDocumentManagerEx
     val task = CommitTask(project, document, "Sync commit", ModalityState.defaultModalityState())
 
     commitUnderProgress(task, synchronously = true, documentManager)()
@@ -176,36 +212,38 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
 
   @RequiresReadLock
   // returns finish commit Runnable (to be invoked later in EDT) or null on failure
-  private fun commitUnderProgress(task: CommitTask, synchronously: Boolean, documentManager: PsiDocumentManagerBase): () -> Unit {
+  private fun commitUnderProgress(task: CommitTask, synchronously: Boolean, documentManager: PsiDocumentManagerEx): () -> Unit {
     if (!synchronously) {
       ApplicationManager.getApplication().assertIsNonDispatchThread()
     }
-    ApplicationManager.getApplication().assertReadAccessAllowed()
-    val document = task.myDocumentRef.get()?: return {}
+    val document = task.myDocumentRef.get()
+    if (!EditorLockFreeTyping.isInElfScope(document)) {
+      ApplicationManager.getApplication().assertReadAccessAllowed()
+    }
+    if (document == null) return {}
     val project = task.myProject
     val finishProcessors = SmartList<BooleanRunnable>()
     val reparseInjectedProcessors = SmartList<BooleanRunnable>()
 
+    LOG.trace { "commitUnderProgress: ${task.myReason}, $document, synchronously: $synchronously " }
 
-    val psiManager = PsiManagerEx.getInstanceEx(project)
-    val virtualFile = FileDocumentManager.getInstance().getFile(document)
-    val viewProvider = if (virtualFile == null) null else psiManager.findViewProvider(virtualFile)
-    if (viewProvider == null) {
+    val viewProviders = findViewProvidersForCommit(document, project)
+    if (viewProviders.isEmpty()) {
       finishProcessors.add(handleCommitWithoutPsi(task, documentManager))
+      task.cachedViewProviders = emptyList()
     }
     else {
-      // While we were messing around transferring things to background thread, the ViewProvider can become obsolete
+      // While we were messing around transferring things to background thread, the ViewProviders can become obsolete
       // when, e.g., a virtual file was renamed.
-      // Store new provider to retain it from GC
-      task.cachedViewProvider = viewProvider
+      // Store new providers to retain them from GC
+      task.cachedViewProviders = viewProviders
 
-      // todo IJPL-339 check if this is correct
-      for (psiFile in viewProvider.getAllFiles()) {
+      for (psiFile in viewProviders.flatMap { it.getAllFiles() }) {
         val oldFileNode = psiFile.getNode()
-            ?: throw AssertionError("No node for " + psiFile.javaClass + " in " + psiFile.getViewProvider().javaClass +
-                                    " of size " + StringUtil.formatFileSize(document.textLength.toLong()) +
-                                    " (is too large = " + SingleRootFileViewProvider
-                                      .isTooLargeForIntelligence(viewProvider.getVirtualFile(), document.textLength.toLong()) + ")")
+                          ?: throw AssertionError("No node for " + psiFile.javaClass + " in " + psiFile.getViewProvider().javaClass +
+                                                  " of size " + StringUtil.formatFileSize(document.textLength.toLong()) +
+                                                  " (is too large = " + SingleRootFileViewProvider
+                                                    .isTooLargeForIntelligence(psiFile.viewProvider.getVirtualFile(), document.textLength.toLong()) + ")")
         val changedPsiRange = ChangedPsiRangeUtil.getChangedPsiRange(
           psiFile,
           document,
@@ -227,6 +265,13 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
       // this document was not referenced by anyone, hence we don't need to perform a write action
       val document = task.myDocumentRef.get() ?: return@task
 
+
+      if (!synchronously && newViewProvidersWereConcurrentlyAdded(document, task.cachedViewProviders, project)) {
+        // add a document back to the queue
+        commitAsynchronously(project, documentManager, document, "Re-added back because of new view providers", task.myCreationModality)
+        return@task
+      }
+
       val success = documentManager.finishCommit(document, finishProcessors, reparseInjectedProcessors, synchronously, task.myReason)
       if (synchronously) {
         assert(success)
@@ -234,47 +279,85 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
       if (synchronously || success) {
         assert(!documentManager.isInUncommittedSet(document))
       }
-      if (!success && viewProvider?.isEventSystemEnabled() == true) {
+      if (!success && task.cachedViewProviders.isEventSystemEnabled()) {
         // add a document back to the queue
         commitAsynchronously(project, documentManager, document, "Re-added back", task.myCreationModality)
       }
     }
   }
 
-  override fun toString(): String = "Document commit thread; application: ${ApplicationManager.getApplication()}; isDisposed: $isDisposed"
+  private fun findViewProvidersForCommit(document: Document, project: Project): List<FileViewProvider> {
+    val psiManager = PsiManagerEx.getInstanceEx(project)
+    val virtualFile = FileDocumentManager.getInstance().getFile(document) ?: return emptyList()
 
-
-  fun Pair<Job, AtomicBoolean>.isReadPartInProgress(): Boolean {
-    // the commit is in the read phase if its job is not canceled (by a similar task) or when it did not manage to set the boolean flag of read
-    return !first.isCancelled && second.get()
+    if (isSharedSourceSupportEnabled(psiManager.project)) {
+      val cached = psiManager.fileManagerEx.findCachedViewProviders(virtualFile)
+      if (cached.isNotEmpty()) {
+        return cached
+      }
+    }
+    return listOfNotNull(psiManager.findViewProvider(virtualFile))
   }
+
+  private fun newViewProvidersWereConcurrentlyAdded(
+    document: Document,
+    committedViewProviders: List<FileViewProvider>,
+    project: Project,
+  ): Boolean {
+    val currentProviders = findViewProvidersForCommit(document, project)
+
+    if (committedViewProviders.size != currentProviders.size) {
+      LOG.trace { "Concurrent view provider modification detected. Was: ${committedViewProviders.size}, Now: ${currentProviders.size}. Adding document back to the queue. $document" }
+      return true
+    }
+
+    if (committedViewProviders.size == 1) {
+      if (committedViewProviders.first() == currentProviders.first()) {
+        return false
+      }
+      else {
+        LOG.trace { "Concurrent view provider modification detected: view provider was changed to another one. Adding document back to the queue. $document" }
+        return true
+      }
+    }
+
+    if (committedViewProviders.toSet().containsAll(currentProviders)) {
+      return false
+    }
+    else {
+      LOG.trace { "Concurrent view provider modification detected. Adding document back to the queue. $document" }
+      return true
+    }
+  }
+
+  override fun toString(): String = "Document commit thread; application: ${ApplicationManager.getApplication()}; isDisposed: $isDisposed"
 
   // NB: failures applying EDT tasks are not handled - i.e., failed documents are added back to the queue and the method returns
   @TestOnly
+  @ApiStatus.Internal
   fun waitForAllCommits(timeout: Long, timeUnit: TimeUnit) {
-    val boundedTaskExecutor = myExecutor as BoundedTaskExecutor
-    if (!ApplicationManager.getApplication().isDispatchThread()) {
-      boundedTaskExecutor.waitAllTasksExecuted(timeout, timeUnit)
-      while (commitInProgressCounter.get() > 0) {
-        Thread.sleep(10)
-      }
-      return
-    }
-
-    assert(!ApplicationManager.getApplication().isWriteAccessAllowed())
-
-    EDT.dispatchAllInvocationEvents()
+    assert(ApplicationManager.getApplication().isUnitTestMode)
     val deadLine = System.nanoTime() + timeUnit.toNanos(timeout)
-    while (!boundedTaskExecutor.isEmpty || commitInProgressCounter.get() > 0) {
-      try {
-        boundedTaskExecutor.waitAllTasksExecuted(10, TimeUnit.MILLISECONDS)
-      }
-      catch (e: TimeoutException) {
+    val projectManager = ProjectManagerEx.getInstanceEx()
+    val allProjects = projectManager.openProjects + if (projectManager.isDefaultProjectInitialized) arrayOf(projectManager.defaultProject) else arrayOf()
+    allProjects.forEach { project ->
+      while (true) {
+        val documentManager = PsiDocumentManager.getInstance(project) as PsiDocumentManagerEx
+        val documents = runReadActionBlocking {
+          documentManager.uncommittedDocuments.filter { documentManager.isEventSystemEnabled(it) }
+        }
+        if (documents.isEmpty()) {
+          break
+        }
         if (System.nanoTime() > deadLine) {
-          throw e
+          throw TimeoutException("Uncommitted documents: " +
+                                 StringUtil.join(documents, {d -> ""+d+": "+System.identityHashCode(d)}, ", ")+" in $project")
+        }
+        TimeoutUtil.sleep(10) // do not saturate edt completely
+        if (EDT.isCurrentThreadEdt()) {
+          EDT.dispatchAllInvocationEvents()
         }
       }
-      EDT.dispatchAllInvocationEvents()
     }
   }
 
@@ -286,7 +369,9 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
     val myLastCommittedText: CharSequence
     // store initial document modification sequence here to check if it changed later before commit in EDT
     private val myModificationSequence: Int
-    @Volatile var cachedViewProvider: FileViewProvider? = null
+
+    /** initialized under read-action in commitUnderProgress */
+    @Volatile lateinit var cachedViewProviders: List<FileViewProvider>
 
     constructor(
       project: Project,
@@ -329,7 +414,7 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
         null
       }
     }
-    fun isExpired(documentManager: PsiDocumentManagerBase): Boolean {
+    fun isExpired(documentManager: PsiDocumentManagerEx): Boolean {
       val document = stillValidDocument()
       val expired = myProject.isDisposed() ||
                     document == null ||
@@ -349,12 +434,14 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
     oldFileNode: FileASTNode,
     changedPsiRange: ProperTextRange,
     outReparseInjectedProcessors: MutableList<BooleanRunnable>,
-    documentManager: PsiDocumentManagerBase,
+    documentManager: PsiDocumentManagerEx,
   ): BooleanRunnable {
     if (!synchronously) {
       ApplicationManager.getApplication().assertIsNonDispatchThread()
     }
-    ApplicationManager.getApplication().assertReadAccessAllowed()
+    if (!EditorLockFreeTyping.isInElfScope(document)) {
+      ApplicationManager.getApplication().assertReadAccessAllowed()
+    }
     val newDocumentText = document.getImmutableCharSequence()
 
     val data = document.getUserData(BlockSupport.DO_NOT_REPARSE_INCREMENTALLY)
@@ -392,7 +479,7 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
 
     return BooleanRunnable {
       val document = task.myDocumentRef.get() ?: return@BooleanRunnable false
-      val viewProvider = psiFile.getViewProvider() //todo IJPL-339 figure out correct check here
+      val viewProvider = psiFile.getViewProvider()
       if (task.stillValidDocument() == null || viewProvider !in documentManager.getCachedViewProviders(document)) { // optimistic locking failed
         return@BooleanRunnable false
       }
@@ -405,14 +492,14 @@ class DocumentCommitThread : DocumentCommitProcessor, Disposable {
       diffLog.doActualPsiChange(psiFile)
 
       assertAfterCommit(document, psiFile, oldFileNode) // just to make an impression the field is used
-      Reference.reachabilityFence(task.cachedViewProvider)
+      Reference.reachabilityFence(task.cachedViewProviders)
       true
     }
   }
 
   private fun handleCommitWithoutPsi(
     task: CommitTask,
-    documentManager: PsiDocumentManagerBase,
+    documentManager: PsiDocumentManagerEx,
   ): BooleanRunnable {
     return BooleanRunnable {
       val document = task.myDocumentRef.get() ?: return@BooleanRunnable false

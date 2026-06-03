@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.structureView.customRegions;
 
 import com.intellij.ide.structureView.StructureViewTreeElement;
@@ -10,7 +10,12 @@ import com.intellij.lang.folding.FoldingBuilder;
 import com.intellij.lang.folding.LanguageFolding;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.TextRange;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.StubBasedPsiElement;
+import com.intellij.psi.SyntaxTraverser;
 import com.intellij.psi.impl.PsiFileEx;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
@@ -19,33 +24,34 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 
 @ApiStatus.Internal
 public final class CustomRegionStructureUtil {
 
   public static Collection<StructureViewTreeElement> groupByCustomRegions(@NotNull PsiElement rootElement,
                                                                           @NotNull Collection<StructureViewTreeElement> originalElements) {
-    if (rootElement instanceof PsiFileEx && !((PsiFileEx)rootElement).isContentsLoaded() ||
-        rootElement instanceof StubBasedPsiElement && ((StubBasedPsiElement<?>)rootElement).getStub() != null) {
+    if (rootElement instanceof PsiFileEx file && !file.isContentsLoaded() ||
+        rootElement instanceof StubBasedPsiElement<?> stubElement && stubElement.getStub() != null) {
       return originalElements;
     }
-    List<StructureViewTreeElement> physicalElements = ContainerUtil.filter(originalElements, element -> {
-      Object value = element.getValue();
-      return !(value instanceof StubBasedPsiElement) || ((StubBasedPsiElement<?>)value).getStub() == null;
-    });
-    Set<TextRange> childrenRanges = ContainerUtil.map2SetNotNull(physicalElements, element -> {
-      Object value = element.getValue();
-      return value instanceof PsiElement ? getTextRange((PsiElement)value) : null;
-    });
+    List<StructureViewTreeElement> physicalElements =
+      ContainerUtil.filter(originalElements, element -> !(element.getValue() instanceof StubBasedPsiElement<?> e) || e.getStub() == null);
+    Set<TextRange> childrenRanges =
+      ContainerUtil.map2SetNotNull(physicalElements, element -> element.getValue() instanceof PsiElement e ? getTextRange(e) : null);
     Collection<CustomRegionTreeElement> customRegions = collectCustomRegions(rootElement, childrenRanges);
     if (!customRegions.isEmpty()) {
-      List<StructureViewTreeElement> result = new ArrayList<>(customRegions);
+      List<StructureViewTreeElement> result = physicalElements.isEmpty() ? new ArrayList<>(customRegions) : new ArrayList<>();
       for (StructureViewTreeElement element : physicalElements) {
         ProgressManager.checkCanceled();
         boolean isInCustomRegion = false;
         for (CustomRegionTreeElement customRegion : customRegions) {
           if (customRegion.containsElement(element)) {
+            if (result.isEmpty() || result.getLast() != customRegion) result.add(customRegion);
             customRegion.addChild(element);
             isInCustomRegion = true;
             break;
@@ -133,8 +139,8 @@ public final class CustomRegionStructureUtil {
     Language language = element.getLanguage();
     if (!Language.ANY.is(language)) {
       for (FoldingBuilder builder : LanguageFolding.INSTANCE.allForLanguage(language)) {
-        if (builder instanceof CustomFoldingBuilder) {
-          return ((CustomFoldingBuilder)builder).isCustomFoldingCandidate(element);
+        if (builder instanceof CustomFoldingBuilder foldingBuilder) {
+          return foldingBuilder.isCustomFoldingCandidate(element);
         }
       }
     }

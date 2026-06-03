@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.codeInsight.daemon.QuickFixBundle;
@@ -9,8 +9,32 @@ import com.intellij.modcommand.Presentation;
 import com.intellij.modcommand.PsiBasedModCommandAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
-import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassObjectAccessExpression;
+import com.intellij.psi.PsiDeconstructionPattern;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiFileFactory;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiInstanceOfExpression;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNameIdentifierOwner;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiPatternVariable;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiTypeParameterList;
+import com.intellij.psi.PsiTypeParameterListOwner;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
@@ -21,7 +45,9 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 import java.util.Objects;
 
-import static com.intellij.modcommand.ModCommand.*;
+import static com.intellij.modcommand.ModCommand.chooseAction;
+import static com.intellij.modcommand.ModCommand.nop;
+import static com.intellij.modcommand.ModCommand.psiUpdateStep;
 import static com.intellij.util.ObjectUtils.tryCast;
 
 public class CreateTypeParameterFromUsageFix extends PsiBasedModCommandAction<PsiJavaCodeReferenceElement> {
@@ -115,18 +141,15 @@ public class CreateTypeParameterFromUsageFix extends PsiBasedModCommandAction<Ps
   private record Context(@NotNull List<PsiNameIdentifierOwner> placesToAdd, @NotNull String typeName) {
     static @Nullable Context from(@NotNull PsiJavaCodeReferenceElement element, boolean findFirstOnly) {
       if (!PsiUtil.isAvailable(JavaFeature.GENERICS, element)) return null;
-      if (element.isQualified()) return null;
-      PsiElement container =
-        PsiTreeUtil.getParentOfType(element, PsiReferenceList.class, PsiClass.class, PsiMethod.class, PsiClassInitializer.class,
-                                    PsiStatement.class);
-      if (container == null || (container instanceof PsiClass aClass && !aClass.isRecord())) return null;
+      if (element.isQualified() || element.getTypeParameters().length > 0) return null;
       PsiElement parent = element.getParent();
+      if (parent.getNextSibling() instanceof PsiErrorElement) return null;
       if (parent instanceof PsiMethodCallExpression ||
           parent instanceof PsiJavaCodeReferenceElement ||
           parent instanceof PsiReferenceList ||
           parent instanceof PsiNewExpression ||
           parent instanceof PsiAnnotation ||
-          (parent instanceof PsiTypeElement && typeParameterIsNotValidInTypeElementContext((PsiTypeElement)parent)) ||
+          (parent instanceof PsiTypeElement typeElement && typeParameterIsNotValidInTypeElementContext(typeElement)) ||
           element instanceof PsiReferenceExpression) {
         return null;
       }
@@ -151,10 +174,10 @@ public class CreateTypeParameterFromUsageFix extends PsiBasedModCommandAction<Ps
     element = element.getParent();
     List<PsiNameIdentifierOwner> parents = new SmartList<>();
     while (element != null) {
-      if (element instanceof PsiField && ((PsiField)element).hasModifierProperty(PsiModifier.STATIC)) {
+      if (element instanceof PsiField field && field.hasModifierProperty(PsiModifier.STATIC)) {
         break;
       }
-      if (element instanceof PsiClass && ((PsiClass)element).isEnum()) break;
+      if (element instanceof PsiClass aClass && aClass.isEnum()) break;
       if (element instanceof PsiMethod || isValidClass(element)) {
         if (((PsiMember)element).getName() != null) {
           parents.add((PsiNameIdentifierOwner)element);

@@ -3,9 +3,21 @@ package com.intellij.platform.workspace.storage.impl
 
 import com.github.benmanes.caffeine.cache.Cache
 import com.github.benmanes.caffeine.cache.Caffeine
+import com.intellij.concurrency.ThreadContextAwareReentrantLock
 import com.intellij.platform.diagnostic.telemetry.TelemetryManager
 import com.intellij.platform.diagnostic.telemetry.WorkspaceModel
-import com.intellij.platform.workspace.storage.*
+import com.intellij.platform.workspace.storage.CachedValue
+import com.intellij.platform.workspace.storage.CachedValueWithParameter
+import com.intellij.platform.workspace.storage.EntityChange
+import com.intellij.platform.workspace.storage.EntityStorage
+import com.intellij.platform.workspace.storage.ImmutableEntityStorage
+import com.intellij.platform.workspace.storage.MutableEntityStorage
+import com.intellij.platform.workspace.storage.ReferenceChange
+import com.intellij.platform.workspace.storage.SymbolicEntityId
+import com.intellij.platform.workspace.storage.VersionedEntityStorage
+import com.intellij.platform.workspace.storage.VersionedStorageChange
+import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityWithSymbolicId
 import com.intellij.platform.workspace.storage.instrumentation.instrumentation
 import io.opentelemetry.api.metrics.Meter
 import org.jetbrains.annotations.ApiStatus
@@ -203,6 +215,8 @@ public open class VersionedEntityStorageImpl(initialStorage: ImmutableEntityStor
       return snapshotCache.cache
     }
 
+  private val lock = ThreadContextAwareReentrantLock()
+
   override val current: ImmutableEntityStorage
     get() = currentPointer.storage
 
@@ -237,16 +251,15 @@ public open class VersionedEntityStorageImpl(initialStorage: ImmutableEntityStor
    * Unfortunately, we have to do it because we initialize bridges on the base of the changes.
    * We may calculate the change in this function as we won't need the changes for bridges initialization.
    */
-  @Synchronized
   public fun replace(
     newStorage: ImmutableEntityStorage,
     changes: Map<Class<*>, List<EntityChange<*>>>,
     symbolicEntityIdsChanges: Set<ReferenceChange<*>>,
     beforeChanged: (VersionedStorageChange) -> Unit,
     afterChanged: (VersionedStorageChange) -> Unit,
-  ) {
+  ): Unit = lock.withLock {
     val oldCopy = currentPointer
-    if (oldCopy.storage == newStorage) return
+    if (oldCopy.storage == newStorage) return@withLock
     val change = VersionedStorageChangeImpl(oldCopy.storage, newStorage, changes, symbolicEntityIdsChanges)
     try {
       (newStorage as? AbstractEntityStorage)?.isEventHandling = true

@@ -14,9 +14,24 @@ import git4idea.repo.GitRepoInfo
 import git4idea.repo.GitRepository
 import git4idea.repo.GitRepositoryChangeListener
 import git4idea.repo.GitRepositoryManager
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.supervisorScope
+import org.jetbrains.annotations.ApiStatus
 
 fun GitRepository.changesSignalFlow(): Flow<Unit> = channelFlow {
   project.messageBus
@@ -67,7 +82,7 @@ private fun GitRepositoryManager.collectRemotes(): Set<GitRemoteUrlCoordinates> 
 
   return repositories.flatMap { repo ->
     repo.remotes.flatMap { remote ->
-      remote.urls.map { url ->
+      (remote.urls + remote.pushUrls).distinct().map { url ->
         GitRemoteUrlCoordinates(url, remote, repo)
       }
     }
@@ -116,6 +131,18 @@ fun <S : ServerPath, M : HostedGitRepositoryMapping> GitRemotesFlow.mapToServers
   combine(serversState) { remotes, servers ->
     remotes.asSequence().mapNotNull { remote ->
       servers.find { GitHostingUrlUtil.match(it.toURI(), remote.url) }?.let { mapper(it, remote) }
+    }.toSet()
+  }
+
+@ApiStatus.Internal
+fun <S : ServerPath, M : HostedGitRepositoryMapping> GitRemotesFlow.mapToServers(
+  serversState: Flow<Set<S>>,
+  defaultServerAliasesFlow: Flow<Set<String>>,
+  mapper: (Set<S>, Set<String>, GitRemoteUrlCoordinates) -> M?,
+): Flow<Set<M>> =
+  combine(this, serversState, defaultServerAliasesFlow) { remotes, servers, aliases ->
+    remotes.asSequence().mapNotNull { remote ->
+      return@mapNotNull mapper(servers, aliases, remote)
     }.toSet()
   }
 

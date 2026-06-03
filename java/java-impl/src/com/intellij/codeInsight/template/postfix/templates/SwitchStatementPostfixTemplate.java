@@ -15,7 +15,27 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiCall;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiReturnStatement;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiSwitchBlock;
+import com.intellij.psi.PsiSwitchExpression;
+import com.intellij.psi.PsiSwitchStatement;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -61,11 +81,16 @@ public class SwitchStatementPostfixTemplate extends SurroundPostfixTemplateBase 
   }
 
   @Override
+  public boolean isApplicableForModCommand() {
+    return true;
+  }
+
+  @Override
   protected @NotNull Surrounder getSurrounder() {
     return new JavaExpressionModCommandSurrounder() {
       @Override
       public boolean isApplicable(PsiExpression expr) {
-        return expr.isPhysical() && SWITCH_TYPE.value(expr);
+        return SWITCH_TYPE.value(expr);
       }
 
       @Override
@@ -167,5 +192,10 @@ public class SwitchStatementPostfixTemplate extends SurroundPostfixTemplateBase 
         return parent instanceof PsiExpressionList && parent.getParent() instanceof PsiCall;
       }
     };
+  }
+
+  @Override
+  public boolean isApplicable(@NotNull PsiElement context, @NotNull Document copyDocument, int newOffset) {
+    return super.isApplicable(context, copyDocument, newOffset) && !JavaPostfixTemplatesUtils.isInExpressionFile(context);
   }
 }

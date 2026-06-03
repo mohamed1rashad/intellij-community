@@ -1,10 +1,9 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.maven.project.importing
 
-import com.intellij.platform.util.progress.RawProgressReporter
 import kotlinx.coroutines.runBlocking
-import org.jetbrains.idea.maven.buildtool.MavenLogEventHandler
-import org.jetbrains.idea.maven.project.MavenPluginResolver
+import org.jetbrains.idea.maven.model.MavenExplicitProfiles
+import org.jetbrains.idea.maven.project.MavenProjectsTree
 import org.junit.Test
 
 class MavenProjectsTreeReadingPluginTest : MavenProjectsTreeTestCase() {
@@ -28,35 +27,24 @@ class MavenProjectsTreeReadingPluginTest : MavenProjectsTreeTestCase() {
                                 </parent>
                                 """.trimIndent())
     val listener = MyLoggingListener()
-    tree.addListener(listener, getTestRootDisposable())
+    project.messageBus.connect(getTestRootDisposable()).subscribe(MavenProjectsTree.Listener.TOPIC, listener)
     updateAll(projectPom, child)
     val parentProject = tree.findProject(projectPom)!!
 
-    resolve(project,
-            parentProject,
-            mavenGeneralSettings
-    )
-    val pluginResolver = MavenPluginResolver(tree)
-    val progressReporter = object : RawProgressReporter {}
-    pluginResolver.resolvePlugins(listOf(parentProject),
-                                  mavenEmbedderWrappers,
-                                  progressReporter,
-                                  MavenLogEventHandler)
+    resolve(project, parentProject, mavenGeneralSettings)
 
     assertEquals(
       log()
         .add("updated", "parent", "child")
         .add("deleted")
-        .add("resolved", "parent")
-        .add("plugins", "parent"),
+        .add("resolved", "parent"),
       listener.log)
-    tree.updateAll(false, mavenGeneralSettings, mavenEmbedderWrappers, rawProgressReporter)
+    tree.updateAll(listOf(projectPom, child), false, mavenGeneralSettings, MavenExplicitProfiles.NONE, mavenEmbedderWrappers, rawProgressReporter)
     assertEquals(
       log()
         .add("updated", "parent", "child")
         .add("deleted")
-        .add("resolved", "parent")
-        .add("plugins", "parent"),
+        .add("resolved", "parent"),
       listener.log)
   }
 }

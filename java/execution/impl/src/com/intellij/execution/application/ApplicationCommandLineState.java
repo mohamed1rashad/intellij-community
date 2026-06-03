@@ -1,10 +1,14 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.application;
 
 import com.intellij.codeInsight.daemon.impl.analysis.JavaModuleGraphUtil;
 import com.intellij.compiler.CompilerConfiguration;
 import com.intellij.debugger.settings.DebuggerSettings;
-import com.intellij.execution.*;
+import com.intellij.execution.CantRunException;
+import com.intellij.execution.CommonJavaRunConfigurationParameters;
+import com.intellij.execution.ConfigurationWithCommandLineShortener;
+import com.intellij.execution.ExecutionBundle;
+import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.JavaParameters;
 import com.intellij.execution.configurations.JavaRunConfigurationModule;
 import com.intellij.execution.configurations.ModuleBasedConfiguration;
@@ -13,6 +17,7 @@ import com.intellij.execution.process.OSProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.util.JavaParametersUtil;
 import com.intellij.execution.util.ProgramParametersConfigurator;
+import com.intellij.java.JavaPluginDisposable;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.projectRoots.JavaSdkVersion;
@@ -23,8 +28,6 @@ import com.intellij.psi.impl.light.LightJavaModule;
 import com.intellij.util.ExceptionUtil;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.concurrent.Callable;
 
 public abstract class ApplicationCommandLineState<T extends
   ModuleBasedConfiguration<JavaRunConfigurationModule, Element> &
@@ -40,19 +43,24 @@ public abstract class ApplicationCommandLineState<T extends
     final JavaParameters params = new JavaParameters();
     T configuration = getConfiguration();
 
-    params.setMainClass(ReadAction.compute(() -> myConfiguration.getRunClass()));
-    String mainClass = params.getMainClass();
+    JavaPluginDisposable expireReadsWith = JavaPluginDisposable.getInstance(configuration.getProject());
+
+    String mainClass = ReadAction.nonBlocking(() -> configuration.getRunClass())
+      .expireWith(expireReadsWith)
+      .executeSynchronously();
+
+    params.setMainClass(mainClass);
     try {
-      JavaParametersUtil.configureConfiguration(params, myConfiguration);
+      JavaParametersUtil.configureConfiguration(params, configuration);
     }
     catch (ProgramParametersConfigurator.ParametersConfiguratorException e) {
       throw new ExecutionException(e);
     }
 
-    final JavaRunConfigurationModule module = myConfiguration.getConfigurationModule();
+    final JavaRunConfigurationModule module = configuration.getConfigurationModule();
     try {
-      ReadAction.nonBlocking((Callable<Void>)() -> {
-        final String jreHome = getTargetEnvironmentRequest() == null && myConfiguration.isAlternativeJrePathEnabled() ? myConfiguration.getAlternativeJrePath() : null;
+      ReadAction.nonBlocking(() -> {
+        final String jreHome = getTargetEnvironmentRequest() == null && configuration.isAlternativeJrePathEnabled() ? configuration.getAlternativeJrePath() : null;
         if (module.getModule() != null) {
           DumbService.getInstance(module.getProject()).runWithAlternativeResolveEnabled(() -> {
             if (mainClass == null) {
@@ -60,15 +68,17 @@ public abstract class ApplicationCommandLineState<T extends
             }
             int classPathType = JavaParametersUtil.getClasspathType(module, mainClass, false,
                                                                     isProvidedScopeIncluded());
+            // todo effects must be applied in non-cancellable section
             JavaParametersUtil.configureModule(module, params, classPathType, jreHome);
           });
         }
         else {
+          // todo effects must be applied in non-cancellable section
           JavaParametersUtil.configureProject(module.getProject(), params, JavaParameters.JDK_AND_CLASSES_AND_TESTS, jreHome);
         }
         return null;
       })
-        .expireWith(configuration.getProject())
+        .expireWith(expireReadsWith)
         .executeSynchronously();
     }
     catch (Exception e) {
@@ -81,7 +91,9 @@ public abstract class ApplicationCommandLineState<T extends
       }
     }
 
-    setupModulePath(params, module);
+    if (useModulePath()) {
+      setupModulePath(params, module);
+    }
 
     params.setShortenCommandLine(configuration.getShortenCommandLine(), configuration.getProject());
 
@@ -116,6 +128,10 @@ public abstract class ApplicationCommandLineState<T extends
         }
       }
     }
+  }
+
+  protected boolean useModulePath() {
+    return true;
   }
 
   protected abstract boolean isProvidedScopeIncluded();

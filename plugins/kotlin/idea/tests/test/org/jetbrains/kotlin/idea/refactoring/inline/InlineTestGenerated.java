@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.refactoring.inline;
 
@@ -1173,6 +1173,11 @@ public abstract class InlineTestGenerated extends AbstractInlineTest {
             public void testWhenSubject() throws Exception {
                 runTest("testData/refactoring/inline/inlineVariableOrProperty/whenSubject.kt");
             }
+
+            @TestMetadata("WithContextParametersAndReceiver.kt")
+            public void testWithContextParametersAndReceiver() throws Exception {
+                runTest("testData/refactoring/inline/inlineVariableOrProperty/WithContextParametersAndReceiver.kt");
+            }
         }
     }
 
@@ -2253,6 +2258,11 @@ public abstract class InlineTestGenerated extends AbstractInlineTest {
             @TestMetadata("emptyVarargs.kt")
             public void testEmptyVarargs() throws Exception {
                 runTest("testData/refactoring/inline/namedFunction/emptyVarargs.kt");
+            }
+
+            @TestMetadata("EnumEntryImplicitReceiver.kt")
+            public void testEnumEntryImplicitReceiver() throws Exception {
+                runTest("testData/refactoring/inline/namedFunction/EnumEntryImplicitReceiver.kt");
             }
 
             @TestMetadata("expect.kt")

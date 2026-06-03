@@ -8,8 +8,9 @@ import org.jetbrains.intellij.build.BuildPaths.Companion.ULTIMATE_HOME
 import org.jetbrains.intellij.build.CompilationContext
 import org.jetbrains.intellij.build.TestingOptions
 import org.jetbrains.intellij.build.TestingTasks
-import org.jetbrains.intellij.build.impl.CompilationContextImpl
+import org.jetbrains.intellij.build.impl.JUnitRunConfigurationProperties
 import org.jetbrains.intellij.build.impl.asBazelIfNeeded
+import org.jetbrains.intellij.build.impl.createCompilationContext
 import org.jsoup.Jsoup
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -31,17 +32,20 @@ class CoverageTest {
     coveredClassesPatterns = coveredClass.packageName + ".*"
     testPatterns = CoverageTest::class.java.canonicalName
     mainModule = "intellij.platform.buildScripts.tests"
+    searchScope = JUnitRunConfigurationProperties.TestSearchScope.SINGLE_MODULE.serialized
   }
 
-  private suspend fun context(): CompilationContext = CompilationContextImpl.createCompilationContext(
-    projectHome = ULTIMATE_HOME,
-    buildOutputRootEvaluator = { tempDir },
-    setupTracer = false,
-    enableCoroutinesDump = false,
-    options = BuildOptions().apply {
-      useCompiledClassesFromProjectOutput = true
-    }
-  ).asBazelIfNeeded
+  private suspend fun context(): CompilationContext {
+    return createCompilationContext(
+      projectHome = ULTIMATE_HOME,
+      buildOutputRootEvaluator = { tempDir },
+      setupTracer = false,
+      enableCoroutinesDump = false,
+      options = BuildOptions().apply {
+        useCompiledClassesFromProjectOutput = true
+      }
+    ).asBazelIfNeeded
+  }
 
   @Test
   fun test() {

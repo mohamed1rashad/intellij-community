@@ -6,7 +6,7 @@ import com.intellij.ui.IconManager;
 import icons.KotlinBaseResourcesIcons;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.Icon;
 
 public interface KotlinIcons {
     /** 16x16 */ @NotNull Icon SMALL_LOGO = KotlinBaseResourcesIcons.Kotlin;
@@ -22,9 +22,12 @@ public interface KotlinIcons {
     /** 16x16 */ @NotNull Icon EXPECT = KotlinBaseResourcesIcons.Expect;
     Icon EXTENSION_FUNCTION = IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Function);
     /** 16x16 */ @NotNull Icon FIELD_VAL = KotlinBaseResourcesIcons.Field_value;
+    /** 16x16 */ @NotNull Icon FIELD_VAL_KOTLIN = KotlinBaseResourcesIcons.FieldValueKotlin;
     /** 16x16 */ @NotNull Icon FIELD_VAR = KotlinBaseResourcesIcons.Field_variable;
+    /** 16x16 */ @NotNull Icon FIELD_VAR_KOTLIN = KotlinBaseResourcesIcons.FieldVariableKotlin;
     /** 16x16 */ @NotNull Icon FIR = KotlinBaseResourcesIcons.Fir;
     Icon FUNCTION = IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Function);
+    /** 16x16 */ @NotNull Icon FUNCTION_KOTLIN = KotlinBaseResourcesIcons.FunctionKotlin;
     /** 16x16 */ @NotNull Icon INTERFACE = KotlinBaseResourcesIcons.InterfaceKotlin;
     /** 16x16 */ @NotNull Icon FILE = KotlinBaseResourcesIcons.Kotlin_file;
     /** 16x16 */ @NotNull Icon GRADLE_SCRIPT = KotlinBaseResourcesIcons.Kotlin_gradle_script;
@@ -44,6 +47,7 @@ public interface KotlinIcons {
     /** 16x16 */ @NotNull Icon TYPE_ALIAS = KotlinBaseResourcesIcons.TypeAlias;
     Icon VAR = IconManager.getInstance().getPlatformIcon(com.intellij.ui.PlatformIcons.Variable);
     /** 16x16 */ @NotNull Icon VAL = KotlinBaseResourcesIcons.Value;
+    /** 16x16 */ @NotNull Icon J2K = KotlinBaseResourcesIcons.ConvertJavaToKotlin;
 
     final class Wizard {
         /** 16x16 */ public static final @NotNull Icon ANDROID = KotlinBaseResourcesIcons.Wizard.Android;

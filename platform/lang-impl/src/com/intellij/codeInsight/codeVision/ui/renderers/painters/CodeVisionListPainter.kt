@@ -6,6 +6,7 @@ import com.intellij.codeInsight.codeVision.ui.model.ProjectCodeVisionModel
 import com.intellij.codeInsight.codeVision.ui.model.RangeCodeVisionModel
 import com.intellij.codeInsight.codeVision.ui.renderers.providers.painter
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.Inlay
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.editor.markup.TextAttributes
 import org.jetbrains.annotations.ApiStatus
@@ -68,7 +69,7 @@ open class CodeVisionListPainter(
   ) {
 
     var x = point.x + theme.left
-    val y = point.y + theme.top + (inlayTextAscent(editor) ?: (editor as EditorImpl).ascent)
+    val y = point.y + theme.top + (inlayTextAscent(editor, value?.inlay) ?: (editor as EditorImpl).ascent)
 
     if (value == null || value.visibleLens.isEmpty()) {
       loadingPainter.paint(editor, textAttributes, g, Point(x, y), state, hovered)
@@ -124,19 +125,20 @@ open class CodeVisionListPainter(
     }
     else {
       val delimiterWidth = delimiterPainter.size(editor, state).width
+      val moreWidth = if (value.isMoreLensActive()) settingsWidth + delimiterWidth else 0
       Dimension(
-        list.sum() + (delimiterWidth * list.size - 1) + theme.left + theme.right + settingsWidth,
+        list.sum() + (delimiterWidth * (list.size - 1)) + theme.left + theme.right + moreWidth,
         editor.lineHeight + theme.top + theme.bottom
       )
     }
   }
 
   @ApiStatus.Internal
-  open fun inlayHeightInPixels(editor: Editor): Int? {
+  open fun inlayHeightInPixels(editor: Editor, inlay: Inlay<*>): Int? {
     return null
   }
 
-  open fun inlayTextAscent(editor: Editor): Int? {
+  open fun inlayTextAscent(editor: Editor, inlay: Inlay<*>?): Int? {
     return editor.ascent
   }
 

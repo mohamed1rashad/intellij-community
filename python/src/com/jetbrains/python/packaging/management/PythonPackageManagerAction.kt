@@ -7,16 +7,18 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.CommonDataKeys.PSI_FILE
 import com.intellij.openapi.actionSystem.PlatformDataKeys
-import com.intellij.openapi.application.edtWriteAction
-import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.module.ModuleUtil
 import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.python.pyproject.PY_PROJECT_TOML
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.jetbrains.python.errorProcessing.ErrorSink
 import com.jetbrains.python.errorProcessing.PyResult
 import com.jetbrains.python.packaging.management.ui.PythonPackageManagerUI
 import com.jetbrains.python.packaging.utils.PyPackageCoroutine
+import com.jetbrains.python.sdk.associatedModuleDir
 import com.jetbrains.python.sdk.pythonSdk
 import com.jetbrains.python.util.ShowingMessageErrorSync
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,7 @@ abstract class PythonPackageManagerAction<T : PythonPackageManager, V> : DumbAwa
    *
    * @return the manager instance of type [T] associated with the action event, or null if there is no [T]-manager associated.
    */
+  @RequiresBackgroundThread
   protected abstract fun getManager(e: AnActionEvent): T?
 
   /**
@@ -67,22 +70,19 @@ abstract class PythonPackageManagerAction<T : PythonPackageManager, V> : DumbAwa
   protected open fun isWatchedFile(virtualFile: VirtualFile?): Boolean = virtualFile?.name?.let { fileNamesPattern.matches(it) } ?: false
 
   /**
-   * This action saves the current document on fs because tools are command line tools, and they need actual files to be up to date
    * Handles errors via [errorSink]
    */
   override fun actionPerformed(e: AnActionEvent) {
-    val manager = getManager(e) ?: return
-    val psiFile = e.getData(PSI_FILE) ?: return
-    ModuleUtil.findModuleForFile(psiFile) ?: return
-
     PyPackageCoroutine.launch(e.project, Dispatchers.IO) {
-      edtWriteAction {
-        FileDocumentManager.getInstance().saveAllDocuments()
-      }
+      val manager = runReadAction { getManager(e) } ?: return@launch
+      val psiFile = runReadAction { e.getData(PSI_FILE) } ?: return@launch
 
       PythonPackageManagerUI.forPackageManager(manager).executeCommand(e.presentation.text) {
         execute(e, manager).mapSuccess {
-          DaemonCodeAnalyzer.getInstance(psiFile.project).restart(psiFile, this)
+          runReadAction {
+            DaemonCodeAnalyzer.getInstance(psiFile.project).restart(psiFile, "PythonPackageManagerAction")
+          }
+          manager.sdk.associatedModuleDir?.refresh(true, false)
         }
       }
     }
@@ -104,3 +104,9 @@ internal fun PythonPackageManager.isRunLocked(): Boolean {
   return CancellableJobSerialRunner.isRunLocked(this.sdk)
 }
 
+internal suspend fun <V> PythonPackageManager.runSynchronized(
+  title: @NlsContexts.ProgressTitle String,
+  runnable: suspend () -> PyResult<V>,
+): PyResult<V> {
+  return CancellableJobSerialRunner.run(this.project, this.sdk, title, runnable)
+}

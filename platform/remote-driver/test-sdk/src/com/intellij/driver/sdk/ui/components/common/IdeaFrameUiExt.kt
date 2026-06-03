@@ -1,7 +1,11 @@
 package com.intellij.driver.sdk.ui.components.common
 
 import com.intellij.driver.sdk.invokeAction
+import com.intellij.driver.sdk.ui.components.common.toolwindows.CommitToolWindowUi
+import com.intellij.driver.sdk.ui.components.common.toolwindows.GitLogToolWindowUi
+import com.intellij.driver.sdk.ui.components.common.toolwindows.TerminalToolWindowUi
 import com.intellij.driver.sdk.ui.components.common.toolwindows.ToolWindowUiComponent
+import com.intellij.driver.sdk.ui.components.elements.WindowUiComponent
 import com.intellij.driver.sdk.ui.components.elements.fileChooser
 import java.nio.file.Path
 
@@ -17,7 +21,11 @@ fun IdeaFrameUI.notificationsToolWindow(action: ToolWindowUiComponent.() -> Unit
 
 fun IdeaFrameUI.structureToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent = toolWindow("Structure", action)
 
-fun IdeaFrameUI.commitToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent = toolWindow("Commit", action)
+fun IdeaFrameUI.commitToolWindow(action: CommitToolWindowUi.() -> Unit = {}): CommitToolWindowUi =
+  x(CommitToolWindowUi::class.java) { and(byAccessibleName("Commit Tool Window"), byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS)) }.apply(action)
+
+fun IdeaFrameUI.gitLogToolWindow(action: GitLogToolWindowUi.() -> Unit = {}): GitLogToolWindowUi =
+  x(GitLogToolWindowUi::class.java) { and(byAccessibleName("Log Tool Window"), byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS)) }.apply(action)
 
 fun IdeaFrameUI.databaseToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent = toolWindow("Database", action)
 
@@ -26,11 +34,14 @@ fun IdeaFrameUI.mesonToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): 
 
 fun IdeaFrameUI.messagesToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent = toolWindow("Build", action)
 
-fun IdeaFrameUI.terminalToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent =
-  x(ToolWindowUiComponent::class.java) { componentWithChild(byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS), byType("org.jetbrains.plugins.terminal.TerminalToolWindowPanel")) }.apply(action)
+fun IdeaFrameUI.terminalToolWindow(action: TerminalToolWindowUi.() -> Unit = {}): TerminalToolWindowUi =
+  x(TerminalToolWindowUi::class.java) { componentWithChild(byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS), byType("org.jetbrains.plugins.terminal.TerminalToolWindowPanel")) }.apply(action)
 
 fun IdeaFrameUI.problemsToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent =
   x(ToolWindowUiComponent::class.java) { componentWithChild(byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS), byAccessibleName("Problems")) }.apply(action)
+
+fun IdeaFrameUI.usagesToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent =
+  x(ToolWindowUiComponent::class.java) { componentWithChild(byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS), byAccessibleName("Find")) }.apply(action)
 
 fun IdeaFrameUI.jupyterToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): ToolWindowUiComponent =
   x(ToolWindowUiComponent::class.java) { componentWithChild(byType(TOOL_WINDOW_ROOT_COMPONENT_CLASS), byAccessibleName("Jupyter")) }.apply(action)
@@ -53,6 +64,14 @@ fun IdeaFrameUI.todoToolWindow(action: ToolWindowUiComponent.() -> Unit = {}): T
 fun IdeaFrameUI.toolWindow(name: String, action: ToolWindowUiComponent.() -> Unit = {}) = x(ToolWindowUiComponent::class.java) { byAccessibleName("$name Tool Window") }.apply(action)
 
 fun IdeaFrameUI.invokeOpenFileAction(file: Path) {
+  doInvokeOpenFileAction(file)
+}
+
+fun WelcomeScreenUI.invokeOpenFileAction(file: Path) {
+  doInvokeOpenFileAction(file)
+}
+
+private fun WindowUiComponent.doInvokeOpenFileAction(file: Path) {
   driver.invokeAction("OpenFile", now = false)
   fileChooser({ byTitle("Open File or Project") }).openPath(file)
 }

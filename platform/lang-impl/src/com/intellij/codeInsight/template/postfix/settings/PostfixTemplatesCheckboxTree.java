@@ -22,7 +22,12 @@ import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.*;
+import com.intellij.ui.AnActionButton;
+import com.intellij.ui.CheckboxTree;
+import com.intellij.ui.CheckedTreeNode;
+import com.intellij.ui.DoubleClickListener;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.Consumer;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.MultiMap;
@@ -32,20 +37,27 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JTree;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
-import java.awt.*;
+import java.awt.Color;
 import java.awt.event.MouseEvent;
-import java.util.*;
+import java.util.Collection;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 
 @ApiStatus.Internal
 public class PostfixTemplatesCheckboxTree extends CheckboxTree implements Disposable {
-  private static final Function<Object, Set<PostfixTemplateCheckedTreeNode>> myNodesComparator = __ -> new TreeSet<>((o1, o2) -> {
+  private static final Function<Object, Set<PostfixTemplateCheckedTreeNode>> myNodesComparator = _ -> new TreeSet<>((o1, o2) -> {
     PostfixTemplate template1 = o1.getTemplate();
     PostfixTemplate template2 = o2.getTemplate();
     int compare = Comparing.compare(template1.getPresentableName(), template2.getPresentableName());
@@ -181,7 +193,7 @@ public class PostfixTemplatesCheckboxTree extends CheckboxTree implements Dispos
     final Map<String, Set<String>> result = new HashMap<>();
     visitTemplateNodes(template -> {
       if (!template.isChecked()) {
-        Set<String> templatesForProvider = result.computeIfAbsent(template.getTemplateProvider().getId(), __ -> new HashSet<>());
+        Set<String> templatesForProvider = result.computeIfAbsent(template.getTemplateProvider().getId(), _ -> new HashSet<>());
         templatesForProvider.add(template.getTemplate().getId());
       }
     });

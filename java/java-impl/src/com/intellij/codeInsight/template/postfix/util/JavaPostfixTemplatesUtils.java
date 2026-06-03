@@ -9,7 +9,18 @@ import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.impl.source.PsiCodeFragmentImpl;
+import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiExpressionTrimRenderer;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -198,6 +209,11 @@ public final class JavaPostfixTemplatesUtils {
   public static @Nullable PsiExpression getTopmostExpression(PsiElement context) {
     PsiExpressionStatement statement = PsiTreeUtil.getNonStrictParentOfType(context, PsiExpressionStatement.class);
     return statement != null ? statement.getExpression() : null;
+  }
+
+  public static boolean isInExpressionFile(@NotNull PsiElement context) {
+    return context.getContainingFile() instanceof PsiCodeFragmentImpl codeFragment &&
+           codeFragment.getContentElementType() == JavaElementType.EXPRESSION_TEXT;
   }
 }
 

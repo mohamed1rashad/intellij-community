@@ -8,7 +8,6 @@ import com.intellij.ide.IdeBundle
 import com.intellij.ide.Region
 import com.intellij.ide.RegionSettings
 import com.intellij.ide.RegionSettings.RegionSettingsListener
-import com.intellij.ide.plugins.DynamicPlugins
 import com.intellij.ide.plugins.PluginManagerConfigurable
 import com.intellij.ide.ui.localization.statistics.EventSource
 import com.intellij.ide.ui.localization.statistics.LocalizationActionsStatistics
@@ -16,6 +15,7 @@ import com.intellij.l10n.LocalizationListener
 import com.intellij.l10n.LocalizationStateService
 import com.intellij.l10n.LocalizationUtil
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.ExtensionPointListener
 import com.intellij.openapi.extensions.PluginDescriptor
@@ -37,9 +37,12 @@ import com.intellij.ui.dsl.listCellRenderer.listCellRenderer
 import com.intellij.util.application
 import com.intellij.util.messages.MessageBusConnection
 import com.intellij.util.ui.RestartDialog
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus.Internal
 import java.net.URL
-import java.util.*
+import java.util.Locale
 import javax.swing.JComponent
 import javax.swing.ListCellRenderer
 import javax.swing.event.HyperlinkEvent
@@ -207,8 +210,10 @@ object LanguageAndRegionUi {
     }
   }
 
-  fun showRestartDialog(runAlways: Boolean = true) {
-    DynamicPlugins.runAfter(runAlways) {
+  fun showRestartDialog() {
+    @OptIn(DelicateCoroutinesApi::class)
+    GlobalScope.launch {
+      readAction { } /** wait until a potential dynamic plugin reconfiguration completes [com.intellij.ide.plugins.LocalizationPluginListener] */
       application.invokeLater {
         application.service<RestartDialog>().showRestartRequired()
       }

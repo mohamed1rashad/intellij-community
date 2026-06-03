@@ -10,7 +10,6 @@ import com.intellij.ide.plugins.newui.PluginUiModel;
 import com.intellij.ide.plugins.newui.PluginUiModelAdapter;
 import com.intellij.ide.plugins.newui.PluginUiModelBuilderFactory;
 import com.intellij.openapi.application.PathManager;
-import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.components.impl.stores.ComponentStorageUtil;
 import com.intellij.openapi.diagnostic.Logger;
@@ -37,18 +36,25 @@ import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static com.intellij.ide.plugins.BrokenPluginFileKt.isBrokenPlugin;
+import static com.intellij.ide.plugins.PluginManagerCore.MARKETPLACE_PLUGIN_ID;
+import static com.intellij.ide.plugins.PluginManagerCore.ULTIMATE_PLUGIN_ID;
 
 public final class RepositoryHelper {
   private static final Logger LOG = Logger.getInstance(RepositoryHelper.class);
 
   /** Duplicates VmOptionsGenerator.CUSTOM_BUILT_IN_PLUGIN_REPOSITORY_PROPERTY */
   private static final String CUSTOM_BUILT_IN_PLUGIN_REPOSITORY_PROPERTY = "intellij.plugins.custom.built.in.repository.url";
-  @SuppressWarnings("SpellCheckingInspection") private static final String PLUGIN_LIST_FILE = "availables.xml";
-  private static final String MARKETPLACE_PLUGIN_ID = "com.intellij.marketplace";
-  private static final String ULTIMATE_MODULE = "com.intellij.modules.ultimate";
+  private static final String PLUGIN_LIST_FILE = "availables.xml";
 
   /**
    * Returns a list of configured custom plugin repository hosts.
@@ -63,14 +69,9 @@ public final class RepositoryHelper {
 
     hosts.addAll(UpdateSettingsProvider.getRepositoriesFromProviders());
 
-    @SuppressWarnings("deprecation") var pluginsUrl = ApplicationInfoEx.getInstanceEx().getBuiltinPluginsUrl();
-    if (pluginsUrl != null && !"__BUILTIN_PLUGINS_URL__".equals(pluginsUrl)) {
-      hosts.add(pluginsUrl);
-    }
-
-    pluginsUrl = System.getProperty(CUSTOM_BUILT_IN_PLUGIN_REPOSITORY_PROPERTY);
+    var pluginsUrl = System.getProperty(CUSTOM_BUILT_IN_PLUGIN_REPOSITORY_PROPERTY);
     if (pluginsUrl != null) {
-      hosts.add(pluginsUrl);
+      hosts.addAll(Arrays.asList(pluginsUrl.split(",")));
     }
 
     ContainerUtil.removeDuplicates(hosts);
@@ -190,7 +191,9 @@ public final class RepositoryHelper {
 
       if (model.getName() == null) {
         var url = model.getDownloadUrl();
-        model.setName(FileUtilRt.getNameWithoutExtension(url.substring(url.lastIndexOf('/') + 1)));
+        if (url != null) {
+          model.setName(FileUtilRt.getNameWithoutExtension(url.substring(url.lastIndexOf('/') + 1)));
+        }
       }
 
       var previous = result.get(pluginId);
@@ -216,18 +219,19 @@ public final class RepositoryHelper {
   private static boolean isPaidPluginsRequireMarketplacePlugin() {
     var core = PluginManagerCore.findPlugin(PluginManagerCore.CORE_ID);
     return core == null ||
-           !core.getPluginAliases().contains(PluginId.getId(ULTIMATE_MODULE)) ||
+           !core.getPluginAliases().contains(ULTIMATE_PLUGIN_ID) ||
            !ApplicationInfoImpl.getShadowInstance().isVendorJetBrains();
   }
 
   private static void addMarketplacePluginDependencyIfRequired(PluginUiModel node, boolean isPaidPluginsRequireMarketplacePlugin) {
     if (isPaidPluginsRequireMarketplacePlugin && node.getProductCode() != null) {
-      node.addDependency(PluginId.getId(MARKETPLACE_PLUGIN_ID), false);
+      node.addDependency(MARKETPLACE_PLUGIN_ID, false);
     }
   }
 
   @ApiStatus.Internal
   @Deprecated(forRemoval = true)
+  @SuppressWarnings("DeprecatedIsStillUsed")
   public static @NotNull Collection<PluginNode> mergePluginsFromRepositories(
     @NotNull List<PluginNode> marketplacePlugins,
     @NotNull List<PluginNode> customPlugins,
@@ -298,7 +302,7 @@ public final class RepositoryHelper {
    * Looks for the given plugins in the Marketplace and custom repositories. Only compatible plugins are returned.
    */
   public static @NotNull Collection<PluginNode> loadPlugins(@NotNull Set<PluginId> pluginIds) {
-    var mpPlugins = MarketplaceRequests.loadLastCompatiblePluginDescriptors(pluginIds);
+    @SuppressWarnings("deprecation") var mpPlugins = MarketplaceRequests.loadLastCompatiblePluginDescriptors(pluginIds);
     var customPlugins = loadPluginsFromCustomRepositories(null).stream().filter(p -> pluginIds.contains(p.getPluginId())).toList();
     return mergePluginsFromRepositories(mpPlugins, customPlugins, true);
   }

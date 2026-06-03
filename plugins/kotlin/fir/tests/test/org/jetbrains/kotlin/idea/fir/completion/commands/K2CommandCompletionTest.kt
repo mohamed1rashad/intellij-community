@@ -1,12 +1,16 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.fir.completion.commands
 
 import com.intellij.codeInsight.completion.CompletionType
 import com.intellij.codeInsight.completion.command.CommandCompletionLookupElement
+import com.intellij.codeInsight.intention.preview.IntentionPreviewInfo
 import com.intellij.codeInsight.lookup.LookupElement
+import com.intellij.codeInsight.lookup.LookupElementCustomPreviewHolder
 import com.intellij.codeInsight.lookup.LookupEvent
 import com.intellij.codeInsight.lookup.impl.LookupImpl
+import com.intellij.codeInsight.template.impl.LiveTemplateCompletionContributor
 import com.intellij.codeInsight.template.impl.TemplateManagerImpl
+import com.intellij.modcommand.ActionContext
 import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl
 import com.intellij.openapi.util.TextRange
@@ -352,12 +356,14 @@ class K2CommandCompletionTest : KotlinLightCodeInsightFixtureTestCase() {
         val elements = myFixture.completeBasic()
         selectItem(myFixture, elements.first { element -> element.lookupString.contains("Introduce parameter", ignoreCase = true) })
         NonBlockingReadActionImpl.waitForAsyncTaskCompletion()
-        myFixture.performEditorAction(IdeActions.ACTION_EDITOR_PASTE)
+        myFixture.performEditorAction(IdeActions.ACTION_EDITOR_ENTER)
+        NonBlockingReadActionImpl.waitForAsyncTaskCompletion()
         myFixture.checkResult(
             """
             fun foo(string: String) {
-            
+
                 val a = string
+                
             }""".trimIndent()
         )
     }
@@ -766,7 +772,77 @@ class K2CommandCompletionTest : KotlinLightCodeInsightFixtureTestCase() {
         val elements = myFixture.completeBasic()
         assertTrue(elements.any { element -> element.lookupString.contains("Optimize im", ignoreCase = true) })
     }
-}
+
+    fun testParameterInfo() {
+        Registry.get("ide.completion.command.force.enabled").setValue(true, getTestRootDisposable())
+        myFixture.configureByText(
+            "x.kt", """"
+          class A{
+            fun call(a: String){}
+            
+            fun test(){
+              call(.<caret>)
+            }
+          }
+          """.trimIndent()
+        )
+        val elements = myFixture.completeBasic()
+        assertTrue(elements.any { element -> element.lookupString.contains("Parameter info", ignoreCase = true) })
+    }
+
+    fun testShowLiveTemplate() {
+        Registry.get("ide.completion.command.force.enabled").setValue(true, getTestRootDisposable())
+        myFixture.configureByText(
+            "x.kt", """
+          class A {
+            fun foo() {
+              .<caret>
+            }
+          }
+          """.trimIndent()
+        )
+        val elements = myFixture.completeBasic()
+        assertNotNull(elements.firstOrNull { element -> element.lookupString.contains("Live template", ignoreCase = true) })
+    }
+
+    fun testIntentionReplaceWithUnderscore() {
+        Registry.get("ide.completion.command.force.enabled").setValue(true, getTestRootDisposable())
+        myFixture.configureByText(
+            "x.kt", """
+                    fun <K, T> foo(x: (K) -> T): Pair<K, T> = TODO()
+                    
+                    val x = foo<Int.<caret>, _> { a: Int -> a.toFloat() }
+          """.trimIndent()
+        )
+        val elements = myFixture.completeBasic()
+        assertNotNull(elements.firstOrNull { element -> element.lookupString.contains("Replace explicit type with '_'", ignoreCase = true) })
+    }
+
+    fun testPostfixIterPreview() {
+        LiveTemplateCompletionContributor.setShowTemplatesInTests(true, getTestRootDisposable())
+        myFixture.configureByText(
+            "x.kt", """
+            fun test(list: List<String>) {
+                list.iter<caret>
+            }
+        """.trimIndent()
+        )
+        val elements = myFixture.completeBasic()
+        val item = elements.first { element -> element.lookupString.contains("iter", ignoreCase = true) }
+            .`as`(LookupElementCustomPreviewHolder::class.java)
+        if (item == null) {
+            fail()
+            return
+        }
+        val preview = item.preview(ActionContext.from(myFixture.editor, myFixture.file))
+        if (preview !is IntentionPreviewInfo.CustomDiff) {
+            fail()
+            return
+        }
+        val modifiedText = preview.modifiedText()
+        assertTrue("Expected 'string' variable in preview, got: $modifiedText", modifiedText.contains("string"))
+        assertTrue("Expected 'in list' in preview, got: $modifiedText", modifiedText.contains("in list"))
+    } }
 
 internal fun selectItem(fixture: JavaCodeInsightTestFixture,
                         item: LookupElement,

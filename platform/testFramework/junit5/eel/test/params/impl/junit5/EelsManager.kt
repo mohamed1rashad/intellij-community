@@ -1,18 +1,24 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.testFramework.junit5.eel.params.impl.junit5
 
+import com.intellij.execution.target.EelTargetEnvironmentRequest
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.platform.ijent.ParentOfIjentScopes
 import com.intellij.platform.testFramework.junit5.eel.params.api.EelHolder
 import com.intellij.platform.testFramework.junit5.eel.params.api.EelHolderImpl
 import com.intellij.platform.testFramework.junit5.eel.params.api.LocalEelHolder
 import com.intellij.platform.testFramework.junit5.eel.params.api.TestApplicationWithEel
-import com.intellij.platform.testFramework.junit5.eel.params.impl.junit5.EelsManager.Companion.create
 import com.intellij.platform.testFramework.junit5.eel.params.spi.EelIjentTestProvider.StartResult.Skipped
 import com.intellij.platform.testFramework.junit5.eel.params.spi.EelIjentTestProvider.StartResult.Started
 import com.intellij.platform.util.coroutines.childScope
-import kotlinx.coroutines.*
+import com.intellij.testFramework.junit5.eel.EelFixtureFilter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.annotations.TestOnly
 import org.junit.jupiter.api.condition.OS
 import org.junit.jupiter.api.extension.ExtensionContext
@@ -25,11 +31,14 @@ import java.io.Closeable
  * Call [create] to get manager that looks for [EelHolder] in invocation context and "activate" it.
  * [close] is used to destroy it.
  */
-internal class EelsManager private constructor(private val eelHolders: List<EelHolder>, extensionContext: ExtensionContext) : java.lang.AutoCloseable {
+internal class EelsManager private constructor(private val eelHolders: List<EelHolder>, extensionContext: ExtensionContext) :
+  java.lang.AutoCloseable {
   // Autocloseable things might be closed by JUnit, hence need not be closed two times
   private var closed = false
   private val closeAfterTest: MutableList<Closeable> = mutableListOf<Closeable>()
-  private val scope: CoroutineScope = ApplicationManager.getApplication().service<EelTestService>().scope.childScope("Eel test child scope")
+  private val scope: ParentOfIjentScopes = ParentOfIjentScopes(
+    ApplicationManager.getApplication().service<EelTestService>().scope.childScope("Eel test child scope")
+  )
 
   companion object {
     fun create(invocationContext: ReflectiveInvocationContext<*>, extensionContext: ExtensionContext): EelsManager? {
@@ -38,6 +47,8 @@ internal class EelsManager private constructor(private val eelHolders: List<EelH
       return EelsManager(eelHolders, extensionContext)
     }
   }
+
+  private val useLegacyTargets = extensionContext.annotation.useLegacyTargets
 
   init {
     val testContext = extensionContext.parent.get()
@@ -52,13 +63,17 @@ internal class EelsManager private constructor(private val eelHolders: List<EelH
             append("Install docker. ")
           }
 
-          error("""
-            Although some remote (ijent) eel implementations were found on a class-path, all of them were skipped.
-            That means, you've tested the local eel implementation only! 
-            If that was your plan, configure ${TestApplicationWithEel::osesMayNotHaveRemoteEels} and stick with the local eel only (not recommended).
-            But much better to do the following: $advice
-            Testing something against local eel only is not recommended. 
-          """.trimIndent())
+          // If the filter is not default, it's deliberately requested to run tests only with specific Eels,
+          // and it may turn out that no tests can run with the requested Eels.
+          if (EelFixtureFilter.instance.isDefault) {
+            error("""
+              Although some remote (ijent) eel implementations were found on a class-path, all of them were skipped.
+              That means, you've tested the local eel implementation only! 
+              If that was your plan, configure ${TestApplicationWithEel::osesMayNotHaveRemoteEels} and stick with the local eel only (not recommended).
+              But much better to do the following: $advice
+              Testing something against local eel only is not recommended. 
+            """.trimIndent())
+          }
         }
       }
     })
@@ -69,12 +84,13 @@ internal class EelsManager private constructor(private val eelHolders: List<EelH
       for (eelHolder in eelHolders) {
         when (eelHolder) {
           is EelHolderImpl<*> -> {
-            val (eel, eelType, closable) = eelHolder.startIjentProvider(scope)
+            val (eel, eelType, legacyTarget, closable) = eelHolder.startIjentProvider(scope)
             closable?.let {
               closeAfterTest.add(it)
             }
             eelHolder.eel = eel
             eelHolder.type = eelType
+            eelHolder.target = if (useLegacyTargets) legacyTarget() else EelTargetEnvironmentRequest.Configuration(eel)
             testContext.store.put(REMOTE_EEL_EXECUTED, true)
           }
           LocalEelHolder -> Unit
@@ -100,8 +116,8 @@ internal class EelsManager private constructor(private val eelHolders: List<EelH
         for (closeable in closeAfterTest) {
           closeable.close()
         }
-        scope.coroutineContext.job.cancelAndJoin()
-        scope.cancel()
+        scope.s.coroutineContext.job.cancelAndJoin()
+        scope.s.cancel()
       }
     }
   }
@@ -110,11 +126,11 @@ internal class EelsManager private constructor(private val eelHolders: List<EelH
 
 @TestOnly
 private suspend fun <T : Annotation> EelHolderImpl<T>.startIjentProvider(
-  scope: CoroutineScope,
-): Started<*> {
+  scope: ParentOfIjentScopes,
+): Started {
   val provider = this.eelTestProvider
   when (val r = provider.start(scope, annotation)) {
-    is Started<*> -> {
+    is Started -> {
       return r
     }
     is Skipped -> {
@@ -140,6 +156,6 @@ private class EelTestService(val scope: CoroutineScope)
 internal val ExtensionContext.store: ExtensionContext.Store get() = getStore(ExtensionContext.Namespace.GLOBAL)
 private const val REMOTE_EEL_EXECUTED = "REMOTE_EEL_EXECUTED"
 
-private val ExtensionContext.atLeastOneRemoteEelRequired: Boolean
-  get() =
-    OS.current() !in AnnotationUtils.findAnnotation(testClass.get(), TestApplicationWithEel::class.java).get().osesMayNotHaveRemoteEels
+private val ExtensionContext.atLeastOneRemoteEelRequired: Boolean get() = OS.current() !in annotation.osesMayNotHaveRemoteEels
+
+private val ExtensionContext.annotation get() = AnnotationUtils.findAnnotation(testClass.get(), TestApplicationWithEel::class.java).get()

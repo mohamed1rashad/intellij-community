@@ -10,7 +10,6 @@ import com.intellij.execution.actions.StopProcessAction;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RunProfile;
 import com.intellij.execution.console.ConsoleViewWrapperBase;
-import com.intellij.execution.dashboard.RunDashboardManager;
 import com.intellij.execution.filters.Filter;
 import com.intellij.execution.filters.HyperlinkInfo;
 import com.intellij.execution.impl.ConsoleViewImpl;
@@ -18,11 +17,24 @@ import com.intellij.execution.impl.ExecutionManagerImpl;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.RunContentActionsContributor;
-import com.intellij.execution.ui.*;
+import com.intellij.execution.ui.ConsoleView;
+import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.execution.ui.ExecutionConsole;
+import com.intellij.execution.ui.ObservableConsoleView;
+import com.intellij.execution.ui.RunContentDescriptor;
+import com.intellij.execution.ui.RunContentManagerExtension;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.OccurenceNavigator;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.DataKey;
+import com.intellij.openapi.actionSystem.DataSink;
+import com.intellij.openapi.actionSystem.DefaultActionGroup;
+import com.intellij.openapi.actionSystem.ExecutionDataKeys;
+import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -38,8 +50,9 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.BorderLayout;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -241,8 +254,21 @@ public class BuildView extends CompositeView<ExecutionConsole>
 
   @Nullable
   @ApiStatus.Internal
-  BuildTreeConsoleView getEventView() {
+  public BuildTreeConsoleView getEventView() {
     return getView(BuildTreeConsoleView.class.getName(), BuildTreeConsoleView.class);
+  }
+
+  // returns a non-null value after the view is initialized (after build start event is processed)
+  JComponent getConsoleComponent() {
+    BuildTreeConsoleView eventView = getEventView();
+    if (eventView != null) {
+      return eventView.getConsoleComponent();
+    }
+    ExecutionConsole console = getView(CONSOLE_VIEW_NAME);
+    if (console != null) {
+      return console.getComponent();
+    }
+    return null;
   }
 
   @Override
@@ -477,7 +503,7 @@ public class BuildView extends CompositeView<ExecutionConsole>
     ExecutionEnvironment environment = myBuildDescriptor.getExecutionEnvironment();
     RunProfile runProfile = environment != null ? environment.getRunProfile() : null;
     return runProfile instanceof RunConfiguration configuration &&
-           RunDashboardManager.getInstance(myProject).isShowInDashboard(configuration) &&
+           RunContentManagerExtension.isShownInServicesIfAvailable(myProject, configuration) &&
            ExecutionManagerImpl.getDelegatedRunProfile(configuration) instanceof RunConfiguration;
   }
 

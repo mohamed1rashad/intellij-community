@@ -1,20 +1,25 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.debugger.impl.rpc
 
 import com.intellij.ide.rpc.DocumentPatchVersion
 import com.intellij.ide.rpc.DocumentPatchVersionAccessor
 import com.intellij.ide.rpc.FrontendDocumentId
+import com.intellij.ide.rpc.util.TextRangeDto
+import com.intellij.ide.ui.icons.IconId
+import com.intellij.ide.vfs.VirtualFileId
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.NlsSafe
 import com.intellij.platform.project.ProjectId
 import com.intellij.platform.rpc.RemoteApiProviderService
 import com.intellij.xdebugger.breakpoints.SuspendPolicy
+import com.intellij.xdebugger.breakpoints.XLineBreakpointVerticalPlacement
 import com.intellij.xdebugger.evaluation.EvaluationMode
-import com.intellij.xdebugger.impl.rpc.XBreakpointId
-import com.intellij.xdebugger.impl.rpc.XBreakpointTypeId
 import fleet.rpc.RemoteApi
 import fleet.rpc.Rpc
+import fleet.rpc.core.RpcFlow
 import fleet.rpc.remoteApiDescriptor
+import kotlinx.serialization.Serializable
 import org.jetbrains.annotations.ApiStatus
 
 @ApiStatus.Internal
@@ -50,6 +55,8 @@ interface XBreakpointApi : RemoteApi<Unit> {
 
   suspend fun setFileUrl(breakpointId: XBreakpointId, requestId: Long, fileUrl: String?)
 
+  suspend fun setPlacement(breakpointId: XBreakpointId, requestId: Long, placement: XLineBreakpointVerticalPlacement)
+
   /**
    * Returns `true` on success, `false` if the request should be retried later due to version mismatch.
    */
@@ -69,6 +76,76 @@ interface XBreakpointApi : RemoteApi<Unit> {
     }
   }
 }
+
+@ApiStatus.Internal
+@Serializable
+data class XBreakpointDto(
+  val id: XBreakpointId,
+  val initialState: XBreakpointDtoState,
+  val initialCustomPresentation: XBreakpointCustomPresentationDto?,
+  val initialCurrentSessionCustomPresentation: XBreakpointCustomPresentationDto?,
+  val state: RpcFlow<XBreakpointDtoState>,
+  val editorsProviderDto: XDebuggerEditorsProviderDto?,
+  val typeId: XBreakpointTypeId,
+)
+
+@ApiStatus.Internal
+@Serializable
+data class XBreakpointDtoState(
+  val displayText: String,
+  val sourcePosition: XSourcePositionDto?,
+  val isDefault: Boolean,
+  val logMessage: Boolean,
+  val logStack: Boolean,
+  val isLogExpressionEnabled: Boolean,
+  val logExpression: XExpressionDto?,
+  val isConditionEnabled: Boolean,
+  val conditionExpression: XExpressionDto?,
+  val enabled: Boolean,
+  val suspendPolicy: SuspendPolicy,
+  val userDescription: String?,
+  val group: String?,
+  val shortText: String,
+  val generalDescription: String,
+  val tooltipDescription: String,
+  val timestamp: Long,
+  val lineBreakpointInfo: XLineBreakpointInfo?,
+  val requestId: Long,
+  val hasCustomCondition: Boolean,
+)
+
+@ApiStatus.Internal
+@Serializable
+data class XLineBreakpointInfo(
+  val isTemporary: Boolean,
+  val line: Int,
+  val fileUrl: String,
+  val placement: XLineBreakpointVerticalPlacement,
+  val highlightingRange: TextRangeDto?,
+  val file: VirtualFileId?,
+)
+
+@ApiStatus.Internal
+@Serializable
+data class XBreakpointCustomPresentationDto(
+  val icon: IconId?,
+  val errorMessage: @NlsSafe String?,
+  val timestamp: Long,
+)
+
+
+@ApiStatus.Internal
+@Serializable
+enum class XBreakpointTypeSerializableStandardPanels {
+  SUSPEND_POLICY, ACTIONS, DEPENDENCY
+}
+
+@ApiStatus.Internal
+@Serializable
+data class XLineBreakpointTypeInfo(
+  val priority: Int,
+  val supportsInterLinePlacement: Boolean,
+)
 
 
 @ApiStatus.Internal

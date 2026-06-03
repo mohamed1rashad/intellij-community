@@ -12,12 +12,21 @@ import com.intellij.ide.plugins.DynamicPluginListener
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.idea.AppMode
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.application.impl.NonBlockingReadActionImpl
+import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.extensions.impl.ExtensionPointImpl
-import com.intellij.openapi.fileEditor.*
+import com.intellij.openapi.fileEditor.FileEditor
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader.Companion.isEditorLoaded
 import com.intellij.openapi.fileEditor.impl.text.TextEditorImpl
@@ -39,14 +48,26 @@ import com.intellij.ui.EditorNotifications.getInstance
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.containers.CollectionFactory
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
-import java.util.*
+import java.util.Optional
 import java.util.concurrent.CancellationException
 import java.util.function.BiFunction
 import javax.swing.JComponent
@@ -73,7 +94,7 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
   private val updateAllRequestFlowJob: Job
 
   init {
-    val connection = project.messageBus.connect()
+    val connection = project.messageBus.connect(coroutineScope)
     connection.subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
       override fun selectionChanged(event: FileEditorManagerEvent) {
         val file = event.newFile ?: return
@@ -174,7 +195,7 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
 
   override fun updateNotifications(file: VirtualFile) {
     coroutineScope.launch(Dispatchers.EDT + ModalityState.any().asContextElement()) {
-      if (file.isValid) {
+      if (runReadActionBlocking { file.isValid }) {
         val fileEditorManager = project.serviceAsync<FileEditorManager>()
         doUpdateNotifications(file, fileEditorManager)
       }
@@ -243,7 +264,19 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
         }
 
         try {
-          val provider = adapter.createInstance<EditorNotificationProvider>(project) ?: continue
+          val provider = try {
+            adapter.createInstance<EditorNotificationProvider>(project) ?: continue
+          }
+          catch (e: Exception) {
+            // some EditorNotificationProviders assume the project is active and register things on its disposables
+            // that could throw IncorrectOperationException/PluginException/etc when they are already disposed
+            if (project.isDisposed) {
+              return@launch
+            }
+            else {
+              throw e
+            }
+          }
           coroutineContext.ensureActive()
 
           val result = readAction {
@@ -257,14 +290,12 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
           } ?: continue
 
           val componentProvider = result.orElse(null)
-          withContext(Dispatchers.UiWithModelAccess + ModalityState.any().asContextElement()) {
+          withContext(Dispatchers.EDT + ModalityState.any().asContextElement()) {
             if (!file.isValid || project.isDisposed) {
               return@withContext
             }
             for (fileEditor in fileEditors) {
-              runReadAction {
-                updateNotification(fileEditor = fileEditor, provider = provider, component = componentProvider?.apply(fileEditor))
-              }
+              updateNotification(fileEditor = fileEditor, provider = provider, component = componentProvider?.apply(fileEditor))
             }
           }
         }
@@ -282,7 +313,7 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
           }
         }
         catch (e: Exception) {
-          val pluginException = if (e is PluginException) e else PluginException(e, adapter.pluginDescriptor.pluginId)
+          val pluginException = e as? PluginException ?: PluginException(e, adapter.pluginDescriptor.pluginId)
           logger<EditorNotificationsImpl>().error(pluginException)
         }
       }
@@ -358,7 +389,7 @@ class EditorNotificationsImpl(private val project: Project, coroutineScope: Coro
   }
 }
 
-private class RefactoringListenerProvider : RefactoringElementListenerProvider {
+internal class RefactoringListenerProvider : RefactoringElementListenerProvider {
   override fun getListener(element: PsiElement): RefactoringElementListener? {
     if (element !is PsiFile) {
       return null

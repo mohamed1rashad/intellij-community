@@ -35,7 +35,7 @@ internal class ProjectSdkDataService : AbstractProjectDataService<ProjectSdkData
 
   private fun importProjectSdk(project: Project, sdkData: ProjectSdkData) {
     val sdkName = sdkData.sdkName ?: return
-    val projectJdkTable = ProjectJdkTable.getInstance()
+    val projectJdkTable = ProjectJdkTable.getInstance(project)
     val sdk = projectJdkTable.findJdk(sdkName)
     val projectRootManager = ProjectRootManager.getInstance(project)
     val projectSdk = projectRootManager.projectSdk
@@ -71,14 +71,14 @@ internal class ModuleSdkDataService : AbstractProjectDataService<ModuleSdkData, 
     useDefaultsIfCan: Boolean
   ) {
     val moduleSdkName = sdkData.sdkName
-    val projectJdkTable = ProjectJdkTable.getInstance()
+    val projectJdkTable = ProjectJdkTable.getInstance(module.project)
     val sdk = moduleSdkName?.let { projectJdkTable.findJdk(moduleSdkName) }
     val modifiableRootModel = modelsProvider.getModifiableRootModel(module)
     val projectRootManager = ProjectRootManager.getInstance(module.project)
     val projectSdk = projectRootManager.projectSdk
     when {
+      moduleSdkName == null -> modifiableRootModel.inheritSdk()
       useDefaultsIfCan && sdk == projectSdk -> modifiableRootModel.inheritSdk()
-      moduleSdkName == null && sdk == null -> modifiableRootModel.inheritSdk()
       sdk == null -> modifiableRootModel.setInvalidSdk(moduleSdkName, ExternalSystemBundle.message("unknown.sdk.type"))
       else -> modifiableRootModel.sdk = sdk
     }

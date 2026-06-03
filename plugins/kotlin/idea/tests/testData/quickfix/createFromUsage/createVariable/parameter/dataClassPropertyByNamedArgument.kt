@@ -1,4 +1,5 @@
 // "Create property 'parameter4' as constructor parameter" "true"
+// K2_ERROR: No parameter with name 'parameter4' found.
 
 data class MyDto(
         val parameter1:String,
@@ -12,3 +13,4 @@ fun main(args: Array<String>) {
 
 // FUS_QUICKFIX_NAME: org.jetbrains.kotlin.idea.quickfix.createFromUsage.createVariable.CreateParameterFromUsageFix
 // FUS_K2_QUICKFIX_NAME: org.jetbrains.kotlin.idea.k2.codeinsight.quickFixes.createFromUsage.K2CreateParameterFromUsageBuilder$CreateParameterFromUsageAction
+// TEST_PREVIEW: val parameter4: kotlin.String

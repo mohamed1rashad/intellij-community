@@ -6,14 +6,18 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.CachedSingletonsRegistry;
 import com.intellij.openapi.util.ModificationTracker;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
+import com.intellij.openapi.vfs.newvfs.BulkFileListenerBackgroundable;
 import com.intellij.openapi.vfs.newvfs.CacheAvoidingVirtualFile;
 import com.intellij.openapi.vfs.newvfs.FileSystemInterface;
-import com.intellij.openapi.vfs.newvfs.BulkFileListenerBackgroundable;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.io.URLUtil;
 import com.intellij.util.messages.Topic;
 import kotlinx.coroutines.CoroutineScope;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Path;
 import java.util.function.Supplier;
@@ -207,7 +211,7 @@ public abstract class VirtualFileManager implements ModificationTracker {
 
   /**
    * Consider using extension point {@code vfs.asyncListenerBackgroundable}.
-   * The listeners registered this way will be able to run on background threads.
+   * The listeners registered this way will always to run on background threads.
    */
   @ApiStatus.Experimental
   public abstract void addAsyncFileListenerBackgroundable(@NotNull AsyncFileListener listener, @NotNull Disposable parentDisposable);

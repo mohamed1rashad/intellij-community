@@ -3,13 +3,28 @@ package com.intellij.workspaceModel.ide.impl.legacyBridge.watcher
 
 import com.intellij.ide.highlighter.ModuleFileType
 import com.intellij.java.workspace.entities.JavaModuleSettingsEntity
-import com.intellij.java.workspace.entities.ModifiableJavaModuleSettingsEntity
+import com.intellij.java.workspace.entities.JavaModuleSettingsEntityBuilder
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.platform.backend.workspace.WorkspaceModel
 import com.intellij.platform.workspace.jps.JpsProjectFileEntitySource
-import com.intellij.platform.workspace.jps.entities.*
+import com.intellij.platform.workspace.jps.entities.ContentRootEntity
+import com.intellij.platform.workspace.jps.entities.ContentRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntity
+import com.intellij.platform.workspace.jps.entities.ExcludeUrlEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryEntity
+import com.intellij.platform.workspace.jps.entities.LibraryEntityBuilder
+import com.intellij.platform.workspace.jps.entities.LibraryRoot
+import com.intellij.platform.workspace.jps.entities.ModuleEntity
+import com.intellij.platform.workspace.jps.entities.SdkEntity
+import com.intellij.platform.workspace.jps.entities.SdkRoot
+import com.intellij.platform.workspace.jps.entities.SourceRootEntity
+import com.intellij.platform.workspace.jps.entities.SourceRootEntityBuilder
+import com.intellij.platform.workspace.jps.entities.contentRoot
+import com.intellij.platform.workspace.jps.entities.library
+import com.intellij.platform.workspace.jps.entities.modifyLibraryEntity
+import com.intellij.platform.workspace.jps.entities.modifySdkEntity
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.EntityStorage
 import com.intellij.platform.workspace.storage.MutableEntityStorage
@@ -17,6 +32,8 @@ import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.impl.indices.VirtualFileIndex
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import com.intellij.platform.workspace.storage.url.VirtualFileUrlManager
+import com.intellij.workspaceModel.ide.ProjectRootEntity
+import com.intellij.workspaceModel.ide.ProjectRootEntityBuilder
 import org.jetbrains.annotations.ApiStatus
 import kotlin.reflect.KClass
 
@@ -33,7 +50,7 @@ open class VirtualFileUrlWatcher(val project: Project) {
     SdkRootFileWatcher(),
     // Library excluded roots
     EntityVirtualFileUrlWatcher(
-      LibraryEntity::class, ModifiableLibraryEntity::class,
+      LibraryEntity::class, LibraryEntityBuilder::class,
       propertyName = LibraryEntity::excludedRoots.name,
       modificator = { oldVirtualFileUrl, newVirtualFileUrl ->
         val newUrls = excludedRoots.toMutableList()
@@ -43,7 +60,7 @@ open class VirtualFileUrlWatcher(val project: Project) {
       }
     ),
     EntityVirtualFileUrlWatcher(
-      ExcludeUrlEntity::class, ModifiableExcludeUrlEntity::class,
+      ExcludeUrlEntity::class, ExcludeUrlEntityBuilder::class,
       propertyName = ExcludeUrlEntity::url.name,
       modificator = { _, newVirtualFileUrl ->
         if (this.library != null || this.contentRoot != null) {
@@ -53,13 +70,13 @@ open class VirtualFileUrlWatcher(val project: Project) {
     ),
     // Content root urls
     EntityVirtualFileUrlWatcher(
-      ContentRootEntity::class, ModifiableContentRootEntity::class,
+      ContentRootEntity::class, ContentRootEntityBuilder::class,
       propertyName = ContentRootEntity::url.name,
       modificator = { _, newVirtualFileUrl -> url = newVirtualFileUrl }
     ),
     // Content root excluded urls
     EntityVirtualFileUrlWatcher(
-      ContentRootEntity::class, ModifiableContentRootEntity::class,
+      ContentRootEntity::class, ContentRootEntityBuilder::class,
       propertyName = ContentRootEntity::excludedUrls.name,
       modificator = { oldVirtualFileUrl, newVirtualFileUrl ->
         val newUrls = excludedUrls.toMutableList()
@@ -70,21 +87,26 @@ open class VirtualFileUrlWatcher(val project: Project) {
     ),
     // Source roots
     EntityVirtualFileUrlWatcher(
-      SourceRootEntity::class, ModifiableSourceRootEntity::class,
+      SourceRootEntity::class, SourceRootEntityBuilder::class,
       propertyName = SourceRootEntity::url.name,
       modificator = { _, newVirtualFileUrl -> url = newVirtualFileUrl }
     ),
     // Java module settings entity compiler output
     EntityVirtualFileUrlWatcher(
-      JavaModuleSettingsEntity::class, ModifiableJavaModuleSettingsEntity::class,
+      JavaModuleSettingsEntity::class, JavaModuleSettingsEntityBuilder::class,
       propertyName = JavaModuleSettingsEntity::compilerOutput.name,
       modificator = { _, newVirtualFileUrl -> compilerOutput = newVirtualFileUrl }
     ),
     // Java module settings entity compiler output for tests
     EntityVirtualFileUrlWatcher(
-      JavaModuleSettingsEntity::class, ModifiableJavaModuleSettingsEntity::class,
+      JavaModuleSettingsEntity::class, JavaModuleSettingsEntityBuilder::class,
       propertyName = JavaModuleSettingsEntity::compilerOutputForTests.name,
       modificator = { _, newVirtualFileUrl -> compilerOutputForTests = newVirtualFileUrl }
+    ),
+    EntityVirtualFileUrlWatcher(
+      ProjectRootEntity::class, ProjectRootEntityBuilder::class,
+      propertyName = ProjectRootEntity::root.name,
+      modificator = { _, newVirtualFileUrl -> root = newVirtualFileUrl }
     ),
     EntitySourceFileWatcher(JpsProjectFileEntitySource.ExactFile::class, { it.file.url }, { source, file -> source.copy(file = file) }),
     EntitySourceFileWatcher(JpsProjectFileEntitySource.FileInDirectory::class, { it.directory.url },

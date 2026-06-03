@@ -20,10 +20,10 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.LinkedList
 
 @ApiStatus.Experimental
-private class InlineCompletionPartialAcceptHandlerImpl : InlineCompletionPartialAcceptHandler {
+internal class InlineCompletionPartialAcceptHandlerImpl : InlineCompletionPartialAcceptHandler {
 
   override fun insertNextWord(
     editor: Editor,
@@ -66,7 +66,7 @@ private class InlineCompletionPartialAcceptHandlerImpl : InlineCompletionPartial
     val braceMatcher = BraceMatchingUtil.getBraceMatcher(fileType, iterator)
     val quoteHandlerEx = InlineCompletionQuoteHandlerEx.getAdapter(originalFile, originalEditor)
     val skipOffsetsAfterInsertion = mutableListOf<Int>()
-    val stuckDetector = IteratorStuckDetector(iterator)
+    val stuckDetector = IteratorStuckDetector { iterator }
     iteratorLabel@ while (!iterator.atEnd() && iterator.start < offset + prefixLength) {
       if (!stuckDetector.iterateIfStuck()) {
         break
@@ -138,7 +138,7 @@ private class InlineCompletionPartialAcceptHandlerImpl : InlineCompletionPartial
     val fileType = originalFile.fileType
     val braceMatcher = BraceMatchingUtil.getBraceMatcher(fileType, iterator)
     val quoteHandlerEx = InlineCompletionQuoteHandlerEx.getAdapter(originalFile, originalEditor)
-    val stuckDetector = IteratorStuckDetector(iterator)
+    val stuckDetector = IteratorStuckDetector { iterator }
     while (!iterator.atEnd() && iterator.start < offset + prefixLength) {
       if (!stuckDetector.iterateIfStuck()) {
         break
@@ -351,11 +351,12 @@ private class InlineCompletionPartialAcceptHandlerImpl : InlineCompletionPartial
     }
   }
 
-  private class IteratorStuckDetector(private val iterator: HighlighterIterator) {
+  private class IteratorStuckDetector(private val getIterator: () -> HighlighterIterator) {
 
     private var lastStartOffset: Int? = null
 
     fun iterateIfStuck(): Boolean {
+      val iterator = getIterator()
       if (iterator.start == lastStartOffset) {
         iterator.advance()
       }

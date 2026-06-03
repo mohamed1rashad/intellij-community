@@ -1,116 +1,52 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.workspaceModel.codegen.impl.writer
 
-import com.intellij.workspaceModel.codegen.deft.meta.*
-import com.intellij.workspaceModel.codegen.engine.*
+import com.intellij.workspaceModel.codegen.deft.meta.ObjClass
+import com.intellij.workspaceModel.codegen.deft.meta.ObjProperty
+import com.intellij.workspaceModel.codegen.deft.meta.OwnProperty
+import com.intellij.workspaceModel.codegen.deft.meta.ValueType
 import com.intellij.workspaceModel.codegen.impl.CodeGeneratorVersionCalculator
 import com.intellij.workspaceModel.codegen.impl.engine.ProblemReporter
-import com.intellij.workspaceModel.codegen.impl.writer.classes.*
-import com.intellij.workspaceModel.codegen.impl.writer.extensions.*
-import com.intellij.workspaceModel.codegen.impl.writer.fields.*
+import com.intellij.workspaceModel.codegen.impl.writer.classes.noDefaultValue
+import com.intellij.workspaceModel.codegen.impl.writer.classes.noEntitySource
+import com.intellij.workspaceModel.codegen.impl.writer.classes.noOptional
+import com.intellij.workspaceModel.codegen.impl.writer.classes.noRefs
+import com.intellij.workspaceModel.codegen.impl.writer.classes.noSymbolicId
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.additionalAnnotations
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.allExtensions
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.allFields
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.builderWithTypeParameter
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.defaultJavaBuilderName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.isRefType
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.isStandardInterface
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.javaBuilderName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.javaFullName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.javaName
+import com.intellij.workspaceModel.codegen.impl.writer.extensions.requiresCompatibility
+import com.intellij.workspaceModel.codegen.impl.writer.fields.javaBuilderTypeWithGeneric
+import com.intellij.workspaceModel.codegen.impl.writer.fields.javaMutableType
+import com.intellij.workspaceModel.codegen.impl.writer.fields.javaType
+import com.intellij.workspaceModel.codegen.impl.writer.fields.wsCode
 
 fun ObjClass<*>.generateMutableCode(reporter: ProblemReporter): String = lines {
-  checkSuperTypes(this@generateMutableCode, reporter)
-  checkSymbolicId(this@generateMutableCode, reporter)
   if (additionalAnnotations.isNotEmpty()) {
-    line(additionalAnnotations)
+    list(additionalAnnotations)
   }
   line("@${GeneratedCodeApiVersion}(${CodeGeneratorVersionCalculator.apiVersion})")
   val (typeParameter, typeDeclaration) = if (builderWithTypeParameter) "T" to "<T: $javaFullName>" else javaFullName to ""
   val superBuilders = superTypes.filterIsInstance<ObjClass<*>>().filter { !it.isStandardInterface }.joinToString {
     ", ${it.javaBuilderName}<$typeParameter>"
   }
-  val header = "$generatedCodeVisibilityModifier interface $defaultJavaBuilderName$typeDeclaration: ${WorkspaceEntity.Builder}<$typeParameter>$superBuilders"
+  val header = "${generatedCodeVisibilityModifier}interface $defaultJavaBuilderName$typeDeclaration: ${WorkspaceEntity.Builder}<$typeParameter>$superBuilders"
 
   section(header) {
-    list(allFields.noSymbolicId()) {
-      checkProperty(this, reporter)
-      getWsBuilderApi(this@generateMutableCode)
+    for (field in allFields.noSymbolicId()) {
+      checkProperty(field, reporter)
+      if (reporter.hasErrors()) return@generateMutableCode ""
+      line(field.getWsBuilderApi(this@generateMutableCode))
     }
   }
 }
-
-fun checkSuperTypes(objClass: ObjClass<*>, reporter: ProblemReporter) {
-  objClass.superTypes.filterIsInstance<ObjClass<*>>().forEach { superClass ->
-    if (!superClass.openness.extendable) {
-      reporter.reportProblem(GenerationProblem("Class '${superClass.name}' cannot be extended", GenerationProblem.Level.ERROR,
-        ProblemLocation.Class(objClass)))
-    }
-    else if (!superClass.openness.openHierarchy && superClass.module != objClass.module) {
-      reporter.reportProblem(GenerationProblem("Class '${superClass.name}' cannot be extended from other modules",
-        GenerationProblem.Level.ERROR, ProblemLocation.Class(objClass)))
-    }
-  }
-}
-
-private fun checkSymbolicId(objClass: ObjClass<*>, reporter: ProblemReporter) {
-  if (!objClass.isEntityWithSymbolicId) return
-  if (objClass.openness == ObjClass.Openness.abstract) return
-  if (objClass.fields.none { it.name == "symbolicId" }) {
-    reporter.reportProblem(GenerationProblem("Class extends '${WorkspaceEntityWithSymbolicId.simpleName}' but " +
-      "doesn't override 'WorkspaceEntityWithSymbolicId.getSymbolicId' property",
-      GenerationProblem.Level.ERROR, ProblemLocation.Class(objClass)))
-  }
-}
-
-private fun checkProperty(objProperty: ObjProperty<*, *>, reporter: ProblemReporter) {
-  checkInheritance(objProperty, reporter)
-  checkAllImmutable(objProperty, reporter)
-  checkPropertyType(objProperty, reporter)
-}
-
-fun checkInheritance(objProperty: ObjProperty<*, *>, reporter: ProblemReporter) {
-  objProperty.receiver.allSuperClasses.mapNotNull { it.fieldsByName[objProperty.name] }.forEach { overriddenField ->
-    if (!overriddenField.open) {
-      reporter.reportProblem(
-        GenerationProblem("Property '${overriddenField.receiver.name}::${overriddenField.name}' cannot be overridden",
-          GenerationProblem.Level.ERROR, ProblemLocation.Property(objProperty)))
-    }
-  }
-}
-
-private fun checkPropertyType(objProperty: ObjProperty<*, *>, reporter: ProblemReporter) {
-  val errorMessage = when (val type = objProperty.valueType) {
-    is ValueType.ObjRef<*> -> {
-      if (type.child) "Child references should always be nullable"
-      else null
-    }
-
-    else -> checkType(type)
-  }
-  if (errorMessage != null) {
-    reporter.reportProblem(GenerationProblem(errorMessage, GenerationProblem.Level.ERROR, ProblemLocation.Property(objProperty)))
-  }
-}
-
-fun checkAllImmutable(objProperty: ObjProperty<*, *>, reporter: ProblemReporter) {
-  if (objProperty.mutable) {
-    reporter.reportProblem(GenerationProblem("An immutable interface can't contain mutable properties", GenerationProblem.Level.ERROR, ProblemLocation.Property(objProperty)))
-  }
-}
-
-private fun checkType(type: ValueType<*>): String? = when (type) {
-  is ValueType.Optional -> when (type.type) {
-    is ValueType.List<*> -> "Optional lists aren't supported"
-    is ValueType.Set<*> -> "Optional sets aren't supported"
-    else -> checkType(type.type)
-  }
-
-  is ValueType.Set<*> -> {
-    if (type.elementType.isRefType()) {
-      "Set of references isn't supported"
-    }
-    else checkType(type.elementType)
-  }
-
-  is ValueType.Map<*, *> -> {
-    checkType(type.keyType) ?: checkType(type.valueType)
-  }
-
-  else -> null
-}
-
-private val knownInterfaces = setOf(VirtualFileUrl.decoded, EntitySource.decoded, SymbolicEntityId.decoded)
 
 fun ObjClass<*>.generateEntityTypeObject(): String = lines {
   val builderGeneric = if (openness.extendable) "<$javaFullName>" else ""
@@ -120,9 +56,9 @@ fun ObjClass<*>.generateEntityTypeObject(): String = lines {
     if (mandatoryFields.isNotEmpty()) {
       line("operator fun invoke(")
       mandatoryFields.forEach { field ->
-        line(" ".repeat(this.indentSize) + "${field.name}: ${field.valueType.javaType},")
+        line("${field.name}: ${field.valueType.javaType},")
       }
-      line(" ".repeat(this.indentSize) + "init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null,")
+      line("init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null,")
       section("): $defaultJavaBuilderName$builderGeneric") {
         line("val builder = builder()")
         list(mandatoryFields) {
@@ -141,7 +77,7 @@ fun ObjClass<*>.generateEntityTypeObject(): String = lines {
       }
     }
     else {
-      section("$generatedCodeVisibilityModifier operator fun invoke(init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null): $defaultJavaBuilderName$builderGeneric") {
+      section("${generatedCodeVisibilityModifier}operator fun invoke(init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null): $defaultJavaBuilderName$builderGeneric") {
         line("val builder = builder()")
         line("init?.invoke(builder)")
         line("return builder")
@@ -162,9 +98,14 @@ fun List<OwnProperty<*, *>>.mandatoryFields(): List<ObjProperty<*, *>> {
 }
 
 fun ObjClass<*>.generateTopLevelCode(reporter: ProblemReporter): String {
-  var result = generateMutableCode(reporter)
-  val companion = generateEntityTypeObject()
-  result = "$result\n$companion"
+  val mutableCode = generateMutableCode(reporter)
+  val entityTypeObject = generateEntityTypeObject()
+  val header = """
+    @file:JvmName("${name}Modifications")
+    
+    package ${module.name}
+  """.trimIndent()
+  var result = "$header\n$mutableCode\n$entityTypeObject"
   val extensions = generateExtensionCode()
   if (extensions != null) {
     result = "$result\n$extensions"
@@ -183,20 +124,20 @@ fun ObjClass<*>.generateConstructorCode(): String? {
 
   return lines {
     if (additionalAnnotations.isNotEmpty()) {
-      line(additionalAnnotations)
+      list(additionalAnnotations)
     }
     line("@${JvmOverloads::class.fqn}")
     line("@${JvmName::class.fqn}(\"create$name\")")
     if (mandatoryFields.isNotEmpty()) {
-      line("$generatedCodeVisibilityModifier fun $name(")
+      line("${generatedCodeVisibilityModifier}fun $name(")
       mandatoryFields.forEach { field ->
-        line(" ".repeat(this.indentSize) + "${field.name}: ${field.valueType.javaType},")
+        line("${field.name}: ${field.valueType.javaType},")
       }
-      line(" ".repeat(this.indentSize) + "init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null,")
-      line(" ".repeat(this.indentSize) + "): $defaultJavaBuilderName = ${name}Type(${mandatoryFields.joinToString(", ") { it.name }}, init)")
+      line("init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null,")
+      line("): $defaultJavaBuilderName = ${name}Type(${mandatoryFields.joinToString(", ") { it.name }}, init)")
     }
     else {
-      line("$generatedCodeVisibilityModifier fun $name(init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null): $defaultJavaBuilderName = ${name}Companion(init)")
+      line("${generatedCodeVisibilityModifier}fun $name(init: ($defaultJavaBuilderName$builderGeneric.() -> Unit)? = null): $defaultJavaBuilderName = ${name}Companion(init)")
     }
   }
 }
@@ -208,11 +149,11 @@ fun ObjClass<*>.generateExtensionCode(): String? {
   return lines {
     if (!openness.extendable) {
       if (additionalAnnotations.isNotEmpty()) {
-        line(additionalAnnotations)
+        list(additionalAnnotations)
       }
-      line("$generatedCodeVisibilityModifier fun ${MutableEntityStorage}.modify$name(")
-      line("  entity: $name,")
-      line("  modification: $defaultJavaBuilderName.() -> Unit,")
+      line("${generatedCodeVisibilityModifier}fun ${MutableEntityStorage}.modify$name(")
+      line("entity: $name,")
+      line("modification: $defaultJavaBuilderName.() -> Unit,")
       line("): $name = modifyEntity($defaultJavaBuilderName::class.java, entity, modification)")
       
       if (requiresCompatibility) {
@@ -232,5 +173,5 @@ fun ObjProperty<*, *>.getWsBuilderApi(objClass: ObjClass<*>): String {
     valueType is ValueType.Collection<*, *> && !valueType.isRefType() -> valueType.javaMutableType
     else -> valueType.javaBuilderTypeWithGeneric
   }
-  return "$override var $javaName: $returnType"
+  return "${generatedCodeVisibilityModifier}${override}var $javaName: $returnType"
 }

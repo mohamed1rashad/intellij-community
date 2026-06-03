@@ -6,13 +6,19 @@ import com.intellij.codeInsight.editorActions.enter.EnterHandlerDelegate
 import com.intellij.ide.DataManager
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorModificationUtil
 import com.intellij.openapi.editor.actionSystem.EditorActionHandler
+import com.intellij.openapi.editor.actions.SplitLineAction
 import com.intellij.openapi.util.Ref
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
-import com.intellij.psi.util.*
+import com.intellij.psi.util.endOffset
+import com.intellij.psi.util.isAncestor
+import com.intellij.psi.util.parentOfType
+import com.intellij.psi.util.siblings
+import com.intellij.psi.util.startOffset
 import org.intellij.plugins.markdown.editor.lists.ListRenumberUtils.obtainMarkerNumber
 import org.intellij.plugins.markdown.editor.lists.ListRenumberUtils.renumberInBulk
 import org.intellij.plugins.markdown.editor.lists.ListUtils.getLineIndentRange
@@ -20,7 +26,11 @@ import org.intellij.plugins.markdown.editor.lists.ListUtils.getLineIndentSpaces
 import org.intellij.plugins.markdown.editor.lists.ListUtils.getListItemAt
 import org.intellij.plugins.markdown.editor.lists.ListUtils.list
 import org.intellij.plugins.markdown.editor.lists.ListUtils.normalizedMarker
-import org.intellij.plugins.markdown.lang.psi.impl.*
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownBlockQuote
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownCodeFence
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownFile
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownListItem
+import org.intellij.plugins.markdown.lang.psi.impl.MarkdownListNumber
 import org.intellij.plugins.markdown.settings.MarkdownCodeInsightSettings
 import org.intellij.plugins.markdown.util.MarkdownPsiUtil
 
@@ -64,6 +74,10 @@ internal class MarkdownListEnterHandlerDelegate: EnterHandlerDelegate {
       return EnterHandlerDelegate.Result.Continue
     }
 
+    if (DataManager.getInstance().loadFromDataContext(dataContext, SplitLineAction.SPLIT_LINE_KEY) == true) {
+      return EnterHandlerDelegate.Result.Continue
+    }
+
     if (DataManager.getInstance().loadFromDataContext(dataContext, AutoHardWrapHandler.AUTO_WRAP_LINE_IN_PROGRESS_KEY) == true) {
       editor.putUserData(AutoHardWrapHandler.AUTO_WRAP_LINE_IN_PROGRESS_KEY, true)
       return EnterHandlerDelegate.Result.Continue
@@ -90,6 +104,9 @@ internal class MarkdownListEnterHandlerDelegate: EnterHandlerDelegate {
       caretOffset.set(editor.caretModel.offset)
       return EnterHandlerDelegate.Result.Stop
     }
+    if (isAtMarkdownHardLineBreak(caretOffset.get(), document)) {
+      return EnterHandlerDelegate.Result.Continue
+    }
 
     val blockQuote = MarkdownPsiUtil.findNonWhiteSpacePrevSibling(file, caretOffset.get())?.parentOfType<MarkdownBlockQuote>()
     if (blockQuote != null && item.isAncestor(blockQuote)) {
@@ -98,6 +115,9 @@ internal class MarkdownListEnterHandlerDelegate: EnterHandlerDelegate {
 
     val itemLine = document.getLineNumber(item.startOffset)
     val markerElement = item.markerElement!!
+    if (caretOffset.get() <= markerElement.startOffset) {
+      return EnterHandlerDelegate.Result.Continue
+    }
     val indentWithMakerRange = document.getLineIndentRange(itemLine).union(markerElement.textRange)
 
     if (indentWithMakerRange.contains(caretOffset.get())) {
@@ -116,6 +136,16 @@ internal class MarkdownListEnterHandlerDelegate: EnterHandlerDelegate {
     val element = file.findElementAt(caretOffset - 1) ?: return false
     val fence = element.parentOfType<MarkdownCodeFence>(withSelf = true)
     return fence != null
+  }
+
+  private fun isAtMarkdownHardLineBreak(offset: Int, document: Document): Boolean {
+    val line = document.getLineNumber(offset)
+    if (offset != document.getLineEndOffset(line)) {
+      return false
+    }
+    val lineStart = document.getLineStartOffset(line)
+    val chars = document.charsSequence
+    return offset - 2 >= lineStart && chars[offset - 1] == ' ' && chars[offset - 2] == ' '
   }
 
   private fun handleEmptyItem(item: MarkdownListItem, editor: Editor, file: PsiFile, originalHandler: EditorActionHandler?, dataContext: DataContext) {

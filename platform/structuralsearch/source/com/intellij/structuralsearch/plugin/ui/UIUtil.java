@@ -25,7 +25,13 @@ import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
-import com.intellij.structuralsearch.*;
+import com.intellij.structuralsearch.MatchOptions;
+import com.intellij.structuralsearch.MatchVariableConstraint;
+import com.intellij.structuralsearch.PatternContext;
+import com.intellij.structuralsearch.ReplacementVariableDefinition;
+import com.intellij.structuralsearch.SSRBundle;
+import com.intellij.structuralsearch.StructuralSearchProfile;
+import com.intellij.structuralsearch.StructuralSearchUtil;
 import com.intellij.structuralsearch.plugin.StructuralSearchAction;
 import com.intellij.structuralsearch.plugin.replace.ReplaceOptions;
 import com.intellij.ui.EditorTextField;
@@ -34,7 +40,7 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.awt.*;
+import java.awt.Color;
 
 /**
  * @author Maxim.Mossienko
@@ -241,7 +247,7 @@ public final class UIUtil {
     else {
       doc = EditorFactory.getInstance().createDocument("");
     }
-    return createEditor(doc, project, editable, getTemplateContextType(profile));
+    return createEditor(doc, project, editable, getTemplateContextType(profile, dialect));
   }
 
   private static PsiFile createFileFragment(@NotNull Project project, @NotNull LanguageFileType fileType, Language dialect, @NotNull String text) {
@@ -253,8 +259,8 @@ public final class UIUtil {
            : factory.createFileFromText(name, dialect, text, true, true);
   }
 
-  public static TemplateContextType getTemplateContextType(@NotNull StructuralSearchProfile profile) {
-    final Class<? extends TemplateContextType> clazz = profile.getTemplateContextTypeClass();
+  public static TemplateContextType getTemplateContextType(@NotNull StructuralSearchProfile profile, Language dialect) {
+    final Class<? extends TemplateContextType> clazz = profile.getTemplateContextTypeClass(dialect);
     return TemplateContextTypes.getByClass(clazz);
   }
 }

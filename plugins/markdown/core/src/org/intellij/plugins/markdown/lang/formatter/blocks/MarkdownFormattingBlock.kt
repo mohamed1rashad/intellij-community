@@ -1,7 +1,13 @@
 // Copyright 2000-2021 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.intellij.plugins.markdown.lang.formatter.blocks
 
-import com.intellij.formatting.*
+import com.intellij.formatting.Alignment
+import com.intellij.formatting.Block
+import com.intellij.formatting.ChildAttributes
+import com.intellij.formatting.Indent
+import com.intellij.formatting.Spacing
+import com.intellij.formatting.SpacingBuilder
+import com.intellij.formatting.Wrap
 import com.intellij.lang.ASTNode
 import com.intellij.psi.codeStyle.CodeStyleSettings
 import com.intellij.psi.formatter.common.AbstractBlock
@@ -15,6 +21,10 @@ import org.intellij.plugins.markdown.lang.psi.util.children
 import org.intellij.plugins.markdown.lang.psi.util.hasType
 import org.intellij.plugins.markdown.lang.psi.util.parents
 import org.intellij.plugins.markdown.util.MarkdownPsiStructureUtil.isTopLevel
+
+private fun ASTNode.isBlockQuoteContinuationWhitespace(): Boolean {
+  return elementType in MarkdownTokenTypeSets.WHITE_SPACES && text.contains('>')
+}
 
 /**
  * Formatting block used by markdown plugin
@@ -41,7 +51,15 @@ internal open class MarkdownFormattingBlock(
 
   override fun isLeaf(): Boolean = subBlocks.isEmpty()
 
-  override fun getSpacing(child1: Block?, child2: Block): Spacing? = spacing.getSpacing(this, child1, child2)
+  override fun getSpacing(child1: Block?, child2: Block): Spacing? {
+    val continuation = (child1 as? AbstractBlock)?.node?.takeIf { it.isBlockQuoteContinuationWhitespace() }
+    if (node.elementType == MarkdownElementTypes.LIST_ITEM && continuation != null
+        && (child2 as? AbstractBlock)?.node?.elementType in MarkdownTokenTypeSets.LISTS) {
+      val spaces = continuation.text.substringAfter('>').length.coerceAtLeast(1)
+      return Spacing.createSpacing(spaces, spaces, 0, false, 0)
+    }
+    return spacing.getSpacing(this, child1, child2)
+  }
 
   override fun getIndent(): Indent? {
     if (node.elementType in MarkdownTokenTypeSets.LISTS && node.parents(withSelf = false).any { it.elementType == MarkdownElementTypes.LIST_ITEM }) {
@@ -79,7 +97,7 @@ internal open class MarkdownFormattingBlock(
       MarkdownElementTypes.FRONT_MATTER_HEADER -> emptyList()
       MarkdownElementTypes.LIST_ITEM -> {
         MarkdownBlocks.create(node.children(), settings, spacing) {
-          if (it.elementType in NON_ALIGNABLE_LIST_ELEMENTS) alignment else newAlignment
+          if (it.elementType in NON_ALIGNABLE_LIST_ELEMENTS || it.isBlockQuoteContinuationWhitespace()) alignment else newAlignment
         }.toList()
       }
       MarkdownElementTypes.PARAGRAPH, MarkdownElementTypes.CODE_BLOCK, MarkdownElementTypes.BLOCK_QUOTE -> {

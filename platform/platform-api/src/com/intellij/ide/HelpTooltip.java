@@ -13,6 +13,7 @@ import com.intellij.openapi.util.NlsContexts.Tooltip;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.HtmlChunk;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.reference.SoftReference;
 import com.intellij.ui.ColorUtil;
@@ -22,21 +23,41 @@ import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.ActionLink;
 import com.intellij.ui.components.BrowserLink;
 import com.intellij.ui.components.JBFontScaler;
+import com.intellij.ui.components.JBHtmlPane;
+import com.intellij.ui.components.JBHtmlPaneConfiguration;
+import com.intellij.ui.components.JBHtmlPaneStyleConfiguration;
 import com.intellij.ui.components.panels.VerticalLayout;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.SingleEdtTaskScheduler;
+import com.intellij.util.ui.ExtendableHTMLViewFactory;
 import com.intellij.util.ui.JBEmptyBorder;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.JBValue;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.plaf.basic.BasicHTML;
 import javax.swing.text.View;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Insets;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
@@ -51,39 +72,39 @@ import java.util.function.Supplier;
 import static com.intellij.openapi.util.text.HtmlChunk.html;
 
 /**
- * Standard implementation of help context tooltip.
+ * Standard implementation of the help context tooltip.
  *
  * <h2>Overview</h2>
- * <p>UI design requires to have tooltips that contain detailed information about UI actions and controls.
- * Embedded context help tooltip functionality is incorporated this class.</p>
+ * <p>UI design requires having tooltips that contain detailed information about UI actions and controls.
+ * Embedded context help tooltip functionality is incorporated into this class.</p>
  *
  * <p>A simple example of the tooltip usage is the following:<br/>
  * <code>new HelpTooltip().<br/>
- *  &nbsp;&nbsp;&nbsp;&nbsp;setTitle("Title").<br/>
+ *  &nbsp;&nbsp;&nbsp;&nbsp;setPlainTextTitle("Title").<br/>
  *  &nbsp;&nbsp;&nbsp;&nbsp;setShortcut("Shortcut").<br/>
- *  &nbsp;&nbsp;&nbsp;&nbsp;setDescription("Description").<br/>
+ *  &nbsp;&nbsp;&nbsp;&nbsp;setDescription(HtmlChunk.text("Description").<br/>
  *  &nbsp;&nbsp;&nbsp;&nbsp;installOn(component);</code>
  * </p>
  *
  * <h2>Restrictions and field formats</h2>
- * <p>If you're creating a tooltip with a shortcut then title is mandatory otherwise title, description, link are optional.
+ * <p>If you're creating a tooltip with a shortcut, then title is mandatory otherwise title, description, link are optional.
  * You can optionally set the tooltip relative location using {@link HelpTooltip#setLocation(Alignment)}.
  * The {@code Alignment} enum defines fixed relative locations according to the design document (see the link below).
- * More types of relative location will be added as needed but there won't be a way to choose the location on pixel basis.</p>
+ * More types of relative location will be added as needed, but there won't be a way to choose the location on a pixel basis.</p>
  *
- * <p>No HTML tagging is allowed in title or shortcut, they are supposed to be simple text strings.</p>
- * <p>Description is can be html formatted. You can use all possible html tagging in description just without enclosing
- * &lt;html&gt; and &lt;/html&gt; tags themselves. In description it's allowed to have &lt;p/&gt; or &lt;p&gt; tags between paragraphs.
- * Paragraphs will be rendered with the standard (10px) offset from the title, from one another and from the link.
- * To force the line break in a paragraph use &lt;br/&gt;. Standard font coloring and styling is also available.</p>
+ * <p>No HTML tagging is allowed in the shortcut, it is supposed to be a simple text string.</p>
+ * <p>Title and description can be HTML formatted. You can use all possible HTML tagging in description just without enclosing
+ * &lt;html&gt; and &lt;/html&gt; tags themselves. In description, it's allowed to have &lt;p/&gt; or &lt;p&gt; tags between paragraphs.
+ * Paragraphs will be rendered with the standard (10px) offset from the title, from one another, and from the link.
+ * To force the line break in a paragraph, use &lt;br/&gt;. Standard font coloring and styling are also available.</p>
  *
  * <h2>Timeouts</h2>
  *
  * <p>Single line tooltips auto close in 10 seconds, multiline in 30 seconds. You can optionally disable auto closing by
- * setting {@link HelpTooltip#setNeverHideOnTimeout(boolean)} to {@code true}. By default tooltips don't close after a timeout on help buttons
- * (those having a round icon with question mark). Before setting this option to true you should contact designers first.</p>
+ * setting {@link HelpTooltip#setNeverHideOnTimeout(boolean)} to {@code true}. By default, tooltips don't close after a timeout on help buttons
+ * (those having a round icon with question mark). Before setting this option to true, you should contact designers first.</p>
  *
- * <p>System wide tooltip timeouts are set through the registry:
+ * <p>System-wide tooltip timeouts are set through the registry:
  * <ul>
  * <li>&nbsp;ide.helptooltip.full.dismissDelay - multiline tooltip timeout (default 30 seconds)</li>
  * <li>&nbsp;ide.helptooltip.regular.dismissDelay - single line tooltip timeout (default 10 seconds)</li>
@@ -94,7 +115,7 @@ import static com.intellij.openapi.util.text.HtmlChunk.html;
  * The current design is that the action's popup menu should take over the help tooltip.
  * This is partly implemented in {@code AbstractPopup} class to track such cases. But this doesn't always work.
  * If the help tooltip shows up over the component's popup menu, you should make sure you set the master popup for the help tooltip.
- * This will prevent help tooltip from showing when the popup menu is opened.
+ * This will prevent the help tooltip from showing when the popup menu is opened.
  * The best way to do it is to take a source component from an {@code InputEvent}
  * and pass the source component along with the popup menu reference to {@link HelpTooltip#setMasterPopup(Component, JBPopup)} static method.
  *
@@ -120,8 +141,10 @@ public class HelpTooltip {
   private static final String TOOLTIP_PROPERTY = "JComponent.helpTooltip";
   private static final String TOOLTIP_DISABLED_PROPERTY = "JComponent.helpTooltipDisabled";
 
+  /** Can contain HTML text */
   private @Nullable Supplier<@NotNull @TooltipTitle String> title;
   private @NlsSafe String shortcut;
+  /** Can contain HTML text */
   private @Tooltip String description;
   private @Nullable ActionLink link;
   private @Nullable JBFontScaler linkOriginalFontScaler;
@@ -135,6 +158,8 @@ public class HelpTooltip {
   private final SingleEdtTaskScheduler popupAlarm = SingleEdtTaskScheduler.createSingleEdtTaskScheduler(UiDispatcherKind.RELAX);
   private boolean isOverPopup;
   private boolean isMultiline;
+  /** Owner component captured in {@link #scheduleShow}; used for screen-relative width detection in the long-text auto-wrap path. */
+  private @Nullable WeakReference<Component> popupOwner;
   private int myInitialDelay = -1;
   private int myHideDelay = -1;
   private String myToolTipText;
@@ -180,7 +205,7 @@ public class HelpTooltip {
 
         SwingUtilities.convertPointToScreen(location, owner);
         Rectangle r = new Rectangle(location, popupSize);
-        ScreenUtil.fitToScreen(r);
+        ScreenUtil.moveToFit(r, ScreenUtil.getScreenRectangle(owner), null, true);
         location = r.getLocation();
         SwingUtilities.convertPointFromScreen(location, owner);
         r.setLocation(location);
@@ -197,18 +222,61 @@ public class HelpTooltip {
   }
 
   /**
-   * Sets tooltip title.
+   * Sets tooltip title content.
+   * <p>
+   * Title is allowed to contain HTML markup. Construct the title using {@link HtmlChunk}.
+   * If your title doesn't suppose to contain HTML markup,
+   * prefer using {@link #setPlainTextTitle(String)} to avoid accidental HTML injections.
+   * <p>
    * If it's longer than two lines (fitting in 250 pixels each),
    * then the text is automatically stripped to the word boundary and dots are added to the end.
-   *
-   * @param title text for title.
-   * @return {@code this}
    */
+  public HelpTooltip setTitle(@Nullable HtmlChunk title) {
+    this.title = title != null ? () -> title.toString() : null;
+    return this;
+  }
+
+  /**
+   * @see #setTitle(HtmlChunk)
+   */
+  public HelpTooltip setTitleSupplier(@Nullable Supplier<@NotNull HtmlChunk> title) {
+    this.title = title != null ? () -> title.get().toString() : null;
+    return this;
+  }
+
+  /**
+   * Sets tooltip title content.
+   * <p>
+   * The provided title will be properly escaped and rendered as a plain text.
+   * If it's longer than two lines (fitting in 250 pixels each),
+   * then the text is automatically stripped to the word boundary and dots are added to the end.
+   */
+  public HelpTooltip setPlainTextTitle(@Nullable @TooltipTitle String title) {
+    this.title = title != null ? () -> StringUtil.escapeXmlEntities(title) : null;
+    return this;
+  }
+
+  /**
+   * @see #setPlainTextTitle(String)
+   */
+  public HelpTooltip setPlainTextTitle(@Nullable Supplier<@NotNull @TooltipTitle String> title) {
+    this.title = title != null ? () -> StringUtil.escapeXmlEntities(title.get()) : null;
+    return this;
+  }
+
+  /**
+   * @deprecated use {@link #setTitle(HtmlChunk)} or {@link #setPlainTextTitle(String)} instead to avoid accidental HTML injections.
+   */
+  @Deprecated
   public HelpTooltip setTitle(@Nullable @TooltipTitle String title) {
     this.title = title != null ? () -> title : null;
     return this;
   }
 
+  /**
+   * @deprecated use {@link #setTitleSupplier(Supplier)} or {@link #setPlainTextTitle(Supplier)} instead to avoid accidental HTML injections.
+   */
+  @Deprecated
   public HelpTooltip setTitle(@Nullable Supplier<@NotNull @TooltipTitle String> title) {
     this.title = title;
     return this;
@@ -261,11 +329,21 @@ public class HelpTooltip {
   }
 
   /**
-   * Sets description text.
-   *
-   * @param description text for description.
-   * @return {@code this}
+   * Sets tooltip description content.
+   * <p>
+   * Description is allowed to contain HTML markup. Construct the description using {@link HtmlChunk}.
+   * If your description doesn't suppose to contain HTML markup,
+   * prefer using {@link HtmlChunk#text(String)} to avoid accidental HTML injections.
    */
+  public HelpTooltip setDescription(@Nullable HtmlChunk description) {
+    this.description = description != null ? description.toString() : null;
+    return this;
+  }
+
+  /**
+   * @deprecated use {@link #setDescription(HtmlChunk)} instead to avoid accidental HTML injections.
+   */
+  @Deprecated
   public HelpTooltip setDescription(@Nullable @Tooltip String description) {
     this.description = description;
     return this;
@@ -472,6 +550,8 @@ public class HelpTooltip {
 
   @ApiStatus.Internal
   public @NotNull JPanel createTipPanel() {
+    isMultiline = false;
+
     JPanel tipPanel = new JPanel();
     tipPanel.setLayout(new VerticalLayout(JBUI.getInt("HelpTooltip.verticalGap", 4)));
     tipPanel.setBackground(UIUtil.getToolTipBackground());
@@ -481,7 +561,7 @@ public class HelpTooltip {
     boolean hasDescription = Strings.isNotEmpty(description);
 
     if (hasTitle) {
-      tipPanel.add(new Header(hasDescription), VerticalLayout.TOP);
+      tipPanel.add(createTitleComponent(hasDescription), VerticalLayout.TOP);
     }
 
     if (hasDescription) {
@@ -513,6 +593,53 @@ public class HelpTooltip {
     tipPanel.setBorder(textBorder(isMultiline));
 
     return tipPanel;
+  }
+
+  private @NotNull JComponent createTitleComponent(boolean hasDescription) {
+    var popupOwner = this.popupOwner == null ? null : this.popupOwner.get();
+    var singleLineTitle = new Header(hasDescription);
+    if (popupOwner != null && popupOwner.isShowing()) {
+      Rectangle screen = ScreenUtil.getScreenRectangle(popupOwner);
+      int maxWidth = (int)(screen.width * 0.9);
+      int maxHeight = (int)(screen.height * 0.9);
+      if (singleLineTitle.getPreferredSize().width > maxWidth) {
+        isMultiline = true;
+        return createLongHtmlTextTitle(getHtmlTitle(), singleLineTitle.getFont(), maxWidth, maxHeight);
+      }
+    }
+    return singleLineTitle;
+  }
+
+  private static @NotNull JBHtmlPane createLongHtmlTextTitle(
+    @NotNull @TooltipTitle String htmlTitle,
+    @NotNull Font font,
+    int maxWidth,
+    int maxHeight
+  ) {
+    var htmlPane = configureHtmlPane(new JBHtmlPane(
+      new JBHtmlPaneStyleConfiguration(),
+      JBHtmlPaneConfiguration.builder()
+        .extensions(ExtendableHTMLViewFactory.Extensions.WORD_WRAP)
+        .build()
+    ));
+    htmlPane.setText(htmlTitle);
+    htmlPane.setFont(font);
+    htmlPane.setSize(new Dimension(maxWidth, maxHeight));
+    Dimension wrapped = htmlPane.getPreferredSize();
+    htmlPane.setPreferredSize(new Dimension(Math.min(wrapped.width, maxWidth), Math.min(wrapped.height, maxHeight)));
+    htmlPane.setMaximumSize(new Dimension(maxWidth, maxHeight));
+    return htmlPane;
+  }
+
+  private static @NotNull JBHtmlPane configureHtmlPane(@NotNull JBHtmlPane htmlPane) {
+    htmlPane.setEditable(false);
+    htmlPane.setOpaque(false);
+    htmlPane.setBorder(JBUI.Borders.empty());
+    htmlPane.setMargin(JBUI.emptyInsets());
+    htmlPane.setForeground(UIUtil.getToolTipForeground());
+    htmlPane.setBackground(UIUtil.getToolTipBackground());
+    htmlPane.setFocusable(false);
+    return htmlPane;
   }
 
   private void installMouseListeners(@NotNull JComponent owner) {
@@ -644,6 +771,7 @@ public class HelpTooltip {
       }
 
       Component owner = e.getComponent();
+      popupOwner = new WeakReference<>(owner);
       String text = owner instanceof JComponent ? ((JComponent)owner).getToolTipText(e) : null;
       if (myPopup != null && !myPopup.isDisposed()) {
         if (Strings.isEmpty(text) && Strings.isEmpty(myToolTipText)) {
@@ -686,6 +814,7 @@ public class HelpTooltip {
       }
       myPopup = null;
       myToolTipText = null;
+      popupOwner = null;
     }
   }
 
@@ -778,7 +907,7 @@ public class HelpTooltip {
       setFont(deriveHeaderFont(getFont()));
       setForeground(UIUtil.getToolTipForeground());
 
-      String currentTitle = Objects.requireNonNullElse(title != null ? title.get() : null, "");
+      String currentTitle = getNonNullTitle();
       if (obeyWidth || currentTitle.length() > MAX_WIDTH.get()) {
         View v = BasicHTML.createHTMLView(this, String.format("<html>%s%s</html>", currentTitle, getShortcutAsHTML()));
         float width = v.getPreferredSpan(View.X_AXIS);
@@ -790,15 +919,24 @@ public class HelpTooltip {
         setSizeForWidth(width);
       }
       else {
-        setText(BasicHTML.isHTMLString(currentTitle) ?
-                currentTitle :
-                HtmlChunk.div().addRaw(currentTitle).addRaw(getShortcutAsHTML()).wrapWith(html()).toString());
+        setText(getHtmlTitle());
       }
     }
+  }
 
-    private @NlsSafe String getShortcutAsHTML() {
-      return getShortcutAsHtml(shortcut);
-    }
+  private @NotNull @TooltipTitle String getHtmlTitle() {
+    String currentTitle = getNonNullTitle();
+    return BasicHTML.isHTMLString(currentTitle) ?
+           currentTitle :
+           HtmlChunk.div().addRaw(currentTitle).addRaw(getShortcutAsHTML()).wrapWith(html()).toString();
+  }
+
+  private @NlsSafe String getShortcutAsHTML() {
+    return getShortcutAsHtml(shortcut);
+  }
+
+  private @NotNull @TooltipTitle String getNonNullTitle() {
+    return Objects.requireNonNullElse(title != null ? title.get() : null, "");
   }
 
   private final class Paragraph extends BoundWidthLabel {

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplaceGetOrSet", "ReplacePutWithAssignment", "ReplaceJavaStaticMethodWithKotlinAnalog", "OVERRIDE_DEPRECATION", "RemoveRedundantQualifierName")
 
 package com.intellij.openapi.actionSystem.impl
@@ -7,6 +7,8 @@ import com.intellij.AbstractBundle
 import com.intellij.BundleBase
 import com.intellij.DynamicBundle
 import com.intellij.codeWithMe.ClientId
+import com.intellij.concurrency.ExternalIntelliJContextElement
+import com.intellij.concurrency.currentThreadContext
 import com.intellij.concurrency.installThreadContext
 import com.intellij.diagnostic.PluginException
 import com.intellij.diagnostic.StartUpMeasurer
@@ -25,11 +27,48 @@ import com.intellij.internal.statistic.collectors.fus.actions.persistence.Action
 import com.intellij.internal.statistic.collectors.fus.actions.persistence.ActionsCollectorImpl.Companion.onAfterActionInvoked
 import com.intellij.internal.statistic.collectors.fus.actions.persistence.ActionsCollectorImpl.Companion.onBeforeActionInvoked
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
-import com.intellij.openapi.actionSystem.ex.*
+import com.intellij.openapi.actionSystem.AbbreviationManager
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
+import com.intellij.openapi.actionSystem.ActionPopupMenu
+import com.intellij.openapi.actionSystem.ActionStub
+import com.intellij.openapi.actionSystem.ActionStubBase
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUiKind
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.AnActionResult
+import com.intellij.openapi.actionSystem.Anchor
+import com.intellij.openapi.actionSystem.Constraints
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.DefaultCompactActionGroup
+import com.intellij.openapi.actionSystem.EmptyAction
+import com.intellij.openapi.actionSystem.KeyboardShortcut
+import com.intellij.openapi.actionSystem.OverridingAction
+import com.intellij.openapi.actionSystem.PerformWithDocumentsCommitted
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
+import com.intellij.openapi.actionSystem.Presentation
+import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.actionSystem.TimerListener
+import com.intellij.openapi.actionSystem.ex.ActionContextElement
+import com.intellij.openapi.actionSystem.ex.ActionManagerEx
+import com.intellij.openapi.actionSystem.ex.ActionPopupMenuListener
+import com.intellij.openapi.actionSystem.ex.ActionRuntimeRegistrar
+import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.ex.ActionUtil.getActionUnavailableMessage
+import com.intellij.openapi.actionSystem.ex.AnActionListener
 import com.intellij.openapi.actionSystem.impl.ActionConfigurationCustomizer.LightCustomizeStrategy
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationActivationListener
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.TransactionGuard
+import com.intellij.openapi.application.TransactionGuardImpl
+import com.intellij.openapi.application.UI
+import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.components.ComponentManager
 import com.intellij.openapi.components.ComponentManagerEx
 import com.intellij.openapi.components.service
@@ -37,32 +76,49 @@ import com.intellij.openapi.components.serviceIfCreated
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.editor.EditorThreading
 import com.intellij.openapi.editor.actionSystem.EditorAction
-import com.intellij.openapi.extensions.*
+import com.intellij.openapi.extensions.ExtensionNotApplicableException
+import com.intellij.openapi.extensions.ExtensionPointListener
+import com.intellij.openapi.extensions.ExtensionPointName
+import com.intellij.openapi.extensions.PluginDescriptor
+import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.keymap.impl.ActionProcessor
 import com.intellij.openapi.keymap.impl.KeymapImpl
+import com.intellij.openapi.keymap.impl.ModifierKeyDoubleClickHandler
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.IndexNotReadyException
 import com.intellij.openapi.project.ProjectType
-import com.intellij.openapi.util.*
+import com.intellij.openapi.util.ActionCallback
+import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.util.NlsActions
+import com.intellij.openapi.util.NlsSafe
+import com.intellij.openapi.util.RecursionManager
+import com.intellij.openapi.util.findIconUsingNewImplementation
 import com.intellij.openapi.util.text.StringUtilRt
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.wm.awaitFocusSettlesDown
 import com.intellij.platform.ide.CoreUiCoroutineScopeHolder
-import com.intellij.platform.plugins.parser.impl.elements.ActionElement.*
+import com.intellij.platform.pluginSystem.parser.impl.elements.ActionElement.ActionDescriptorAction
+import com.intellij.platform.pluginSystem.parser.impl.elements.ActionElement.ActionElementGroup
+import com.intellij.platform.pluginSystem.parser.impl.elements.ActionElement.ActionElementName
 import com.intellij.platform.util.coroutines.childScope
 import com.intellij.serviceContainer.AlreadyDisposedException
-import com.intellij.serviceContainer.executeRegisterTaskForOldContent
 import com.intellij.ui.ClientProperty
 import com.intellij.ui.icons.IconLoadMeasurer
 import com.intellij.util.ArrayUtilRt
 import com.intellij.util.DefaultBundleService
 import com.intellij.util.SlowOperations
 import com.intellij.util.SystemProperties
-import com.intellij.util.concurrency.*
+import com.intellij.util.concurrency.AppExecutorUtil
+import com.intellij.util.concurrency.ChildContext
+import com.intellij.util.concurrency.SynchronizedClearableLazy
+import com.intellij.util.concurrency.ThreadScopeCheckpoint
+import com.intellij.util.concurrency.ThreadingAssertions
+import com.intellij.util.concurrency.createChildContext
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.containers.with
 import com.intellij.util.containers.without
@@ -70,12 +126,24 @@ import com.intellij.util.ui.RawSwingDispatcher
 import com.intellij.util.ui.StartupUiUtil.addAwtListener
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.xml.dom.XmlElement
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Experimental
 import org.jetbrains.annotations.ApiStatus.Internal
@@ -86,13 +154,15 @@ import java.awt.Component
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
 import java.awt.event.WindowEvent
-import java.util.*
+import java.util.ResourceBundle
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.function.Function
 import javax.swing.Icon
 import javax.swing.JLabel
 import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.resume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -129,7 +199,7 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     val state = ActionManagerState()
     val actionPreInitRegistrar = ActionPreInitRegistrar(idToAction = idToAction, boundShortcuts = boundShortcuts, state = state)
     val keymapToOperations = HashMap<String, MutableList<KeymapShortcutOperation>>()
-    doRegisterActions(modules = PluginManagerCore.getPluginSet().getEnabledModules(),
+    doRegisterActions(descriptors = PluginManagerCore.getPluginSet().sequenceResolvedSortedDescriptorsForRegistration(),
                       keymapToOperations = keymapToOperations,
                       actionRegistrar = actionPreInitRegistrar)
 
@@ -212,9 +282,9 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
   final override fun asActionRuntimeRegistrar(): ActionRuntimeRegistrar = actionPostInitRuntimeRegistrar
 
   // for dynamic plugins
-  internal fun registerActions(modules: Iterable<IdeaPluginDescriptorImpl>) {
+  internal fun registerActions(descriptors: Sequence<IdeaPluginDescriptorImpl>) {
     val keymapToOperations = HashMap<String, MutableList<KeymapShortcutOperation>>()
-    doRegisterActions(modules = modules, keymapToOperations = keymapToOperations, actionRegistrar = actionPostInitRegistrar)
+    doRegisterActions(descriptors = descriptors, keymapToOperations = keymapToOperations, actionRegistrar = actionPostInitRegistrar)
     if (keymapToOperations.isNotEmpty()) {
       val keymapManager = service<KeymapManager>()
       for ((keymapName, operations) in keymapToOperations) {
@@ -224,14 +294,11 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     }
   }
 
-  private fun doRegisterActions(modules: Iterable<IdeaPluginDescriptorImpl>,
+  private fun doRegisterActions(descriptors: Sequence<IdeaPluginDescriptorImpl>,
                                 keymapToOperations: MutableMap<String, MutableList<KeymapShortcutOperation>>,
                                 actionRegistrar: ActionRegistrar) {
-    for (module in modules) {
+    for (module in descriptors) {
       registerPluginActions(module = module, keymapToOperations = keymapToOperations, actionRegistrar = actionRegistrar)
-      executeRegisterTaskForOldContent(module) {
-        registerPluginActions(module = it, keymapToOperations = keymapToOperations, actionRegistrar = actionRegistrar)
-      }
     }
   }
 
@@ -493,13 +560,17 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
                                                            secondary = isSecondary(child),
                                                            actionRegistrar = actionRegistrar)
         "keyboard-shortcut" -> processKeyboardShortcutNode(element = child,
-                                                           actionId = id,
-                                                           module = module,
-                                                           keymapToOperations = keymapToOperations)
+                                                            actionId = id,
+                                                            module = module,
+                                                            keymapToOperations = keymapToOperations)
+        "keyboard-gesture-shortcut" -> processKeyboardGestureShortcutNode(element = child,
+                                                                          actionId = id,
+                                                                          module = module,
+                                                                          keymapToOperations = keymapToOperations)
         "mouse-shortcut" -> processMouseShortcutNode(element = child,
-                                                     actionId = id,
-                                                     module = module,
-                                                     keymapToOperations = keymapToOperations)
+                                                      actionId = id,
+                                                      module = module,
+                                                      keymapToOperations = keymapToOperations)
         "abbreviation" -> processAbbreviationNode(e = child, id = id)
         OVERRIDE_TEXT_ELEMENT_NAME -> processOverrideTextNode(action = stub,
                                                               id = stub.id,
@@ -1002,8 +1073,18 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
 
   override val registrationOrderComparator: Comparator<String>
     get() {
-      val idToDescriptor = actionPostInitRegistrar.state.idToDescriptor
-      return Comparator.comparingInt { key -> idToDescriptor.get(key)?.index ?: -1 }
+      val state = actionPostInitRegistrar.state
+      val registrationOrder = synchronized(state.lock) {
+        val result = HashMap<String, Int>(state.idToDescriptor.size)
+        for ((id, descriptor) in state.idToDescriptor) {
+          result.put(id, descriptor.index)
+        }
+        result
+      }
+      return Comparator { id1, id2 ->
+        val result = (registrationOrder.get(id1) ?: -1).compareTo(registrationOrder.get(id2) ?: -1)
+        if (result == 0) id1.compareTo(id2) else result
+      }
     }
 
   override fun getPluginActions(pluginId: PluginId): Array<String> {
@@ -1087,15 +1168,13 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
 
   override fun fireBeforeEditorTyping(c: Char, dataContext: DataContext) {
     lastTimeEditorWasTypedIn = System.currentTimeMillis()
-    //maybe readaction
-    WriteIntentReadAction.run {
+    EditorThreading.runWritable {
       publisher().beforeEditorTyping(c, dataContext)
     }
   }
 
   override fun fireAfterEditorTyping(c: Char, dataContext: DataContext) {
-    //maybe readaction
-    WriteIntentReadAction.run {
+    EditorThreading.runWritable {
       publisher().afterEditorTyping(c, dataContext)
     }
   }
@@ -1157,11 +1236,17 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
       val coroutineContext = continuation.context +
                              ModalityState.current().asContextElement() +
                              ClientId.coroutineContext() +
+                             currentThreadContext().fold<CoroutineContext>(EmptyCoroutineContext) { acc, elem -> acc + (elem as? ExternalIntelliJContextElement ?: EmptyCoroutineContext) } +
                              ActionContextElement.create(actionId, event.place, event.inputEvent, component)
+      // todo: remove `ThreadScopeCheckpoint` from here once we migrate all usages to `AnActionEvent#coroutineScope`
       val coroutineContext2 = coroutineContext + ThreadScopeCheckpoint(coroutineContext) // permit `currentThreadCoroutineScope` inside
+      val providedScope = ActionCoroutineScope(coroutineContext.minusKey(Job.Key) + Dispatchers.Default + CoroutineName("actionPerformed of $actionId"), cs)
+      event.installCoroutineScope(providedScope)
       installThreadContext(coroutineContext2.minusKey(ContinuationInterceptor), replace = true) {
-        SlowOperations.startSection(SlowOperations.ACTION_PERFORM).use { _ ->
-          runnable.run()
+        runInWriteIntentConditionally(action) {
+          SlowOperations.startSection(SlowOperations.ACTION_PERFORM).use { _ ->
+            runnable.run()
+          }
         }
       }
       AnActionResult.PERFORMED
@@ -1198,6 +1283,16 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     return result
   }
 
+  // inlining here to reduce the number of service stacktraces
+  @Suppress("NOTHING_TO_INLINE")
+  inline fun runInWriteIntentConditionally(action: AnAction, runnable: Runnable) {
+    if (Utils.isLockRequired(action)) {
+      WriteIntentReadAction.run(runnable)
+    } else {
+      runnable.run()
+    }
+  }
+
   @TestOnly
   fun preloadActions() {
     for (id in actionPostInitRegistrar.ids) {
@@ -1205,6 +1300,21 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
       // don't preload ActionGroup.getChildren() because that would un-stub child actions
       // and make it impossible to replace the corresponding actions later
       // (via unregisterAction+registerAction, as some app components do)
+    }
+  }
+
+  /**
+   * The coroutines in actions should be launched on a scope with a specific coroutine context,
+   * that's why we augment the container's scope with [localContext].
+   * In addition, scope's context should NOT be terminated when the action is finished, because the action could fire some `invokeLater`s
+   * which capture this context and possibly launch some more coroutines.
+   */
+  private class ActionCoroutineScope(val localContext: CoroutineContext, val delegate: CoroutineScope): CoroutineScope by delegate {
+    override val coroutineContext: CoroutineContext
+      get() = delegate.coroutineContext + localContext
+
+    override fun toString(): String {
+      return "ActionCoroutineScope(delegate=$delegate, localContext=$localContext)"
     }
   }
 
@@ -1218,7 +1328,11 @@ open class ActionManagerImpl protected constructor(private val coroutineScope: C
     val place = place ?: "tryToExecute"
     if (now) {
       try {
-        tryToExecuteNow(action, place, contextComponent, inputEvent, result)
+        @Suppress("DEPRECATION")
+        val dataContext = DataManager.getInstance().let {
+          if (contextComponent == null) it.dataContext else it.getDataContext(contextComponent)
+        }
+        tryToExecuteNow(action, place, contextComponent, inputEvent, result, dataContext)
       }
       finally {
         if (!result.isProcessed) {
@@ -1331,16 +1445,28 @@ private fun doPerformAction(action: AnAction,
   }
 }
 
-private fun tryToExecuteNow(action: AnAction,
-                            place: String,
-                            contextComponent: Component?,
-                            inputEvent: InputEvent?,
-                            callback: ActionCallback) {
+/**
+ * Synchronously updates and executes an action with a custom data context.
+ *
+ * @param action the action to execute
+ * @param place the action place (e.g., "MainMenu", "EditorPopup")
+ * @param contextComponent the component to use as context, may be null
+ * @param inputEvent the input event that triggered the action, may be null
+ * @param callback the callback to be notified of execution result
+ * @param dataContext the custom data context to use for update and execution
+ *
+ * @see ActionManager.tryToExecute for the public API that creates its own DataContext
+ */
+@ApiStatus.Internal
+fun tryToExecuteNow(
+  action: AnAction,
+  place: String,
+  contextComponent: Component?,
+  inputEvent: InputEvent?,
+  callback: ActionCallback,
+  dataContext: DataContext,
+) {
   val presentationFactory = PresentationFactory()
-  @Suppress("DEPRECATION")
-  val dataContext = DataManager.getInstance().let {
-    if (contextComponent == null) it.dataContext else it.getDataContext(contextComponent)
-  }
   val wrappedContext = Utils.createAsyncDataContext(dataContext)
   val actionProcessor = object : ActionProcessor() {}
   val inputEventAdjusted = inputEvent ?: KeyEvent(
@@ -1385,8 +1511,19 @@ private suspend fun tryToExecuteSuspend(action: AnAction,
   val event = AnActionEvent(wrappedContext, presentation, place, uiKind, inputEvent, 0, actionManager)
 
   //todo fix all clients and move locks into them
-  writeIntentReadAction {
+  runOnEdtWithConditionalWriteIntentSuspending(action) {
     doPerformAction(action, event, callback)
+  }
+}
+
+private suspend fun runOnEdtWithConditionalWriteIntentSuspending(action: AnAction, computation: suspend () -> Unit) {
+  val dispatcher = if (Utils.isLockRequired(action)) {
+    Dispatchers.EDT
+  } else {
+    Dispatchers.UI
+  }
+  withContext(dispatcher) {
+    computation()
   }
 }
 
@@ -2165,7 +2302,7 @@ private fun registerAction(actionId: String,
     return
   }
 
-  action.registerCustomShortcutSet(ProxyShortcutSet(actionId), null)
+  action.setShortcutSet(ProxyShortcutSet(actionId))
   val descriptor = state.idToDescriptor.computeIfAbsent(actionId) { ActionManagerStateActionItemDescriptor() }
   descriptor.index = if (oldIndex >= 0) oldIndex else state.registeredActionCount++
   if (pluginId != null) {
@@ -2176,7 +2313,13 @@ private fun registerAction(actionId: String,
   }
 
   actionRegistrar.actionRegistered(actionId, action)
+  ModifierKeyDoubleClickHandler.scheduleKeymapShortcutSyncIfCreated()
 }
+
+/**
+ * We want to avoid leaking scope for `actionPerformed`
+ * So we await until all children coroutines finish and then terminate the scope
+ */
 
 private fun getAction(
   id: String,
@@ -2260,6 +2403,7 @@ private fun unregisterAction(actionId: String, actionRegistrar: ActionRegistrar,
     }
   }
   updateHandlers(actionToRemove)
+  ModifierKeyDoubleClickHandler.scheduleKeymapShortcutSyncIfCreated()
 }
 
 private fun replaceAction(actionId: String, newAction: AnAction, pluginId: PluginId?, actionRegistrar: ActionRegistrar): AnAction? {

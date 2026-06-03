@@ -20,7 +20,11 @@ import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 
 public final class AlternativeSdkRootsProvider extends AdditionalLibraryRootsProvider {
   private static final Key<Collection<SyntheticLibrary>> ALTERNATIVE_SDK_LIBS_KEY = Key.create("ALTERNATIVE_SDK_LIBS_KEY");
@@ -56,7 +60,7 @@ public final class AlternativeSdkRootsProvider extends AdditionalLibraryRootsPro
       .map(conf -> conf instanceof ConfigurationWithAlternativeJre jreConf && jreConf.isAlternativeJrePathEnabled() ?
         jreConf.getAlternativeJrePath() : null)
       .filter(Objects::nonNull)
-      .map(ProjectJdkTable.getInstance()::findJdk)
+      .map(ProjectJdkTable.getInstance(project)::findJdk)
       .filter(Objects::nonNull)
       .distinct()
       .toList();

@@ -1,11 +1,16 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.indexing.impl;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.util.LowMemoryWatcher;
 import com.intellij.openapi.util.ThrowableComputable;
-import com.intellij.util.indexing.*;
+import com.intellij.util.indexing.DataIndexer;
+import com.intellij.util.indexing.IndexExtension;
+import com.intellij.util.indexing.IndexId;
+import com.intellij.util.indexing.InvertedIndex;
+import com.intellij.util.indexing.StorageException;
+import com.intellij.util.indexing.StorageUpdate;
 import com.intellij.util.indexing.impl.forward.ForwardIndex;
 import com.intellij.util.indexing.impl.forward.ForwardIndexAccessor;
 import com.intellij.util.indexing.impl.forward.IntForwardIndex;
@@ -139,11 +144,13 @@ public abstract class MapReduceIndex<Key, Value, Input> implements InvertedIndex
 
   public void clearCaches() {
     try {
-      //TODO RC: it seems useless to clearCaches() before flush() -- clearCaches() basically trims
-      //         mergedSnapshot from all the cached ChangeTrackingValueContainers, while flush() in
-      //         its current implementation persists all the changes in those containers, AND
-      //         invalidates the cache entirely, i.e. remove all the cached content. So flush()
-      //         strongly tops .clearCaches() in its effect on occupied heap space.
+      //It seems useless to clearCaches() before flush() -- clearCaches() basically trims
+      //   mergedSnapshot from all the cached ChangeTrackingValueContainers, while flush()
+      //   in its current implementation persists all the changes in those containers, AND
+      //   invalidates the cache entirely, i.e. remove all the cached content.
+      //   So flush() strongly tops .clearCaches() in its effect on occupied heap space.
+      //   My guess: probably we're trying to first free a bit of heap so following flush
+      //   has less chance to trigger an OoM?
       myStorage.clearCaches();
       flush();
     }
@@ -451,11 +458,13 @@ public abstract class MapReduceIndex<Key, Value, Input> implements InvertedIndex
     public boolean update() {
       checkNonCancellableSection();
       try {
+        //MAYBE RC: why we do not return true/false to indicate 'nothing has changed'?
         MapReduceIndex.this.updateWith(updateData);
       }
       catch (StorageException | CancellationException ex) {
         logStorageUpdateException(ex);
 
+        //MAYBE RC: ClosedStorageException could legally happen (e.g., during indexes' shutdown), maybe ignore it here?
         MapReduceIndex.this.requestRebuild(ex);
         return false;
       }

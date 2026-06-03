@@ -2,7 +2,11 @@
 package org.jetbrains.jps.dependency.impl;
 
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.jps.dependency.*;
+import org.jetbrains.jps.dependency.BackDependencyIndex;
+import org.jetbrains.jps.dependency.Delta;
+import org.jetbrains.jps.dependency.Node;
+import org.jetbrains.jps.dependency.NodeSource;
+import org.jetbrains.jps.dependency.ReferenceID;
 import org.jetbrains.jps.util.Iterators;
 
 import java.util.Collections;
@@ -25,7 +29,7 @@ public final class DeltaImpl extends GraphImpl implements Delta {
   private final Set<NodeSource> myDeletedSources;
   
   public DeltaImpl(Iterable<NodeSource> baseSources, Iterable<NodeSource> deletedSources, IndexFactory indexFactory) {
-    super(Containers.MEMORY_CONTAINER_FACTORY, indexFactory);
+    super(new MemoryMapletFactory(), indexFactory);
     myBaseSources = Collections.unmodifiableSet(baseSources instanceof Set? (Set<? extends NodeSource>)baseSources : Iterators.collect(baseSources, new HashSet<>()));
     myDeletedSources = Collections.unmodifiableSet(deletedSources instanceof Set? (Set<? extends NodeSource>)deletedSources : Iterators.collect(deletedSources, new HashSet<>()));
   }

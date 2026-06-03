@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.idea.devkit.dom.index;
 
 import com.intellij.openapi.project.Project;
@@ -24,7 +24,13 @@ import org.jetbrains.idea.devkit.dom.Dependency;
 import org.jetbrains.idea.devkit.dom.DependencyDescriptor;
 import org.jetbrains.idea.devkit.dom.IdeaPlugin;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Plugin dependency declarations (old and new model).
@@ -108,7 +114,8 @@ public final class PluginIdDependenciesIndex extends PluginXmlIndexBase<String, 
 
       ids.addAll(ContainerUtil.filter(keys, s ->
         !StringUtil.startsWith(s, PLUGIN_ID_KEY_PREFIX) &&
-        !StringUtil.startsWith(s, FILENAME_KEY_PREFIX)));
+        !StringUtil.startsWith(s, FILENAME_KEY_PREFIX) &&
+        !StringUtil.startsWith(s, CONTENT_KEY_PREFIX)));
     }
     return ids;
   }
@@ -133,6 +140,10 @@ public final class PluginIdDependenciesIndex extends PluginXmlIndexBase<String, 
     Collection<VirtualFile> allFiles = new ArrayList<>(dependsFiles);
     allFiles.addAll(contentFiles);
     return allFiles;
+  }
+
+  public static Collection<VirtualFile> findDescriptorsWithReferenceInDependenciesTag(GlobalSearchScope scope, String moduleNameOrPluginId) {
+    return FileBasedIndex.getInstance().getContainingFiles(NAME, moduleNameOrPluginId, scope);
   }
 
   public static Collection<VirtualFile> findFilesIncludingContentModule(Project project, VirtualFile file) {

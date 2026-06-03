@@ -1,10 +1,15 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.fir.testGenerator.codeinsight
 
+import org.jetbrains.kotlin.idea.codeInsight.AbstractLineMarkersTestInLibrarySources
 import org.jetbrains.kotlin.idea.k2.codeInsight.lineMarkers.test.AbstractKotlinPsiBasedTestFrameworkK2Test
 import org.jetbrains.kotlin.idea.k2.codeInsight.lineMarkers.test.AbstractLineMarkersK2Test
-import org.jetbrains.kotlin.testGenerator.model.*
-import org.jetbrains.kotlin.testGenerator.model.GroupCategory.*
+import org.jetbrains.kotlin.testGenerator.model.GroupCategory.HIGHLIGHTING
+import org.jetbrains.kotlin.testGenerator.model.MutableTWorkspace
+import org.jetbrains.kotlin.testGenerator.model.Patterns
+import org.jetbrains.kotlin.testGenerator.model.model
+import org.jetbrains.kotlin.testGenerator.model.testClass
+import org.jetbrains.kotlin.testGenerator.model.testGroup
 
 internal fun MutableTWorkspace.generateK2LineMarkerTests() {
     testGroup("code-insight/line-markers", category = HIGHLIGHTING) {
@@ -38,6 +43,10 @@ internal fun MutableTWorkspace.generateK2LineMarkerTests() {
                 testMethodName = "doTestWithGradleConfiguration",
                 testClassName = "WithGradleConfiguration"
             )
+
+            testClass<AbstractLineMarkersTestInLibrarySources>(generatedClassName = "org.jetbrains.kotlin.idea.k2.codeInsight.lineMarkers.test.LineMarkersTestInLibrarySourcesGenerated") {
+                model("../../../idea/tests/testData/codeInsightInLibrary/lineMarker", testMethodName = "doTestWithLibrary")
+            }
         }
     }
 }

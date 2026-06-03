@@ -23,6 +23,7 @@ import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.Processor;
 import com.intellij.util.SlowOperations;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.impl.InputData;
 import it.unimi.dsi.fastutil.ints.IntIterator;
@@ -32,7 +33,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.BooleanSupplier;
@@ -41,6 +46,7 @@ import java.util.function.Function;
 @ApiStatus.Internal
 public final class FileBasedIndexScanUtil {
 
+  @RequiresBackgroundThread(generateAssertion = false)
   private static void ensureUpToDate(@NotNull ID<?, ?> indexId) {
     SlowOperations.assertSlowOperationsAreAllowed();
     ApplicationManager.getApplication().assertReadAccessAllowed();
@@ -232,6 +238,7 @@ public final class FileBasedIndexScanUtil {
     return null;
   }
 
+  @RequiresBackgroundThread(generateAssertion = false)
   public static <K, V> Boolean processFilesContainingAnyKey(@NotNull ID<K, V> indexId,
                                                             @NotNull Collection<? extends K> keys,
                                                             @NotNull GlobalSearchScope scope,
@@ -328,6 +335,7 @@ public final class FileBasedIndexScanUtil {
     }
   }
 
+  /** @return true if this index is not automatically updated, but needs to be updated explicitly */
   public static boolean isManuallyManaged(@NotNull ID<?, ?> id) {
     return id == TodoIndexId.INSTANCE.getName();
   }

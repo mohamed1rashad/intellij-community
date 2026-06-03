@@ -2,6 +2,7 @@
 
 package org.jetbrains.kotlin.idea.refactoring.introduce.extractClass.ui
 
+import com.intellij.openapi.application.runReadAction
 import com.intellij.psi.PsiDirectory
 import com.intellij.psi.PsiElement
 import com.intellij.refactoring.RefactoringBundle
@@ -29,6 +30,7 @@ import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.psi.psiUtil.isIdentifier
 import org.jetbrains.kotlin.psi.psiUtil.quoteIfNeeded
+import org.jetbrains.kotlin.resolve.jvm.JvmConstants
 import java.awt.BorderLayout
 import javax.swing.BorderFactory
 import javax.swing.JComponent
@@ -63,14 +65,14 @@ abstract class KotlinExtractSuperDialogBase(
         false,
         interfaceContainmentVerifier
     ) {
-        override fun isMemberEnabled(member: KotlinMemberInfo): Boolean {
-            val declaration = member.member ?: return false
-            return !declaration.hasModifier(KtTokens.CONST_KEYWORD)
+        override fun isMemberEnabled(member: KotlinMemberInfo): Boolean = runReadAction {
+            val declaration = member.member ?: return@runReadAction false
+            !declaration.hasModifier(KtTokens.CONST_KEYWORD)
         }
 
-        override fun isAbstractEnabled(memberInfo: KotlinMemberInfo): Boolean {
+        override fun isAbstractEnabled(memberInfo: KotlinMemberInfo): Boolean = runReadAction {
             val member = memberInfo.member
-            return !(member.hasModifier(KtTokens.INLINE_KEYWORD) ||
+            !(member.hasModifier(KtTokens.INLINE_KEYWORD) ||
                     member.hasModifier(KtTokens.EXTERNAL_KEYWORD) ||
                     member.hasModifier(KtTokens.LATEINIT_KEYWORD))
         }
@@ -165,9 +167,12 @@ abstract class KotlinExtractSuperDialogBase(
     override fun isExtractSuperclass(): Boolean = true
 
     override fun validateName(name: String): String? {
+        val unquotedName = name.unquoteKotlinIdentifier()
         return when {
-            !name.quoteIfNeeded().isIdentifier() -> RefactoringMessageUtil.getIncorrectIdentifierMessage(name)
-            name.unquoteKotlinIdentifier() == mySourceClass.name -> KotlinBundle.message("error.text.different.name.expected")
+            !name.quoteIfNeeded().isIdentifier() || unquotedName.any { it in JvmConstants.INVALID_CHARS } ->
+                RefactoringMessageUtil.getIncorrectIdentifierMessage(name)
+
+            unquotedName == mySourceClass.name -> KotlinBundle.message("error.text.different.name.expected")
             else -> null
         }
     }

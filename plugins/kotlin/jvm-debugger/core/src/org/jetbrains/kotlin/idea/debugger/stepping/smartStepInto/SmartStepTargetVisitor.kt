@@ -16,9 +16,16 @@ import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.resolution.KaVariableAccessCall
 import org.jetbrains.kotlin.analysis.api.resolution.successfulCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
-import org.jetbrains.kotlin.analysis.api.symbols.*
+import org.jetbrains.kotlin.analysis.api.symbols.KaDeclarationSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaNamedFunctionSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
+import org.jetbrains.kotlin.analysis.api.symbols.KaSyntheticJavaPropertySymbol
+import org.jetbrains.kotlin.analysis.api.symbols.KaValueParameterSymbol
 import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.idea.codeinsight.utils.getCallExpressionSymbol
+import org.jetbrains.kotlin.idea.codeinsight.utils.isEnum
 import org.jetbrains.kotlin.idea.codeinsight.utils.resolveFunctionCall
 import org.jetbrains.kotlin.idea.debugger.core.breakpoints.isInlineOnly
 import org.jetbrains.kotlin.idea.debugger.core.isInlineClass
@@ -26,7 +33,33 @@ import org.jetbrains.kotlin.idea.debugger.core.stepping.getLineRange
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.load.kotlin.internalName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtArrayAccessExpression
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtCallableReferenceExpression
+import org.jetbrains.kotlin.psi.KtConstantExpression
+import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDeclarationWithBody
+import org.jetbrains.kotlin.psi.KtDoWhileExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtForExpression
+import org.jetbrains.kotlin.psi.KtFunction
+import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtLambdaExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtObjectLiteralExpression
+import org.jetbrains.kotlin.psi.KtOperationReferenceExpression
+import org.jetbrains.kotlin.psi.KtProperty
+import org.jetbrains.kotlin.psi.KtPropertyAccessor
+import org.jetbrains.kotlin.psi.KtPropertyDelegate
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtSimpleNameExpression
+import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
+import org.jetbrains.kotlin.psi.KtUnaryExpression
+import org.jetbrains.kotlin.psi.KtWhenExpression
+import org.jetbrains.kotlin.psi.KtWhileExpression
 
 // TODO support class initializers, local functions, delegated properties with specified type, setter for properties
 class SmartStepTargetVisitor(
@@ -84,7 +117,6 @@ class SmartStepTargetVisitor(
         }
     }
 
-    @OptIn(KaExperimentalApi::class)
     private fun KaSession.recordProperty(expression: KtExpression, symbol: KaPropertySymbol): Boolean {
         if (expression !is KtNameReferenceExpression && expression !is KtCallableReferenceExpression) return false
         val targetType = expression.computeTargetType()
@@ -347,6 +379,7 @@ class SmartStepTargetVisitor(
             return
         }
 
+        if (isEnumEqualityCall(expression)) return
         val callLabel = calcLabel(symbol)
         val label = if (symbol.isInvoke() && highlightExpression is KtSimpleNameExpression) {
             "${highlightExpression.text}.$callLabel"
@@ -366,6 +399,21 @@ class SmartStepTargetVisitor(
                 CallableMemberInfo(symbol, ordinal, isEqualsNullCall = isEqualsNullCall)
             )
         )
+    }
+
+    private fun KaSession.isEnumEqualityCall(expression: KtExpression): Boolean {
+        if (expression !is KtBinaryExpression) return false
+        val operationToken = expression.operationToken
+        if (operationToken != KtTokens.EQEQ && operationToken != KtTokens.EXCLEQ) return false
+
+        val left = expression.left ?: return false
+        val right = expression.right ?: return false
+        return isEnumExpression(left) && isEnumExpression(right)
+    }
+
+    private fun KaSession.isEnumExpression(expression: KtExpression): Boolean {
+        val expressionType = expression.expressionType ?: return false
+        return expressionType.isEnum()
     }
 
     /**

@@ -1,19 +1,18 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.tools.build.bazel.jvmIncBuilder.impl
 
-import com.intellij.openapi.util.io.BufferExposingByteArrayInputStream
-import com.intellij.openapi.vfs.DeprecatedVirtualFileSystem
-import com.intellij.openapi.vfs.StandardFileSystems
-import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.vfs.VirtualFileSystem
-import com.intellij.util.PathUtilRt
+import org.jetbrains.kotlin.com.intellij.openapi.util.io.BufferExposingByteArrayInputStream
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.DeprecatedVirtualFileSystem
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.StandardFileSystems
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFile
+import org.jetbrains.kotlin.com.intellij.openapi.vfs.VirtualFileSystem
+import org.jetbrains.kotlin.com.intellij.util.PathUtilRt
 import org.jetbrains.kotlin.load.kotlin.LibraryContainerAwareVirtualFile
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.URI
 import java.nio.file.*
-import java.util.Collection
 
 /*
  * This file is a copy of community/build/jvm-rules/src/kotlin/kotlin-builder/OutputVirtualFile.kt but with a custom KotlinVirtualFileProvider
@@ -145,8 +144,7 @@ internal class OutputVirtualFile(
       ))
     }
 
-    @Suppress("UNCHECKED_CAST", "PLATFORM_CLASS_MAPPED_TO_KOTLIN")
-    (result as Collection<OutputVirtualFile>).toArray(EMPTY_ARRAY) as Array<VirtualFile>
+    return@lazy result.toTypedArray<VirtualFile>()
   }
 
   private val pathAdapter by lazy {

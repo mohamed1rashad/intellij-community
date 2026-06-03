@@ -1,18 +1,22 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.editor.impl
 
 import com.intellij.injected.editor.DocumentWindow
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.DataContext
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ModalityStateListener
+import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.application.impl.LaterInvocator
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.debug
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.editor.*
-import com.intellij.openapi.editor.actionSystem.ActionPlan
-import com.intellij.openapi.editor.actionSystem.TypedActionHandler
-import com.intellij.openapi.editor.actionSystem.TypedActionHandlerEx
+import com.intellij.openapi.editor.ClientEditorManager
+import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.EditorKind
 import com.intellij.openapi.editor.colors.EditorColorsListener
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.event.EditorEventMulticaster
@@ -21,8 +25,10 @@ import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.highlighter.EditorHighlighter
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory
+import com.intellij.openapi.editor.impl.ad.isRhizomeAdRebornEnabled
 import com.intellij.openapi.editor.impl.event.EditorEventMulticasterImpl
 import com.intellij.openapi.editor.impl.view.EditorPainter
+import com.intellij.openapi.editor.impl.zombie.Necropolis
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader.Companion.isEditorLoaded
 import com.intellij.openapi.fileTypes.FileType
@@ -114,13 +120,13 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
     return document
   }
 
-  fun createDocument(allowUpdatesWithoutWriteAction: Boolean): Document {
+  override fun createDocument(allowUpdatesWithoutWriteAction: Boolean): Document {
     val document = DocumentImpl("", allowUpdatesWithoutWriteAction)
     editorEventMulticaster.registerDocument(document)
     return document
   }
 
-  fun createDocument(text: CharSequence, acceptsSlashR: Boolean, allowUpdatesWithoutWriteAction: Boolean): Document {
+  override fun createDocument(text: CharSequence, acceptsSlashR: Boolean, allowUpdatesWithoutWriteAction: Boolean): Document {
     val document = DocumentImpl(text, acceptsSlashR, allowUpdatesWithoutWriteAction)
     editorEventMulticaster.registerDocument(document)
     return document
@@ -231,6 +237,7 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
   @RequiresEdt
   override fun releaseEditor(editor: Editor) {
     try {
+      turnIntoZombiesAndBury(editor)
       val event = EditorFactoryEvent(this, editor)
       editorFactoryEventDispatcher.multicaster.editorReleased(event)
       EP.forEachExtensionSafe { it.editorReleased(event) }
@@ -245,7 +252,9 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
         for (clientEditors in ClientEditorManager.getAllInstances()) {
           if (clientEditors.editorReleased(editor)) {
             LOG.debug { "number of Editors after release: ${clientEditors.editorsSequence().count()}" }
-            if (clientEditors != ClientEditorManager.getCurrentInstance()) {
+            //don't try creating the service to avoid CancellationException
+            val currentInstance = ClientEditorManager.getCurrentInstanceIfCreated()
+            if (currentInstance != null && clientEditors != currentInstance) {
               LOG.warn("Released editor didn't belong to current session")
             }
             break
@@ -283,24 +292,16 @@ class EditorFactoryImpl(coroutineScope: CoroutineScope?) : EditorFactory() {
   }
 
   override fun getEventMulticaster(): EditorEventMulticaster = editorEventMulticaster
-}
 
-@Suppress("unused")
-private class MyRawTypedHandler(private val delegate: TypedActionHandler) : TypedActionHandlerEx {
-  override fun execute(editor: Editor, charTyped: Char, dataContext: DataContext) {
-    editor.putUserData(EditorImpl.DISABLE_CARET_SHIFT_ON_WHITESPACE_INSERTION, true)
-    try {
-      delegate.execute(editor, charTyped, dataContext)
+  /**
+   * Must be called before the listeners because they could do disposing things corrupting the editor's state,
+   * see CodeVisionHost
+   */
+  private fun turnIntoZombiesAndBury(editor: Editor) {
+    val necropolis = editor.project?.let {
+      Necropolis.getInstance(it, onlyIfCreated = true)
     }
-    finally {
-      editor.putUserData(EditorImpl.DISABLE_CARET_SHIFT_ON_WHITESPACE_INSERTION, null)
-    }
-  }
-
-  override fun beforeExecute(editor: Editor, c: Char, context: DataContext, plan: ActionPlan) {
-    if (delegate is TypedActionHandlerEx) {
-      delegate.beforeExecute(editor, c, context, plan)
-    }
+    necropolis?.turnIntoZombiesAndBury(editor)
   }
 }
 
@@ -309,7 +310,7 @@ private fun collectAllEditors(): Sequence<Editor> {
 }
 
 private fun hackyPutEditorIdToDocument(document: Document) {
-  if (isRhizomeAdEnabled) {
+  if (isRhizomeAdRebornEnabled) {
     if (document.getUserData(KERNEL_EDITOR_ID_KEY) == null) {
       document.putUserData(KERNEL_EDITOR_ID_KEY, EditorId.create())
     }
@@ -317,7 +318,7 @@ private fun hackyPutEditorIdToDocument(document: Document) {
 }
 
 private fun putEditorId(document: Document, editor: EditorImpl) {
-  if (isRhizomeAdEnabled) {
+  if (isRhizomeAdRebornEnabled) {
     editor.putUserData(KERNEL_EDITOR_ID_KEY, document.removeUserData(KERNEL_EDITOR_ID_KEY))
   }
   else {

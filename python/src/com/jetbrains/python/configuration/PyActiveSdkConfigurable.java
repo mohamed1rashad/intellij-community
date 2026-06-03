@@ -2,6 +2,7 @@
 package com.jetbrains.python.configuration;
 
 import com.intellij.ide.DataManager;
+import com.intellij.ide.HelpTooltipKt;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
@@ -10,7 +11,6 @@ import com.intellij.openapi.module.Module;
 import com.intellij.openapi.options.UnnamedConfigurable;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectSdksModel;
 import com.intellij.openapi.ui.ComboBox;
@@ -19,6 +19,7 @@ import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.ui.CollectionComboBoxModel;
 import com.intellij.ui.ComboboxSpeedSearch;
 import com.intellij.ui.components.DropDownLink;
@@ -28,20 +29,35 @@ import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.packaging.PyPackageManagers;
 import com.jetbrains.python.packaging.PyPackagesNotificationPanel;
 import com.jetbrains.python.packaging.ui.PyInstalledPackagesPanel;
-import com.jetbrains.python.sdk.*;
+import com.jetbrains.python.sdk.AddInterpreterActions;
+import com.jetbrains.python.sdk.DialogAction;
+import com.jetbrains.python.sdk.ModuleOrProject;
+import com.jetbrains.python.sdk.PyCustomSdkUiProvider;
+import com.jetbrains.python.sdk.PyRenderedSdkType;
+import com.jetbrains.python.sdk.PySdkExtKt;
+import com.jetbrains.python.sdk.PySdkListCellRenderer;
+import com.jetbrains.python.sdk.PyTransferredSdkRootsKt;
+import com.jetbrains.python.sdk.PythonSdkConfigurationMutexKt;
+import com.jetbrains.python.sdk.PythonSdkType;
+import com.jetbrains.python.sdk.SdkExtKt;
 import com.jetbrains.python.sdk.legacy.PythonSdkUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import java.awt.Component;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.event.ItemEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
+import static com.jetbrains.python.sdk.ModuleExKt.setPythonSdk;
 import static com.jetbrains.python.sdk.PySdkRenderingKt.groupModuleSdksByTypes;
 import static com.jetbrains.python.sdk.legacy.PythonSdkUtil.isRemote;
 
@@ -77,7 +93,12 @@ public class PyActiveSdkConfigurable implements UnnamedConfigurable {
     myProject = project;
     myModule = module;
 
+    boolean sdkConfigurationInProgress = PythonSdkConfigurationMutexKt.isSdkConfigurationInProgress(project).getValue();
     mySdkCombo = buildSdkComboBox(this::onShowAllSelected, this::onSdkSelected);
+    if (sdkConfigurationInProgress) {
+      HelpTooltipKt.setToolTipText(mySdkCombo, HtmlChunk.text(PyBundle.message("active.sdk.dialog.link.add.interpreter.disabled.tooltip")));
+      mySdkCombo.setEnabled(false);
+    }
 
     final PackagesNotificationPanel packagesNotificationPanel = new PyPackagesNotificationPanel();
     myPackagesPanel = new PyInstalledPackagesPanel(myProject, packagesNotificationPanel);
@@ -90,16 +111,27 @@ public class PyActiveSdkConfigurable implements UnnamedConfigurable {
     final Pair<PyCustomSdkUiProvider, Disposable> customizer =
       customUiProvider == null ? null : new Pair<>(customUiProvider, myDisposable);
 
-    final JButton additionalAction;
-    additionalAction = new DropDownLink<>(PyBundle.message("active.sdk.dialog.link.add.interpreter.text"),
-                                          link -> createAddInterpreterPopup(project, module, link, this::updateSdkListAndSelect));
-
+    final DropDownLink<?> additionalAction = getAddInterpreterDropDownLink(project, module, sdkConfigurationInProgress);
     myMainPanel =
       buildPanel(project, mySdkCombo, additionalAction, freeTier ? myPanelWithPromo.getPanel() : myPackagesPanel, packagesNotificationPanel,
                  customizer);
 
     myInterpreterList = PyConfigurableInterpreterList.getInstance(myProject);
     myProjectSdksModel = myInterpreterList.getModel();
+  }
+
+  private @NotNull DropDownLink<?> getAddInterpreterDropDownLink(@NotNull Project project, @Nullable Module module, boolean sdkConfigurationInProgress) {
+    final DropDownLink<?> additionalAction = new DropDownLink<>(
+      PyBundle.message("active.sdk.dialog.link.add.interpreter.text"),
+      link -> createAddInterpreterPopup(project, module, link, this::updateSdkListAndSelect)
+    );
+    if (sdkConfigurationInProgress) {
+      additionalAction.setAutoHideOnDisable(false);
+      additionalAction.setEnabled(false);
+      HelpTooltipKt.setToolTipText(additionalAction,
+                                   HtmlChunk.text(PyBundle.message("active.sdk.dialog.link.add.interpreter.disabled.tooltip")));
+    }
+    return additionalAction;
   }
 
   @ApiStatus.Internal
@@ -277,12 +309,12 @@ public class PyActiveSdkConfigurable implements UnnamedConfigurable {
   }
 
   protected @Nullable Sdk getSdk() {
-    Sdk sdk = null;
+    Sdk sdk;
     if (myModule == null) {
       sdk = ProjectRootManager.getInstance(myProject).getProjectSdk();
     }
     else {
-      sdk = ModuleRootManager.getInstance(myModule).getSdk();
+      sdk = com.jetbrains.python.sdk.PythonSdkUtil.findPythonSdk(myModule);
     }
 
     if (sdk != null && PythonSdkUtil.isPythonSdk(sdk)) {
@@ -311,7 +343,7 @@ public class PyActiveSdkConfigurable implements UnnamedConfigurable {
 
     if (myModule != null) {
       PyTransferredSdkRootsKt.removeTransferredRoots(myModule, currentSdk);
-      PySdkExtKt.setPythonSdk(myModule, item);
+      setPythonSdk(myModule, item);
       PyTransferredSdkRootsKt.transferRoots(myModule, item);
     }
   }
@@ -323,7 +355,7 @@ public class PyActiveSdkConfigurable implements UnnamedConfigurable {
   }
 
   protected @NotNull List<Sdk> getAvailableSdks() {
-    return myInterpreterList.getAllPythonSdks(myProject, myModule, true);
+    return myInterpreterList.getAllPythonSdks(myModule);
   }
 
   private void updateSdkListAndSelect(@Nullable Sdk selectedSdk) {
@@ -333,7 +365,7 @@ public class PyActiveSdkConfigurable implements UnnamedConfigurable {
     items.add(null);
 
     final Map<PyRenderedSdkType, List<Sdk>> moduleSdksByTypes =
-      groupModuleSdksByTypes(allPythonSdks, myModule, sdk -> !PySdkExtKt.getSdkSeemsValid(sdk));
+      groupModuleSdksByTypes(allPythonSdks, myModule, sdk -> !SdkExtKt.isSdkSeemsValid(sdk));
 
     final PyRenderedSdkType[] renderedSdkTypes = PyRenderedSdkType.values();
     for (int i = 0; i < renderedSdkTypes.length; i++) {

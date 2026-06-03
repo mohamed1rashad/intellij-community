@@ -9,10 +9,10 @@ import com.intellij.openapi.vcs.changes.ui.ChangesViewContentManagerListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-private class ShelveChangeManagerProjectActivity : ProjectActivity {
+internal class ShelveChangeManagerProjectActivity : ProjectActivity {
   override suspend fun execute(project: Project) {
     val manager = project.serviceAsync<ShelveChangesManager>()
-    manager.projectOpened()
+    manager.scheduleShelvesLoading().await()
   }
 }
 

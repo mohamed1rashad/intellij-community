@@ -23,14 +23,15 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.uast.UCallExpression;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
  * A mutable bunch of CallHandlers which allows to dispatch a transformer call based on CallMatcher
- *
- * @author Tagir Valeev
  */
 public final class CallMapper<T> {
   private final Map<String, List<CallHandler<T>>> myMap = new LinkedHashMap<>();

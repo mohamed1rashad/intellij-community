@@ -41,6 +41,17 @@ c:com.intellij.execution.actions.StopAction
 com.intellij.execution.configuration.CompatibilityAwareRunProfile
 - com.intellij.execution.configurations.RunProfile
 - a:mustBeStoppedToRun(com.intellij.execution.configurations.RunConfiguration):Z
+f:com.intellij.execution.configuration.EnvFilesDialog
+- <init>(javax.swing.JComponent,java.util.List,com.intellij.openapi.project.Project):V
+- b:<init>(javax.swing.JComponent,java.util.List,com.intellij.openapi.project.Project,I,kotlin.jvm.internal.DefaultConstructorMarker):V
+- f:getProject():com.intellij.openapi.project.Project
+f:com.intellij.execution.configuration.EnvFilesDialogKt
+- sf:addEnvFile(java.awt.Component,com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.project.Project,kotlin.jvm.functions.Function1):V
+- bs:addEnvFile$default(java.awt.Component,com.intellij.openapi.vfs.VirtualFile,com.intellij.openapi.project.Project,kotlin.jvm.functions.Function1,I,java.lang.Object):V
+c:com.intellij.execution.configuration.EnvironmentVariablesComponent
+- <init>(com.intellij.openapi.project.Project):V
+c:com.intellij.execution.configuration.EnvironmentVariablesTextFieldWithBrowseButton
+- <init>(com.intellij.openapi.project.Project):V
 com.intellij.execution.configuration.PersistentAwareRunConfiguration
 - com.intellij.execution.configurations.RunConfiguration
 - a:needsToBeMigrated():Z
@@ -68,6 +79,12 @@ com.intellij.execution.runners.RunConfigurationWithSuppressedDefaultRunAction
 com.intellij.execution.target.TargetEnvironmentWizard$ValidationCallbackConsumer
 - java.util.function.Consumer
 - a:doValidateAll():java.util.List
+c:com.intellij.execution.ui.CommonProgramParametersPanel
+- <init>(com.intellij.openapi.project.Project):V
+- <init>(Z,com.intellij.openapi.project.Project):V
+a:com.intellij.execution.ui.RunConfigurationFragmentedEditor
+f:com.intellij.execution.ui.RunContentManagerImpl
+- getContentDescriptorToolWindowId(com.intellij.execution.runners.ExecutionEnvironment):java.lang.String
 com.intellij.execution.ui.TargetAwareRunConfigurationEditor
 - a:targetChanged(java.lang.String):V
 com.intellij.openapi.module.WorkingDirectoryProvider
@@ -89,10 +106,56 @@ com.intellij.terminal.JBTerminalWidgetListener
 - a:onTerminalStarted():V
 - a:showTabs():V
 - split(Z):V
+c:com.intellij.terminal.ProcessHandlerTtyConnector
+- f:getProcess():java.lang.Process
+c:com.intellij.terminal.TerminalExecutionConsole
+- com.intellij.execution.ui.ConsoleView
+- com.intellij.execution.ui.ObservableConsoleView
+- <init>(com.intellij.openapi.project.Project,I,I,com.intellij.execution.process.ProcessHandler):V
+- <init>(com.intellij.openapi.project.Project,I,I,com.intellij.execution.process.ProcessHandler,com.intellij.terminal.JBTerminalSystemSettingsProviderBase):V
+- <init>(com.intellij.openapi.project.Project,com.intellij.execution.process.ProcessHandler):V
+- <init>(com.intellij.openapi.project.Project,com.intellij.execution.process.ProcessHandler,com.intellij.terminal.JBTerminalSystemSettingsProviderBase):V
+- addChangeListener(com.intellij.execution.ui.ObservableConsoleView$ChangeListener,com.intellij.openapi.Disposable):V
+- addMessageFilter(com.intellij.execution.filters.Filter):V
+- allowHeavyFilters():V
+- attachToProcess(com.intellij.execution.process.ProcessHandler):V
+- f:attachToProcess(com.intellij.execution.process.ProcessHandler,com.jediterm.terminal.TtyConnector,Z):V
+- pf:attachToProcess(com.intellij.execution.process.ProcessHandler,Z):V
+- canPause():Z
+- clear():V
+- createConsoleActions():com.intellij.openapi.actionSystem.AnAction[]
+- dispose():V
+- getComponent():javax.swing.JComponent
+- getContentSize():I
+- getPreferredFocusableComponent():javax.swing.JComponent
+- getTerminalWidget():com.intellij.terminal.JBTerminalWidget
+- hasDeferredOutput():Z
+- s:isAcceptable(com.intellij.execution.process.ProcessHandler):Z
+- isOutputPaused():Z
+- performWhenNoDeferredOutput(java.lang.Runnable):V
+- print(java.lang.String,com.intellij.execution.ui.ConsoleViewContentType):V
+- printHyperlink(java.lang.String,com.intellij.execution.filters.HyperlinkInfo):V
+- scrollTo(I):V
+- setHelpId(java.lang.String):V
+- setOutputPaused(Z):V
+- withConvertLfToCrlfForNonPtyProcess(Z):com.intellij.terminal.TerminalExecutionConsole
+- withEnterKeyDefaultCodeEnabled(Z):com.intellij.terminal.TerminalExecutionConsole
+f:com.intellij.terminal.TerminalExecutionConsoleBuilder
+- <init>(com.intellij.openapi.project.Project):V
+- f:build():com.intellij.terminal.TerminalExecutionConsole
+- f:convertLfToCrlfForProcessWithoutPty(Z):com.intellij.terminal.TerminalExecutionConsoleBuilder
+- f:initialTermSize(com.jediterm.core.util.TermSize):com.intellij.terminal.TerminalExecutionConsoleBuilder
+- f:settingsProvider(com.intellij.terminal.JBTerminalSystemSettingsProviderBase):com.intellij.terminal.TerminalExecutionConsoleBuilder
 com.intellij.terminal.TerminalShellCommandHandler
 - sf:Companion:com.intellij.terminal.TerminalShellCommandHandler$Companion
 - a:execute(com.intellij.openapi.project.Project,java.lang.String,Z,java.lang.String,com.intellij.execution.Executor):Z
 - a:matches(com.intellij.openapi.project.Project,java.lang.String,Z,java.lang.String):Z
+f:com.intellij.terminal.TerminalTitle$State
+- <init>(java.lang.String,java.lang.String,java.lang.String,java.lang.String,Z):V
+- b:<init>(java.lang.String,java.lang.String,java.lang.String,java.lang.String,Z,I,kotlin.jvm.internal.DefaultConstructorMarker):V
+- f:component5():Z
+- f:copy(java.lang.String,java.lang.String,java.lang.String,java.lang.String,Z):com.intellij.terminal.TerminalTitle$State
+- bs:copy$default(com.intellij.terminal.TerminalTitle$State,java.lang.String,java.lang.String,java.lang.String,java.lang.String,Z,I,java.lang.Object):com.intellij.terminal.TerminalTitle$State
 com.intellij.terminal.ui.TerminalWidget
 - com.intellij.openapi.ui.ComponentContainer
 - a:addNotification(javax.swing.JComponent,com.intellij.openapi.Disposable):V

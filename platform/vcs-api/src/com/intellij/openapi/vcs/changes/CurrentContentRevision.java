@@ -2,7 +2,6 @@
 package com.intellij.openapi.vcs.changes;
 
 import com.intellij.openapi.application.ReadAction;
-import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.vcs.FilePath;
@@ -29,7 +28,7 @@ public class CurrentContentRevision implements ByteBackedContentRevision {
     if (vFile == null) {
       return null;
     }
-    Document doc = ReadAction.compute(() -> FileDocumentManager.getInstance().getDocument(vFile));
+    Document doc = ReadAction.computeBlocking(() -> FileDocumentManager.getInstance().getDocument(vFile));
     if (doc == null) {
       return null;
     }
@@ -37,7 +36,7 @@ public class CurrentContentRevision implements ByteBackedContentRevision {
       // In some cases like Jupyter Notebooks we need to make TextPresentationTransformers.toPersistent to have a correct text representation
       // In the case of Jupyter Notebooks it is a JSON representation of the notebook instead of representation with #%% cells separators
       String docText = doc.getText();
-      return ReadAction.compute(() -> TextPresentationTransformers.toPersistent(docText, vFile).toString());
+      return ReadAction.computeBlocking(() -> TextPresentationTransformers.toPersistent(docText, vFile).toString());
     }
   }
 

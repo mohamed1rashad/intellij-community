@@ -16,7 +16,9 @@ interface ProjectRootManager {
   fun setProjectSdk(sdk: Sdk?)
 }
 
-@Remote("com.intellij.openapi.roots.ProjectRootManager", rdTarget = RdTarget.FRONTEND)
+@Remote("com.intellij.openapi.roots.ProjectRootManager",
+        rdTarget = RdTarget.FRONTEND,
+        plugin = "com.jetbrains.performancePlugin/intellij.performanceTesting.frontend.split")
 interface FrontendProjectRootManager {
   fun getContentRoots(): Array<VirtualFile>
 }
@@ -27,7 +29,6 @@ fun Driver.findFile(relativePath: String, project: Project? = null): VirtualFile
       service<FrontendProjectRootManager>(project ?: singleProject()).getContentRoots()
         .firstNotNullOfOrNull { it.findFileByRelativePath(relativePath) }
     } else {
-      val cr = service<ProjectRootManager>(project ?: singleProject()).getContentRoots()
       // On Frontend the file will not be found unless it was opened previously
       service<ProjectRootManager>(project ?: singleProject()).getContentRoots()
         .firstNotNullOfOrNull { it.findFileByRelativePath(relativePath) }

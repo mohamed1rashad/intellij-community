@@ -18,18 +18,42 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.Gray;
+import com.intellij.ui.IslandsState;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JRootPane;
+import javax.swing.SwingUtilities;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Point;
 
 public class EditorEmptyTextPainter {
   public void paintEmptyText(@NotNull JComponent splitters, @NotNull Graphics g) {
-    if (JBUI.getInt("Islands", 0) != 1) {
-      doPaintEmptyText(splitters, g);
+    if (!IslandsState.Companion.isEnabled()) {
+      JRootPane rootPane = splitters.getRootPane();
+      if (rootPane.getGlassPane() == splitters) {
+        EditorsSplitters editorArea = UIUtil.findComponentOfType((JComponent)rootPane.getContentPane(), EditorsSplitters.class);
+        if (editorArea != null) {
+          Point shift = SwingUtilities.convertPoint(editorArea, 0, 0, splitters);
+          g.translate(shift.x, shift.y);
+          doPaintEmptyText(editorArea, g);
+          g.translate(-shift.x, -shift.y);
+        }
+        else {
+          doPaintEmptyText(splitters, g);
+        }
+      }
+      else {
+        doPaintEmptyText(splitters, g);
+      }
     }
   }
 
@@ -41,7 +65,9 @@ public class EditorEmptyTextPainter {
 
     UISettings.setupAntialiasing(g);
 
-    UIUtil.TextPainter painter = createTextPainter();
+    UIUtil.TextPainter painter = createTextPainter().withColor(JBColor.namedColor("Label.infoForeground", new JBColor(Gray._80, Gray._160)))
+      .withShortcutColor(JBColor.namedColor("Shortcut.foreground", new JBColor(0x0, 0xDFE1E5)));
+
     advertiseActions(splitters, painter);
     painter.draw(g, (width, height) -> {
       Dimension s = splitters.getSize();

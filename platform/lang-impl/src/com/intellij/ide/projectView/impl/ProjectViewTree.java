@@ -3,13 +3,14 @@ package com.intellij.ide.projectView.impl;
 
 import com.intellij.ide.dnd.aware.DnDAwareTree;
 import com.intellij.ide.projectView.impl.nodes.BasePsiNode;
-import com.intellij.ide.projectView.impl.nodes.PsiDirectoryNode;
+import com.intellij.ide.projectView.impl.nodes.NodeWithMeasurableExpand;
 import com.intellij.ide.util.treeView.AbstractTreeNode;
 import com.intellij.ide.util.treeView.PresentableNodeDescriptor;
 import com.intellij.openapi.actionSystem.DataSink;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.actionSystem.UiCompatibleDataProvider;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.presentation.FilePresentationService;
 import com.intellij.psi.PsiElement;
 import com.intellij.toolWindow.InternalDecoratorImpl;
@@ -28,12 +29,15 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JTree;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreeCellRenderer;
 import javax.swing.tree.TreeModel;
 import javax.swing.tree.TreePath;
-import java.awt.*;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.Point;
 
 /**
  * @author Konstantin Bulenkov
@@ -95,8 +99,8 @@ public class ProjectViewTree extends DnDAwareTree implements UiCompatibleDataPro
       return;
     }
     var value = TreeUtil.getUserObject(path.getLastPathComponent());
-    if (!(value instanceof PsiDirectoryNode)) {
-      return; // Only measure real directory expansion, not, say, classes or external libraries.
+    if (!(value instanceof NodeWithMeasurableExpand)) {
+      return;
     }
     var expandMeasurer = this.expandMeasurer;
     if (expandMeasurer != null) {
@@ -175,5 +179,11 @@ public class ProjectViewTree extends DnDAwareTree implements UiCompatibleDataPro
     }
     Project project = psi.getProject();
     return FilePresentationService.getInstance(project).getFileBackgroundColor(psi);
+  }
+
+  @Override
+  @ApiStatus.Internal
+  protected boolean isHorizontalAutoAlignEnabled() {
+    return Registry.is("ide.project.view.auto.align.horizontally");
   }
 }

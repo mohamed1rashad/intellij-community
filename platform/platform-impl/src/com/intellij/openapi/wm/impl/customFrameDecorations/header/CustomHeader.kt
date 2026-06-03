@@ -13,20 +13,55 @@ import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.openapi.wm.impl.customFrameDecorations.header.CustomWindowHeaderUtil.isCompactHeader
 import com.intellij.openapi.wm.impl.headertoolbar.HeaderClickTransparentListener
-import com.intellij.ui.*
+import com.intellij.ui.ColorUtil
+import com.intellij.ui.ExperimentalUI
+import com.intellij.ui.Gray
+import com.intellij.ui.JBColor
+import com.intellij.ui.UIBundle
+import com.intellij.ui.loadSmallApplicationIcon
 import com.intellij.ui.paint.LinePainter2D
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.ui.scale.ScaleContext
 import com.intellij.ui.scale.ScaleContextCache
-import com.intellij.util.ui.*
+import com.intellij.util.ui.JBEmptyBorder
+import com.intellij.util.ui.JBFont
+import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.StartupUiUtil
+import com.intellij.util.ui.UIUtil
 import com.jetbrains.JBR
 import com.jetbrains.WindowDecorations.CustomTitleBar
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
-import java.awt.event.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Dialog
+import java.awt.Font
+import java.awt.Frame
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.GraphicsEnvironment
+import java.awt.Insets
+import java.awt.Toolkit
+import java.awt.Window
+import java.awt.event.ActionEvent
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.beans.PropertyChangeListener
 import javax.accessibility.AccessibleContext
-import javax.swing.*
+import javax.swing.AbstractAction
+import javax.swing.Action
+import javax.swing.Icon
+import javax.swing.JComponent
+import javax.swing.JDialog
+import javax.swing.JFrame
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JPopupMenu
+import javax.swing.SwingUtilities
+import javax.swing.UIManager
 import javax.swing.border.Border
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -126,8 +161,6 @@ internal sealed class CustomHeader(@JvmField internal val window: Window) : JPan
   protected val productIcon: JComponent by lazy {
     createProductIcon()
   }
-
-  internal var borderPainter: BorderPainter = DefaultBorderPainter()
 
   init {
     isOpaque = true
@@ -287,11 +320,6 @@ internal sealed class CustomHeader(@JvmField internal val window: Window) : JPan
   open fun addMenuItems(menu: JPopupMenu) {
     val closeMenuItem = menu.add(createCloseAction(this))
     closeMenuItem.font = JBFont.label().deriveFont(Font.BOLD)
-  }
-
-  override fun paint(g: Graphics) {
-    super.paint(g)
-    borderPainter.paintAfterChildren(this, g)
   }
 
   override fun getAccessibleContext(): AccessibleContext {

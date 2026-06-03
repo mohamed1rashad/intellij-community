@@ -2,6 +2,7 @@
 package com.jetbrains.python.inspections;
 
 import com.jetbrains.python.fixtures.PyInspectionTestCase;
+import com.jetbrains.python.psi.LanguageLevel;
 import org.jetbrains.annotations.NotNull;
 
 public class PyTypedDictInspectionTest extends PyInspectionTestCase {
@@ -195,17 +196,6 @@ public class PyTypedDictInspectionTest extends PyInspectionTestCase {
                        ""\"
                            It's doc string
                        ""\"""");
-  }
-
-  public void testFieldOverwrittenByInheritance() {
-    doTestByText("""
-                   from typing import TypedDict
-                   class X(TypedDict):
-                       y: int
-                   class Y(TypedDict):
-                       y: str
-                   class XYZ<warning descr="Cannot overwrite TypedDict field 'y' while merging">(X, Y)</warning>:
-                       <warning descr="Cannot overwrite TypedDict field">y</warning>: bool""");
   }
 
   public void testIncorrectTypedDictArguments() {
@@ -531,6 +521,176 @@ public class PyTypedDictInspectionTest extends PyInspectionTestCase {
     );
   }
 
+  // PY-76878
+  public void testMixedMutableAndReadOnlyFieldsMerging313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        from typing_extensions import ReadOnly
+        
+        class TD_A1(TypedDict):
+            x: int
+            y: ReadOnly[int]
+        
+        class TD_A2(TypedDict):
+            x: float
+            y: ReadOnly[float]
+        
+        class TD_A<warning descr="Base classes define field 'x' incompatibly">(TD_A1, TD_A2)</warning>:
+            pass
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testReadOnlyMutableMergeConflict313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        from typing_extensions import ReadOnly
+        
+        class Base1(TypedDict):
+            name: ReadOnly[str]
+        
+        class Base2(TypedDict):
+            name: str
+        
+        class Child<warning descr="Base classes define field 'name' incompatibly">(Base1, Base2)</warning>:
+            pass
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testMutableTypeMismatchMerging313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        
+        class Base1(TypedDict):
+            items: list[int]
+        
+        class Base2(TypedDict):
+            items: list[str]
+        
+        class Child<warning descr="Base classes define field 'items' incompatibly">(Base1, Base2)</warning>:
+            pass
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testRequiredNotRequiredMergeConflict313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict, NotRequired
+        
+        class Base1(TypedDict, total=False):
+            name: str  # NotRequired by default
+        
+        class Base2(TypedDict):
+            name: str  # Required
+        
+        class Child<warning descr="Field \\"name\\" cannot be redefined as NotRequired">(Base1, Base2)</warning>:
+            pass
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testReadOnlyOverrideMutableRequired313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        from typing_extensions import ReadOnly
+        
+        class Base(TypedDict):
+            name: str
+        
+        class Child(Base):
+            <warning descr="Cannot override mutable required field 'name' as read-only">name</warning>: ReadOnly[str]
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testOverrideMutableRequiredAsNotRequired313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict, NotRequired
+        
+        class Base(TypedDict):
+            name: str
+        
+        class Child(Base):
+            <warning descr="Cannot override mutable required field 'name' as not-required">name</warning>: NotRequired[str]
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testOverrideReadOnlyRequiredAsNotRequired313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict, NotRequired
+        from typing_extensions import ReadOnly
+        
+        class Base(TypedDict):
+            name: ReadOnly[str]
+        
+        class Child(Base):
+            <warning descr="Cannot override read-only required field 'name' as not-required">name</warning>: ReadOnly[NotRequired[str]]
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testValidReadOnlyOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        from typing_extensions import ReadOnly
+        
+        class Base(TypedDict):
+            name: ReadOnly[str]
+        
+        class Child(Base):
+            name: str  # OK - can override read-only as mutable
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testReadOnlyTypeMismatchOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        from typing_extensions import ReadOnly
+        
+        class Base(TypedDict):
+            name: ReadOnly[str]
+        
+        class Child(Base):
+            <warning descr="Type 'int' is incompatible with expected type 'str'">name</warning>: ReadOnly[int]
+        """);
+    });
+  }
+
+  // PY-76878
+  public void testMutableInvariantMismatchOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> {
+      doTestByText("""
+        from typing import TypedDict
+        
+        class Base(TypedDict):
+            items: list[int]
+        
+        class Child(Base):
+            <warning descr="Type 'list[str]' is incompatible with expected type 'list[int]'">items</warning>: list[str]
+        """);
+    });
+  }
+
   // PY-78174
   public void testRawDictTypeInferredForDictLiteral() {
     doTestByText("""
@@ -538,6 +698,582 @@ public class PyTypedDictInspectionTest extends PyInspectionTestCase {
                    def f():
                        d['name'] = 1
                    """);
+  }
+
+  // PY-76878
+  public void testReadonlyListInvarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+    from typing import TypedDict
+    from typing_extensions import ReadOnly
+    
+    class Animal: ...
+    class Dog(Animal): ...
+
+    class Base(TypedDict):
+        items: ReadOnly[list[Animal]]
+
+    class Child(Base):
+        <warning descr="Type 'list[Dog]' is incompatible with expected type 'list[Animal]'">items</warning>: ReadOnly[list[Dog]]
+    """));
+  }
+
+  // PY-76878
+  public void testReadonlySequenceCovarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+    from typing import TypedDict, Sequence
+    from typing_extensions import ReadOnly
+
+    class Animal: ...
+    class Dog(Animal): ...
+
+    class Base(TypedDict):
+        items: ReadOnly[Sequence[Animal]]
+
+    class Child(Base):
+        items: ReadOnly[list[Dog]]  # OK
+    """));
+  }
+
+  // PY-76878
+  public void testReadonlyDictInvarianceVsMappingCovariance313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+    from typing import TypedDict, Mapping
+    from typing_extensions import ReadOnly
+
+    class Animal: ...
+    class Dog(Animal): ...
+
+    class Base1(TypedDict):
+        m: ReadOnly[dict[str, Animal]]
+
+    class BadChild(Base1):
+        <warning descr="Type 'dict[str, Dog]' is incompatible with expected type 'dict[str, Animal]'">m</warning>: ReadOnly[dict[str, Dog]]
+
+    class Base2(TypedDict):
+        m: ReadOnly[Mapping[str, Animal]]
+
+    class GoodChild(Base2):
+        m: ReadOnly[dict[str, Dog]]  # OK
+    """));
+  }
+
+  // PY-76878
+  public void testReadonlyCallableVarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+    from typing import TypedDict, Callable
+    from typing_extensions import ReadOnly
+
+    class Animal: ...
+    class Dog(Animal): ...
+
+    class Base(TypedDict):
+        f: ReadOnly[Callable[[Dog], Animal]]
+
+    class GoodChild(Base):
+        f: ReadOnly[Callable[[Animal], Dog]]  # OK
+
+    class BadChild(Base):
+        <warning descr="Type '(Dog) -> object' is incompatible with expected type '(Dog) -> Animal'">f</warning>: ReadOnly[Callable[[Dog], object]]
+    """));
+  }
+
+  // PY-76878
+  public void testReadonlyTupleCovarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+    from typing import TypedDict
+    from typing_extensions import ReadOnly
+
+    class Animal: ...
+    class Dog(Animal): ...
+
+    class Base(TypedDict):
+        t1: ReadOnly[tuple[Animal, Animal]]
+        t2: ReadOnly[tuple[Animal, ...]]
+
+    class Child(Base):
+        t1: ReadOnly[tuple[Dog, Dog]]  # OK
+        t2: ReadOnly[tuple[Dog, ...]]  # OK
+    """));
+  }
+
+  // PY-76878
+  public void testReadonlyMutableSequenceInvarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, MutableSequence
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class Base(TypedDict):
+          items: ReadOnly[MutableSequence[Animal]]
+
+      class Child(Base):
+          <warning descr="Type 'MutableSequence[Dog]' is incompatible with expected type 'MutableSequence[Animal]'">items</warning>: ReadOnly[MutableSequence[Dog]]
+      """));
+  }
+
+  // PY-76878
+  public void testReadonlyMappingKeyInvarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, Mapping
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class Base(TypedDict):
+          m: ReadOnly[Mapping[Animal, int]]
+
+      class Child(Base):
+          <warning descr="Type 'Mapping[Dog, int]' is incompatible with expected type 'Mapping[Animal, int]'">m</warning>: ReadOnly[Mapping[Dog, int]]
+      """));
+  }
+
+  // PY-76878
+  public void testReadonlySequenceVsCollectionCovarianceAndWidening313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, Sequence, Collection
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class BaseOk(TypedDict):
+          items: ReadOnly[Collection[Animal]]
+
+      class ChildOk(BaseOk):
+          items: ReadOnly[Sequence[Dog]]  # OK: Sequence[Dog] <: Collection[Dog] <: Collection[Animal]
+
+      class BaseBad(TypedDict):
+          items: ReadOnly[Sequence[Dog]]
+
+      class ChildBad(BaseBad):
+          <warning descr="Type 'Collection[Animal]' is incompatible with expected type 'Sequence[Dog]'">items</warning>: ReadOnly[Collection[Animal]]
+      """));
+  }
+
+  // PY-76878
+  public void testReadonlyDequeInvarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, Deque
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class Base(TypedDict):
+          dq: ReadOnly[Deque[Animal]]
+
+      class Child(Base):
+          <warning descr="Type 'deque[Dog]' is incompatible with expected type 'deque[Animal]'">dq</warning>: ReadOnly[Deque[Dog]]
+      """));
+  }
+
+  // PY-76878
+  public void testReadonlyMutableMappingInvarianceOverride313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, MutableMapping
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class Base(TypedDict):
+          m: ReadOnly[MutableMapping[str, Animal]]
+
+      class Child(Base):
+          <warning descr="Type 'MutableMapping[str, Dog]' is incompatible with expected type 'MutableMapping[str, Animal]'">m</warning>: ReadOnly[MutableMapping[str, Dog]]
+      """));
+  }
+
+  // PY-76878
+  public void testReadonlyMappingFromDefaultDictIsOk313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, Mapping, DefaultDict
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class Base(TypedDict):
+          m: ReadOnly[Mapping[str, Animal]]
+
+      class Child(Base):
+          m: ReadOnly[DefaultDict[str, Dog]]  # OK: DefaultDict[str, Dog] <: Mapping[str, Dog] <: Mapping[str, Animal]
+      """));
+  }
+
+  // PY-76878
+  public void testReadonlyIterableCovarianceAndWidening313() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+      from typing import TypedDict, Iterable
+      from typing_extensions import ReadOnly
+
+      class Animal: ...
+      class Dog(Animal): ...
+
+      class BaseOk(TypedDict):
+          it: ReadOnly[Iterable[Animal]]
+
+      class ChildOk(BaseOk):
+          it: ReadOnly[list[Dog]]  # OK: list[Dog] <: Iterable[Dog] <: Iterable[Animal]
+
+      class BaseBad(TypedDict):
+          it: ReadOnly[Iterable[Dog]]
+
+      class ChildBad(BaseBad):
+          <warning descr="Type 'Iterable[Animal]' is incompatible with expected type 'Iterable[Dog]'">it</warning>: ReadOnly[Iterable[Animal]]
+      """));
+  }
+
+  // PY-85421
+  public void testClosedParameterRequiresBooleanValue() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+      
+      class IllegalTD(TypedDict, closed=<warning descr="Value of 'closed' must be True or False">42 == 42</warning>):
+          name: str
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testClosedParameterInheritanceConstraints() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+  
+      class ClosedBase(TypedDict, closed=True):
+          name: str
+     
+      class IllegalChild1(ClosedBase, <warning descr="Cannot set 'closed=False' when superclass is 'closed=True'">closed=False</warning>):
+          pass
+      
+      class ExtraItemsBase(TypedDict, extra_items=int):
+          name: str
+      
+      class IllegalChild2(ExtraItemsBase, <warning descr="Cannot set 'closed=False' when superclass has 'extra_items'">closed=False</warning>):
+          pass
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testClosedPropertyInheritedFromSuperclass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+      
+      # > If ``closed`` is not provided, the behavior is inherited from the superclass.
+      # > If the superclass is TypedDict itself or the superclass does not have ``closed=True``
+      # > or the ``extra_items`` parameter, the previous TypedDict behavior is preserved:
+      # > arbitrary extra items are allowed. If the superclass has ``closed=True``, the
+      # > child class is also closed.
+      
+      class BaseMovie(TypedDict, closed=True):
+          name: str
+      
+      class MovieA(BaseMovie):
+          pass
+      
+      class MovieB(BaseMovie, closed=True):
+          pass
+      
+      class MovieC(MovieA):
+          <warning descr="\\"MovieC\\" is a closed TypedDict; extra key \\"age\\" not allowed">age</warning>: int
+      
+      class MovieD(MovieB):
+          <warning descr="\\"MovieD\\" is a closed TypedDict; extra key \\"age\\" not allowed">age</warning>: int
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testClosedTrueRequiresReadOnlyExtraItems() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing import Never
+      from typing_extensions import TypedDict, ReadOnly
+      
+      class ExtraItemsBase(TypedDict, extra_items=int):
+          name: str
+      
+      class MovieES(TypedDict, extra_items=ReadOnly[str]):
+          pass
+      
+      class MovieClosed(MovieES, closed=True):  # OK
+          pass
+      
+      class MovieNever(MovieES, extra_items=Never):
+          pass
+      
+      class IllegalCloseNonReadOnly(ExtraItemsBase, <warning descr="Cannot set 'closed=True' when superclass has non-readonly 'extra_items'">closed=True</warning>):
+          pass
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsCannotBeRequiredOrNotRequired() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing import NotRequired, Required
+      from typing_extensions import TypedDict
+      
+      class IllegalExtraItemsTD(TypedDict, <warning descr="'extra_items' value cannot be 'Required[...]'">extra_items=Required[int]</warning>):
+          name: str
+      
+      class AnotherIllegalExtraItemsTD(TypedDict, <warning descr="'extra_items' value cannot be 'NotRequired[...]'">extra_items=NotRequired[int]</warning>):
+          name: str
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsImplicitlyNotRequired() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+      
+      class MovieEI(TypedDict, extra_items=int):
+          name: str
+      
+      def del_items(movie: MovieEI) -> None:
+          del movie[<warning descr="Key 'name' of TypedDict 'MovieEI' cannot be deleted">"name"</warning>]
+          del movie["year"]
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsRedeclarationRequiresReadOnlyInSuperclass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing import ReadOnly
+      
+      from typing_extensions import TypedDict
+      
+      class ReadOnlyBase(TypedDict, extra_items=ReadOnly[int]):
+          pass
+      
+      class NonReadOnlyBase(TypedDict, extra_items=int):
+          pass
+      
+      class ReadOnlyChild(ReadOnlyBase, extra_items=ReadOnly[bool]):
+          pass
+      
+      class MutableChild(ReadOnlyBase, extra_items=int):
+          pass
+      
+      class IllegalChild(NonReadOnlyBase, <warning descr="Cannot change 'extra_items' type unless it is 'ReadOnly' in the superclass">extra_items=int</warning>):
+          pass
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsEnforcesNotRequiredForNewKeys() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict, ReadOnly
+      from typing import NotRequired
+      
+      class MovieBase2(TypedDict, extra_items=int | None):
+          name: str
+      
+      class MovieRequiredYear(MovieBase2):
+          <warning descr="Required key 'year' is not known to 'MovieBase2'">year</warning>: int | None
+      
+      class MovieNotRequiredYear(MovieBase2):
+          <warning descr="Expected type 'int | None', got 'int' instead">year</warning>: NotRequired[int]
+      
+      class MovieWithYear(MovieBase2):  # OK
+          year: NotRequired[int | None]
+      
+      class BookBase(TypedDict, extra_items=ReadOnly[int | None]):
+          name: str
+      
+      class BookWithPublisher(BookBase):
+          <warning descr="'str' is not assignable to 'int | None'">publisher</warning>: str
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsTypedDictAssignmentWithRequiredKeyMismatch() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+      from typing import NotRequired
+      
+      class MovieBase(TypedDict, extra_items=int | None):
+          name: str
+      
+      class MovieDetails(TypedDict, extra_items=int | None):
+          name: str
+          year: NotRequired[int]
+      
+      class MovieDetails2(TypedDict, extra_items=int | None):
+          name: str
+          year: NotRequired[int | None]
+      
+      details: MovieDetails = {"name": "Kill Bill Vol. 1", "year": 2003}
+      <warning descr="Expected type 'int | None', got 'int' instead">movie</warning>: MovieBase = details
+      
+      details2: MovieDetails2 = {"name": "Kill Bill Vol. 1", "year": 2003}
+      movie2: MovieBase = details2  # OK
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsAssignmentRequiresNotRequiredKeys() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+      
+      # > - If ``extra_items`` is not read-only:
+      # >   - The key is non-required.
+      # >   - The key's value type is :term:`consistent` with ``T``.
+      # >   - The key is not in ``S``.
+      
+      class MovieBase(TypedDict, extra_items=int | None):
+          name: str
+      
+      class MovieWithYear(TypedDict, extra_items=int | None):
+          name: str
+          year: int | None
+      
+      details: MovieWithYear = {"name": "Kill Bill Vol. 1", "year": 2003}
+      <warning descr="'year' is not required in 'MovieBase', but it is required in 'MovieWithYear'">movie3</warning>: MovieBase = details
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testReadOnlyExtraItemsAllowNarrowerTypesInSubclass() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict, ReadOnly
+  
+      # > When ``extra_items`` is specified to be read-only on a TypedDict type, it is
+      # > possible for an item to have a :term:`narrower <narrow>` type than the
+      # > ``extra_items`` argument.
+  
+      class MovieSI(TypedDict, extra_items=ReadOnly[str | int]):
+          name: str
+  
+      class MovieDetails4(TypedDict, extra_items=int):
+          name: str
+          year: NotRequired[int]
+  
+      class MovieDetails5(TypedDict, extra_items=int):
+          name: str
+          actors: list[str]
+  
+      details4: MovieDetails4 = {"name": "Kill Bill Vol. 2", "year": 2004}
+      details5: MovieDetails5 = {"name": "Kill Bill Vol. 2", "actors": ["Uma Thurman"]}
+      movie4: MovieSI = details4  # OK. 'int' is assignable to 'str | int'.
+      <warning descr="'list[str]' is not assignable to 'str | int'">movie5</warning>: MovieSI = details5
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testExtraItemsTypeCompatibilityCheckedInAssignment() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing_extensions import TypedDict
+  
+      # > ``extra_items`` as a pseudo-item follows the same rules that other items have,
+      # > so when both TypedDicts types specify ``extra_items``, this check is naturally
+      # > enforced.
+  
+      class MovieExtraInt(TypedDict, extra_items=int):
+          name: str
+  
+      class MovieExtraStr(TypedDict, extra_items=str):
+          name: str
+  
+      extra_int: MovieExtraInt = {"name": "No Country for Old Men", "year": 2007}
+      extra_str: MovieExtraStr = {"name": "No Country for Old Men", "description": ""}
+      <warning descr="'str' is not assignable to extra items type 'int'">extra_int</warning> = extra_str
+      <warning descr="'int' is not assignable to extra items type 'str'">extra_str</warning> = extra_int
+      """
+    ));
+  }
+
+  // PY-85421
+  public void testNonClosedTypedDictHasImplicitReadOnlyObjectExtraItems() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText("""
+    from typing_extensions import TypedDict
+
+    class MovieExtraInt(TypedDict, extra_items=int):
+        name: str
+
+    class MovieNotClosed(TypedDict):
+        name: str
+
+    extra_int2: MovieExtraInt = {"name": "No Country for Old Men", "year": 2007}
+    not_closed: MovieNotClosed = {"name": "No Country for Old Men"}
+    <warning descr="Implicit ReadOnly[object] on 'MovieNotClosed' is not assignable to 'int'">extra_int2</warning> = not_closed
+    not_closed = extra_int2  # OK
+    """));
+  }
+
+  // PY-89006
+  public void testDictModificationMethodsAllowedWhenAssignableToDict() {
+    runWithLanguageLevel(LanguageLevel.PYTHON313, () -> doTestByText(
+      """
+      from typing import NotRequired
+      from typing_extensions import TypedDict
+
+      # > The TypedDict type is assignable to dict[str, VT] if all items satisfy:
+      # > - The value type of the item is consistent with VT.
+      # > - The item is not read-only.
+      # > - The item is not required.
+      # > In this case, methods that are previously unavailable on a TypedDict are allowed,
+      # > with signatures matching dict[str, VT].
+
+      class IntDict(TypedDict, extra_items=int):
+          pass
+
+      class IntDictWithNum(IntDict):
+          num: NotRequired[int]
+
+      m: IntDictWithNum = {"num": 1, "bar": 2}
+      m.clear()
+      m.popitem()
+      m.get("bar")
+      m.get("unknown_key")
+
+      class RegularTypedDict(TypedDict):
+          name: str
+          year: int
+
+      r = RegularTypedDict(name="Alien", year=1979)
+      r.<warning descr="This operation might break TypedDict consistency">clear</warning>()
+      r.<warning descr="This operation might break TypedDict consistency">popitem</warning>()
+      """
+    ));
+  }
+
+  // PY-76847
+  public void testParamOverlapsWithTypedDict() {
+    doTestByText("""
+    from typing import TypedDict, Unpack
+    class TD1(TypedDict):
+        v1: Required[int]
+        v2: NotRequired[str]
+        v3: Required[str]
+    
+    def foo1(<warning descr="Named parameter 'v1' conflicts with a field of the TypedDict 'TD1'">v1: int</warning>, <warning descr="Named parameter 'v2' conflicts with a field of the TypedDict 'TD1'">v2: str</warning>, **kwargs: Unpack[TD1]) -> None:
+        ...
+    def foo1(v1: int, v2: str, /, **kwargs: Unpack[TD1]) -> None: # pos-only OK
+        ...
+    """);
   }
 
   @NotNull

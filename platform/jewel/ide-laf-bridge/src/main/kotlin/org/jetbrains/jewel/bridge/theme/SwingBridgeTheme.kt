@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.jewel.bridge.BridgeMessageResourceResolver
 import org.jetbrains.jewel.bridge.BridgePainterHintsProvider
+import org.jetbrains.jewel.bridge.BridgePlatformCursorController
 import org.jetbrains.jewel.bridge.BridgeTypography
 import org.jetbrains.jewel.bridge.BridgeUriHandler
 import org.jetbrains.jewel.bridge.SwingBridgeReader
@@ -26,6 +27,7 @@ import org.jetbrains.jewel.ui.LocalMenuItemShortcutProvider
 import org.jetbrains.jewel.ui.LocalTypography
 import org.jetbrains.jewel.ui.icon.LocalNewUiChecker
 import org.jetbrains.jewel.ui.painter.LocalPainterHintsProvider
+import org.jetbrains.jewel.ui.platform.LocalPlatformCursorController
 import org.jetbrains.jewel.ui.theme.BaseJewelTheme
 import org.jetbrains.jewel.ui.util.LocalMessageResourceResolverProvider
 
@@ -43,7 +45,10 @@ public fun SwingBridgeTheme(content: @Composable () -> Unit) {
         swingCompatMode = true,
     ) {
         CompositionLocalProvider(
-            LocalPainterHintsProvider provides BridgePainterHintsProvider(themeData.themeDefinition.isDark),
+            LocalPainterHintsProvider provides
+                remember(themeData.themeDefinition.isDark) {
+                    BridgePainterHintsProvider(themeData.themeDefinition.isDark)
+                },
             LocalNewUiChecker provides BridgeNewUiChecker,
             LocalDensity provides scaleDensityWithIdeScale(LocalDensity.current),
             LocalClipboard provides remember { JewelBridgeClipboard() },
@@ -51,7 +56,8 @@ public fun SwingBridgeTheme(content: @Composable () -> Unit) {
             LocalMenuItemShortcutHintProvider provides BridgeMenuItemShortcutHintProvider,
             LocalTypography provides BridgeTypography,
             LocalUriHandler provides BridgeUriHandler,
-            LocalMessageResourceResolverProvider provides BridgeMessageResourceResolver(),
+            LocalMessageResourceResolverProvider provides remember { BridgeMessageResourceResolver() },
+            LocalPlatformCursorController provides BridgePlatformCursorController,
         ) {
             content()
         }

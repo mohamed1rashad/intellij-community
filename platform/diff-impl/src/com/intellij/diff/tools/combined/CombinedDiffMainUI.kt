@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.diff.tools.combined
 
 import com.intellij.CommonBundle
@@ -17,7 +17,15 @@ import com.intellij.diff.util.DiffUserDataKeysEx
 import com.intellij.diff.util.DiffUtil
 import com.intellij.ide.impl.DataManagerImpl
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.actionSystem.*
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.PlatformCoreDataKeys
+import com.intellij.openapi.actionSystem.Presentation
+import com.intellij.openapi.actionSystem.UiDataProvider
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.diff.DiffBundle
@@ -35,7 +43,11 @@ import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.mac.touchbar.Touchbar
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,7 +63,7 @@ import javax.swing.SwingUtilities
 import kotlin.math.max
 
 @ApiStatus.Internal
-class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToChangeAction: AnAction?) : Disposable {
+class CombinedDiffMainUI(private val model: CombinedDiffModel, goToChangeAction: AnAction) : Disposable {
   private val ourDisposable = Disposer.newCheckedDisposable().also { Disposer.register(this, it) }
 
   @OptIn(DelicateCoroutinesApi::class)
@@ -75,8 +87,8 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
     combinedDiffUIState,
     mainPanel,
     diffToolChooser,
+    context,
     goToChangeAction,
-    context
   )
 
   private val combinedViewer get() = context.getUserData(COMBINED_DIFF_VIEWER_KEY)
@@ -109,11 +121,11 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
   }
 
   @RequiresEdt
-  internal fun setContent(viewer: CombinedDiffViewer, blockState: BlockState) {
+  internal fun setContent(viewer: CombinedDiffViewer) {
     clear()
     contentPanel.setContent(viewer.component)
     val toolbarComponents = viewer.init()
-    mainToolbar.updateToolbar(blockState, toolbarComponents.toolbarActions)
+    mainToolbar.updateToolbar(toolbarComponents.toolbarActions)
     buildActionPopup(toolbarComponents.popupActions)
   }
 
@@ -187,7 +199,7 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
     }
   }
 
-  private class MyDiffToolChooser(
+  internal class MyDiffToolChooser(
     val context: DiffContext,
     val model: CombinedDiffModel,
     val settings: DiffSettings,
@@ -266,7 +278,6 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
       sink[CommonDataKeys.PROJECT] = context.project
       sink[PlatformCoreDataKeys.HELP_ID] = context.getUserData(DiffUserDataKeys.HELP_ID) ?: "reference.dialogs.diff.file"
       sink[DiffDataKeys.DIFF_CONTEXT] = context
-
       DataSink.uiDataSnapshot(sink, context.getUserData(DiffUserDataKeys.DATA_PROVIDER))
       DataSink.uiDataSnapshot(sink, getCurrentRequest()?.getUserData(DiffUserDataKeys.DATA_PROVIDER))
       DataSink.uiDataSnapshot(sink, contentPanel.targetComponent as? UiDataProvider
@@ -291,7 +302,7 @@ class CombinedDiffMainUI(private val model: CombinedDiffModel, private val goToC
   }
 }
 
-private class ShowActionGroupPopupAction(
+internal class ShowActionGroupPopupAction(
   private val parentComponent: JComponent,
   private val popupActionGroup: DefaultActionGroup
 ) : DumbAwareAction() {

@@ -4,6 +4,9 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.intentions.contexts
 
 import com.intellij.refactoring.RefactoringBundle
 import com.intellij.usageView.UsageInfo
+import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaSession
+import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.idea.base.projectStructure.languageVersionSettings
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.KotlinChangeInfo
@@ -11,7 +14,16 @@ import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.KotlinChangeSign
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.KotlinMethodDescriptor
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.KotlinParameterInfo
 import org.jetbrains.kotlin.idea.k2.refactoring.checkSuperMethods
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.idea.references.mainReference
+import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtCallableDeclaration
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtContextParameterList
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtParameterList
+import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
 import org.jetbrains.kotlin.psi.psiUtil.parameterIndex
 import org.jetbrains.kotlin.utils.addToStdlib.lastIsInstanceOrNull
@@ -22,19 +34,22 @@ object ContextParameterUtils {
      */
     fun isConvertibleContextParameter(ktParameter: KtParameter): Boolean {
         if (!ktParameter.languageVersionSettings.supportsFeature(LanguageFeature.ContextParameters)) return false
-        val contextParameterList = ktParameter.parent as? KtContextReceiverList ?: return false
+        val contextParameterList = ktParameter.parent as? KtContextParameterList ?: return false
         val contextParameterListOwner = contextParameterList.ownerDeclaration
         return contextParameterListOwner is KtCallableDeclaration
     }
 
     /**
      * Checks if the given [KtParameter] is a value parameter that can be converted into a context parameter.
+     * The owner function must be a named function with a name identifier.
+     * Parameters of lambdas and anonymous functions are not allowed.
      */
     fun isValueParameterConvertibleToContext(ktParameter: KtParameter): Boolean {
         if (!ktParameter.languageVersionSettings.supportsFeature(LanguageFeature.ContextParameters)) return false
         val valueParameterList = ktParameter.parent as? KtParameterList ?: return false
-        val ownerFunction = valueParameterList.ownerFunction
-        return ownerFunction != null && ownerFunction !is KtConstructor<*>
+        val ownerFunction = valueParameterList.ownerFunction ?: return false
+        val namedFunction = ownerFunction as? KtNamedFunction ?: return false
+        return namedFunction.nameIdentifier != null
     }
 
     /**
@@ -84,11 +99,7 @@ object ContextParameterUtils {
      * The utility mitigates the awkward declaration of context parameters in the Kotlin PSI hierarchy.
      */
     fun KtCallableDeclaration.getContextParameters(): List<KtParameter>? {
-        return when (this) {
-            is KtNamedFunction -> contextReceiverList?.contextParameters()
-            is KtProperty -> contextReceiverList?.contextParameters()
-            else -> null
-        }
+        return takeIf { this is KtNamedFunction || this is KtProperty }?.contextParameters
     }
 
     /**
@@ -108,4 +119,13 @@ object ContextParameterUtils {
      */
     fun isAnonymousParameter(ktParameter: KtParameter): Boolean =
         ktParameter.name.let { name -> !name.isNullOrEmpty() && name.all { char -> char == '_' }}
+
+    /**
+     * Checks if the given call expression is a call to the `kotlin.context` function.
+     */
+    @OptIn(KaExperimentalApi::class)
+    fun KaSession.isKotlinContextCall(call: KtCallExpression): Boolean {
+        val symbol = call.calleeExpression?.mainReference?.resolveToSymbol() as? KaFunctionSymbol ?: return false
+        return symbol.callableId?.asSingleFqName() == FqName("kotlin.context")
+    }
 }

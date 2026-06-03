@@ -4,9 +4,10 @@ package com.intellij.usageView;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.content.Content;
+import com.intellij.util.concurrency.annotations.RequiresEdt;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 
 
 public abstract class UsageViewContentManager {
@@ -30,5 +31,6 @@ public abstract class UsageViewContentManager {
 
   public abstract Content getSelectedContent();
 
+  @RequiresEdt
   public abstract void closeContent(@NotNull Content usageView);
 }

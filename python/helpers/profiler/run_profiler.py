@@ -1,15 +1,16 @@
+import argparse
 import os
 import sys
 import time
 import traceback
-import argparse
 from socket import AF_INET
 from socket import SOCK_STREAM
 from socket import socket
 
 from _prof_imports import ProfilerResponse
 from prof_io import ProfWriter, ProfReader
-from prof_util import generate_snapshot_filepath, stats_to_response, get_snapshot_basepath, save_main_module, execfile, get_fullname
+from prof_util import generate_snapshot_filepath, stats_to_response, \
+    get_snapshot_basepath, save_main_module, execfile, get_fullname
 
 base_snapshot_path = os.getenv('PYCHARM_SNAPSHOT_PATH')
 remote_run = bool(os.getenv('PYCHARM_REMOTE_RUN', ''))
@@ -161,17 +162,31 @@ def exit_with_error(message):
     sys.stderr.write(message + "\n")
     sys.exit(1)
 
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Python Profiler')
     parser.add_argument('host', help='Host to connect to')
     parser.add_argument('port', type=int, help='Port number to connect to')
+    parser.add_argument('-m', '--module', help='Module to profile')
 
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-m', '--module', help='Module to profile')
-    group.add_argument('file', nargs='?', help='File to profile')
+    args, remaining_args = parser.parse_known_args()
 
-    args, remaining = parser.parse_known_args()
-    return args, remaining
+    if args.module:
+        # When -m is specified, all remaining args go to the module
+        args.file = None
+        return args, remaining_args
+
+    # When -m is not specified, parse file and its arguments
+    remaining_parser = argparse.ArgumentParser(add_help=False)
+    remaining_parser.add_argument('file', nargs='?', help='Python file to profile')
+    remaining_parser.add_argument('args', nargs=argparse.REMAINDER, help='Arguments to pass to the target')
+
+    remaining_namespace = remaining_parser.parse_args(remaining_args)
+
+    args.file = remaining_namespace.file
+    remaining_args = remaining_namespace.args
+
+    return args, remaining_args
 
 def main():
     args, remaining = parse_arguments()

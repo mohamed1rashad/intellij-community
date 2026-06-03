@@ -7,7 +7,16 @@ import com.intellij.icons.AllIcons
 import com.intellij.ide.presentation.Presentation
 import com.intellij.openapi.module.Module
 import com.intellij.psi.xml.XmlFile
-import com.intellij.util.xml.*
+import com.intellij.util.xml.Attribute
+import com.intellij.util.xml.Convert
+import com.intellij.util.xml.DefinesXml
+import com.intellij.util.xml.DomElement
+import com.intellij.util.xml.DomFileDescription
+import com.intellij.util.xml.GenericAttributeValue
+import com.intellij.util.xml.NameValue
+import com.intellij.util.xml.Referencing
+import com.intellij.util.xml.Required
+import com.intellij.util.xml.SubTagList
 import org.jetbrains.idea.devkit.dom.impl.ActionOrGroupReferencingConverter
 import org.jetbrains.idea.devkit.dom.impl.KeymapConverter
 import org.jetbrains.idea.devkit.util.PsiUtil
@@ -49,6 +58,9 @@ interface KeymapXmlAction : DomElement {
   @get:SubTagList("keyboard-shortcut")
   val keyboardShortcuts: List<KeymapXmlKeyboardShortcut>
 
+  @get:SubTagList("keyboard-gesture-shortcut")
+  val keyboardGestureShortcuts: List<KeymapXmlKeyboardGestureShortcut>
+
   @get:SubTagList("mouse-shortcut")
   val mouseShortcuts: List<KeymapXmlMouseShortcut>
 }
@@ -56,6 +68,11 @@ interface KeymapXmlAction : DomElement {
 interface KeymapXmlKeyboardShortcut : DomElement {
   val firstKeystroke: GenericAttributeValue<String>
   val secondKeystroke: GenericAttributeValue<String>
+}
+
+interface KeymapXmlKeyboardGestureShortcut : DomElement {
+  val keystroke: GenericAttributeValue<String>
+  val modifier: GenericAttributeValue<String>
 }
 
 interface KeymapXmlMouseShortcut : DomElement {

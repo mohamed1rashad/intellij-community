@@ -8,7 +8,19 @@ import com.intellij.formatting.WrapType;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiKeyword;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiPolyadicExpression;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiWhiteSpace;
+import com.intellij.psi.TokenType;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.formatter.FormatterUtil;
@@ -591,7 +603,7 @@ public final class JavaFormatterUtil {
    * @param indent               the number of spaces used for indentation
    * @return a list of {@code TextRange} objects representing the extracted text ranges
    */
-  static @NotNull List<TextRange> extractTextRangesFromLiteralText(@NotNull String text, int indent) {
+  public static @NotNull List<TextRange> extractTextRangesFromLiteralText(@NotNull String text, int indent) {
     List<TextRange> linesRanges = new ArrayList<>();
     boolean isLastLine = false;
     int start = StringUtil.indexOf(text, '\n', 3);

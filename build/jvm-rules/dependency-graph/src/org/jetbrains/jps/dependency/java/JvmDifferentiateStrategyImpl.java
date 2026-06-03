@@ -3,28 +3,40 @@ package org.jetbrains.jps.dependency.java;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.jps.dependency.*;
+import org.jetbrains.jps.dependency.DifferentiateContext;
+import org.jetbrains.jps.dependency.Node;
+import org.jetbrains.jps.dependency.NodeSource;
+import org.jetbrains.jps.dependency.ReferenceID;
+import org.jetbrains.jps.dependency.Usage;
 import org.jetbrains.jps.dependency.diff.Difference;
 import org.jetbrains.jps.util.Pair;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
-import static org.jetbrains.jps.util.Iterators.*;
+import static org.jetbrains.jps.util.Iterators.asIterable;
+import static org.jetbrains.jps.util.Iterators.collect;
+import static org.jetbrains.jps.util.Iterators.filter;
+import static org.jetbrains.jps.util.Iterators.find;
+import static org.jetbrains.jps.util.Iterators.flat;
+import static org.jetbrains.jps.util.Iterators.map;
+import static org.jetbrains.jps.util.Iterators.recurse;
 
 /**
  * This class provides implementation common to all jvm strategies
  */
 public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateStrategy{
-  private static final Logger LOG = Logger.getLogger("#org.jetbrains.jps.dependency.java.JvmDifferentiateStrategyImpl");
+  public static final String LOGGER_NAME = "#org.jetbrains.jps.dependency.java.JvmDifferentiateStrategyImpl";
 
   protected final <T extends AnnotationInstance, D extends AnnotationInstance.Diff<T>> boolean isAffectedByAnnotations(
     Proto element, Difference.Specifier<T, D> annotationsDiff, Set<AnnotationGroup.AffectionKind> affectionKinds, Predicate<? super TypeRepr.ClassType> annotationSelector
   ) {
-    return !element.isPrivate() && find(getAffectedAnnotations(annotationsDiff, affectionKinds), annotationSelector::test) != null;
+    return !element.isPrivate() && find(getAffectedAnnotations(annotationsDiff, affectionKinds), annotationSelector) != null;
   }
 
   protected final <T extends AnnotationInstance, D extends AnnotationInstance.Diff<T>> Iterable<TypeRepr.ClassType> getAffectedAnnotations(
@@ -63,7 +75,7 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
     Set<AnnotationGroup.AffectionScope> affectionScope = EnumSet.noneOf(AnnotationGroup.AffectionScope.class);
     for (AnnotationGroup group : filter(getTrackedAnnotations(), gr -> gr.targets.contains(AnnotationGroup.AnnTarget.type))) {
       if (isAffectedByAnnotations(changedClass, annotationDiff, group.affectionKind, group.types::contains)) {
-        debug(group.name, " changed for ", changedClass.getName(), " --- affecting class usages");
+        debug(context, group.name, " changed for ", changedClass.getName(), " --- affecting class usages");
         affectionScope.addAll(group.affectionScope);
         if (affectionScope.equals(maxScope)) {
           break;
@@ -88,7 +100,7 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
     Set<AnnotationGroup.AffectionScope> affectionScope = EnumSet.noneOf(AnnotationGroup.AffectionScope.class);
     for (AnnotationGroup group : filter(getTrackedAnnotations(), gr -> gr.targets.contains(AnnotationGroup.AnnTarget.field))) {
       if (isAffectedByAnnotations(changedField, annotationDiff, group.affectionKind, group.types::contains) ) {
-        debug(group.name, " changed for field ", changedField, " --- affecting field usages");
+        debug(context, group.name, " changed for field ", changedField, " --- affecting field usages");
         affectionScope.addAll(group.affectionScope);
         if (affectionScope.equals(maxScope)) {
           break;
@@ -118,10 +130,10 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
         if (!changedMethod.isFinal()) {
           // ensure the affection scope is expanded for subclasses
           affectionScope.add(AnnotationGroup.AffectionScope.subclasses);
-          debug(group.name, " changed for non-final method ", changedMethod, " --- affecting method usages and subclasses");
+          debug(context, group.name, " changed for non-final method ", changedMethod, " --- affecting method usages and subclasses");
         }
         else {
-          debug(group.name, " changed for method ", changedMethod, " --- affecting method usages");
+          debug(context, group.name, " changed for method ", changedMethod, " --- affecting method usages");
         }
         if (affectionScope.equals(maxScope)) {
           break;
@@ -136,10 +148,10 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
           if (!changedMethod.isFinal()) {
             // ensure the affection scope is expanded for subclasses
             affectionScope.add(AnnotationGroup.AffectionScope.subclasses);
-            debug(group.name, " changed for non-final method parameters ", changedMethod, " --- affecting method usages and subclasses");
+            debug(context, group.name, " changed for non-final method parameters ", changedMethod, " --- affecting method usages and subclasses");
           }
           else {
-            debug(group.name, " changed for method parameters ", changedMethod, " --- affecting method usages");
+            debug(context, group.name, " changed for method parameters ", changedMethod, " --- affecting method usages");
           }
           if (affectionScope.equals(maxScope)) {
             break;
@@ -207,7 +219,7 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
 
   protected void affectStaticMemberOnDemandUsages(DifferentiateContext context, JvmNodeReferenceID clsId, Iterable<JvmNodeReferenceID> propagated) {
     affectUsages(
-      context, "static member on-demand import usage",
+      context, "static member on-demand import",
       flat(asIterable(clsId), propagated),
       id -> new ImportStaticOnDemandUsage(id),
       null
@@ -225,43 +237,41 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
 
   protected void affectUsages(DifferentiateContext context, String usageKind, Iterable<JvmNodeReferenceID> usageOwners, Function<? super JvmNodeReferenceID, ? extends Usage> usageFactory, @Nullable Predicate<Node<?, ?>> constraint) {
     for (JvmNodeReferenceID id : usageOwners) {
+      Usage usage = usageFactory.apply(id);
       if (constraint != null) {
-        context.affectUsage(usageFactory.apply(id), constraint);
+        context.affectUsage(usage, constraint);
       }
       else {
-        context.affectUsage(usageFactory.apply(id));
+        context.affectUsage(usage);
       }
-      debug("Affect ", usageKind, " usage owned by node '", id.getNodeName(), "'");
+      String usageOwnerName = usage.getElementOwner() instanceof JvmNodeReferenceID? ((JvmNodeReferenceID) usage.getElementOwner()).getNodeName() : usage.getElementOwner().toString();
+      debug(context, "Affect ", usageKind, " usage owned by '", usageOwnerName, "' ", "(node '", id.getNodeName(), "')");
     }
   }
 
-  protected boolean isDebugEnabled() {
-    return LOG.isLoggable(Level.FINE);
-  }
-
-  protected void debug(String message, Object... details) {
-    if (isDebugEnabled()) {
+  protected void debug(DifferentiateContext context, String message, Object... details) {
+    context.getParams().logConsumer().consume(Utils.lazyValue(() -> {
       StringBuilder msg = new StringBuilder(message);
       for (Object detail : details) {
         msg.append(detail);
       }
-      debug(msg.toString());
-    }
+      return msg.toString();
+    }));
   }
 
-  protected void debug(String message) {
-    LOG.log(Level.FINE, message);
+  protected void debug(DifferentiateContext context, String message) {
+    context.getParams().logConsumer().consume(message);
   }
 
   protected void affectSubclasses(DifferentiateContext context, Utils utils, ReferenceID fromClass, boolean affectUsages) {
-    debug("Affecting subclasses of class: ", fromClass, "; with usages affection: ", affectUsages);
+    debug(context, "Affecting subclasses of class: ", fromClass, "; with usages affection: ", affectUsages);
     for (ReferenceID cl : utils.withAllSubclasses(fromClass)) {
       affectNodeSources(context, cl, "Affecting source file: ", utils);
       if (affectUsages) {
         String nodeName = utils.getNodeName(cl);
         if (nodeName != null) {
           context.affectUsage(new ClassUsage(nodeName));
-          debug("Affect usage of class ", nodeName);
+          debug(context, "Affect usage of class ", nodeName);
         }
       }
     }
@@ -274,10 +284,10 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
   protected void affectSources(DifferentiateContext context, Iterable<NodeSource> sources, String affectReason, boolean forceAffect) {
     Set<NodeSource> deletedSources = context.getDelta().getDeletedSources();
     Predicate<? super NodeSource> affectionFilter = context.getParams().affectionFilter();
-    for (NodeSource source : filter(sources, affectionFilter::test)) {
+    for (NodeSource source : filter(sources, affectionFilter)) {
       if ((forceAffect || !context.isCompiled(source)) && !deletedSources.contains(source)) {
         context.affectNodeSource(source);
-        debug(affectReason, source);
+        debug(context, affectReason, source);
       }
     }
   }
@@ -297,7 +307,7 @@ public abstract class JvmDifferentiateStrategyImpl implements JvmDifferentiateSt
         context.affectNodeSource(candidate);
         msg.append(candidate).append("; ");
       }
-      debug(msg.toString());
+      debug(context, msg.toString());
       return true;
     }
     return false;

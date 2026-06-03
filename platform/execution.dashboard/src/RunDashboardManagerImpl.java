@@ -1,12 +1,25 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.execution.dashboard;
 
-import com.intellij.execution.*;
+import com.intellij.execution.ExecutionListener;
+import com.intellij.execution.ExecutionManager;
+import com.intellij.execution.RunContentDescriptorId;
+import com.intellij.execution.RunContentDescriptorIdImpl;
+import com.intellij.execution.RunManager;
+import com.intellij.execution.RunManagerListener;
+import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.ConfigurationType;
 import com.intellij.execution.configurations.ConfigurationTypeUtil;
 import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RunProfile;
-import com.intellij.execution.dashboard.*;
+import com.intellij.execution.dashboard.RunDashboardCustomizer;
+import com.intellij.execution.dashboard.RunDashboardDefaultTypesProvider;
+import com.intellij.execution.dashboard.RunDashboardListener;
+import com.intellij.execution.dashboard.RunDashboardManager;
+import com.intellij.execution.dashboard.RunDashboardRunConfigurationStatus;
+import com.intellij.execution.dashboard.RunDashboardService;
+import com.intellij.execution.dashboard.RunDashboardServiceId;
+import com.intellij.execution.dashboard.RunDashboardServiceIdType;
 import com.intellij.execution.impl.ExecutionManagerImpl;
 import com.intellij.execution.impl.RunManagerImpl;
 import com.intellij.execution.impl.RunnerAndConfigurationSettingsImpl;
@@ -15,7 +28,11 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManagerImpl;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.components.*;
+import com.intellij.openapi.components.PersistentStateComponent;
+import com.intellij.openapi.components.Service;
+import com.intellij.openapi.components.State;
+import com.intellij.openapi.components.Storage;
+import com.intellij.openapi.components.StoragePathMacros;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointListener;
 import com.intellij.openapi.extensions.ExtensionPointName;
@@ -25,6 +42,10 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Condition;
+import com.intellij.platform.execution.dashboard.splitApi.NavigateToServiceEvent;
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardConfigurationDto;
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardConfigurationId;
+import com.intellij.platform.execution.dashboard.splitApi.RunDashboardConfigurationIdKt;
 import com.intellij.platform.execution.dashboard.splitApi.RunDashboardServiceDto;
 import com.intellij.platform.execution.dashboard.splitApi.RunDashboardSettingsDto;
 import com.intellij.platform.execution.dashboard.splitApi.ServiceCustomizationDto;
@@ -34,13 +55,21 @@ import com.intellij.ui.content.Content;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBusConnection;
+import com.intellij.util.remdev.BackendApi;
 import kotlinx.coroutines.CoroutineScope;
 import kotlinx.coroutines.flow.Flow;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -54,6 +83,7 @@ import static com.intellij.platform.kernel.ids.BackendGlobalIdsKt.storeValueGlob
 // fixme might want to save the state on backend machine
 @Service(Service.Level.PROJECT)
 @State(name = "RunDashboard", storages = @Storage(StoragePathMacros.WORKSPACE_FILE))
+@BackendApi
 public final class RunDashboardManagerImpl implements RunDashboardManager, PersistentStateComponent<RunDashboardManagerImpl.State> {
   public static RunDashboardManagerImpl getInstance(Project project) {
     return project.getService(RunDashboardManagerImpl.class);
@@ -65,8 +95,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
   private final Project myProject;
   private State myState = new State();
   private final Set<String> myTypes = new HashSet<>();
-  private final Set<RunConfiguration> myHiddenConfigurations = new HashSet<>();
-  private final Set<RunConfiguration> myShownConfigurations = new HashSet<>();
+  private final Set<RunConfiguration> myHiddenConfigurations = ConcurrentHashMap.newKeySet();
+  private final Set<RunConfiguration> myShownConfigurations = ConcurrentHashMap.newKeySet();
   private final Map<RunConfiguration, RunDashboardRunConfigurationStatus> myConfigurationStatuses = new ConcurrentHashMap<>();
   private volatile List<List<RunDashboardService>> myServices = new SmartList<>();
   private final BackendRunDashboardManagerState mySharedState;
@@ -82,6 +112,11 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
   }
 
   @Override
+  public boolean isInitialized() {
+    return true;
+  }
+
+  @Override
   public void updateServiceRunContentDescriptor(@NotNull Content contentWithNewDescriptor, @NotNull RunContentDescriptor oldDescriptor) {
     RunContentDescriptorId oldDescriptorId = oldDescriptor.getId();
     if (oldDescriptorId == null) return;
@@ -89,11 +124,19 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     var newDescriptor = RunContentManagerImpl.getRunContentDescriptorByContent(contentWithNewDescriptor);
 
     var newContentId = newDescriptor == null ? null : newDescriptor.getId();
-    if (newContentId instanceof  RunContentDescriptorIdImpl newContentIdImpl) {
+    if (newContentId instanceof RunContentDescriptorIdImpl newContentIdImpl) {
       updateServiceRunContentDescriptor(oldDescriptorId, newContentIdImpl);
     }
 
     RunDashboardUiManagerImpl.getInstance(myProject).getDashboardContentManager().addContent(contentWithNewDescriptor);
+  }
+
+  @Override
+  public void navigateToServiceOnRun(@NotNull RunContentDescriptorId descriptorId, Boolean focus) {
+    RunDashboardService service = findService(descriptorId);
+    if (service == null) return;
+
+    mySharedState.fireNavigateToServiceEvent(service.getUuid(), focus);
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -148,9 +191,11 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     if (!myListenersInitialized.compareAndSet(false, true)) return;
 
     MessageBusConnection connection = myProject.getMessageBus().connect(myProject);
-    // todo backend updates
     connection.subscribe(RunManagerListener.TOPIC, new RunManagerListener() {
-      private volatile boolean myUpdateStarted;
+      private final BackendRunDashboardUpdatesQueue synchronizationScheduler
+        = new BackendRunDashboardUpdatesQueue(
+        RunDashboardCoroutineScopeProvider.getInstance(myProject).createChildNamedScope("Backend run manager listener sync requests"),
+        OverlappingTasksStrategy.SKIP_NEW);
 
       @Override
       public void runConfigurationAdded(@NotNull RunnerAndConfigurationSettings settings) {
@@ -158,41 +203,62 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
           // Always include newly added temporary configurations.
           myShownConfigurations.add(settings.getConfiguration());
         }
-        if (!myUpdateStarted) {
+        synchronizationScheduler.submit(() -> {
+          fireAvailableConfigurationsUpdated();
           syncConfigurations();
           updateDashboardIfNeeded(settings);
-        }
+        });
       }
 
       @Override
       public void runConfigurationRemoved(@NotNull RunnerAndConfigurationSettings settings) {
         RunConfiguration configuration = settings.getConfiguration();
-        myHiddenConfigurations.remove(configuration);
-        myShownConfigurations.remove(configuration);
+        myHiddenConfigurations.removeIf(c -> isSameConfiguration(c, configuration));
+        myShownConfigurations.removeIf(c -> isSameConfiguration(c, configuration));
         myConfigurationStatuses.remove(configuration);
-        if (!myUpdateStarted) {
+        synchronizationScheduler.submit(() -> {
+          fireAvailableConfigurationsUpdated();
           syncConfigurations();
           updateDashboardIfNeeded(settings);
-        }
+        });
       }
 
       @Override
       public void runConfigurationChanged(@NotNull RunnerAndConfigurationSettings settings) {
-        if (!myUpdateStarted) {
-          updateDashboardIfNeeded(settings);
+        RunConfiguration configuration = settings.getConfiguration();
+        if (!myHiddenConfigurations.contains(configuration)) {
+          boolean replaced = myHiddenConfigurations.removeIf(c -> isSameConfiguration(c, configuration));
+          if (replaced) {
+            myHiddenConfigurations.add(configuration);
+          }
         }
+        if (!myShownConfigurations.contains(configuration)) {
+          boolean replaced = myShownConfigurations.removeIf(c -> isSameConfiguration(c, configuration));
+          if (replaced) {
+            myShownConfigurations.add(configuration);
+          }
+        }
+
+        synchronizationScheduler.submit(() -> {
+          fireAvailableConfigurationsUpdated();
+          if (isShowInDashboard(configuration) ||
+              !filterByContent(getConfigurationDescriptors(configuration)).isEmpty()) {
+            mySharedState.setServices(getRunConfigurations());
+            updateDashboard(true);
+          }
+        });
       }
 
       @Override
-      public void beginUpdate() {
-        myUpdateStarted = true;
-      }
+      public void beginUpdate() { }
 
       @Override
       public void endUpdate() {
-        myUpdateStarted = false;
-        syncConfigurations();
-        updateDashboard(true);
+        synchronizationScheduler.submit(() -> {
+          fireAvailableConfigurationsUpdated();
+          syncConfigurations();
+          updateDashboard(true);
+        });
       }
     });
     connection.subscribe(ExecutionManager.EXECUTION_TOPIC, new ExecutionListener() {
@@ -240,7 +306,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     }
 
     Logger.getInstance(RunDashboardManagerImpl.class)
-      .warn("findServiceById failed to discover backend run dashboard service in global storage, falling back to manually managed collection");
+      .warn(
+        "findServiceById failed to discover backend run dashboard service in global storage, falling back to manually managed collection");
     return ContainerUtil.find(getRunConfigurations(), service -> service.getUuid().equals(id));
   }
 
@@ -270,12 +337,20 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     return mySharedState.getCustomizations();
   }
 
+  public Flow<List<RunDashboardConfigurationDto>> getAvailableConfigurations() {
+    return mySharedState.getAvailableConfigurations();
+  }
+
   public Flow<Set<String>> getExcludedTypesDto() {
     return mySharedState.getExcludedTypes();
   }
 
   public Flow<Set<String>> getConfigurationTypes() {
     return mySharedState.getConfigurationTypes();
+  }
+
+  public Flow<NavigateToServiceEvent> getNavigateToServiceEvents() {
+    return mySharedState.getNavigateToServiceEvents();
   }
 
   public void runCallbackForLink(@NotNull String link, @NotNull RunDashboardServiceId serviceId) {
@@ -308,16 +383,20 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
   private boolean isShown(@NotNull RunConfiguration runConfiguration) {
     if (!myTypes.contains(runConfiguration.getType().getId())) return false;
     if (myState.excludedNewTypes.contains(runConfiguration.getType().getId())) {
-      return myShownConfigurations.contains(runConfiguration);
+      return ContainerUtil.exists(myShownConfigurations, c -> isSameConfiguration(c, runConfiguration));
     }
     else {
-      return !myHiddenConfigurations.contains(runConfiguration);
+      return !ContainerUtil.exists(myHiddenConfigurations, c -> isSameConfiguration(c, runConfiguration));
     }
   }
 
-  private static @Nullable RunConfiguration getBaseConfiguration(@NotNull RunConfiguration runConfiguration) {
+  public static @Nullable RunConfiguration getBaseConfiguration(@NotNull RunConfiguration runConfiguration) {
     RunProfile runProfile = ExecutionManagerImpl.getDelegatedRunProfile(runConfiguration);
     return runProfile instanceof RunConfiguration ? (RunConfiguration)runProfile : null;
+  }
+
+  private static boolean isSameConfiguration(@NotNull RunConfiguration c1, @NotNull RunConfiguration c2) {
+    return c1.getType().getId().equals(c2.getType().getId()) && c1.getName().equals(c2.getName());
   }
 
   @Override
@@ -377,14 +456,15 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     if (type == null) return Collections.emptyList();
 
     List<RunConfiguration> configurations = RunManager.getInstance(myProject).getConfigurationsList(type);
-    return ContainerUtil.filter(configurations, configuration -> !toExclude.contains(configuration));
+    return ContainerUtil.filter(configurations,
+                                configuration -> !ContainerUtil.exists(toExclude, c -> isSameConfiguration(c, configuration)));
   }
 
   @Override
-  public void hideConfigurations(Collection<? extends RunConfiguration> configurations) {
+  public void hideConfigurations(@NotNull Collection<? extends RunConfiguration> configurations) {
     for (RunConfiguration configuration : configurations) {
       if (myState.excludedNewTypes.contains(configuration.getType().getId())) {
-        myShownConfigurations.remove(configuration);
+        myShownConfigurations.removeIf(c -> isSameConfiguration(c, configuration));
       }
       else {
         myHiddenConfigurations.add(configuration);
@@ -402,7 +482,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
         myShownConfigurations.add(configuration);
       }
       else {
-        myHiddenConfigurations.remove(configuration);
+        myHiddenConfigurations.removeIf(c -> isSameConfiguration(c, configuration));
       }
     }
     syncConfigurations();
@@ -429,6 +509,11 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
         updateDashboard(true);
       }
     }
+  }
+
+  @Override
+  public boolean hasPersistedStatus(@NotNull RunConfiguration configuration) {
+    return getPersistedStatus(configuration) != null;
   }
 
   @Override
@@ -503,6 +588,37 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     }
   }
 
+  private void fireAvailableConfigurationsUpdated() {
+    // Build a reverse map from RunConfiguration to existing RunDashboardConfigurationId
+    // to avoid calling storeGlobally for already stored configurations (it always creates a new ID).
+    // Note: stored RunDashboardConfigurationId might change if a configuration is removed from Services and then added again.
+    Map<RunConfiguration, RunDashboardConfigurationId> existingConfigurationIds = new HashMap<>();
+    for (RunDashboardConfigurationDto dto : mySharedState.getCurrentAvailableConfigurations()) {
+      RunConfiguration configuration = RunDashboardConfigurationIdKt.findConfigurationValue(dto.getConfigurationId());
+      if (configuration != null) {
+        existingConfigurationIds.put(configuration, dto.getConfigurationId());
+      }
+    }
+
+    List<RunDashboardConfigurationDto> availableConfigurations =
+      ContainerUtil.map(RunManager.getInstance(myProject).getAllSettings(), configurationSettings -> {
+        RunConfiguration configuration = configurationSettings.getConfiguration();
+        RunDashboardConfigurationId configurationId = existingConfigurationIds.get(configuration);
+        if (configurationId == null) {
+          configurationId = RunDashboardConfigurationIdKt.storeGlobally(configuration,
+                                                                        RunDashboardCoroutineScopeProvider.getInstance(myProject).getCs());
+        }
+
+        return new RunDashboardConfigurationDto(
+          configurationSettings.getType().getId(),
+          configurationSettings.getName(),
+          configurationSettings.getFolderName(),
+          configurationId
+        );
+      });
+    mySharedState.fireAvailableConfigurationsUpdated(availableConfigurations);
+  }
+
   private void syncConfigurations() {
     List<RunnerAndConfigurationSettings> settingsList =
       ContainerUtil.filter(RunManager.getInstance(myProject).getAllSettings(), settings -> {
@@ -521,8 +637,11 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
         result.add(syncedServices);
       }
       for (List<RunDashboardService> oldServices : myServices) {
-        RunDashboardService oldService = oldServices.get(0);
-        if (oldService.getDescriptorId() != null && !settingsList.contains(oldService.getConfigurationSettings())) {
+        RunDashboardService oldService = oldServices.getFirst();
+        RunContentDescriptorId descriptorId = oldService.getDescriptorId();
+        RunContentDescriptor descriptor = descriptorId == null ? null : getDescriptorById(descriptorId, myProject);
+        var isAcceptableType = myState.configurationTypes.contains(oldService.getConfigurationSettings().getType().getId());
+        if (descriptor != null && !settingsList.contains(oldService.getConfigurationSettings()) && isAcceptableType) {
           if (!updateServiceSettings(myProject, result, oldServices)) {
             result.add(oldServices);
           }
@@ -532,8 +651,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     }
     finally {
       myServiceLock.writeLock().unlock();
-      mySharedState.setServices(myServices);
-      mySharedState.setConfigurationTypes(myState.configurationTypes);
+      mySharedState.setConfigurationTypes(new HashSet<>(myTypes));
+      mySharedState.setServices(getRunConfigurations());
     }
   }
 
@@ -544,16 +663,37 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
 
     myServiceLock.writeLock().lock();
     try {
-      RunDashboardService service = findService(oldDescriptorId);
-      if (service != null) {
-        doDetachServiceRunContentDescriptor(service);
+      RunDashboardService oldService = findService(oldDescriptorId);
+      if (oldService != null && oldService.getConfigurationSettings().equals(settings)) {
+        List<RunDashboardService> services = getServices(settings);
+        if (services != null) {
+          for (RunDashboardService s : services) {
+            if (s != oldService && descriptorId.equals(s.getDescriptorId())) {
+              // Another service already owns descriptorId — detach oldService so it doesn't keep a stale link to oldDescriptorId.
+              doDetachServiceRunContentDescriptor(oldService);
+              return s;
+            }
+          }
+          if (oldService instanceof RunDashboardServiceImpl mainService) {
+            mainService.setDescriptorId(descriptorId);
+            return mainService;
+          }
+          int idx = services.indexOf(oldService);
+          AdditionalRunDashboardService replacement =
+            new AdditionalRunDashboardService(settings, descriptorId, services.getFirst().getScope());
+          services.set(idx, replacement);
+          return replacement;
+        }
       }
 
+      if (oldService != null) {
+        doDetachServiceRunContentDescriptor(oldService);
+      }
       return doAttachServiceRunContentDescriptor(settings, descriptorId);
     }
     finally {
       myServiceLock.writeLock().unlock();
-      mySharedState.setServices(myServices);
+      mySharedState.setServices(getRunConfigurations());
       updateDashboard(true);
     }
   }
@@ -568,7 +708,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     }
     finally {
       myServiceLock.writeLock().unlock();
-      mySharedState.setServices(myServices);
+      mySharedState.setServices(getRunConfigurations());
       updateDashboard(true);
     }
   }
@@ -583,13 +723,13 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     }
     finally {
       myServiceLock.writeLock().unlock();
-      mySharedState.setServices(myServices);
+      mySharedState.setServices(getRunConfigurations());
       updateDashboard(true);
     }
   }
 
-  private @NotNull RunDashboardService doAttachServiceRunContentDescriptor(@NotNull RunnerAndConfigurationSettings settings,
-                                                                           @NotNull RunContentDescriptorId descriptorId) {
+  private @Nullable RunDashboardService doAttachServiceRunContentDescriptor(@NotNull RunnerAndConfigurationSettings settings,
+                                                                            @NotNull RunContentDescriptorId descriptorId) {
     List<RunDashboardService> settingsServices = getServices(settings);
     if (settingsServices == null) {
       RunDashboardServiceImpl newService = new RunDashboardServiceImpl(RunDashboardCoroutineScopeProvider.getInstance(myProject).getCs(),
@@ -600,31 +740,21 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
       return newService;
     }
 
-    RunDashboardService service = settingsServices.get(0);
+    if (ContainerUtil.find(settingsServices, service -> descriptorId.equals(service.getDescriptorId())) != null) {
+      return null;
+    }
 
-    // purely to avoid thinking that frontend debugger might reuse content of the backend run
-    var areDescriptorsWithSameExecutors = areSameOriginDescriptorsBeingExchanged(descriptorId, service);
-
-    if ((!areDescriptorsWithSameExecutors || service.getDescriptorId() == null) && service instanceof RunDashboardServiceImpl mainService) {
+    RunDashboardService service = settingsServices.getFirst();
+    if (service.getDescriptorId() == null && service instanceof RunDashboardServiceImpl mainService) {
       mainService.setDescriptorId(descriptorId);
       return mainService;
     }
     else {
       AdditionalRunDashboardService newService =
-        new AdditionalRunDashboardService(settings, descriptorId, service.getUuid());
+        new AdditionalRunDashboardService(settings, descriptorId, service.getScope());
       settingsServices.add(newService);
       return newService;
     }
-  }
-
-  private static boolean areSameOriginDescriptorsBeingExchanged(@NotNull RunContentDescriptorId descriptorId, RunDashboardService service) {
-    var existingId = service.getDescriptorId();
-    var resolvedExistingDescriptor = existingId instanceof RunContentDescriptorIdImpl impl ?  findContentValue(impl) : null;
-    var resolvedNewDescriptor = descriptorId instanceof RunContentDescriptorIdImpl impl ? findContentValue(impl) : null;
-    var areDescriptorsWithSameExecutors =
-      resolvedExistingDescriptor != null && resolvedNewDescriptor != null
-      && resolvedExistingDescriptor.isHiddenContent() == resolvedNewDescriptor.isHiddenContent();
-    return areDescriptorsWithSameExecutors;
   }
 
   private void doDetachServiceRunContentDescriptor(@NotNull RunDashboardService service) {
@@ -871,6 +1001,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
   }
 
   private void initTypes() {
+    fireAvailableConfigurationsUpdated();
     syncConfigurations();
     initServiceContentListeners();
     ApplicationManager.getApplication().executeOnPooledThread(() -> {
@@ -981,10 +1112,10 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
 
     AdditionalRunDashboardService(@NotNull RunnerAndConfigurationSettings settings,
                                   @NotNull RunContentDescriptorId descriptorId,
-                                  @NotNull RunDashboardServiceId id) {
+                                  @NotNull CoroutineScope scope) {
       mySettings = settings;
       myDescriptorId = descriptorId;
-      myId = id;
+      myId = storeValueGlobally(scope, this, RunDashboardServiceIdType.INSTANCE);
     }
 
     @Override
@@ -1014,7 +1145,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
 
     @Override
     public Content getContent() {
-      return getDescriptor().getAttachedContent();
+      RunContentDescriptor descriptor = getDescriptor();
+      return descriptor == null ? null : descriptor.getAttachedContent();
     }
 
     @Override

@@ -27,9 +27,13 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import static com.intellij.grazie.text.TextContent.TextDomain.*;
+import static com.intellij.grazie.text.TextContent.TextDomain.COMMENTS;
+import static com.intellij.grazie.text.TextContent.TextDomain.DOCUMENTATION;
+import static com.intellij.grazie.text.TextContent.TextDomain.LITERALS;
 import static com.intellij.grazie.utils.EscapeUtilsKt.replaceBackslashEscapes;
-import static com.intellij.psi.JavaDocTokenType.*;
+import static com.intellij.psi.JavaDocTokenType.DOC_COMMENT_END;
+import static com.intellij.psi.JavaDocTokenType.DOC_COMMENT_LEADING_ASTERISKS;
+import static com.intellij.psi.JavaDocTokenType.DOC_COMMENT_START;
 import static com.intellij.psi.impl.source.tree.ElementType.JAVA_PLAIN_COMMENT_BIT_SET;
 import static com.intellij.psi.impl.source.tree.JavaDocElementType.DOC_PARAMETER_REF;
 import static com.intellij.psi.impl.source.tree.JavaDocElementType.DOC_REFERENCE_HOLDER;
@@ -81,6 +85,7 @@ public class JavaTextExtractor extends TextExtractor {
             ContainerUtil.map(Text.allOccurrences(Pattern.compile("(?<=\n)" + "\\s{" + indent + "}"), content), Exclusion::exclude));
         }
         content = content.excludeRanges(ContainerUtil.map(Text.allOccurrences(Pattern.compile("\\\\\n"), content), Exclusion::exclude));
+        content = replaceBackslashEscapes(content);
         return ContainerUtil.createMaybeSingletonList(content.trimWhitespace());
       }
       if (indent == -1 && content != null) {

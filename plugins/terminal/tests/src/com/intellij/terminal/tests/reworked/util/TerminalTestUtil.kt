@@ -10,10 +10,12 @@ import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.plugins.terminal.TerminalEngine
 import org.jetbrains.plugins.terminal.TerminalOptionsProvider
-import org.jetbrains.plugins.terminal.block.reworked.MutableTerminalOutputModel
-import org.jetbrains.plugins.terminal.block.reworked.MutableTerminalOutputModelImpl
 import org.jetbrains.plugins.terminal.session.impl.StyleRange
 import org.jetbrains.plugins.terminal.session.impl.TerminalOutputModelState
+import org.jetbrains.plugins.terminal.view.TerminalOutputModel
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModel
+import org.jetbrains.plugins.terminal.view.impl.MutableTerminalOutputModelImpl
+import kotlin.reflect.KMutableProperty0
 
 @ApiStatus.Internal
 object TerminalTestUtil {
@@ -21,6 +23,9 @@ object TerminalTestUtil {
     val document = DocumentImpl("", true)
     return MutableTerminalOutputModelImpl(document, maxLength)
   }
+
+  val TerminalOutputModel.text: String
+    get() = getText(startOffset, endOffset).toString()
 
   suspend fun MutableTerminalOutputModel.update(absoluteLineIndex: Long, text: String, styles: List<StyleRange> = emptyList()) {
     updateOutputModel { updateContent(absoluteLineIndex, text, styles) }
@@ -54,5 +59,20 @@ object TerminalTestUtil {
     Disposer.register(parentDisposable) {
       options.terminalEngine = prevValue
     }
+  }
+
+  fun <V> KMutableProperty0<V>.setValueInTest(newValue: V, disposable: Disposable) {
+    val prevValue = this.get()
+    this.set(newValue)
+    Disposer.register(disposable) {
+      this.set(prevValue)
+    }
+  }
+
+  /**
+   * Can be used to provide parameter values for a parameterized test.
+   */
+  fun enginesWithCompletionSupport(): List<TerminalEngine> {
+    return listOf(TerminalEngine.REWORKED, TerminalEngine.NEW_TERMINAL)
   }
 }

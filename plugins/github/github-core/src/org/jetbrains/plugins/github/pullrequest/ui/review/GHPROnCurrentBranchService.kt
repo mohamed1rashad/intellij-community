@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.github.pullrequest.ui.review
 
 import com.intellij.collaboration.async.launchNow
@@ -18,8 +18,22 @@ import git4idea.branch.GitBranchUtil
 import git4idea.repo.GitRepository
 import git4idea.ui.branch.GitBranchPopupActions
 import git4idea.ui.branch.GitCurrentBranchPresenter
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import org.jetbrains.plugins.github.GithubIcons
 import org.jetbrains.plugins.github.i18n.GithubBundle
 import org.jetbrains.plugins.github.pullrequest.data.GHPRIdentifier
@@ -65,12 +79,14 @@ class GHPROnCurrentBranchService(private val project: Project, parentCs: Corouti
         GitBranchPopupActions.truncateBranchName(branchName, repository.project)
       })
 
+      val fullBranchName = GitBranchUtil.getDisplayableBranchText(repository)
+
       val syncStatus = GitBranchSyncStatus.calcForCurrentBranch(repository)
       if (vm.updateRequired.value) {
         return GitCurrentBranchPresenter.PresentationData(
           GithubIcons.GithubWarning,
           GithubBundle.message("pull.request.on.branch", vm.id.number, currentBranchName),
-          GithubBundle.message("pull.request.on.branch.out.of.sync", vm.id.number, currentBranchName),
+          GithubBundle.message("pull.request.on.branch.out.of.sync", vm.id.number, fullBranchName),
           syncStatus
         )
       }
@@ -86,14 +102,14 @@ class GHPROnCurrentBranchService(private val project: Project, parentCs: Corouti
             GitCurrentBranchPresenter.PresentationData(
               AllIcons.Vcs.Vendors.Github,
               GithubBundle.message("pull.request.on.branch", vm.id.number, currentBranchName),
-              GithubBundle.message("pull.request.on.branch.description", vm.id.number, currentBranchName)
+              GithubBundle.message("pull.request.on.branch.description", vm.id.number, fullBranchName)
             )
           },
           onFailure = {
             GitCurrentBranchPresenter.PresentationData(
               AllIcons.Vcs.Vendors.Github,
               GithubBundle.message("pull.request.on.branch", vm.id.number, currentBranchName),
-              GithubBundle.message("pull.request.on.branch.error", vm.id.number, currentBranchName)
+              GithubBundle.message("pull.request.on.branch.error", vm.id.number, fullBranchName)
             )
           }
         )

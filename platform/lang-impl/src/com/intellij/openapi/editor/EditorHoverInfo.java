@@ -7,8 +7,9 @@ import org.jetbrains.annotations.ApiStatus.Internal;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import java.awt.Component;
 import java.util.Objects;
 
 @Internal
@@ -38,26 +39,5 @@ public final class EditorHoverInfo {
     if (c1 != null) p.add(c1);
     if (c2 != null) p.add(c2);
     return p;
-  }
-
-  private static class CombinedPopupPanel extends JPanel implements WidthBasedLayout {
-
-    CombinedPopupPanel(CombinedPopupLayout layout) {
-      super(layout);
-    }
-
-    @Override
-    public int getPreferredWidth() {
-      return getPreferredSize().width;
-    }
-
-    @Override
-    public int getPreferredHeight(int width) {
-      int height = 0;
-      for (Component c: getComponents()) {
-        height += WidthBasedLayout.getPreferredHeight(c, width);
-      }
-      return height;
-    }
   }
 }

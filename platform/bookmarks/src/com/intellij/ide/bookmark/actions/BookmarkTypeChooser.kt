@@ -1,27 +1,42 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package com.intellij.ide.bookmark.actions
 
 import com.intellij.ide.bookmark.BookmarkBundle
 import com.intellij.ide.bookmark.BookmarkType
-import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.JBColor.namedColor
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.panels.RowGridLayout
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.IntelliJSpacingConfiguration
+import com.intellij.ui.dsl.builder.MAX_LINE_LENGTH_NO_WRAP
+import com.intellij.ui.dsl.builder.panel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.RegionPaintIcon
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.components.BorderLayoutPanel
 import org.jetbrains.annotations.Nls
-import java.awt.*
+import java.awt.Color
+import java.awt.Component
+import java.awt.Cursor
+import java.awt.Dimension
+import java.awt.Point
 import java.awt.RenderingHints.KEY_ANTIALIASING
 import java.awt.RenderingHints.VALUE_ANTIALIAS_ON
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.KeyListener
-import javax.swing.*
+import javax.swing.JButton
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.KeyStroke
+import javax.swing.LayoutFocusTraversalPolicy
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
+import javax.swing.UIManager
 
 private val ASSIGNED_FOREGROUND = namedColor("Bookmark.MnemonicAssigned.foreground", 0x000000, 0xBBBBBB)
 private val ASSIGNED_BACKGROUND = namedColor("Bookmark.MnemonicAssigned.background", 0xF7C777, 0x665632)
@@ -180,8 +195,10 @@ private class BookmarkLayoutGrid(
     putClientProperty(TYPE_KEY, type)
     addPropertyChangeListener { repaint() }
     addActionListener {
-      onChosen(type)
-      updateButtons(type)
+      WriteIntentReadAction.run {
+        onChosen(type)
+        updateButtons(type)
+      }
     }
     inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0, true), "released")
     inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0, false), "pressed")
@@ -222,7 +239,7 @@ private class BookmarkLayoutGrid(
   private fun next(source: Component, dx: Int, dy: Int): Component? {
     val point = SwingUtilities.convertPoint(source, offset(dx, source.width), offset(dy, source.height), this)
     val component = next(source, dx, dy, point)
-    if (component != null || !Registry.`is`("ide.bookmark.mnemonic.chooser.cyclic.scrolling.allowed")) return component
+    if (component != null) return component
     if (dx > 0) point.x = 0
     if (dx < 0) point.x = dx + width
     if (dy > 0) point.y = 0
@@ -257,7 +274,9 @@ private class BookmarkLayoutGrid(
           val type = BookmarkType.get(event.keyCode.toChar())
           if (type != BookmarkType.DEFAULT) {
             onChosen(type)
-            save()
+            WriteIntentReadAction.run {
+              save()
+            }
           }
         }
       }

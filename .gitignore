@@ -1,5 +1,6 @@
 *.pyc
 .DS_Store
+.bazelrc-user.bazelrc
 .gradle
 .idea/gradle_extensions.xml
 .idea/libraries/Gradle__*.xml
@@ -8,6 +9,9 @@
 .idea/workspace.xml
 .jqwik-database
 /.diff
+# detekt can be configured by ./platform/jewel/detekt-rules/install-rules-to-idea.sh
+/.idea/artifacts
+/.idea/detekt.xml
 /config
 /out
 /system
@@ -16,8 +20,7 @@
 /univocity-parsers
 build/dependencies/.gradle
 build/dependencies/build
-edu/dependencies/.gradle
-edu/dependencies/build
 native/**/build/
+platform/build-scripts/licenses/gradlebuild/build
 stale_outputs_checked
 /android

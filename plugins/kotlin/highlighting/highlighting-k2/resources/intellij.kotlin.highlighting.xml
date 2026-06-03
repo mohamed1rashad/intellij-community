@@ -1,8 +1,11 @@
 <idea-plugin visibility="internal" package="org.jetbrains.kotlin.idea.highlighting">
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
+    <module name="intellij.java.psi"/>
+    <module name="intellij.kotlin.codeInsight.shared"/>
     <module name="intellij.kotlin.searching"/>
-    <module name="intellij.kotlin.base.scripting"/>
   </dependencies>
+  <!-- endregion -->
 
   <extensionPoints>
     <extensionPoint
@@ -19,7 +22,8 @@
     <highlightVisitor implementation="org.jetbrains.kotlin.idea.highlighting.visitor.KotlinDslSemanticHighlightingVisitor"/>
     <highlightVisitor implementation="org.jetbrains.kotlin.idea.highlighting.visitor.KotlinDiagnosticHighlightVisitor"/>
     <highlightVisitor implementation="org.jetbrains.kotlin.idea.highlighting.visitor.KotlinUnusedDeclarationHighlightingVisitor"/>
-    <highlightVisitor implementation="org.jetbrains.kotlin.idea.highlighting.visitor.KotlinUnresolvedKDocHighlightVisitor"/>
+    <highlightVisitor implementation="org.jetbrains.kotlin.idea.highlighting.visitor.ParameterNamesHighlightingExtension"/>
+    <highlightErrorFilter implementation="org.jetbrains.kotlin.idea.highlighting.visitor.KotlinHighlightInjectionErrorFilter"/>
 
     <highlightUsagesHandlerFactory implementation="org.jetbrains.kotlin.idea.highlighting.KotlinHighlightExitPointsHandlerFactory"/>
 
@@ -27,8 +31,14 @@
 
     <registryKey key="kotlin.highlighting.warmup"
                  description="Enables Kotlin highlighting warmup – triggers resolution in parallel to prefill caches"
-                 defaultValue="true"
-    />
+                 defaultValue="true"/>
+    <registryKey key="kotlin.highlighting.internal.show.diagnostic.names"
+                 description="Shows diagnostic names in internal mode for debugging purposes."
+                 defaultValue="true"/>
+  </extensions>
+
+  <extensions defaultExtensionNs="org.jetbrains.kotlin">
+    <beforeResolveHighlightingVisitor implementation="org.jetbrains.kotlin.idea.highlighting.visitor.ParameterNamesHighlightingExtension"/>
   </extensions>
 
 </idea-plugin>

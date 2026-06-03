@@ -141,7 +141,7 @@ public final class JBAnimator implements Disposable {
     final var taskId = myRunning.incrementAndGet();
 
     if (!myIgnorePowerSaveMode && PowerSaveMode.isEnabled()
-        || Registry.is("ui.no.bangs.and.whistles", false)
+        || Registry.is("ui.simplified", false)
         || RemoteDesktopService.isRemoteSession()
         || duration == 0) {
       myCurrentAnimatorFuture = myService.schedule(() -> {
@@ -360,8 +360,8 @@ public final class JBAnimator implements Disposable {
     myCurrentAnimatorFuture.cancel(false);
     if (!myDisposed.getAndSet(true) && myService != EdtExecutorService.getScheduledExecutorInstance()) {
       myService.shutdownNow();
-      JBAnimatorHelper.cancelHighPrecisionTimer(this);
     }
+    JBAnimatorHelper.cancelHighPrecisionTimer(this);
   }
 
   /**

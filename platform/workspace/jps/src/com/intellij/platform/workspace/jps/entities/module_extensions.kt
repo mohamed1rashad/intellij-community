@@ -5,17 +5,19 @@ package com.intellij.platform.workspace.jps.entities
 
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.EntityType
-import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.annotations.Parent
-import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceList
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.NonNls
 
 
 /**
  * Describes additional data stored in [Module][com.intellij.openapi.module.Module] instance.
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface ModuleCustomImlDataEntity : WorkspaceEntity {
@@ -30,8 +32,8 @@ interface ModuleCustomImlDataEntity : WorkspaceEntity {
   val module: ModuleEntity
 
   //region generated code
-  @Deprecated(message = "Use ModifiableModuleCustomImlDataEntity instead")
-  interface Builder : ModifiableModuleCustomImlDataEntity {
+  @Deprecated(message = "Use ModuleCustomImlDataEntityBuilder instead")
+  interface Builder : ModuleCustomImlDataEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getModule(): ModuleEntity.Builder = module as ModuleEntity.Builder
 
@@ -74,6 +76,10 @@ val ModuleEntity.customImlData: ModuleCustomImlDataEntity?
 /**
  * Describes [explicit module group][com.intellij.openapi.module.ModuleManager.getModuleGroupPath]. Note that explicit module groups are
  * deprecated, so this entity should be used for compatibility with old code only.
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface ModuleGroupPathEntity : WorkspaceEntity {
@@ -83,8 +89,8 @@ interface ModuleGroupPathEntity : WorkspaceEntity {
   val path: List<@NonNls String>
 
   //region generated code
-  @Deprecated(message = "Use ModifiableModuleGroupPathEntity instead")
-  interface Builder : ModifiableModuleGroupPathEntity {
+  @Deprecated(message = "Use ModuleGroupPathEntityBuilder instead")
+  interface Builder : ModuleGroupPathEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getModule(): ModuleEntity.Builder = module as ModuleEntity.Builder
 
@@ -126,6 +132,10 @@ val ModuleEntity.groupPath: ModuleGroupPathEntity?
 
 /**
  * Describes options for a [Module][com.intellij.openapi.module.Module] imported from some external project system (Maven, Gradle).
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface ExternalSystemModuleOptionsEntity : WorkspaceEntity {
@@ -141,8 +151,8 @@ interface ExternalSystemModuleOptionsEntity : WorkspaceEntity {
   val externalSystemModuleType: String?
 
   //region generated code
-  @Deprecated(message = "Use ModifiableExternalSystemModuleOptionsEntity instead")
-  interface Builder : ModifiableExternalSystemModuleOptionsEntity {
+  @Deprecated(message = "Use ExternalSystemModuleOptionsEntityBuilder instead")
+  interface Builder : ExternalSystemModuleOptionsEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getModule(): ModuleEntity.Builder = module as ModuleEntity.Builder
 
@@ -183,6 +193,10 @@ val ModuleEntity.exModuleOptions: ExternalSystemModuleOptionsEntity?
 
 /**
  * Provides reference to [production module][com.intellij.openapi.roots.TestModuleProperties.getProductionModule].
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface TestModulePropertiesEntity : WorkspaceEntity {
@@ -191,8 +205,8 @@ interface TestModulePropertiesEntity : WorkspaceEntity {
   val productionModuleId: ModuleId
 
   //region generated code
-  @Deprecated(message = "Use ModifiableTestModulePropertiesEntity instead")
-  interface Builder : ModifiableTestModulePropertiesEntity {
+  @Deprecated(message = "Use TestModulePropertiesEntityBuilder instead")
+  interface Builder : TestModulePropertiesEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getModule(): ModuleEntity.Builder = module as ModuleEntity.Builder
 

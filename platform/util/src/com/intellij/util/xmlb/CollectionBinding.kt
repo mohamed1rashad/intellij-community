@@ -10,13 +10,18 @@ import com.intellij.util.ArrayUtilRt
 import com.intellij.util.SmartList
 import com.intellij.util.xmlb.annotations.Transient
 import com.intellij.util.xmlb.annotations.XCollection
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jdom.Attribute
 import org.jdom.Element
 import org.jdom.Namespace
 import org.jdom.Text
 import java.lang.reflect.Type
-import java.util.*
+import java.util.Collections
+import java.util.SortedSet
 
 internal fun createCollectionBinding(serializer: Serializer, itemType: Class<*>, accessor: MutableAccessor?, isArray: Boolean): RootBinding {
   var isSurroundWithTag = true
@@ -255,13 +260,25 @@ internal class CollectionBinding(
       return strategy.deserializeList(currentValue = currentValue, elements = elements, adapter = adapter, binding = this)
     }
 
-    val element = elements.single()
-    return strategy.deserializeList(
-      currentValue = if (currentValue == null && adapter.getName(element) == Constants.SET) HashSet<Any>() else currentValue,
-      elements = adapter.getChildren(element),
-      adapter = adapter,
-      binding = this,
-    )
+    return when {
+      elements.isEmpty() -> {
+        strategy.deserializeList(
+          currentValue = currentValue,
+          elements = emptyList(),
+          adapter = adapter,
+          binding = this,
+        )
+      }
+      else -> {
+        val element = elements.single()
+        strategy.deserializeList(
+          currentValue = if (currentValue == null && adapter.getName(element) == Constants.SET) HashSet<Any>() else currentValue,
+          elements = adapter.getChildren(element),
+          adapter = adapter,
+          binding = this,
+        )
+      }
+    }
   }
 
   private fun serializeItem(value: Any?, parent: Element, filter: SerializationFilter?) {

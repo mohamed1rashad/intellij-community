@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.intention.impl.config;
 
 import com.intellij.ide.ui.search.SearchUtil;
@@ -6,36 +6,44 @@ import com.intellij.ide.ui.search.SearchableOptionsRegistrar;
 import com.intellij.openapi.options.MasterDetails;
 import com.intellij.openapi.ui.DetailsComponent;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.GuiUtils;
+import com.intellij.ui.JBSplitter;
 import com.intellij.util.Alarm;
 import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JTree;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
-import java.util.*;
+import java.util.Set;
 
 @ApiStatus.Internal
 public final class IntentionSettingsPanel implements MasterDetails {
-  private JPanel myPanel;
+  private final JBSplitter myPanel;
   private final IntentionSettingsTree myIntentionSettingsTree;
   private final IntentionDescriptionPanel myIntentionDescriptionPanel = new IntentionDescriptionPanel();
-
-  private JPanel myTreePanel;
-  private JPanel myDescriptionPanel;
   private DetailsComponent myDetailsComponent;
 
   private final Alarm myResetAlarm = new Alarm();
 
   public IntentionSettingsPanel() {
+    myPanel = new JBSplitter(false, "IntentionSettingsPanel.HORIZONTAL_DIVIDER_PROPORTION", 0.5f);
     myIntentionSettingsTree = new IntentionSettingsTree() {
       @Override
       protected void selectionChanged(Object selected) {
-        if (selected instanceof IntentionActionMetaData actionMetaData) {
+        if (selected == null) {
+          myIntentionDescriptionPanel.reset(null);
+          if (myDetailsComponent != null) {
+            myDetailsComponent.setText();
+          }
+        }
+        else if (selected instanceof IntentionActionMetaData actionMetaData) {
           Runnable runnable = () -> {
             intentionSelected(actionMetaData);
             if (myDetailsComponent != null) {
@@ -70,21 +78,14 @@ public final class IntentionSettingsPanel implements MasterDetails {
           }
         }
         Set<String> filters = SearchableOptionsRegistrar.getInstance().getProcessedWords(filter);
-        if (force && result.isEmpty()) {
-          if (filters.size() > 1) {
-            result = filterModel(filter, false);
-          }
+        if (force && result.isEmpty() && filters.size() > 1) {
+          result = filterModel(filter, false);
         }
         return result;
       }
     };
-    myTreePanel.setLayout(new BorderLayout());
-    myTreePanel.add(myIntentionSettingsTree.getComponent(), BorderLayout.CENTER);
-
-    GuiUtils.replaceJSplitPaneWithIDEASplitter(myPanel);
-
-    myDescriptionPanel.setLayout(new BorderLayout());
-    myDescriptionPanel.add(myIntentionDescriptionPanel.getComponent(), BorderLayout.CENTER);
+    myPanel.setFirstComponent(myIntentionSettingsTree.getComponent());
+    myPanel.setSecondComponent(myIntentionDescriptionPanel.getComponent());
   }
 
   private void intentionSelected(IntentionActionMetaData actionMetaData) {
@@ -102,7 +103,7 @@ public final class IntentionSettingsPanel implements MasterDetails {
   @Override
   public void initUi() {
     myDetailsComponent = new DetailsComponent();
-    myDetailsComponent.setContent(myDescriptionPanel);
+    myDetailsComponent.setContent(myPanel.getSecondComponent());
   }
 
   @Override
@@ -112,7 +113,7 @@ public final class IntentionSettingsPanel implements MasterDetails {
 
   @Override
   public JComponent getMaster() {
-    return myTreePanel;
+    return myPanel.getFirstComponent();
   }
 
   @Override

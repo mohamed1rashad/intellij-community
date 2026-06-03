@@ -1,7 +1,6 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.pluginManager.frontend
 
-import com.intellij.ide.plugins.InstallPluginRequest
 import com.intellij.ide.plugins.PluginEnabler
 import com.intellij.ide.plugins.api.PluginDto
 import com.intellij.ide.plugins.marketplace.ApplyPluginsStateResult
@@ -25,13 +24,13 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.runBlockingCancellable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.FUSEventSource
 import com.intellij.openapi.util.IntellijInternalApi
 import com.intellij.platform.pluginManager.shared.rpc.PluginInstallerApi
 import com.intellij.platform.pluginManager.shared.rpc.PluginManagerApi
 import com.intellij.platform.project.projectId
+import fleet.rpc.client.durable
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -92,24 +91,35 @@ class BackendUiPluginManagerController() : UiPluginManagerController {
     return PluginInstallerApi.getInstance().performUninstall(sessionId, pluginId)
   }
 
-  override suspend fun installOrUpdatePlugin(sessionId: String, parentComponent: JComponent?, descriptor: PluginUiModel, updateDescriptor: PluginUiModel?, installSource: FUSEventSource?, modalityState: ModalityState?, pluginEnabler: PluginEnabler?, customRepoPlugins: List<PluginUiModel>): InstallPluginResult {
-    return PluginInstallerApi.getInstance().installOrUpdatePlugin(sessionId, PluginDto.fromModel(descriptor), updateDescriptor?.let { PluginDto.fromModel(it) }, installSource, customRepoPlugins.map { PluginDto.fromModel(it) })
+  override suspend fun installOrUpdatePlugin(sessionId: String, parentComponent: JComponent?, descriptor: PluginUiModel, updateDescriptor: PluginUiModel?, installSource: FUSEventSource?, modalityState: ModalityState?, pluginEnabler: PluginEnabler?, customRepoPlugins: List<PluginUiModel>?): InstallPluginResult {
+    return PluginInstallerApi.getInstance().installOrUpdatePlugin(sessionId, PluginDto.fromModel(descriptor), updateDescriptor?.let { PluginDto.fromModel(it) }, installSource, customRepoPlugins?.map { PluginDto.fromModel(it) })
   }
 
-  override suspend fun continueInstallation(sessionId: String, pluginId: PluginId, enableRequiredPlugins: Boolean, allowInstallWithoutRestart: Boolean, pluginEnabler: PluginEnabler?, modalityState: ModalityState?, parentComponent: JComponent?, customRepoPlugins: List<PluginUiModel>): InstallPluginResult {
-    return PluginInstallerApi.getInstance().continueInstallation(sessionId, pluginId, enableRequiredPlugins, allowInstallWithoutRestart, customRepoPlugins.map { PluginDto.fromModel(it) })
+  override suspend fun continueInstallation(sessionId: String, pluginId: PluginId, enableRequiredPlugins: Boolean, allowInstallWithoutRestart: Boolean, pluginEnabler: PluginEnabler?, modalityState: ModalityState?, parentComponent: JComponent?, customRepoPlugins: List<PluginUiModel>?): InstallPluginResult {
+    return PluginInstallerApi.getInstance().continueInstallation(sessionId, pluginId, enableRequiredPlugins, allowInstallWithoutRestart, customRepoPlugins?.map { PluginDto.fromModel(it) })
   }
 
   override suspend fun getCustomRepoTags(): Set<String> {
     return PluginManagerApi.getInstance().getCustomRepoTags()
   }
 
-  override suspend fun isModified(sessionId: String): Boolean {
-    return PluginInstallerApi.getInstance().isModified(sessionId)
+  override suspend fun isModified(): Boolean {
+    return PluginInstallerApi.getInstance().isModified()
   }
 
   override fun enablePlugins(sessionId: String, descriptorIds: List<PluginId>, enable: Boolean, project: Project?): SetEnabledStateResult {
     return awaitForResult { PluginManagerApi.getInstance().enablePlugins(sessionId, descriptorIds, enable, project?.projectId()) }
+  }
+
+  override fun markPluginsAsDisabled(pluginIds: List<PluginId>) {
+    awaitForResult { PluginManagerApi.getInstance().markPluginsAsDisabled(pluginIds) }
+  }
+
+  suspend fun disablePluginsWithDependencies(
+    pluginIds: List<PluginId>,
+    project: Project?,
+  ): ApplyPluginsStateResult {
+    return PluginManagerApi.getInstance().disablePluginsWithDependencies(pluginIds, project?.projectId())
   }
 
   override fun isPluginRequiresUltimateButItIsDisabled(sessionId: String, pluginId: PluginId): Boolean {
@@ -126,6 +136,10 @@ class BackendUiPluginManagerController() : UiPluginManagerController {
 
   override suspend fun isRestartRequired(sessionId: String): Boolean {
     return PluginInstallerApi.getInstance().isRestartRequired(sessionId)
+  }
+
+  override suspend fun setPluginsAutoUpdateEnabled(enabled: Boolean) {
+    PluginManagerApi.getInstance().setPluginsAutoUpdateEnabled(enabled)
   }
 
   override suspend fun findInstalledPlugins(plugins: Set<PluginId>): Map<PluginId, PluginUiModel> {
@@ -165,13 +179,16 @@ class BackendUiPluginManagerController() : UiPluginManagerController {
   }
 
   @OptIn(FlowPreview::class)
-  override fun connectToUpdateServiceWithCounter(sessionId: String, callback: (Int?) -> Unit): PluginUpdatesService {
-    service<BackendRpcCoroutineContext>().coroutineScope.launch {
-      PluginManagerApi.getInstance().subscribeToUpdatesCount(sessionId).debounce(100).collectLatest {
-        callback(it)
+  override fun connectToPluginUpdateService(sessionId: String, callback: (List<PluginUiModel>) -> Unit): PluginUpdatesService {
+    val result = RemotePluginUpdatesService(sessionId)
+    result.coroutineScope.launch {
+      durable {
+        PluginManagerApi.getInstance().subscribeToPluginUpdates(sessionId).debounce(100).collectLatest {
+          callback(it)
+        }
       }
     }
-    return RemotePluginUpdatesService(sessionId)
+    return result
   }
 
   override fun filterPluginsRequiringUltimateButItsDisabled(pluginIds: List<PluginId>): List<PluginId> {
@@ -218,8 +235,8 @@ class BackendUiPluginManagerController() : UiPluginManagerController {
     awaitForResult { PluginManagerApi.getInstance().setEnabledState(sessionId, pluginIds, enable) }
   }
 
-  override suspend fun applySession(sessionId: String, parent: JComponent?, project: Project?): ApplyPluginsStateResult {
-    return PluginInstallerApi.getInstance().applyPluginSession(sessionId, project?.projectId())
+  override suspend fun apply(parent: JComponent?, project: Project?): ApplyPluginsStateResult {
+    return PluginInstallerApi.getInstance().apply(project?.projectId())
   }
 
   override suspend fun updatePluginDependencies(sessionId: String): Set<PluginId> {

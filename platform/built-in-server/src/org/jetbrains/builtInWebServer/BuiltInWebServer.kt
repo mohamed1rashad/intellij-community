@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.builtInWebServer
 
 import com.google.common.net.InetAddresses
@@ -16,13 +16,23 @@ import com.intellij.openapi.util.io.endsWithName
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.icons.CachedImageIcon
-import com.intellij.util.io.*
+import com.intellij.util.io.directoryStreamIfExists
+import com.intellij.util.io.getHostName
+import com.intellij.util.io.host
+import com.intellij.util.io.isLocalOrigin
+import com.intellij.util.io.uriScheme
 import com.intellij.util.net.NetUtils
 import com.intellij.util.ui.ImageUtil
 import io.netty.buffer.Unpooled
 import io.netty.channel.Channel
 import io.netty.channel.ChannelHandlerContext
-import io.netty.handler.codec.http.*
+import io.netty.handler.codec.http.FullHttpRequest
+import io.netty.handler.codec.http.HttpHeaderNames
+import io.netty.handler.codec.http.HttpHeaders
+import io.netty.handler.codec.http.HttpMethod
+import io.netty.handler.codec.http.HttpRequest
+import io.netty.handler.codec.http.HttpResponseStatus
+import io.netty.handler.codec.http.QueryStringDecoder
 import org.apache.commons.imaging.ImageFormats
 import org.apache.commons.imaging.Imaging
 import org.jetbrains.ide.HttpRequestHandler
@@ -319,6 +329,7 @@ internal fun isOwnHostName(host: String): Boolean {
   }
 }
 
+@Suppress("SplitModeApiUsage")
 internal fun redirectToDirectory(request: HttpRequest, channel: Channel, extraHeaders: HttpHeaders?) {
   val response = HttpResponseStatus.MOVED_PERMANENTLY.response(request)
   val url = VfsUtil.toUri("${channel.uriScheme}://${request.host!!}${URI(request.uri()).path}/")!!

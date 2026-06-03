@@ -2,7 +2,11 @@
 
 package org.jetbrains.kotlin.idea.k2.codeinsight.inspections
 
-import com.intellij.codeInspection.*
+import com.intellij.codeInspection.InspectionManager
+import com.intellij.codeInspection.LocalQuickFix
+import com.intellij.codeInspection.ProblemDescriptor
+import com.intellij.codeInspection.ProblemHighlightType
+import com.intellij.codeInspection.ProblemsHolder
 import com.intellij.modcommand.ActionContext
 import com.intellij.openapi.util.TextRange
 import org.jetbrains.kotlin.analysis.api.KaSession
@@ -89,7 +93,7 @@ internal class AddExplicitTargetToParameterAnnotationInspection :
     }
 
     private fun KaSession.isInAllowlist(element: KtAnnotationEntry): Boolean {
-        val annotationClassId = element.resolveToCall()?.singleConstructorCallOrNull()?.partiallyAppliedSymbol?.symbol?.containingClassId
+        val annotationClassId = element.resolveToCall()?.singleConstructorCallOrNull()?.symbol?.containingClassId
         return annotationClassId in STANDARD_ANNOTATION_IDS_WITHOUT_NECESSARY_MIGRATION
     }
 

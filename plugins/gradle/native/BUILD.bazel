@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.gradle.native` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "native_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "native",
   module_name = "intellij.gradle.native",
   visibility = ["//visibility:public"],
   srcs = glob(["src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":native_resources"],
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   deps = [
     "//platform/lang-api:lang",
     "//platform/lang-impl",
@@ -27,4 +22,34 @@ jvm_library(
     "//plugins/gradle/native/tooling",
   ]
 )
+
+jvm_library(
+  name = "native_test_lib",
+  testonly = True,
+  module_name = "intellij.gradle.native",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  exports = [
+    "//plugins/gradle:gradle-common",
+    "//plugins/gradle:gradle-common_test_lib",
+    "//plugins/gradle/native/tooling",
+    "//plugins/gradle/native/tooling:tooling_test_lib",
+  ],
+  runtime_deps = [
+    ":native",
+    "//platform/lang-api:lang_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//plugins/gradle:gradle_test_lib",
+    "//plugins/gradle:gradle-common_test_lib",
+    "//plugins/gradle/native/tooling:tooling_test_lib",
+    "//plugins/gradle/tooling-extension-impl:toolingExtension-impl_test_lib",
+    "//platform/platform-util-io:ide-util-io_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.gradle.native` end
+
+### auto-generated section `iml intellij.gradle.native` start
+exports_files([
+  "intellij.gradle.native.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.gradle.native` end

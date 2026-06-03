@@ -2,7 +2,6 @@
 package org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt
 
 import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.impl.ProgressManagerScope
 import com.intellij.psi.PsiMember
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
 import org.jetbrains.kotlin.analysis.api.KaSession
@@ -67,8 +66,8 @@ internal class CallableImportCandidatesProvider(
         }
     }
 
-    context(_: KaSession)
     @OptIn(KaExperimentalApi::class)
+    context(_: KaSession)
     override fun collectCandidates(
         name: Name,
         indexProvider: KtSymbolFromIndexProvider,
@@ -109,7 +108,7 @@ internal class CallableImportCandidatesProvider(
                     )
 
                     yieldAll(
-                        indexProvider.getExtensionCallableSymbolsFromSubclassObjects(name, receiverTypes)
+                        indexProvider.getCallableSymbolsFromSubclassObjects(name, receiverTypes)
                             .map { (dispatcherObject, callableSymbol) -> CallableImportCandidate.create(callableSymbol, dispatcherObject) }
                     )
                 }

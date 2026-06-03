@@ -24,7 +24,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.java.JdkVersionDetector;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
 import java.io.File;
@@ -184,7 +184,7 @@ public final class ProgramRunnerUtil {
       return "";
     }
 
-    final int symbols = Math.max(10, 20 - toBeAdded);
+    final int symbols = Math.max(10, 60 - toBeAdded);
     return name.length() < symbols + 3 ? name : name.substring(0, symbols) + "...";
   }
 }

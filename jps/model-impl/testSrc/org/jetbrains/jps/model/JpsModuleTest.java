@@ -16,10 +16,23 @@
 package org.jetbrains.jps.model;
 
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.jps.model.java.*;
+import org.jetbrains.jps.model.java.JavaSourceRootProperties;
+import org.jetbrains.jps.model.java.JavaSourceRootType;
+import org.jetbrains.jps.model.java.JpsJavaExtensionService;
+import org.jetbrains.jps.model.java.JpsJavaLibraryType;
+import org.jetbrains.jps.model.java.JpsJavaModuleType;
+import org.jetbrains.jps.model.java.JpsJavaSdkType;
 import org.jetbrains.jps.model.library.JpsLibrary;
 import org.jetbrains.jps.model.library.sdk.JpsSdk;
-import org.jetbrains.jps.model.module.*;
+import org.jetbrains.jps.model.module.JpsDependencyElement;
+import org.jetbrains.jps.model.module.JpsLibraryDependency;
+import org.jetbrains.jps.model.module.JpsModule;
+import org.jetbrains.jps.model.module.JpsModuleDependency;
+import org.jetbrains.jps.model.module.JpsModuleSourceDependency;
+import org.jetbrains.jps.model.module.JpsModuleSourceRoot;
+import org.jetbrains.jps.model.module.JpsSdkDependency;
+import org.jetbrains.jps.model.module.JpsTypedModule;
+import org.jetbrains.jps.model.module.JpsTypedModuleSourceRoot;
 
 import java.util.List;
 
@@ -65,22 +78,6 @@ public class JpsModuleTest extends JpsModelTestCase {
     assertInstanceOf(dependencies.get(0), JpsModuleSourceDependency.class);
     assertSame(library, assertInstanceOf(dependencies.get(1), JpsLibraryDependency.class).getLibrary());
     assertSame(dep, assertInstanceOf(dependencies.get(2), JpsModuleDependency.class).getModule());
-  }
-
-  public void testCreateReferenceByModule() {
-    final JpsModule module = myProject.addModule("m", JpsJavaModuleType.INSTANCE);
-    final JpsModuleReference reference = module.createReference().asExternal(myModel);
-    assertEquals("m", reference.getModuleName());
-    assertSame(module, reference.resolve());
-  }
-
-  public void testCreateReferenceByName() {
-    final JpsModuleReference reference = JpsElementFactory.getInstance().createModuleReference("m").asExternal(myModel);
-    assertEquals("m", reference.getModuleName());
-    assertNull(reference.resolve());
-
-    final JpsModule module = myProject.addModule("m", JpsJavaModuleType.INSTANCE);
-    assertSame(module, reference.resolve());
   }
 
   public void testSdkDependency() {

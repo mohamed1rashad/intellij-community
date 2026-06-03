@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui.codeFloatingToolbar
 
 import com.intellij.codeInsight.hint.HintManager
@@ -20,6 +20,7 @@ import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.VisualPosition
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.advanced.AdvancedSettings
 import com.intellij.openapi.ui.popup.JBPopup
 import com.intellij.openapi.ui.popup.JBPopupListener
@@ -35,16 +36,25 @@ import com.intellij.ui.LightweightHint
 import com.intellij.ui.ScreenUtil
 import com.intellij.ui.awt.AnchoredPoint
 import com.intellij.ui.popup.util.PopupImplUtil
+import com.intellij.util.concurrency.ThreadingAssertions
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.UIUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
 import java.awt.Dimension
 import java.awt.IllegalComponentStateException
 import java.awt.Point
 import java.awt.Rectangle
+import java.awt.datatransfer.StringSelection
+import java.awt.event.ActionEvent
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
+import javax.swing.JList
 
 /**
  * Represents floating toolbar which is shown for selected text inside editor.
@@ -86,6 +96,7 @@ class CodeFloatingToolbar(
   }
 
   private var activeMenuPopup: JBPopup? = null
+  private var disabledCount = 0
 
   override fun hasIgnoredParent(element: PsiElement): Boolean {
     return !element.isWritable || TemplateManager.getInstance(element.project).getActiveTemplate(editor) != null
@@ -93,7 +104,7 @@ class CodeFloatingToolbar(
 
   override fun isEnabled(): Boolean {
     return !AdvancedSettings.getBoolean("floating.codeToolbar.hide")
-           && editor.document.isWritable && !TEMPORARILY_DISABLED
+           && editor.document.isWritable && !TEMPORARILY_DISABLED && disabledCount == 0
   }
 
   override fun disableForDoubleClickSelection(): Boolean = true
@@ -169,17 +180,34 @@ class CodeFloatingToolbar(
   override fun createActionGroup(): ActionGroup? {
     val contextAwareActionGroupId = getContextAwareGroupId(editor) ?: return null
     val mainActionGroup = CustomActionsSchema.getInstance().getCorrectedAction(contextAwareActionGroupId) ?: error("Can't find groupId action")
-    val configurationGroup = createConfigureGroup(contextAwareActionGroupId)
-    val showIntentionAction = CustomActionsSchema.getInstance().getCorrectedAction("ShowIntentionActions")
-                              ?: error("Can't find ShowIntentionActions action")
-    return DefaultActionGroup(showIntentionAction, mainActionGroup, configurationGroup)
+
+    val project = editor.project ?: return null
+    val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(editor.document) ?: return null
+
+    val actionList = buildList {
+      if (!isIntentionsGroupHidden(psiFile.language)) {
+        val showIntentionAction = CustomActionsSchema.getInstance().getCorrectedAction("ShowIntentionActions")
+                                  ?: error("Can't find ShowIntentionActions action")
+        add(showIntentionAction)
+      }
+
+      add(mainActionGroup)
+
+      if (!isConfigurationsGroupHidden(psiFile.language)) {
+        add(createConfigureGroup(contextAwareActionGroupId))
+      }
+    }
+
+    return DefaultActionGroup(actionList)
   }
 
   override suspend fun createHint(): LightweightHint {
     val hint = super.createHint()
     val buttons = UIUtil.findComponentsOfType(hint.component, ActionButton::class.java)
     buttons.forEach { button ->
-      button.presentation.putClientProperty(ActionUtil.HIDE_DROPDOWN_ICON, true)
+      if (button.presentation.getClientProperty(ActionUtil.HIDE_DROPDOWN_ICON) == null) {
+        button.presentation.putClientProperty(ActionUtil.HIDE_DROPDOWN_ICON, true)
+      }
       showMenuPopupOnMouseHover(button)
     }
     return hint
@@ -217,11 +245,24 @@ class CodeFloatingToolbar(
         Toggleable.setSelected(button, true)
         alignButtonPopup(popup)
         HelpTooltip.setMasterPopupOpenCondition(button) { true }
+        overrideCopyAction(popup)
       }
 
       override fun onClosed(event: LightweightWindowEvent) {
         activeMenuPopup = null
         Toggleable.setSelected(button, null)
+      }
+    })
+  }
+
+  private fun overrideCopyAction(popup: JBPopup) {
+    val list = UIUtil.findComponentOfType(popup.content, JList::class.java) ?: return
+    list.actionMap.put("copy", object : javax.swing.AbstractAction() {
+      override fun actionPerformed(e: ActionEvent) {
+        val text = editor.selectionModel.selectedText ?: return
+        if (text.isNotEmpty()) {
+          CopyPasteManager.getInstance().setContents(StringSelection(text))
+        }
       }
     })
   }
@@ -260,13 +301,20 @@ class CodeFloatingToolbar(
     val toolbarBounds = getScreenBounds(hintComponent) ?: return
     val popupBounds = getScreenBounds(popup.content) ?: return
     if (!toolbarBounds.intersects(popupBounds)) return
+    hideWhilePopupVisible(popup)
+  }
+
+  /**
+   * Hides and disables the toolbar for the whole popup lifetime.
+   */
+  fun hideWhilePopupVisible(popup: JBPopup) {
+    ThreadingAssertions.assertEventDispatchThread()
     val wasVisible = isShown()
-    val wasDisabled = TEMPORARILY_DISABLED
     val disposable = getPopupDisposable(popup)
-    temporarilyDisable(true)
+    disabledCount++
     scheduleHide()
     Disposer.register(disposable) {
-      temporarilyDisable(wasDisabled)
+      disabledCount--
       if (wasVisible) {
         allowInstantShowing()
       }

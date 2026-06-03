@@ -5,7 +5,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationListener
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.runInEdt
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.event.DocumentEvent
@@ -15,7 +15,6 @@ import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleUtil
-import com.intellij.openapi.progress.Cancellation
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.NlsContexts
@@ -25,7 +24,10 @@ import com.jetbrains.python.PyBundle
 import com.jetbrains.python.errorProcessing.emit
 import com.jetbrains.python.onFailure
 import com.jetbrains.python.packaging.utils.PyPackageCoroutine
-import com.jetbrains.python.sdk.*
+import com.jetbrains.python.sdk.associatedModuleDir
+import com.jetbrains.python.sdk.associatedModulePath
+import com.jetbrains.python.sdk.findAmongRoots
+import com.jetbrains.python.sdk.pythonSdk
 import com.jetbrains.python.sdk.skeleton.PySkeletonUtil
 import com.jetbrains.python.statistics.PipfileWatcherIdsHolder.Companion.RUN_PIPENV_LOCK_SUGGESTION
 import com.jetbrains.python.util.ShowingMessageErrorSync
@@ -75,12 +77,12 @@ internal class PipEnvPipFileWatcher : EditorFactoryListener {
   private suspend fun notifyPipFileChanged(module: Module) {
     if (module.getUserData(notificationActive) == true) return
     val title = when {
-      getPipFileLock(module) == null -> PyBundle.message("python.sdk.pipenv.pip.file.lock.not.found")
+      findAmongRoots(module, PIP_FILE_LOCK) == null -> PyBundle.message("python.sdk.pipenv.pip.file.lock.not.found")
       else -> PyBundle.message("python.sdk.pipenv.pip.file.lock.out.of.date")
     }
     val content = PyBundle.message("python.sdk.pipenv.pip.file.notification.content")
     val notification = withContext(Dispatchers.EDT) {
-      LOCK_NOTIFICATION_GROUP.createNotification(
+      NotificationGroupManager.getInstance().getNotificationGroup("Pipfile Watcher").createNotification(
         title = title,
         content = content,
         type = NotificationType.INFORMATION,
@@ -89,12 +91,16 @@ internal class PipEnvPipFileWatcher : EditorFactoryListener {
       .setListener(NotificationListener { notification, event ->
         notification.expire()
         module.putUserData(notificationActive, null)
-        runInEdt { FileDocumentManager.getInstance().saveAllDocuments() }
-        when (event.description) {
-          PipEnvEvent.LOCK.description -> runPipEnvInBackground(module, listOf("lock"),
-                                                                PyBundle.message("python.sdk.pipenv.pip.file.notification.locking"))
-          PipEnvEvent.UPDATE.description -> runPipEnvInBackground(module, listOf("update", "--dev"),
-                                                                  PyBundle.message("python.sdk.pipenv.pip.file.notification.updating"))
+        PyPackageCoroutine.launch(module.project) {
+          edtWriteAction {
+            FileDocumentManager.getInstance().saveAllDocuments()
+          }
+          when (event.description) {
+            PipEnvEvent.LOCK.description -> runPipEnvInBackground(module, listOf("lock"),
+                                                                  PyBundle.message("python.sdk.pipenv.pip.file.notification.locking"))
+            PipEnvEvent.UPDATE.description -> runPipEnvInBackground(module, listOf("update", "--dev"),
+                                                                    PyBundle.message("python.sdk.pipenv.pip.file.notification.updating"))
+          }
         }
       })
     module.putUserData(notificationActive, true)
@@ -112,7 +118,7 @@ internal class PipEnvPipFileWatcher : EditorFactoryListener {
           ShowingMessageErrorSync.emit(it, module.project)
         }
 
-        withContext(Dispatchers.Default) {
+        withContext(Dispatchers.IO) {
           PySkeletonUtil.getSitePackagesDirectory(sdk)?.refresh(true, true)
           sdk.associatedModuleDir?.refresh(true, false)
         }
@@ -122,22 +128,15 @@ internal class PipEnvPipFileWatcher : EditorFactoryListener {
 
   private suspend fun isPipFileEditor(editor: Editor): Boolean {
     val file = editor.document.virtualFile ?: return false
-    if (file.name != PipEnvFileHelper.PIP_FILE) return false
+    if (file.name != PIP_FILE) return false
     val project = editor.project ?: return false
     val module = file.getModule(project) ?: return false
-    if (PipEnvFileHelper.pipFile(module) != file) return false
+    if (findAmongRoots(module, PIP_FILE) != file) return false
     return module.pythonSdk?.isPipEnv == true
   }
 
   private val Document.virtualFile: VirtualFile?
     get() = FileDocumentManager.getInstance().getFile(this)
 
-  private fun VirtualFile.getModule(project: Project): Module? =
-    ModuleUtil.findModuleForFile(this, project)
-
-  private val LOCK_NOTIFICATION_GROUP = Cancellation.forceNonCancellableSectionInClassInitializer {
-    NotificationGroupManager.getInstance().getNotificationGroup("Pipfile Watcher")
-  }
-
-  private suspend fun getPipFileLock(module: Module): VirtualFile? = withContext(Dispatchers.IO) { findAmongRoots(module, PipEnvFileHelper.PIP_FILE_LOCK) }
+  private fun VirtualFile.getModule(project: Project): Module? = ModuleUtil.findModuleForFile(this, project)
 }

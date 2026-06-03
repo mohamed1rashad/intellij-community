@@ -5,7 +5,13 @@ import com.intellij.externalDependencies.DependencyOnPlugin;
 import com.intellij.externalDependencies.ExternalDependenciesManager;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
-import com.intellij.ide.plugins.*;
+import com.intellij.ide.plugins.DynamicPlugins;
+import com.intellij.ide.plugins.IdeaPluginDescriptor;
+import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
+import com.intellij.ide.plugins.PluginEnabler;
+import com.intellij.ide.plugins.PluginMainDescriptor;
+import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.ide.plugins.PluginManagerMain;
 import com.intellij.notification.NotificationAction;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
@@ -95,7 +101,7 @@ final class CheckRequiredPluginsActivity implements StartupActivity.RequiredForS
 
     for (DependencyOnPlugin dependency : dependencies) {
       PluginId pluginId = PluginId.getId(dependency.getPluginId());
-      IdeaPluginDescriptorImpl descriptor = PluginManagerCore.findPlugin(pluginId);
+      PluginMainDescriptor descriptor = (PluginMainDescriptor)PluginManagerCore.findPlugin(pluginId);
       if (descriptor == null) {
         errorMessages.add(IdeBundle.message("error.plugin.required.for.project.not.installed", pluginId, projectName));
         notInstalled.add(pluginId);
@@ -105,7 +111,7 @@ final class CheckRequiredPluginsActivity implements StartupActivity.RequiredForS
       String pluginName = descriptor.getName();
       if (pluginEnabler.isDisabled(pluginId)) {
         boolean canEnableWithoutRestart = Registry.is("ide.plugins.load.automatically") &&
-                                          DynamicPlugins.allowLoadUnloadWithoutRestart(descriptor);
+                                          DynamicPlugins.INSTANCE.checkCanLoadWithoutRestart(descriptor);
         if (canEnableWithoutRestart) {
           pluginsToEnableWithoutRestart.add(descriptor);
         }

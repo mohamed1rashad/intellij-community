@@ -1,7 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.coverage.actions;
 
-import com.intellij.coverage.*;
+import com.intellij.coverage.CoverageBundle;
+import com.intellij.coverage.CoverageDataManager;
+import com.intellij.coverage.CoverageExecutor;
+import com.intellij.coverage.CoverageSuite;
+import com.intellij.coverage.CoverageSuitesBundle;
 import com.intellij.execution.Executor;
 import com.intellij.execution.Location;
 import com.intellij.execution.configurations.RunConfigurationBase;
@@ -145,10 +149,10 @@ class TrackCoverageAction extends ToggleModelAction {
       if (test != null && !test.isInProgress()) {
         final List<? extends AbstractTestProxy> list = test.getAllTests();
         for (AbstractTestProxy proxy : list) {
-          final Location<?> location = ReadAction.compute(() -> proxy.getLocation(myProperties.getProject(), myProperties.getScope()));
+          final Location<?> location = ReadAction.computeBlocking(() -> proxy.getLocation(myProperties.getProject(), myProperties.getScope()));
           if (location != null) {
             final PsiElement element = location.getPsiElement();
-            final String name = ReadAction.compute(() -> currentSuite.getCoverageEngine().getTestMethodName(element, proxy));
+            final String name = ReadAction.computeBlocking(() -> currentSuite.getCoverageEngine().getTestMethodName(element, proxy));
             if (name != null) {
               testMethods.add(name);
             }

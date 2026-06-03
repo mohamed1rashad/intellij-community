@@ -22,6 +22,7 @@ import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.FileStatus;
 import com.intellij.openapi.vcs.changes.actions.diff.ChangeDiffRequestProducer;
+import com.intellij.openapi.vcs.changes.actions.diff.GoToChangePopupController;
 import com.intellij.openapi.vcs.changes.actions.diff.PresentableGoToChangePopupAction;
 import com.intellij.openapi.vcs.changes.actions.diff.UnversionedDiffRequestProducer;
 import com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode;
@@ -30,8 +31,13 @@ import com.intellij.platform.vcs.impl.shared.changes.DiffPreviewUpdateProcessor;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.CalledInAny;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -240,24 +246,45 @@ public abstract class ChangeViewDiffRequestProcessor extends CacheDiffRequestPro
 
   @Override
   protected @Nullable AnAction createGoToChangeAction() {
-    return new MyGoToChangePopupAction();
+    return PresentableGoToChangePopupAction.create(this::getChanges, new MyGoToChangePopupController());
   }
 
-  private class MyGoToChangePopupAction extends PresentableGoToChangePopupAction.Default<Wrapper> {
-    @Override
-    protected @NotNull ListSelection<? extends Wrapper> getChanges() {
-      List<? extends Wrapper> allChanges = ContainerUtil.newArrayList(iterateAllChanges());
+  protected @NotNull List<AnAction> getGoToChangeToolbarActions() {
+    return Collections.emptyList();
+  }
+
+  protected @NotNull List<AnAction> getGoToChangePopupMenuActions() {
+    return Collections.emptyList();
+  }
+
+  private @NotNull ListSelection<? extends Wrapper> getChanges() {
+    List<? extends Wrapper> allChanges = toListIfNotMany(iterateAllChanges(), true);
+    if (allChanges == null) {
+      return ListSelection.empty();
+    }
+    else {
       return ListSelection.create(allChanges, getCurrentChange());
     }
+  }
 
+  private class MyGoToChangePopupController implements GoToChangePopupController<Wrapper> {
     @Override
-    protected boolean canNavigate() {
-      List<? extends Wrapper> allChanges = toListIfNotMany(iterateAllChanges(), true);
-      return allChanges == null || allChanges.size() > 1;
+    public @Nullable PresentableChange getPresentation(@NotNull Wrapper change) {
+      return change;
     }
 
     @Override
-    protected void onSelected(@NotNull Wrapper change) {
+    public @NotNull List<AnAction> createToolbarActions() {
+      return ChangeViewDiffRequestProcessor.this.getGoToChangeToolbarActions();
+    }
+
+    @Override
+    public @NotNull List<AnAction> createPopupMenuActions() {
+      return ChangeViewDiffRequestProcessor.this.getGoToChangePopupMenuActions();
+    }
+
+    @Override
+    public void onSelected(@NotNull Wrapper change) {
       setCurrentChange(change);
       selectChange(change);
     }
@@ -294,7 +321,8 @@ public abstract class ChangeViewDiffRequestProcessor extends CacheDiffRequestPro
     return true;
   }
 
-  private @Nullable PrevNextDifferenceIterable getSelectionStrategy(boolean fromUpdate) {
+  @ApiStatus.Internal
+  protected @Nullable PrevNextDifferenceIterable getSelectionStrategy(boolean fromUpdate) {
     if (myCurrentChange == null) return null;
 
     List<? extends Wrapper> selectedChanges = toListIfNotMany(iterateSelectedChanges(), fromUpdate);
@@ -550,7 +578,8 @@ public abstract class ChangeViewDiffRequestProcessor extends CacheDiffRequestPro
     }
 
     @Override
-    public @NotNull DiffRequest process(@NotNull UserDataHolder context, @NotNull ProgressIndicator indicator) throws ProcessCanceledException {
+    public @NotNull DiffRequest process(@NotNull UserDataHolder context, @NotNull ProgressIndicator indicator)
+      throws ProcessCanceledException {
       return myRequest;
     }
   }

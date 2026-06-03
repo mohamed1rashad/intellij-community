@@ -1,10 +1,9 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.syntax.util.lexer
 
 import com.intellij.platform.syntax.SyntaxElementType
-import org.jetbrains.annotations.ApiStatus
+import com.intellij.platform.syntax.lexer.LexerPosition
 
-@ApiStatus.Experimental
 open class FlexAdapter(
   val flex: FlexLexer
 ) : LexerBase() {
@@ -61,6 +60,31 @@ open class FlexAdapter(
     myState = flex.yystate()
     myTokenType = flex.advance()
     myTokenEnd = flex.getTokenEnd()
+  }
+
+  override fun getCurrentPosition(): LexerPosition {
+    locateToken()
+    return FlexAdapterPosition(myTokenType, myTokenStart, myTokenEnd, myState, flex.yystate())
+  }
+
+  override fun restore(position: LexerPosition) {
+    position as FlexAdapterPosition
+
+    flex.reset(myText, position.tokenEnd, getBufferEnd(), position.flexState)
+    myTokenStart = position.offset
+    myTokenEnd = position.tokenEnd
+    myTokenType = position.currentToken
+    myState = position.state
+  }
+
+  private class FlexAdapterPosition(
+    val currentToken: SyntaxElementType?,
+    val tokenOffset: Int,
+    val tokenEnd: Int,
+    override val state: Int,
+    val flexState: Int,
+  ) : LexerPosition {
+    override val offset: Int get() = tokenOffset
   }
 
   override fun toString(): String = "FlexAdapter for $flex"

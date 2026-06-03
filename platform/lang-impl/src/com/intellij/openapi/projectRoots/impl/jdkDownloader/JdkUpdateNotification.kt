@@ -1,6 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.projectRoots.impl.jdkDownloader
 
+import com.intellij.execution.wsl.WslPath
 import com.intellij.ide.actions.SettingsEntryPointAction
 import com.intellij.notification.Notification
 import com.intellij.notification.NotificationAction
@@ -8,18 +9,25 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.invokeLater
-import com.intellij.openapi.application.runWriteAction
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.coroutineToIndicator
 import com.intellij.openapi.project.ProjectBundle
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.projectRoots.SdkType
 import com.intellij.openapi.vfs.VfsUtil
+import com.intellij.platform.eel.provider.getEelDescriptor
+import com.intellij.platform.eel.provider.toEelApi
+import com.intellij.platform.ide.progress.withBackgroundProgress
+import com.intellij.util.application
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus
+import java.nio.file.Path
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import kotlin.io.path.invariantSeparatorsPathString
@@ -41,11 +49,13 @@ private val LOG = logger<JdkUpdateNotification>()
  *    - the JDK update is completed
  */
 @ApiStatus.Internal
-class JdkUpdateNotification(val jdk: Sdk,
-                            val oldItem: JdkItem,
-                            val newItem: JdkItem,
-                            private val whenComplete: (JdkUpdateNotification) -> Unit,
-                            private val showVendorVersion: Boolean = false,
+class JdkUpdateNotification(
+  val jdk: Sdk,
+  val oldItem: JdkItem,
+  val newItem: JdkItem,
+  private val whenComplete: (JdkUpdateNotification) -> Unit,
+  private val showVendorVersion: Boolean = false,
+  val scope: CoroutineScope,
 ) {
   private val lock = ReentrantLock()
 
@@ -58,7 +68,7 @@ class JdkUpdateNotification(val jdk: Sdk,
   /**
    * Can be either suggestion or error notification
    */
-  private var myRetryNotification : Notification? = null
+  private var myRetryNotification: Notification? = null
 
   val persistentId: String = "${jdk.name}-${oldItem.fullPresentationText}-${newItem.fullPresentationText}-${jdk.homePath}"
 
@@ -134,7 +144,10 @@ class JdkUpdateNotification(val jdk: Sdk,
                                                         jdk.name,
                                                         if (showVendorVersion) newItem.fullPresentationWithVendorText else newItem.fullPresentationText,
                                                         oldItem.versionPresentationText)
-      templatePresentation.description = ProjectBundle.message("action.description.jdk.update.found", jdk.name, newItem.fullPresentationText, oldItem.versionPresentationText)
+      templatePresentation.description = ProjectBundle.message("action.description.jdk.update.found",
+                                                               jdk.name,
+                                                               newItem.fullPresentationText,
+                                                               oldItem.versionPresentationText)
     }
 
     override fun update(e: AnActionEvent) {
@@ -148,7 +161,7 @@ class JdkUpdateNotification(val jdk: Sdk,
     }
   }
 
-  private fun showUpdateErrorNotification(feedItem: JdkItem) : Unit = lock.withLock {
+  private fun showUpdateErrorNotification(feedItem: JdkItem): Unit = lock.withLock {
     NotificationGroupManager.getInstance().getNotificationGroup("JDK Update Error")
       .createNotification(
         ProjectBundle.message("progress.title.updating.jdk.0.to.1", jdk.name, feedItem.fullPresentationText),
@@ -166,59 +179,82 @@ class JdkUpdateNotification(val jdk: Sdk,
       myIsUpdateRunning = true
     }
 
-    val title = ProjectBundle.message("progress.title.updating.jdk.0.to.1", jdk.name, newItem.fullPresentationText)
-    ProgressManager.getInstance().run(
-      object : Task.Backgroundable(null /*progress should be global*/, title, true, ALWAYS_BACKGROUND) {
-        override fun run(indicator: ProgressIndicator) {
-          val newJdkHome = try {
-            val installer = JdkInstaller.getInstance()
+    val project = e.project
 
-            val request = installer.prepareJdkInstallation(newItem, installer.defaultInstallDir(newItem))
-            installer.installJdk(request, indicator, e.project)
-
-            //make sure VFS sees the files and sets up the JDK correctly
-            indicator.text = ProjectBundle.message("progress.text.updating.jdk.setting.up")
-            VfsUtil.markDirtyAndRefresh(false, true, true, request.installDir.toFile())
-            request.javaHome
-          }
-          catch (t: Throwable) {
-            if (t is ControlFlowException) {
-              reachTerminalState()
-              throw t
-            }
-
-            LOG.warn("Failed to update $jdk to $newItem. ${t.message}", t)
-            showUpdateErrorNotification(newItem)
-            lock.withLock { myIsUpdateRunning = false }
-            return
-          }
-
-          invokeLater {
-            try {
-              runWriteAction {
-                jdk.sdkModificator.apply {
-                  removeAllRoots()
-                  homePath = newJdkHome.invariantSeparatorsPathString
-                  versionString = newItem.versionString
-                }.commitChanges()
-
-                (jdk.sdkType as? SdkType)?.setupSdkPaths(jdk)
-                reachTerminalState()
-              }
-            }
-            catch (t: Throwable) {
-              if (t is ControlFlowException) {
-                reachTerminalState()
-                throw t
-              }
-
-              LOG.warn("Failed to apply downloaded JDK update for $jdk from $newItem at $newJdkHome. ${t.message}", t)
-              showUpdateErrorNotification(newItem)
-              lock.withLock { myIsUpdateRunning = false }
-            }
-          }
+    scope.launch(Dispatchers.IO) {
+      if (project != null) {
+        val title = ProjectBundle.message("progress.title.updating.jdk.0.to.1", jdk.name, newItem.fullPresentationText)
+        withBackgroundProgress(project, title) {
+          doUpdate(e)
         }
       }
-    )
+      else if (application.isUnitTestMode) { // We might not have a project in tests
+        doUpdate(e)
+      }
+      else {
+        LOG.warn("Failed to update $jdk to $newItem (no project)")
+        fail()
+      }
+    }
+  }
+
+  private suspend fun doUpdate(e: AnActionEvent) {
+    val newJdkHome = try {
+      val installer = JdkInstaller.getInstance()
+
+      val eel = jdk.homePath?.let { Path.of(it).getEelDescriptor().toEelApi() }
+      val wsl = jdk.homePath?.let { WslPath.getDistributionByWindowsUncPath(it) }
+      val request = installer.prepareJdkInstallation(newItem, installer.defaultInstallDir(newItem, eel, wsl))
+
+      coroutineToIndicator { indicator ->
+        installer.installJdk(request, indicator, e.project)
+
+        //make sure VFS sees the files and sets up the JDK correctly
+        indicator.text = ProjectBundle.message("progress.text.updating.jdk.setting.up")
+        VfsUtil.markDirtyAndRefresh(false, true, true, request.installDir)
+        request.javaHome
+      }
+    }
+    catch (t: Throwable) {
+      if (t is ControlFlowException) {
+        reachTerminalState()
+        throw t
+      }
+
+      LOG.warn("Failed to update $jdk to $newItem. ${t.message}", t)
+      fail()
+      return
+    }
+
+    try {
+      withContext(Dispatchers.EDT) {
+        edtWriteAction {
+          jdk.sdkModificator.apply {
+            removeAllRoots()
+            homePath = newJdkHome.invariantSeparatorsPathString
+            versionString = newItem.versionString
+          }.commitChanges()
+
+          (jdk.sdkType as? SdkType)?.setupSdkPaths(jdk)
+        }
+      }
+      reachTerminalState()
+    }
+    catch (t: Throwable) {
+      if (t is ControlFlowException) {
+        reachTerminalState()
+        throw t
+      }
+
+      LOG.warn("Failed to apply downloaded JDK update for $jdk from $newItem at $newJdkHome. ${t.message}", t)
+      fail()
+    }
+  }
+
+  private suspend fun fail() {
+    withContext(Dispatchers.EDT) {
+      showUpdateErrorNotification(newItem)
+    }
+    lock.withLock { myIsUpdateRunning = false }
   }
 }

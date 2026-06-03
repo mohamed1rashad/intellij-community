@@ -5,7 +5,6 @@ import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsException;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import git4idea.GitUtil;
@@ -180,16 +179,26 @@ public class GitCommandResult {
     return new GitCommandResult(false, 1, Collections.singletonList(error), Collections.emptyList(), null);
   }
 
-  /**
-   * @deprecated {@link GitHandler} throws {@link com.intellij.openapi.progress.ProcessCanceledException} instead of returning this state.
-   */
-  @Deprecated(forRemoval = true)
-  public boolean cancelled() {
-    return false;
+  private static @NotNull Collection<String> cleanup(@NotNull Collection<String> errorOutput) {
+    return errorOutput.stream()
+        .filter(errorMessage -> !isGitErrorHeaderLine(errorMessage))
+        .map(GitUtil::cleanupErrorPrefixes)
+        .toList();
   }
 
-  private static @NotNull Collection<String> cleanup(@NotNull Collection<String> errorOutput) {
-    return ContainerUtil.map(errorOutput, errorMessage -> GitUtil.cleanupErrorPrefixes(errorMessage));
+  /**
+   * Detects if the line is a part of ASCII art banners from Git error messages.
+   * <p>
+   * Some Git errors (e.g., SSH permission warnings) include decorative ASCII art headers
+   * made of `@` symbols that are unsuitable for IDE notifications. For example:
+   * {@code @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@}
+   * {@code @    WARNING: UNPROTECTED PRIVATE KEY FILE!               @}
+   * {@code @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@}
+   * Permissions 0777 for '/Users/user/.ssh/id_rsa' are too open.
+   * <p>
+   */
+  private static boolean isGitErrorHeaderLine(String message) {
+    return message != null && message.startsWith("@") && message.endsWith("@");
   }
 
   protected boolean hasStartFailed() {

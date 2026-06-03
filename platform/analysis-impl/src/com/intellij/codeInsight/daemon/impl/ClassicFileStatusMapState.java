@@ -22,7 +22,7 @@ final class ClassicFileStatusMapState implements FileStatusMapState {
 
   @Override
   public @NotNull FileStatus getOrCreateStatus(@NotNull Document document, @NotNull CodeInsightContext context) {
-    return myDocumentToStatusMap.computeIfAbsent(document, __ -> new FileStatus(myProject));
+    return myDocumentToStatusMap.computeIfAbsent(document, _ -> new FileStatus(myProject));
   }
 
   @Override
@@ -49,5 +49,36 @@ final class ClassicFileStatusMapState implements FileStatusMapState {
   public @NotNull List<FileStatus> getFileStatuses(@NotNull Document document) {
     FileStatus status = myDocumentToStatusMap.get(document);
     return status != null ? List.of(status) : Collections.emptyList();
+  }
+
+  @Override
+  public boolean allDirtyScopesAreNullFor(@NotNull Document document) {
+    FileStatus status = myDocumentToStatusMap.get(document);
+    return status != null && !status.isDefensivelyMarkedForAnyPass() && status.isWolfPassFinished() && status.allDirtyScopesAreNull();
+  }
+
+  @Override
+  public boolean allDirtyScopesAreNull() {
+    if (myDocumentToStatusMap.isEmpty()) {
+      return false;
+    }
+    for (Document document : myDocumentToStatusMap.keySet()) {
+      if (!allDirtyScopesAreNullFor(document)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Override
+  public void markDefensivelyForAllPasses(@NotNull Project project) {
+    for (FileStatus status : myDocumentToStatusMap.values()) {
+      status.markDefensivelyForAllPasses(project);
+    }
+  }
+
+  @Override
+  public String toString() {
+    return myDocumentToStatusMap.toString();
   }
 }

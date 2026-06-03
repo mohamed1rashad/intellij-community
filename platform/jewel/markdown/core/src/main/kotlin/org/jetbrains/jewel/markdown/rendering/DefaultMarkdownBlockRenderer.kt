@@ -3,22 +3,29 @@ package org.jetbrains.jewel.markdown.rendering
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.selection.DisableSelection
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withCompositionLocal
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -29,6 +36,8 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.onFirstVisible
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -43,6 +52,7 @@ import org.jetbrains.jewel.foundation.code.highlighting.LocalCodeHighlighter
 import org.jetbrains.jewel.foundation.modifier.thenIf
 import org.jetbrains.jewel.foundation.theme.LocalContentColor
 import org.jetbrains.jewel.foundation.util.JewelLogger
+import org.jetbrains.jewel.foundation.util.myLogger
 import org.jetbrains.jewel.markdown.InlineMarkdown
 import org.jetbrains.jewel.markdown.MarkdownBlock
 import org.jetbrains.jewel.markdown.MarkdownBlock.BlockQuote
@@ -68,6 +78,7 @@ import org.jetbrains.jewel.ui.component.HorizontallyScrollableContainer
 import org.jetbrains.jewel.ui.component.Text
 
 private const val DISABLED_CODE_ALPHA = .5f
+private val MIME_TYPE_REGEX = "^\\w+/.+$".toRegex()
 
 /**
  * Default implementation of [MarkdownBlockRenderer] that uses the provided styling, extensions, and inline renderer to
@@ -75,7 +86,7 @@ private const val DISABLED_CODE_ALPHA = .5f
  *
  * @see MarkdownBlockRenderer
  */
-@Suppress("OVERRIDE_DEPRECATION")
+@Suppress("OVERRIDE_DEPRECATION", "LargeClass")
 @ApiStatus.Experimental
 @ExperimentalJewelApi
 public open class DefaultMarkdownBlockRenderer(
@@ -132,6 +143,8 @@ public open class DefaultMarkdownBlockRenderer(
             is ListItem -> RenderListItem(block, enabled, onUrlClick, modifier)
             is Paragraph -> RenderParagraph(block, rootStyling.paragraph, enabled, onUrlClick, modifier)
             ThematicBreak -> RenderThematicBreak(rootStyling.thematicBreak, enabled, modifier)
+            is MarkdownBlock.HtmlBlockWithAttributes ->
+                RenderHtmlBlockWithAttributes(block, enabled, onUrlClick, modifier)
             is CustomBlock -> {
                 rendererExtensions
                     .find { it.blockRenderer?.canRender(block) == true }
@@ -193,23 +206,31 @@ public open class DefaultMarkdownBlockRenderer(
         softWrap: Boolean,
         maxLines: Int,
     ) {
-        val renderedContent = rememberRenderedContent(block, styling.inlinesStyling, enabled, onUrlClick)
-        val textColor =
-            styling.inlinesStyling.textStyle.color
-                .takeOrElse { LocalContentColor.current }
-                .takeOrElse { styling.inlinesStyling.textStyle.color }
-        val mergedStyle = styling.inlinesStyling.textStyle.merge(TextStyle(color = textColor))
+        val onlyImages = remember(block) { block.inlineContent.all { it is InlineMarkdown.Image } }
+        val images = renderedImages(block)
 
-        Text(
-            modifier = modifier,
-            text = renderedContent,
-            overflow = overflow,
-            softWrap = softWrap,
-            maxLines = maxLines,
-            onTextLayout = onTextLayout,
-            inlineContent = renderedImages(block),
-            style = mergedStyle,
-        )
+        if (onlyImages) {
+            RenderImages(images, modifier)
+        } else {
+            val renderedContent = rememberRenderedContent(block, styling.inlinesStyling, enabled, onUrlClick)
+            val textColor =
+                styling.inlinesStyling.textStyle.color
+                    .takeOrElse { LocalContentColor.current }
+                    .takeOrElse { styling.inlinesStyling.textStyle.color }
+            val mergedStyle = styling.inlinesStyling.textStyle.merge(TextStyle(color = textColor))
+
+            Text(
+                modifier = modifier,
+                text = renderedContent,
+                overflow = overflow,
+                softWrap = softWrap,
+                maxLines = maxLines,
+                onTextLayout = onTextLayout,
+                inlineContent = images,
+                style = mergedStyle,
+                textAlign = LocalTextAlignment.current,
+            )
+        }
     }
 
     @Composable
@@ -263,19 +284,30 @@ public open class DefaultMarkdownBlockRenderer(
         onUrlClick: (String) -> Unit,
         modifier: Modifier,
     ) {
-        val renderedContent = rememberRenderedContent(block, styling.inlinesStyling, enabled, onUrlClick)
+        val onlyImages = remember(block) { block.inlineContent.all { it is InlineMarkdown.Image } }
+        val images = renderedImages(block)
+
+        if (onlyImages && images.isEmpty()) return
+
         Column(modifier = modifier.padding(styling.padding)) {
-            val textColor =
-                styling.inlinesStyling.textStyle.color.takeOrElse {
-                    LocalContentColor.current.takeOrElse { styling.inlinesStyling.textStyle.color }
-                }
-            val mergedStyle = styling.inlinesStyling.textStyle.merge(TextStyle(color = textColor))
-            Text(
-                text = renderedContent,
-                style = mergedStyle,
-                modifier = Modifier.focusProperties { this.canFocus = false },
-                inlineContent = this@DefaultMarkdownBlockRenderer.renderedImages(block),
-            )
+            if (onlyImages) {
+                RenderImages(images)
+            } else {
+                val renderedContent = rememberRenderedContent(block, styling.inlinesStyling, enabled, onUrlClick)
+
+                val textColor =
+                    styling.inlinesStyling.textStyle.color.takeOrElse {
+                        LocalContentColor.current.takeOrElse { styling.inlinesStyling.textStyle.color }
+                    }
+                val mergedStyle = styling.inlinesStyling.textStyle.merge(TextStyle(color = textColor))
+                Text(
+                    text = renderedContent,
+                    style = mergedStyle,
+                    modifier = Modifier.focusProperties { this.canFocus = false },
+                    inlineContent = images,
+                    textAlign = LocalTextAlignment.current,
+                )
+            }
 
             if (styling.underlineWidth > 0.dp && styling.underlineColor.isSpecified) {
                 Spacer(Modifier.height(styling.underlineGap))
@@ -549,6 +581,7 @@ public open class DefaultMarkdownBlockRenderer(
                     Modifier.focusProperties { canFocus = false }
                         .padding(styling.padding)
                         .pointerHoverIcon(PointerIcon.Default, overrideDescendants = true),
+                textAlign = LocalTextAlignment.current,
             )
         }
     }
@@ -570,7 +603,7 @@ public open class DefaultMarkdownBlockRenderer(
         enabled: Boolean,
         modifier: Modifier,
     ) {
-        val mimeType = block.mimeType ?: MimeType.Known.UNKNOWN
+        val language = block.language.orEmpty()
         MaybeScrollingContainer(
             isScrollable = styling.scrollsHorizontally,
             modifier
@@ -582,7 +615,7 @@ public open class DefaultMarkdownBlockRenderer(
             Column(Modifier.padding(styling.padding)) {
                 if (styling.infoPosition.verticalAlignment == Alignment.Top) {
                     FencedBlockInfo(
-                        mimeType.displayName(),
+                        language,
                         styling.infoPosition.horizontalAlignment
                             ?: error("No horizontal alignment for position ${styling.infoPosition.name}"),
                         styling.infoTextStyle,
@@ -590,11 +623,18 @@ public open class DefaultMarkdownBlockRenderer(
                     )
                 }
 
-                RenderCodeWithMimeType(block, mimeType, styling, enabled)
+                if (MIME_TYPE_REGEX.matches(language)) {
+                    val mimeType = MimeType.Known.fromMimeTypeString(language)
+                    // Enabled is always true as the container handles the disabled alpha
+                    // Passing the value down would duplicate the alpha, which would produce a 0.25f opacity
+                    RenderCodeWithMimeType(block, mimeType, styling, true)
+                } else {
+                    RenderCodeWithLanguage(block, styling, enabled)
+                }
 
                 if (styling.infoPosition.verticalAlignment == Alignment.Bottom) {
                     FencedBlockInfo(
-                        mimeType.displayName(),
+                        language,
                         styling.infoPosition.horizontalAlignment
                             ?: error("No horizontal alignment for position ${styling.infoPosition.name}"),
                         styling.infoTextStyle,
@@ -605,6 +645,12 @@ public open class DefaultMarkdownBlockRenderer(
         }
     }
 
+    @Deprecated(
+        message =
+            "This class function is not scalable as it relies on a pre-resolved MimeType object. " +
+                "This prevents automatic support for languages not explicitly defined in the MimeType system" +
+                "(e.g., from TextMate bundles)."
+    )
     @Composable
     internal open fun RenderCodeWithMimeType(
         block: FencedCodeBlock,
@@ -619,8 +665,33 @@ public open class DefaultMarkdownBlockRenderer(
             text = highlightedCode,
             style = styling.editorTextStyle,
             modifier =
+                Modifier.onFirstVisible {
+                        this@DefaultMarkdownBlockRenderer.myLogger()
+                            .warn("Rendering code block with using deprecated MimeType class.")
+                    }
+                    .focusProperties { canFocus = false }
+                    .pointerHoverIcon(PointerIcon.Default, overrideDescendants = true)
+                    .thenIf(!enabled) { alpha(.5f) },
+        )
+    }
+
+    @Composable
+    internal open fun RenderCodeWithLanguage(
+        block: FencedCodeBlock,
+        styling: MarkdownStyling.Code.Fenced,
+        enabled: Boolean,
+    ) {
+        val content = block.content
+        val highlighter = LocalCodeHighlighter.current
+        val highlightedCode by
+            highlighter.highlight(content, block.language.orEmpty()).collectAsState(AnnotatedString(content))
+        Text(
+            text = highlightedCode,
+            style = styling.editorTextStyle,
+            modifier =
                 Modifier.focusProperties { canFocus = false }
                     .pointerHoverIcon(PointerIcon.Default, overrideDescendants = true),
+            textAlign = LocalTextAlignment.current,
         )
     }
 
@@ -638,6 +709,7 @@ public open class DefaultMarkdownBlockRenderer(
                     style = textStyle,
                     color = textStyle.color.takeOrElse { LocalContentColor.current },
                     modifier = Modifier.focusProperties { canFocus = false },
+                    textAlign = LocalTextAlignment.current,
                 )
             }
         }
@@ -680,20 +752,27 @@ public open class DefaultMarkdownBlockRenderer(
         enabled: Boolean,
         onUrlClick: ((String) -> Unit)? = null,
     ) =
-        remember(block.inlineContent, styling, enabled) {
+        remember(block.inlineContent, styling, enabled, onUrlClick) {
             inlineRenderer.renderAsAnnotatedString(block.inlineContent, styling, enabled, onUrlClick)
         }
 
     @Composable
-    private fun renderedImages(blockInlineContent: WithInlineMarkdown): Map<String, InlineTextContent> =
-        rendererExtensions
-            .firstNotNullOfOrNull { it.imageRendererExtension }
-            ?.let { imagesRenderer ->
-                getImages(blockInlineContent).associate { image ->
-                    image.source to imagesRenderer.renderImageContent(image)
-                }
+    private fun renderedImages(blockInlineContent: WithInlineMarkdown): Map<String, InlineTextContent> {
+        val map = remember(blockInlineContent) { mutableStateMapOf<String, InlineTextContent>() }
+
+        val imagesRenderer = rendererExtensions.firstNotNullOfOrNull { it.imageRendererExtension }
+
+        for (image in getImages(blockInlineContent)) {
+            val renderedImage = imagesRenderer?.renderImageContent(image)
+            if (renderedImage == null) {
+                map.remove(image.source)
+            } else {
+                map[image.source] = renderedImage
             }
-            .orEmpty()
+        }
+
+        return map
+    }
 
     @Composable
     protected fun MaybeScrollingContainer(
@@ -707,6 +786,56 @@ public open class DefaultMarkdownBlockRenderer(
             HorizontallyScrollableContainer(modifier) { movableContent() }
         } else {
             movableContent()
+        }
+    }
+
+    @Composable
+    private fun RenderHtmlBlockWithAttributes(
+        block: MarkdownBlock.HtmlBlockWithAttributes,
+        enabled: Boolean,
+        onUrlClick: (String) -> Unit,
+        modifier: Modifier = Modifier,
+    ) {
+        val textAlignment: TextAlign =
+            when (block.attributes["align"]) {
+                "left" -> TextAlign.Start
+                "center" -> TextAlign.Center
+                "right" -> TextAlign.End
+                else -> {
+                    RenderBlock(block.mdBlock, enabled, onUrlClick, modifier)
+                    return
+                }
+            }
+        val contentAlignment =
+            when (textAlignment) {
+                TextAlign.Start -> Alignment.TopStart
+                TextAlign.Center -> Alignment.TopCenter
+                TextAlign.End -> Alignment.TopEnd
+                else -> Alignment.TopStart
+            }
+        withCompositionLocal(LocalTextAlignment provides textAlignment) {
+            Box(modifier = modifier.fillMaxWidth(), contentAlignment = contentAlignment) {
+                RenderBlock(block.mdBlock, enabled, onUrlClick, Modifier.align(contentAlignment))
+            }
+        }
+    }
+
+    @Composable
+    private fun RenderImages(images: Map<String, InlineTextContent>, modifier: Modifier = Modifier) {
+        if (images.isEmpty()) return
+
+        val density = LocalDensity.current
+        FlowRow(modifier) {
+            images.map { (text, inlineBlock) ->
+                Box(
+                    modifier =
+                        with(density) {
+                            Modifier.size(inlineBlock.placeholder.width.toDp(), inlineBlock.placeholder.height.toDp())
+                        }
+                ) {
+                    inlineBlock.children(text)
+                }
+            }
         }
     }
 
@@ -725,6 +854,13 @@ public open class DefaultMarkdownBlockRenderer(
     @ExperimentalJewelApi
     override operator fun plus(extension: MarkdownRendererExtension): MarkdownBlockRenderer =
         DefaultMarkdownBlockRenderer(rootStyling, rendererExtensions = rendererExtensions + extension, inlineRenderer)
+
+    public companion object {
+        @Suppress("VariableNaming")
+        private val LocalTextAlignment: ProvidableCompositionLocal<TextAlign> = staticCompositionLocalOf {
+            TextAlign.Start
+        }
+    }
 }
 
 private fun getImages(input: WithInlineMarkdown): List<InlineMarkdown.Image> = buildList {
@@ -734,9 +870,11 @@ private fun getImages(input: WithInlineMarkdown): List<InlineMarkdown.Image> = b
                 is InlineMarkdown.Image -> {
                     if (item.source.isNotBlank()) add(item)
                 }
+
                 is WithInlineMarkdown -> {
                     collectImagesRecursively(item.inlineContent)
                 }
+
                 else -> {
                     // Ignored
                 }
@@ -745,3 +883,55 @@ private fun getImages(input: WithInlineMarkdown): List<InlineMarkdown.Image> = b
     }
     collectImagesRecursively(input.inlineContent)
 }
+
+@Deprecated(
+    message =
+        "The MimeType class is deprecated in favor of using the code block info strings (e.g., \"kt\", \"python\"). " +
+            "This class creates an unnecessary layer of abstraction and requires manual maintenance " +
+            "to support new languages. Use the new `highlight(code, language)` function " +
+            "to handle language resolution automatically."
+)
+private fun MimeType.Known.fromMimeTypeString(mimeType: String): MimeType =
+    when (mimeType) {
+        "text/x-java-source",
+        "application/x-java",
+        "text/x-java" -> JAVA
+
+        "application/kotlin-source",
+        "text/x-kotlin",
+        "text/x-kotlin-source" -> KOTLIN
+
+        "application/xml" -> XML
+        "application/json",
+        "application/vnd.api+json",
+        "application/hal+json",
+        "application/ld+json" -> JSON
+
+        "image/svg+xml" -> XML
+        "text/x-python",
+        "application/x-python-script" -> PYTHON
+
+        "text/dart",
+        "text/x-dart",
+        "application/dart",
+        "application/x-dart" -> DART
+
+        "application/javascript",
+        "application/x-javascript",
+        "text/ecmascript",
+        "application/ecmascript",
+        "application/x-ecmascript" -> JAVASCRIPT
+
+        "application/typescript",
+        "application/x-typescript" -> TYPESCRIPT
+        "text/x-rust",
+        "application/x-rust" -> RUST
+
+        "text/x-sksl" -> AGSL
+        "application/yaml",
+        "text/x-yaml",
+        "application/x-yaml" -> YAML
+        "application/x-patch" -> PATCH
+
+        else -> UNKNOWN
+    }

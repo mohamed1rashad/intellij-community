@@ -7,7 +7,17 @@ import com.intellij.application.options.colors.SchemesPanelFactory
 import com.intellij.ide.IdeBundle
 import com.intellij.ide.actions.QuickChangeLookAndFeel
 import com.intellij.ide.actions.ShowSettingsUtilImpl
-import com.intellij.ide.ui.*
+import com.intellij.ide.ui.ColorBlindness
+import com.intellij.ide.ui.ColorBlindnessSupport
+import com.intellij.ide.ui.EditorSchemesPanel
+import com.intellij.ide.ui.LafComboBoxModelWrapper
+import com.intellij.ide.ui.LafManager
+import com.intellij.ide.ui.LafManagerListener
+import com.intellij.ide.ui.LafReference
+import com.intellij.ide.ui.LanguageAndRegionUi
+import com.intellij.ide.ui.NotRoamableUiSettings
+import com.intellij.ide.ui.UISettings
+import com.intellij.ide.ui.UISettingsListener
 import com.intellij.ide.ui.laf.LafManagerImpl
 import com.intellij.ide.ui.localization.statistics.EventSource
 import com.intellij.openapi.Disposable
@@ -38,12 +48,21 @@ import com.intellij.openapi.wm.WelcomeScreen
 import com.intellij.openapi.wm.WelcomeScreenTab
 import com.intellij.openapi.wm.WelcomeTabFactory
 import com.intellij.openapi.wm.impl.welcomeScreen.TabbedWelcomeScreen.DefaultWelcomeScreenTab
-import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.UIBundle
 import com.intellij.ui.components.AnActionLink
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.dsl.builder.*
+import com.intellij.ui.dsl.builder.BottomGap
+import com.intellij.ui.dsl.builder.Cell
+import com.intellij.ui.dsl.builder.Panel
+import com.intellij.ui.dsl.builder.RightGap
+import com.intellij.ui.dsl.builder.Row
+import com.intellij.ui.dsl.builder.TopGap
+import com.intellij.ui.dsl.builder.bindItem
+import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.builder.selected
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.intellij.ui.layout.ComponentPredicate
 import com.intellij.ui.layout.and
 import com.intellij.ui.layout.not
@@ -327,8 +346,8 @@ private class CustomizeTab(val parentDisposable: Disposable) : DefaultWelcomeScr
           val checkBox = checkBox(UIBundle.message("welcome.screen.color.blindness.combobox.text"))
             .bindSelected(adjustColorsProperty)
             .applyToComponent { isOpaque = false }.component
-          comboBox(DefaultComboBoxModel(supportedColorBlindness.toTypedArray()), SimpleListCellRenderer.create("") {
-            PlatformEditorBundle.message(it?.key ?: "")
+          comboBox(DefaultComboBoxModel(supportedColorBlindness.toTypedArray()), textListCellRenderer("") {
+            PlatformEditorBundle.message(it.key ?: "")
           })
             .bindItem(colorBlindnessProperty)
             .comment(UIBundle.message("color.blindness.combobox.comment"))

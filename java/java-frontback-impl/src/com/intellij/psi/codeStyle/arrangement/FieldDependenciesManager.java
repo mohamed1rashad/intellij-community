@@ -1,10 +1,14 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.codeStyle.arrangement;
 
 import com.intellij.psi.PsiField;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class FieldDependenciesManager {
   private final Map<PsiField, Set<PsiField>> myFieldDependencies;
@@ -12,9 +16,8 @@ public class FieldDependenciesManager {
 
   public FieldDependenciesManager(@NotNull Map<PsiField, Set<PsiField>> fieldDependencies, @NotNull Map<PsiField, JavaElementArrangementEntry> fields) {
     myFieldDependencies = fieldDependencies;
-    for (PsiField field : fields.keySet()) {
-      JavaElementArrangementEntry entry = fields.get(field);
-      myFieldInfosMap.put(field, new ArrangementEntryDependencyInfo(entry));
+    for (Map.Entry<PsiField, JavaElementArrangementEntry> e : fields.entrySet()) {
+      myFieldInfosMap.put(e.getKey(), new ArrangementEntryDependencyInfo(e.getValue()));
     }
   }
 

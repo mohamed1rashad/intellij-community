@@ -1,6 +1,7 @@
 package fleet.buildtool.s3
 
-import fleet.buildtool.platform.*
+import fleet.buildtool.platform.Platform
+import fleet.buildtool.platform.toS3DistributionSlug
 
 sealed class S3Version {
   abstract override fun toString(): String
@@ -55,8 +56,28 @@ fun fleetPartS3Key(
   extension: () -> String,
   distributionSlug: String,
   archiveName: String = partName,
-): String = when (s3Version) {
-  S3Version.Latest -> "fleet-parts/latest/$partName/$distributionSlug$archiveName-latest${extension()}"
-  is S3Version.Specific -> "$partsPrefix/$partName/$distributionSlug$archiveName-${s3Version.version}${extension()}"
-}
+): String = "$partsPrefix/${s3Key(s3Version, partName, extension, distributionSlug, archiveName)}"
 
+fun Platform.s3Key(
+  s3Version: S3Version,
+  partName: String,
+  extension: () -> String,
+  archiveName: String = partName,
+): String = s3Key(
+  s3Version = s3Version,
+  partName = partName,
+  extension = extension,
+  distributionSlug = "${toS3DistributionSlug()}/",
+  archiveName = archiveName,
+)
+
+fun s3Key(
+  s3Version: S3Version,
+  partName: String,
+  extension: () -> String,
+  distributionSlug: String,
+  archiveName: String = partName,
+): String = when (s3Version) {
+  S3Version.Latest -> "latest/$partName/$distributionSlug$archiveName-latest${extension()}"
+  is S3Version.Specific -> "$partName/$distributionSlug$archiveName-${s3Version.version}${extension()}"
+}

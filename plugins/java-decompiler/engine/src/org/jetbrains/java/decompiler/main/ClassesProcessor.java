@@ -30,8 +30,17 @@ import org.jetbrains.java.decompiler.util.TextBuffer;
 import org.jetbrains.java.decompiler.util.VBStyleCollection;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
+import java.util.Set;
 
 public class ClassesProcessor {
   public static final int AVERAGE_CLASS_SIZE = 16 * 1024;
@@ -205,9 +214,9 @@ public class ClassesProcessor {
         if (superConst != null) qualifiedSealedSuperNames.add(superConst.getString());
         clazz.setNonSealed(
           qualifiedSealedSuperNames.stream()
-            .map(mapRootClasses::get)
+            .map(context.getClasses()::get)
             .filter(Objects::nonNull)
-            .map(potentialSuper -> potentialSuper.classStruct.getPermittedSubclasses())
+            .map(potentialSuper -> potentialSuper.getPermittedSubclasses())
             .filter(Objects::nonNull)
             .anyMatch(permittedList -> permittedList.contains(clazz.classStruct.qualifiedName))
         );

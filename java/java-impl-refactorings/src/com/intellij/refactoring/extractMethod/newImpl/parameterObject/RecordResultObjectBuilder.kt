@@ -1,7 +1,12 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.refactoring.extractMethod.newImpl.parameterObject
 
-import com.intellij.psi.*
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiDeclarationStatement
+import com.intellij.psi.PsiElementFactory
+import com.intellij.psi.PsiExpression
+import com.intellij.psi.PsiReferenceExpression
+import com.intellij.psi.PsiVariable
 import com.intellij.psi.util.PsiTreeUtil
 
 class RecordResultObjectBuilder(private val record: PsiClass): ResultObjectBuilder {
@@ -14,9 +19,10 @@ class RecordResultObjectBuilder(private val record: PsiClass): ResultObjectBuild
 
     private fun createRecord(variables: List<PsiVariable>): PsiClass {
       require(variables.isNotEmpty())
-      val project = variables.first().project
+      val context = variables.first()
+      val project = context.project
       val factory = PsiElementFactory.getInstance(project)
-      val record = factory.createRecord("Result")
+      val record = factory.createRecord(ResultObjectBuilder.findSafeName(context))
       val header = variables.joinToString(separator = ", ") { variable -> "${variable.type.canonicalText} ${variable.name}" }
       record.recordHeader?.replace(factory.createRecordHeaderFromText(header, record))
       return record

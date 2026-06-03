@@ -22,8 +22,8 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaFunctionSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaNamedClassSymbol
 import org.jetbrains.kotlin.asJava.toLightClass
 import org.jetbrains.kotlin.asJava.toLightElements
-import org.jetbrains.kotlin.idea.debugger.base.util.ClassNameCalculator
 import org.jetbrains.kotlin.idea.debugger.base.util.runSmartReadActionIfUnderProgressElseDumb
+import org.jetbrains.kotlin.idea.debugger.core.ClassNameProvider
 import org.jetbrains.kotlin.idea.debugger.core.KotlinDebuggerLegacyFacade
 import org.jetbrains.kotlin.idea.debugger.core.methodName
 import org.jetbrains.kotlin.idea.debugger.stepping.smartStepInto.getJvmSignature
@@ -64,7 +64,7 @@ open class KotlinFunctionBreakpoint(
 
     override fun computeClassPattern(): String? {
         val declaration = getKtClass() ?: return null
-        val pattern = ClassNameCalculator.getInstance().getClassName(declaration)
+        val pattern = ClassNameProvider().getCandidatesForElement(declaration).firstOrNull()
         if (pattern != null) return pattern
         // fallback to java
         return psiClass?.qualifiedName
@@ -116,7 +116,6 @@ private fun createMethodDescriptor(declaration: KtDeclaration, sourcePosition: S
     return analyze(declaration) { createMethodDescriptor(document, declaration) }
 }
 
-@OptIn(KaExperimentalApi::class)
 private fun KaSession.createMethodDescriptor(document: Document, declaration: KtDeclaration): MethodDescriptor? {
     var symbol = declaration.symbol
     val lineNumber = document.getLineNumber(declaration.textOffset)

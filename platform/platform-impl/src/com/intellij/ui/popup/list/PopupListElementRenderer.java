@@ -20,19 +20,41 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.text.Strings;
-import com.intellij.ui.*;
+import com.intellij.ui.ExperimentalUI;
+import com.intellij.ui.GroupHeaderSeparator;
+import com.intellij.ui.SeparatorComponent;
+import com.intellij.ui.SeparatorOrientation;
+import com.intellij.ui.SeparatorWithText;
 import com.intellij.ui.components.JBBox;
 import com.intellij.ui.popup.NumericMnemonicItem;
 import com.intellij.ui.popup.PopupFactoryImpl;
-import com.intellij.util.ui.*;
+import com.intellij.util.ui.GridBag;
+import com.intellij.util.ui.JBEmptyBorder;
+import com.intellij.util.ui.JBInsets;
+import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
+import com.intellij.util.ui.UpdateScaleHelper;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import javax.swing.*;
+import javax.swing.Box;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.SwingConstants;
+import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.util.Collections;
 
 public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
@@ -48,6 +70,8 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
 
   private JPanel myButtonPane;
   private Boolean hasExtraButtons = null; // state initialized in updateExtraButtons
+  private boolean reserveSpaceForExtraButtons = true;
+  private boolean showingTooltipForExtraButton = false;
 
   private JComponent myMainPane;
   protected JComponent myButtonSeparator;
@@ -433,6 +457,53 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
     return true;
   }
 
+  /**
+   * The flag that determines whether to leave extra space for inline actions when they're not shown.
+   *
+   * @see #setReserveSpaceForExtraButtons(boolean)
+   * @return the current flag value
+   */
+  public boolean isReserveSpaceForExtraButtons() {
+    return reserveSpaceForExtraButtons;
+  }
+
+  /**
+   * Controls reserving extra space for the inline actions when they're not shown.
+   * <p>
+   *   Inline actions are only shown when the item is selected.
+   *   Reserving extra space (the default) helps to avoid resizing
+   *   of the contents when the selection moves, because the inline actions will take that reserved space as they appear.
+   *   In the current implementation the space is reserved for a single button only, which is a common case.
+   * </p>
+   * <p>
+   *   However, some popups may wish to disable this behavior, because their size could be preset
+   *   to accommodate exactly as much text as needed. In this case, reserving extra space won't make the popup bigger
+   *   (because the size is preset), but rather waste valuable space, cutting values off.
+   * </p>
+   * @param reserveSpaceForExtraButtons the new flag value
+   */
+  public void setReserveSpaceForExtraButtons(boolean reserveSpaceForExtraButtons) {
+    this.reserveSpaceForExtraButtons = reserveSpaceForExtraButtons;
+  }
+
+  /**
+   * Checks if the current tooltip comes from an extra inline action button.
+   * <p>
+   *   Designed to be used in {@link #customizeComponent(JList, Object, int, boolean, boolean)} for tooltip customization.
+   *   Sometimes it's needed to override the tooltip set by a base class, but only if that's the "main" tooltip.
+   *   If the cursor is over an inline action button, then this function will return {@code true}
+   *   and the customization logic should leave the tooltip alone (or apply some special logic).
+   * </p>
+   * <p>
+   *   Note that the tooltip set by an inline button can be {@code null} if the inline button doesn't have a tooltip.
+   * </p>
+   * @return {@code true} iff the tooltip currently set (possibly {@code null}) comes from an extra button
+   */
+  @ApiStatus.Experimental
+  protected boolean isShowingTooltipForExtraButton() {
+    return showingTooltipForExtraButton;
+  }
+
   private boolean updateExtraButtons(JList<? extends E> list, E value, ListPopupStep<Object> step, boolean isSelected, boolean hasNextIcon) {
     GridBag gb = new GridBag().setDefaultFill(GridBagConstraints.BOTH)
       .setDefaultAnchor(GridBagConstraints.CENTER)
@@ -452,6 +523,7 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
         value, isSelected, !isSelected || activeButtonIndex == null ? -1 : activeButtonIndex);
     }
 
+    showingTooltipForExtraButton = false;
     if (!extraButtons.isEmpty()) {
       myButtonPane.removeAll();
       myButtonSeparator.setVisible(true);
@@ -464,10 +536,11 @@ public class PopupListElementRenderer<E> extends GroupedItemsListRenderer<E> {
       if (activeButtonIndex != null && activeButtonIndex < extraButtons.size()) {
         String text = myInlineActionsSupport.getToolTipText(value, activeButtonIndex);
         myRendererComponent.setToolTipText(text);
+        showingTooltipForExtraButton = true;
       }
       hasExtraButtons = true;
     }
-    else if (!hasNextIcon && myInlineActionsSupport.hasExtraButtons(value)) {
+    else if (!hasNextIcon && isReserveSpaceForExtraButtons() && myInlineActionsSupport.hasExtraButtons(value)) {
       myButtonPane.removeAll();
       myButtonSeparator.setVisible(false);
       myButtonPane.add(Box.createHorizontalStrut(InlineActionsUtilKt.buttonWidth()), gb.next());

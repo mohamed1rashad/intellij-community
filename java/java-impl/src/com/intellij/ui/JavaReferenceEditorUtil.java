@@ -1,9 +1,13 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ui;
 
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaCodeFragment;
+import com.intellij.psi.JavaCodeFragmentFactory;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiPackage;
 import com.intellij.util.NullableFunction;
 import org.jetbrains.annotations.Nullable;
 
@@ -31,9 +35,8 @@ public final class JavaReferenceEditorUtil {
                                                   Project project,
                                                   boolean isClassesAccepted,
                                                   JavaCodeFragment.VisibilityChecker visibilityChecker) {
-    final PsiPackage defaultPackage = project.isDefault() ? null : JavaPsiFacade.getInstance(project).findPackage("");
     final JavaCodeFragmentFactory factory = JavaCodeFragmentFactory.getInstance(project);
-    final JavaCodeFragment fragment = factory.createReferenceCodeFragment(text, defaultPackage, true, isClassesAccepted);
+    final JavaCodeFragment fragment = factory.createReferenceCodeFragmentInPackage(text, "", isClassesAccepted);
     fragment.setVisibilityChecker(visibilityChecker);
     return PsiDocumentManager.getInstance(project).getDocument(fragment);
   }

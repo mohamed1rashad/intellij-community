@@ -6,25 +6,34 @@ import com.intellij.lang.ASTNode;
 import com.intellij.lang.Commenter;
 import com.intellij.lang.Language;
 import com.intellij.lang.LanguageCommenters;
-import com.intellij.lang.surroundWith.ModCommandSurrounder;
+import com.intellij.lang.surroundWith.PsiUpdateModCommandSurrounder;
 import com.intellij.lang.surroundWith.SurroundDescriptor;
 import com.intellij.lang.surroundWith.Surrounder;
 import com.intellij.modcommand.ActionContext;
-import com.intellij.modcommand.ModCommand;
 import com.intellij.modcommand.ModPsiUpdater;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.DummyBlockType;
+import com.intellij.psi.PsiCodeFragment;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileSystemItem;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.List;
 
@@ -208,7 +217,7 @@ public final class CustomFoldingSurroundDescriptor implements SurroundDescriptor
   @Override
   public Surrounder @NotNull [] getSurrounders() {
     //noinspection TestOnlyProblems
-    return getAllSurrounders().toArray(new CustomFoldingRegionSurrounder[0]);
+    return getAllSurrounders().toArray(Surrounder.EMPTY_ARRAY);
   }
 
   @TestOnly
@@ -223,7 +232,7 @@ public final class CustomFoldingSurroundDescriptor implements SurroundDescriptor
   }
 
   @ApiStatus.Internal
-  public static final class CustomFoldingRegionSurrounder extends ModCommandSurrounder {
+  public static final class CustomFoldingRegionSurrounder extends PsiUpdateModCommandSurrounder {
 
     private final CustomFoldingProvider myProvider;
 
@@ -251,14 +260,14 @@ public final class CustomFoldingSurroundDescriptor implements SurroundDescriptor
     }
 
     @Override
-    public @NotNull ModCommand surroundElements(@NotNull ActionContext context, @NotNull PsiElement @NotNull [] elements) {
-      return ModCommand.psiUpdate(context, updater -> doSurround(context, ContainerUtil.map(elements, updater::getWritable), updater));
+    public void surroundElements(@NotNull ActionContext context, @NotNull PsiElement @NotNull [] elementsInCopy, @NotNull ModPsiUpdater updater) {
+      doSurround(context, List.of(elementsInCopy), updater);
     }
 
     private void doSurround(@NotNull ActionContext context, @NotNull List<@NotNull PsiElement> elements, @NotNull ModPsiUpdater updater) {
       if (elements.isEmpty()) return;
-      PsiElement firstElement = elements.get(0);
-      PsiElement lastElement = elements.get(elements.size() - 1);
+      PsiElement firstElement = elements.getFirst();
+      PsiElement lastElement = elements.getLast();
       PsiFile psiFile = firstElement.getContainingFile();
       String linePrefix;
       String lineSuffix;

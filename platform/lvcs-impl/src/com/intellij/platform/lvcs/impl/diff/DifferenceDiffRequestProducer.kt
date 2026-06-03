@@ -10,17 +10,22 @@ import com.intellij.history.core.revisions.Difference
 import com.intellij.history.core.tree.Entry
 import com.intellij.history.integration.IdeaGateway
 import com.intellij.history.integration.LocalHistoryBundle
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.UserDataHolder
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vcs.changes.ui.ChangeDiffRequestChain
 import com.intellij.openapi.vcs.changes.ui.PresentableChange
-import com.intellij.platform.lvcs.impl.*
+import com.intellij.platform.lvcs.impl.ActivityScope
+import com.intellij.platform.lvcs.impl.ChangeSetActivityItem
+import com.intellij.platform.lvcs.impl.ChangeSetSelection
+import com.intellij.platform.lvcs.impl.RevisionId
+import com.intellij.platform.lvcs.impl.presentableName
+import com.intellij.platform.lvcs.impl.revisionId
 import com.intellij.util.text.DateFormatUtil
 import org.jetbrains.annotations.Nls
-import java.util.*
+import java.util.Objects
 
 internal abstract class DifferenceDiffRequestProducer(protected val project: Project?,
                                                       protected val gateway: IdeaGateway,
@@ -46,7 +51,7 @@ internal abstract class DifferenceDiffRequestProducer(protected val project: Pro
 
   private fun createContent(entry: Entry?, isCurrent: Boolean): DiffContent {
     if (entry == null) return DiffContentFactory.getInstance().createEmpty()
-    if (isCurrent) return runReadAction { createCurrentDiffContent(project, gateway, entry.path) }
+    if (isCurrent) return runReadActionBlocking { createCurrentDiffContent(project, gateway, entry.path) }
     return createDiffContent(project, gateway, entry)
   }
 

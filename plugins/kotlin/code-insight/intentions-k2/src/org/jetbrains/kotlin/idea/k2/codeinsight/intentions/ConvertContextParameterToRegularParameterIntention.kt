@@ -5,7 +5,7 @@ package org.jetbrains.kotlin.idea.k2.codeinsight.intentions
 import com.intellij.codeInsight.intention.LowPriorityAction
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.edtWriteAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.platform.ide.progress.runWithModalProgressBlocking
 import com.intellij.psi.createSmartPointer
@@ -27,7 +27,7 @@ import org.jetbrains.kotlin.idea.k2.codeinsight.intentions.contexts.ContextParam
 import org.jetbrains.kotlin.idea.k2.refactoring.changeSignature.KotlinChangeInfo
 import org.jetbrains.kotlin.idea.k2.refactoring.renameParameter
 import org.jetbrains.kotlin.lexer.KtTokens.OVERRIDE_KEYWORD
-import org.jetbrains.kotlin.psi.KtContextReceiverList
+import org.jetbrains.kotlin.psi.KtContextParameterList
 import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtParameter
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
@@ -40,7 +40,7 @@ class ConvertContextParameterToRegularParameterIntention : SelfTargetingIntentio
 
     override fun isApplicableTo(element: KtParameter, caretOffset: Int): Boolean {
         if (!isConvertibleContextParameter(element)) return false
-        val ownerFunction = (element.parent as? KtContextReceiverList)?.ownerDeclaration as? KtNamedFunction ?: return false
+        val ownerFunction = (element.parent as? KtContextParameterList)?.ownerDeclaration as? KtNamedFunction ?: return false
         return !isAnonymousParameter(element) || !ownerFunction.hasModifier(OVERRIDE_KEYWORD) // KTIJ-34978
     }
 
@@ -89,7 +89,7 @@ class ConvertContextParameterToRegularParameterIntention : SelfTargetingIntentio
 
             initialNameForAnonymousParameter?.let { initialName ->
                 withContext(Dispatchers.EDT) {
-                    writeAction {
+                    edtWriteAction {
                         (contextParametersInOverrides + contextParameter).forEach { contextParameter ->
                             if (contextParameter.isWritable) {
                                 contextParameter.setName(initialName)
@@ -117,7 +117,7 @@ class ConvertContextParameterToRegularParameterIntention : SelfTargetingIntentio
 
     private fun findContextParameterByIndex(function: KtNamedFunction, index: Int): KtParameter? {
         if (!function.containingKtFile.isUnderKotlinSourceRootTypes()) return null
-        return function.contextReceiverList?.contextParameters()?.getOrNull(index)
+        return function.contextParameters.getOrNull(index)
     }
 
     private fun KaSession.suggestParameterNameByType(ktParameter: KtParameter, ownerFunction: KtNamedFunction): String? {

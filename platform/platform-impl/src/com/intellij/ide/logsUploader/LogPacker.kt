@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.logsUploader
 
 import com.intellij.diagnostic.MacOSDiagnosticReportDirectories
@@ -10,11 +10,12 @@ import com.intellij.openapi.application.ApplicationNamesInfo
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.SystemInfoRt
 import com.intellij.troubleshooting.TroubleInfoCollector
 import com.intellij.util.SystemProperties
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.io.Compressor
+import com.intellij.util.system.LowLevelLocalMachineAccess
+import com.intellij.util.system.OS
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -23,14 +24,16 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlin.io.path.exists
 import kotlin.io.path.forEachDirectoryEntry
 import kotlin.io.path.isDirectory
 import kotlin.io.path.name
 
 @ApiStatus.Internal
+@Suppress("UseOptimizedEelFunctions")
+@OptIn(LowLevelLocalMachineAccess::class)
 object LogPacker {
   @JvmStatic
   @RequiresBackgroundThread
@@ -46,7 +49,7 @@ object LogPacker {
     (Logger.getFactory() as? LoggerFactory)?.flushHandlers()
 
     val productName = ApplicationNamesInfo.getInstance().productName.lowercase()
-    val date = SimpleDateFormat("yyyyMMdd-HHmmss").format(Date())
+    val date = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now())
     val archive = Files.createTempFile("${productName}-logs-${date}", ".zip")
     try {
       Compressor.Zip(archive).use { zip ->
@@ -63,12 +66,25 @@ object LogPacker {
 
         coroutineContext.ensureActive()
 
-        LogProvider.EP.extensionList.firstOrNull()?.let { logProvider ->
+        zip.addDirectory("", logs)
+
+        coroutineContext.ensureActive()
+
+        LogProvider.EP.forEachExtensionSafe { logProvider ->
           logProvider.getAdditionalLogFiles(project).forEach { entry ->
-            for (dir in entry.files) {
-              if (dir.exists()) {
-                val dirPrefix = if (entry.entryName.isNotEmpty()) "${entry.entryName}/${dir.name}" else ""
-                zip.addDirectory(dirPrefix, dir)
+            entry.files.forEach { path ->
+              coroutineContext.ensureActive()
+              if (path.isDirectory()) {
+                val prefix = when {
+                  entry.entryName.isBlank() -> ""
+                  entry.createSubdirectories -> "${entry.entryName}/${path.name}"
+                  else -> entry.entryName
+                }
+                zip.addDirectory(prefix, path)
+              }
+              else if (path.exists()) {
+                val prefix = if (entry.entryName.isNotBlank() && entry.createSubdirectories) "${entry.entryName}/" else ""
+                zip.addFile("${prefix}${path.name}", path)
               }
             }
           }
@@ -84,7 +100,7 @@ object LogPacker {
           }
         }
 
-        if (SystemInfoRt.isMac) {
+        if (OS.CURRENT == OS.macOS) {
           for (reportDir in MacOSDiagnosticReportDirectories) {
             val dir = Path.of(reportDir)
             if (dir.exists() && dir.isDirectory()) {

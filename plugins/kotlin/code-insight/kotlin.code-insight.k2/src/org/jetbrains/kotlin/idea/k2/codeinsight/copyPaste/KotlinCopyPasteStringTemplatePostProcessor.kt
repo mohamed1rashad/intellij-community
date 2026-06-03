@@ -6,6 +6,7 @@ import com.intellij.codeInsight.editorActions.CopyPastePostProcessor
 import com.intellij.codeInsight.editorActions.TextBlockTransferableData
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.rethrowControlFlowException
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.project.Project
@@ -13,8 +14,8 @@ import com.intellij.openapi.util.Ref
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
+import com.intellij.psi.util.parentOfType
 import com.intellij.psi.util.startOffset
-import org.jetbrains.kotlin.analysis.utils.printer.parentOfType
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.EntryUpdateDiff
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.changeInterpolationPrefix
 import org.jetbrains.kotlin.idea.codeinsights.impl.base.templatePrefixLength
@@ -140,7 +141,7 @@ internal class KotlinCopyPasteStringTemplatePostProcessor : CopyPastePostProcess
         val replacementResult = try {
             prepareReplacement(targetFile, bounds, stringTemplateData)
         } catch (e: Throwable) {
-            if (Logger.shouldRethrow(e)) throw e
+            rethrowControlFlowException(e)
             LOG.error(e)
             return
         }

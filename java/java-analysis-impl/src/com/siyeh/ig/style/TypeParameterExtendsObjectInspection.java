@@ -15,18 +15,33 @@
  */
 package com.siyeh.ig.style;
 
+import com.intellij.codeInsight.Nullability;
+import com.intellij.codeInsight.NullabilityAnnotationInfo;
+import com.intellij.codeInsight.NullableNotNullManager;
 import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.codeInspection.options.OptPane;
 import com.intellij.modcommand.ModPsiUpdater;
 import com.intellij.modcommand.PsiUpdateModCommandQuickFix;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaTokenType;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaToken;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiWildcardType;
 import com.intellij.psi.tree.IElementType;
 import com.siyeh.InspectionGadgetsBundle;
 import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import static com.intellij.codeInspection.options.OptPane.checkbox;
 import static com.intellij.codeInspection.options.OptPane.pane;
@@ -135,7 +150,6 @@ public final class TypeParameterExtendsObjectInspection extends BaseInspection {
       registerError(nameIdentifier, Integer.valueOf(1));
     }
 
-
     @Override
     public void visitTypeElement(@NotNull PsiTypeElement typeElement) {
       super.visitTypeElement(typeElement);
@@ -154,11 +168,32 @@ public final class TypeParameterExtendsObjectInspection extends BaseInspection {
       if ((ignoreAnnotatedObject && extendsBound.hasAnnotations()) || !TypeUtils.isJavaLangObject(extendsBound.getType())) {
         return;
       }
+      if (ignoreAnnotatedObject && hasTypeContainerAnnotations(typeElement)) return;
       final PsiElement firstChild = typeElement.getFirstChild();
       if (firstChild == null) {
         return;
       }
       registerError(firstChild, Integer.valueOf(2));
+    }
+
+    /**
+     * If there is a container {@code @NullMarked} annotation, then {@code <?>} means {@code <? extends @Nullable Object>}
+     * but {@code <? extends Object>} mean {@code <? extends @NonNull Object>}.
+     * So, in this case {@code extends Object} changes the behavior.
+     * There is a case when we can delete it:
+     * {@code <? extends @Nullable Object>}, but it seems it is better to preserve it because it makes code easier to understand
+     * @return if there is a container annotation on the given element
+     */
+    private static boolean hasTypeContainerAnnotations(@Nullable PsiTypeElement typeElement) {
+      if (typeElement == null) return false;
+      NullableNotNullManager manager = NullableNotNullManager.getInstance(typeElement.getProject());
+      if (manager != null) {
+        NullabilityAnnotationInfo nullability = manager.findDefaultTypeUseNullability(typeElement);
+        if (nullability != null && nullability.getNullability() != Nullability.UNKNOWN) {
+          return true;
+        }
+      }
+      return false;
     }
   }
 }

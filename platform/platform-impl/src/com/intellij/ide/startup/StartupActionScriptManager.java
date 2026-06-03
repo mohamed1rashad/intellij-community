@@ -8,13 +8,24 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.*;
-import java.nio.file.*;
+import java.io.File;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serial;
+import java.io.Serializable;
+import java.io.StreamCorruptedException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 public final class StartupActionScriptManager {
   @ApiStatus.Internal
@@ -159,6 +170,41 @@ public final class StartupActionScriptManager {
   private static @Nullable Path mapPath(String path, Path oldTarget, Path newTarget) {
     var fsPath = oldTarget.getFileSystem().getPath(path);
     return fsPath.startsWith(oldTarget) ? newTarget.resolve(oldTarget.relativize(fsPath)) : null;
+  }
+
+  @ApiStatus.Internal
+  public static synchronized void executeMarketplaceCommandsFromActionScript() throws IOException {
+    var scriptFile = getActionScriptFile();
+    @Nullable List<ActionCommand> remainingCommands = null;
+    boolean marketplaceCommandsFound = false;
+    try {
+      var commands = loadActionScript(scriptFile);
+
+      var partitioned = commands.stream().collect(Collectors.partitioningBy(command -> {
+        if (command instanceof UnzipCommand unzipCommand) {
+          return Path.of(unzipCommand.mySource).getFileName().toString().startsWith("marketplace");
+        }
+        else if (command instanceof DeleteCommand deleteCommand) {
+          return Path.of(deleteCommand.mySource).getFileName().toString().equals("marketplace");
+        }
+        return false;
+      }));
+
+      var marketplaceCommands = partitioned.get(true);
+      remainingCommands = partitioned.get(false);
+
+      for (var command : marketplaceCommands) {
+        marketplaceCommandsFound = true;
+        command.execute();
+      }
+    } finally {
+      if (remainingCommands == null || remainingCommands.isEmpty()) {
+        Files.deleteIfExists(scriptFile);
+      }
+      else if (marketplaceCommandsFound) { // the file won't change if no marketplace commands were found
+        saveActionScript(remainingCommands, scriptFile);
+      }
+    }
   }
 
   public interface ActionCommand {

@@ -1,9 +1,10 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion;
 
+import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementPresentation;
-import com.intellij.codeInsight.lookup.impl.AsyncRendering;
+import com.intellij.codeInsight.lookup.impl.LookupImpl;
 import com.intellij.codeInsight.template.impl.LiveTemplateLookupElement;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageEditorUtil;
@@ -17,7 +18,7 @@ import java.util.List;
 
 @ApiStatus.Internal
 public class CompletionLookupArrangerImpl extends BaseCompletionLookupArranger {
-  public CompletionLookupArrangerImpl(CompletionProcessEx process) {
+  public CompletionLookupArrangerImpl(@NotNull CompletionProcessEx process) {
     super(process);
   }
 
@@ -39,7 +40,7 @@ public class CompletionLookupArrangerImpl extends BaseCompletionLookupArranger {
     List<LookupElement> exactMatches = new SmartList<>();
     for (int i = 0; i < items.size(); i++) {
       LookupElement item = items.get(i);
-      if (isCustomElements(item)) continue;
+      if (isCustomElement(item)) continue;
       boolean isSuddenLiveTemplate = isSuddenLiveTemplate(item);
       if (isPrefixItem(item, true) && !isSuddenLiveTemplate || item.getLookupString().equals(selectedText)) {
         if (item instanceof LiveTemplateLookupElement) {
@@ -58,10 +59,13 @@ public class CompletionLookupArrangerImpl extends BaseCompletionLookupArranger {
   @Override
   protected void removeItem(@NotNull LookupElement element, @NotNull ProcessingContext context) {
     super.removeItem(element, context);
-    AsyncRendering.Companion.cancelRendering(element);
+    Lookup lookup = myProcess.getLookup();
+    if (lookup instanceof LookupImpl) {
+      ((LookupImpl)lookup).cancelRendering(element);
+    }
   }
 
   private static boolean isSuddenLiveTemplate(@NotNull LookupElement element) {
-    return element instanceof LiveTemplateLookupElement && ((LiveTemplateLookupElement)element).sudden;
+    return element instanceof LiveTemplateLookupElement && ((LiveTemplateLookupElement)element).isSudden();
   }
 }

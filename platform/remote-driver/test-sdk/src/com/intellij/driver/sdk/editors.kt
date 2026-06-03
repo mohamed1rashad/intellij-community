@@ -5,9 +5,11 @@ import com.intellij.driver.client.Remote
 import com.intellij.driver.client.service
 import com.intellij.driver.model.OnDispatcher
 import com.intellij.driver.model.RdTarget
-import com.intellij.driver.sdk.remoteDev.GuestNavigationService
+import com.intellij.driver.sdk.remoteDev.FrontendGuestNavigationService
+import com.intellij.driver.sdk.ui.remote.ColorRef
 import java.awt.Point
 import java.awt.Rectangle
+import java.nio.file.Path
 import kotlin.time.Duration.Companion.seconds
 
 @Remote("com.intellij.openapi.editor.Editor")
@@ -29,6 +31,7 @@ interface Editor {
   fun getSoftWrapModel(): SoftWrapModel
   fun visualLineToY(visualLine: Int): Int
   fun getMarkupModel(): MarkupModel
+  fun getScrollingModel(): ScrollingModel
 }
 
 @Remote("com.intellij.openapi.editor.markup.MarkupModel")
@@ -37,7 +40,12 @@ interface MarkupModel {
 }
 
 @Remote("com.intellij.openapi.editor.markup.RangeHighlighter")
-interface RangeHighlighter
+interface RangeHighlighter {
+  fun getStartOffset(): Int
+  fun getEndOffset(): Int
+  fun getTextAttributes(): TextAttributes?
+  fun getTextAttributesKey(): TextAttributesKey?
+}
 
 @Remote("com.intellij.openapi.editor.VisualPosition")
 interface VisualPosition {
@@ -52,6 +60,7 @@ interface Document {
   fun getLineNumber(offset: Int): Int
   fun getLineStartOffset(line: Int): Int
   fun getLineEndOffset(line: Int): Int
+  fun getLineCount(): Int
 }
 
 @Remote("com.intellij.openapi.editor.CaretModel")
@@ -59,14 +68,39 @@ interface CaretModel {
   fun moveToLogicalPosition(position: LogicalPosition)
   fun moveToVisualPosition(pos: VisualPosition)
   fun getLogicalPosition(): LogicalPosition
+  fun getAllCarets(): List<Caret>
   fun moveToOffset(offset: Int)
   fun getOffset(): Int
+  fun getCurrentCaret(): Caret
+}
+@Remote("com.intellij.openapi.editor.Caret")
+interface Caret {
+  fun getLogicalPosition(): LogicalPosition
+  fun getVisualAttributes(): CaretVisualAttributes
+}
+
+@Remote("com.intellij.openapi.editor.CaretVisualAttributes")
+interface CaretVisualAttributes {
+  fun getColor(): ColorRef?
+}
+
+@Remote("com.intellij.openapi.editor.ScrollingModel")
+interface ScrollingModel {
+  fun scrollToCaret(type: ScrollType)
+  fun scrollTo(pos: LogicalPosition, scrollType: ScrollType)
+}
+
+@Remote("com.intellij.openapi.editor.ScrollType")
+interface ScrollType {
+  fun valueOf(name: String): ScrollType
 }
 
 @Remote("com.intellij.openapi.editor.InlayModel")
 interface InlayModel {
   fun getInlineElementsInRange(startOffset: Int, endOffset: Int): List<Inlay>
+  fun getBlockElementsInRange(startOffset: Int, endOffset: Int): List<Inlay>
   fun getAfterLineEndElementsForLogicalLine(logicalLine: Int): List<Inlay>
+  fun getAfterLineEndElementsInRange(startOffset: Int, endOffset: Int): List<Inlay>
 }
 
 @Remote("com.intellij.openapi.editor.Inlay")
@@ -91,6 +125,14 @@ interface DeclarativeInlayRenderer {
   fun getPresentationList(): InlayPresentationList
 }
 
+@Remote("com.intellij.ui.SimpleColoredText")
+interface SimpleColoredText
+
+@Remote("com.intellij.xdebugger.impl.inline.InlineDebugRenderer")
+interface InlineDebugRenderer {
+  fun getPresentation(): SimpleColoredText?
+}
+
 @Remote("com.intellij.codeInsight.daemon.impl.HintRenderer")
 interface HintRenderer {
   fun getText(): String
@@ -110,7 +152,6 @@ interface InlineCompletionRenderTextBlock {
 interface InlayPresentationList {
   fun getEntries(): Array<TextInlayPresentationEntry>
 }
-
 
 @Remote("com.intellij.codeInsight.hints.declarative.impl.views.TextInlayPresentationEntry")
 interface TextInlayPresentationEntry {
@@ -151,8 +192,20 @@ interface EditorColorsScheme {
 @Remote("com.intellij.openapi.editor.SelectionModel")
 interface SelectionModel {
   fun setSelection(startOffset: Int, endOffset: Int)
-  fun getSelectedText(): String?
+  fun getSelectedText(allCaret: Boolean = false): String?
   fun removeSelection()
+}
+
+@Remote("com.intellij.openapi.editor.markup.TextAttributes")
+interface TextAttributes {
+  fun getEffectType(): EffectType
+  fun getEffectColor(): ColorRef?
+  fun getForegroundColor(): ColorRef
+}
+
+@Remote("com.intellij.openapi.editor.markup.EffectType")
+interface EffectType {
+  fun name(): String
 }
 
 fun Driver.openEditor(file: VirtualFile, project: Project? = null): Array<FileEditor> {
@@ -164,15 +217,20 @@ fun Driver.openEditor(file: VirtualFile, project: Project? = null): Array<FileEd
 fun Driver.openFile(relativePath: String, project: Project = singleProject(), waitForCodeAnalysis: Boolean = true, isTextEditor: Boolean = true) {
   step("Open file $relativePath") {
     val openedFile = if (!isRemDevMode) {
-      val fileToOpen = findFile(relativePath = relativePath, project = project)
-      if (fileToOpen == null) {
-        throw IllegalArgumentException("Fail to find file $relativePath")
-      }
-      openEditor(fileToOpen, project)
+      val fileToOpen = waitFor(message = "File is opened: $relativePath",
+                               errorMessage = { "Fail to find file $relativePath" },
+                               timeout = 10.seconds,
+                               getter = { findFile(relativePath = relativePath, project = project) },
+                               checker = { virtualFile ->
+                                 virtualFile != null &&
+                                 Path.of(virtualFile.getPath()).endsWith(Path.of(relativePath))
+                               })
+
+      openEditor(fileToOpen!!, project)
       fileToOpen
     }
     else {
-      val service = service(GuestNavigationService::class, project)
+      val service = service(FrontendGuestNavigationService::class, project)
       withContext(OnDispatcher.EDT) {
         service.navigateViaBackend(relativePath, 0)
         waitFor(message = "File is opened: $relativePath", timeout = 30.seconds,
@@ -182,7 +240,7 @@ fun Driver.openFile(relativePath: String, project: Project = singleProject(), wa
                 },
                 checker = { virtualFile ->
                   virtualFile != null &&
-                  virtualFile.getPath().contains(relativePath)
+                  Path.of(virtualFile.getPath()).endsWith(Path.of(relativePath))
                 })!!
       }
     }

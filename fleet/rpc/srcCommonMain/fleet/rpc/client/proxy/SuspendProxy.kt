@@ -8,7 +8,6 @@ import fleet.rpc.RemoteApi
 import fleet.rpc.RemoteApiDescriptor
 import fleet.rpc.RemoteKind
 import fleet.rpc.core.AssumptionsViolatedException
-import fleet.rpc.core.RemoteObject
 import fleet.rpc.core.RemoteResource
 import fleet.util.async.Resource
 import fleet.util.async.catching
@@ -16,7 +15,9 @@ import fleet.util.async.resource
 import fleet.util.async.use
 import fleet.util.async.useOn
 import fleet.util.causeOfType
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.consume
 import kotlinx.coroutines.channels.onFailure
@@ -24,6 +25,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.produceIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import kotlin.coroutines.CoroutineContext
 
 /**
@@ -104,17 +107,6 @@ fun SuspendInvocationHandler.outOfScope(
             }) {
               publish(it.map { res ->
                 when (res) {
-                  is RemoteObject -> {
-                    val remoteObject = remoteApiDescriptor.getSignature(method).returnType as RemoteKind.RemoteObject
-                    suspendProxy(
-                      remoteApiDescriptor = remoteObject.descriptor,
-                      handler = delegatingHandler(res)
-                        .outOfScope(
-                          callerContext = callerContext,
-                          hotScope = hotScope,
-                          calleeScope = calleeScope,
-                        ))
-                  }
                   is Flow<*> -> {
                     @Suppress("UNCHECKED_CAST")
                     (res as Flow<Any>).produceIn(calleeScope).consumeAsFlow()

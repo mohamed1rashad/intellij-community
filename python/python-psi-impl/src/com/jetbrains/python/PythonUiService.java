@@ -4,9 +4,15 @@ import com.intellij.codeInspection.LocalQuickFix;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileEditor;
+import com.intellij.openapi.module.Module;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.InputValidator;
-import com.intellij.openapi.util.NlsContexts.*;
+import com.intellij.openapi.util.NlsContexts.DialogMessage;
+import com.intellij.openapi.util.NlsContexts.DialogTitle;
+import com.intellij.openapi.util.NlsContexts.HintText;
+import com.intellij.openapi.util.NlsContexts.ListItem;
+import com.intellij.openapi.util.NlsContexts.PopupContent;
+import com.intellij.openapi.util.NlsContexts.PopupTitle;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiElement;
@@ -18,18 +24,18 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.Icon;
+import java.awt.Component;
 import java.util.List;
 
 @ApiStatus.Experimental
 public class PythonUiService {
 
-  public void showBalloonInfo(Project project, @PopupContent String message) {}
+  public void showBalloonInfo(Project project, @PopupContent String message) { }
 
-  public void showBalloonWarning(Project project, @PopupContent String message) {}
+  public void showBalloonWarning(Project project, @PopupContent String message) { }
 
-  public void showBalloonError(Project project, @PopupContent String message) {}
+  public void showBalloonError(Project project, @PopupContent String message) { }
 
   public FileEditor getSelectedEditor(@NotNull Project project, VirtualFile virtualFile) {
     return null;
@@ -55,7 +61,7 @@ public class PythonUiService {
                                  PsiElement element,
                                  String newName,
                                  boolean searchInComments,
-                                 boolean searchTextOccurrences) {}
+                                 boolean searchTextOccurrences) { }
 
   public LocalQuickFix createPyChangeSignatureQuickFixForMismatchingMethods(PyFunction function, PyFunction method) {
     return null;
@@ -81,6 +87,10 @@ public class PythonUiService {
   }
 
   public @Nullable LocalQuickFix createPyRenameElementQuickFix(final @NotNull PsiElement element) {
+    return null;
+  }
+
+  public @Nullable LocalQuickFix createInterpreterSettingsQuickFix(@Nullable Module module) {
     return null;
   }
 
@@ -119,6 +129,5 @@ public class PythonUiService {
                               @ListItem String initialValue,
                               @Nullable Icon icon) {
     return -1;
-
   }
 }

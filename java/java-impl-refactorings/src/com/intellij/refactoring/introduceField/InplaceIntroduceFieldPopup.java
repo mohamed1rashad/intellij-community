@@ -2,10 +2,21 @@
 package com.intellij.refactoring.introduceField;
 
 import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.codeStyle.SuggestedNameInfo;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.util.PsiExpressionTrimRenderer;
@@ -18,8 +29,8 @@ import com.intellij.util.ui.JBInsets;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.GridBagConstraints;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
 
@@ -42,7 +53,7 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
                                     final PsiElement anchorElementIfAll,
                                     Project project) {
     super(project, editor, initializerExpression, localVariable, occurrences, typeSelectorManager,
-          IntroduceFieldHandler.getRefactoringNameText(), parentClass, anchorElement, anchorElementIfAll);
+          IntroduceFieldHelper.getRefactoringNameText(), parentClass, anchorElement, anchorElementIfAll);
     myStatic = aStatic;
     myIntroduceFieldPanel =
       new IntroduceFieldPopupPanel(parentClass, initializerExpression, localVariable, currentMethodConstructor, localVariable != null, aStatic,
@@ -158,7 +169,9 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
       myIntroduceFieldPanel.addOccurrenceListener(new ItemListener() {
         @Override
         public void itemStateChanged(ItemEvent e) {
-          restartInplaceIntroduceTemplate();
+          WriteIntentReadAction.run(() -> {
+            restartInplaceIntroduceTemplate();
+          });
         }
       });
 
@@ -167,7 +180,7 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
 
   private void updateInitializer(PsiElementFactory elementFactory, PsiField variable) {
     if (variable != null) {
-      if (myIntroduceFieldPanel.getInitializerPlace() == BaseExpressionToFieldHandler.InitializationPlace.IN_FIELD_DECLARATION) {
+      if (myIntroduceFieldPanel.getInitializerPlace() == JavaIntroduceFieldService.InitializationPlace.IN_FIELD_DECLARATION) {
         variable.setInitializer(elementFactory.createExpressionFromText(myExprText, variable));
       } else {
         variable.setInitializer(null);
@@ -180,7 +193,7 @@ public class InplaceIntroduceFieldPopup extends AbstractInplaceIntroduceFieldPop
     return "IntroduceField";
   }
 
-  public BaseExpressionToFieldHandler.InitializationPlace getInitializerPlace() {
+  public JavaIntroduceFieldService.InitializationPlace getInitializerPlace() {
       return myIntroduceFieldPanel.getInitializerPlace();
     }
 

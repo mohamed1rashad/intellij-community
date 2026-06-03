@@ -2,7 +2,6 @@
 package com.intellij.lang;
 
 import com.intellij.lexer.Lexer;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.project.Project;
@@ -10,7 +9,11 @@ import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.NaturalComparator;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.LanguageSubstitutor;
+import com.intellij.psi.LanguageSubstitutors;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.templateLanguages.TemplateLanguage;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.containers.JBIterable;
@@ -18,7 +21,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import static kotlinx.collections.immutable.ExtensionsKt.persistentListOf;
@@ -169,7 +176,7 @@ public final class LanguageUtil {
       return cached;
     }
 
-    if (!ApplicationManager.getApplication().getExtensionArea().hasExtensionPoint(MetaLanguage.EP_NAME)) {
+    if (!MetaLanguage.isEPRegistered()) {
       // don't cache
       return persistentListOf();
     }
@@ -180,11 +187,11 @@ public final class LanguageUtil {
     }
     else {
       Set<MetaLanguage> result = new HashSet<>();
-      MetaLanguage.EP_NAME.forEachExtensionSafe(metaLanguage -> {
+      for (MetaLanguage metaLanguage : MetaLanguage.all()) {
         if (metaLanguage.matchesLanguage(language)) {
           result.add(metaLanguage);
         }
-      });
+      }
       toCache = result.isEmpty() ? persistentListOf() : toPersistentList(result);
     }
     language.putUserData(MATCHING_META_LANGUAGES, toCache);

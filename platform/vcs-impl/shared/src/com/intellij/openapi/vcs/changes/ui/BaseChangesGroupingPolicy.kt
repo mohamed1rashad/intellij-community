@@ -2,7 +2,6 @@
 package com.intellij.openapi.vcs.changes.ui
 
 import com.intellij.openapi.vcs.changes.ui.TreeModelBuilderKeys.IS_CACHING_ROOT
-import com.intellij.openapi.vfs.VirtualFile
 
 abstract class BaseChangesGroupingPolicy : ChangesGroupingPolicy {
   protected var nextPolicy: ChangesGroupingPolicy? = null
@@ -10,12 +9,6 @@ abstract class BaseChangesGroupingPolicy : ChangesGroupingPolicy {
   final override fun setNextGroupingPolicy(policy: ChangesGroupingPolicy?) {
     nextPolicy = policy
   }
-
-  @Deprecated("Prefer using [VcsImplUtil.findValidParentAccurately]",
-              ReplaceWith("VcsImplUtil.findValidParentAccurately(nodePath.filePath)",
-                          "com.intellij.vcsUtil.VcsImplUtil"))
-  protected fun resolveVirtualFile(nodePath: StaticFilePath): VirtualFile? =
-    generateSequence(nodePath) { it.parent }.mapNotNull { it.resolve() }.firstOrNull()
 
   companion object {
     @JvmStatic

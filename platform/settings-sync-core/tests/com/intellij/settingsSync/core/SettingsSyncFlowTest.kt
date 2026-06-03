@@ -8,7 +8,12 @@ import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.testFramework.common.waitUntil
 import com.intellij.util.io.createParentDirectories
 import com.intellij.util.io.write
-import kotlinx.coroutines.*
+import com.intellij.util.xmlb.SettingsInternalApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevCommit
@@ -21,7 +26,13 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.CountDownLatch
-import kotlin.io.path.*
+import java.util.concurrent.TimeUnit
+import kotlin.io.path.createFile
+import kotlin.io.path.div
+import kotlin.io.path.exists
+import kotlin.io.path.readText
+import kotlin.io.path.writeText
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 internal class SettingsSyncFlowTest : SettingsSyncTestBase() {
@@ -37,15 +48,16 @@ internal class SettingsSyncFlowTest : SettingsSyncTestBase() {
     initMode: SettingsSyncBridge.InitMode = SettingsSyncBridge.InitMode.JustInit,
     waitForInit: Boolean = true,
   ) {
+    @OptIn(SettingsInternalApi::class)
     SettingsSyncSettings.getInstance().state = SettingsSyncSettings.getInstance().state.withSyncEnabled(true)
     val controls = SettingsSyncMain.init(this, disposable, settingsSyncStorage, configDir, ideMediator)
     updateChecker = controls.updateChecker
     bridge = controls.bridge
     bridge.initialize(initMode)
     if (waitForInit) {
-      timeoutRunBlocking(200.seconds) {
-        while (!bridge.isInitialized) {
-          delay(10)
+      timeoutRunBlocking(2.seconds) {
+        while (!bridge.isAnyInitializePerformed.get()) {
+          delay(10.milliseconds)
         }
       }
     }
@@ -89,6 +101,12 @@ internal class SettingsSyncFlowTest : SettingsSyncTestBase() {
     Assertions.assertEquals(SettingsSyncLocalSettings.getInstance().userId, DUMMY_USER_ID)
     authService.userData = null
     initSettingsSync()
+
+    // Wait for resetLoginData to be called and complete
+    waitUntil(timeout = 2.seconds) {
+      !SettingsSyncSettings.getInstance().syncEnabled
+    }
+
     Assertions.assertEquals(SettingsSyncLocalSettings.getInstance().providerCode, null)
     Assertions.assertEquals(SettingsSyncLocalSettings.getInstance().userId, null)
     Assertions.assertFalse(SettingsSyncSettings.getInstance().syncEnabled)
@@ -336,6 +354,9 @@ internal class SettingsSyncFlowTest : SettingsSyncTestBase() {
     suppressFailureOnLogError(exceptionToThrow) {
       timeoutRunBlocking {
         initSettingsSync(SettingsSyncBridge.InitMode.TakeFromServer(SyncSettingsEvent.CloudChange(snapshot, null)))
+        waitUntil(timeout = 2.seconds) {
+          SettingsSyncStatusTracker.getInstance().currentStatus is SettingsSyncStatusTracker.SyncStatus.Error
+        }
       }
     }
 
@@ -369,9 +390,12 @@ internal class SettingsSyncFlowTest : SettingsSyncTestBase() {
     writeToConfig {
       fileState("options/laf.xml", "LaF Initial")
     }
-    initSettingsSync()
 
+    val controls = SettingsSyncMain.init(this, disposable, settingsSyncStorage, configDir, ideMediator)
+    updateChecker = controls.updateChecker
+    bridge = controls.bridge
     SettingsSyncSettings.getInstance().syncEnabled = true
+
     val task1: suspend () -> Unit = {
       bridge.initialize(SettingsSyncBridge.InitMode.PushToServer)
     }
@@ -547,6 +571,92 @@ internal class SettingsSyncFlowTest : SettingsSyncTestBase() {
         val blob = treeWalk.getObjectId(0)
         return String(objectReader.open(blob).bytes, StandardCharsets.UTF_8)
       }
+    }
+  }
+
+  @TestFor(issues = ["IJPL-203153"])
+  @Test
+  fun `checkServer does not block DefaultDispatcher when communicator blocks`() {
+    val appReadyLatch = CountDownLatch(1)
+
+    // Use a single-slot view of Dispatchers.Default to reproduce the deadlock scenario:
+    // if checkServerState() blocks the thread (instead of suspending to IO), the single
+    // available slot is exhausted and the APP_READY-simulator coroutine can never run.
+    val limitedDefault = Dispatchers.Default.limitedParallelism(1)
+
+    // The outer timeout acts as the deadlock detector: if not done within 5 s, test fails.
+    timeoutRunBlocking(5.seconds, context = limitedDefault) {
+      initSettingsSync(waitForInit = false)
+
+      // Wait for bridge to finish initialization by suspending (not blocking) the coroutine,
+      // so limitedDefault's single slot is freed for the bridge's init coroutine.
+      while (!bridge.isAnyInitializePerformed.get()) {
+        delay(10.milliseconds)
+      }
+
+      // Activate the blocking interceptor only after the bridge has initialized.
+      // checkServerStateInterceptor is invoked at the start of checkServerState() and
+      // simulates myValidatedToken.get() blocking until APP_READY.
+      remoteCommunicator.checkServerStateInterceptor = { appReadyLatch.await(10, TimeUnit.SECONDS) }
+
+      // Fire a SyncRequest to trigger processExclusiveEvent → checkServer() → checkServerState().
+      SettingsSyncEvents.getInstance().fireSettingsChanged(SyncSettingsEvent.SyncRequest)
+
+      // Simulate APP_READY being reached from a second coroutine.
+      // Without fix: the single limitedDefault slot is occupied by checkServerState() blocking
+      //              on appReadyLatch.await() → this launch never runs → deadlock → timeout.
+      // With fix: checkServerState() runs on Dispatchers.IO (via withContext), the limitedDefault
+      //           slot is free → this launch runs → latch released → no deadlock.
+      launch {
+        appReadyLatch.countDown()
+      }
+
+      bridge.waitForAllExecuted()
+      cleanup()
+    }
+  }
+
+  @Test
+  fun `enable disable enable again - listeners work after re-enable`() = timeoutRunBlockingAndStopBridge {
+    // Initial setup: create initial settings and enable sync (first enable)
+    writeToConfig {
+      fileState("options/laf.xml", "LaF Initial")
+    }
+
+    initSettingsSync(SettingsSyncBridge.InitMode.PushToServer)
+
+    assertServerSnapshot {
+      fileState("options/laf.xml", "LaF Initial")
+    }
+
+    // Mimic UI disable (handleDisableSync from SettingsSyncConfigurable)
+    SettingsSyncSettings.getInstance().syncEnabled = false
+    bridge.waitForAllExecuted()
+    Assertions.assertFalse(SettingsSyncSettings.getInstance().syncEnabled)
+
+    // Mimic UI enable again (second enable via getSettingsFromServer)
+    SettingsSyncSettings.getInstance().syncEnabled = true
+    bridge.initialize(SettingsSyncBridge.InitMode.JustInit)
+    timeoutRunBlocking(2.seconds) {
+      while (!bridge.isInitialized) {
+        delay(10.milliseconds)
+      }
+    }
+
+    // Verify that listeners are working by making a local change
+    writeToConfig {
+      fileState("options/laf.xml", "LaF after re-enable")
+    }
+
+    // Fire IdeChange event to simulate file watcher detecting the change
+    val changedSnapshot = settingsSnapshot {
+      fileState("options/laf.xml", "LaF after re-enable")
+    }
+    syncSettingsAndWait(SyncSettingsEvent.IdeChange(changedSnapshot))
+
+    // Verify the change was synced to server
+    assertServerSnapshot {
+      fileState("options/laf.xml", "LaF after re-enable")
     }
   }
 }

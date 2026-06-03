@@ -4,11 +4,11 @@ package com.jetbrains.python.tools
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.testFramework.TestApplicationManager
 import com.intellij.util.io.Compressor
-import com.jetbrains.python.venvReader.VirtualEnvReader
-import com.jetbrains.python.sdk.skeletons.DefaultPregeneratedSkeletonsProvider
 import com.jetbrains.python.sdk.skeletons.PySkeletonRefresher
+import com.jetbrains.python.sdk.skeletons.getPregeneratedSkeletonsName
 import com.jetbrains.python.tools.sdkTools.PySdkTools
 import com.jetbrains.python.tools.sdkTools.SdkCreationType
+import com.jetbrains.python.venvReader.VirtualEnvReader
 import java.io.File
 import kotlin.io.path.Path
 import kotlin.math.abs
@@ -30,19 +30,19 @@ fun main() {
     for (python in File(root).listFiles()!!) {
       println("Running on $python")
 
-      val executable =  VirtualEnvReader.Instance.findPythonInPythonRoot(Path(python.absolutePath))!!.toString()
+      val executable =  VirtualEnvReader().findPythonInPythonRoot(Path(python.absolutePath))!!.toString()
       val sdk = PySdkTools.createTempSdk(VfsUtil.findFileByIoFile(File(executable), true)!!, SdkCreationType.SDK_PACKAGES_ONLY, null, null)
 
       val skeletonsDir = File(workingDir, "skeletons-${sdk.versionString!!.replace(" ", "_")}_" + abs(sdk.homePath!!.hashCode()))
       println("Generating skeletons in ${skeletonsDir.absolutePath}")
 
-      val refresher = PySkeletonRefresher(null, null, sdk, skeletonsDir.absolutePath, null, null)
+      val refresher = PySkeletonRefresher(null, sdk, skeletonsDir.absolutePath, null, null)
       refresher.generator
         .commandBuilder()
         .inPrebuildingMode()
         .runGeneration(null)
 
-      val artifactName = DefaultPregeneratedSkeletonsProvider.getPregeneratedSkeletonsName(sdk, refresher.generatorVersion, true, true)
+      val artifactName = getPregeneratedSkeletonsName(sdk, refresher.generatorVersion, true, true)
       val dirPacked = File(skeletonsDir.parent, artifactName!!)
       println("Creating artifact $dirPacked")
       Compressor.Zip(dirPacked).use { it.addDirectory(skeletonsDir) }

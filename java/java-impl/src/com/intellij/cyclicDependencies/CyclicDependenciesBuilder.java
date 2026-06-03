@@ -11,12 +11,28 @@ import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.packageDependencies.DependenciesBuilder;
 import com.intellij.packageDependencies.ForwardDependenciesBuilder;
-import com.intellij.psi.*;
-import com.intellij.util.graph.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiPackage;
+import com.intellij.psi.PsiRecursiveElementVisitor;
+import com.intellij.util.graph.CachingSemiGraph;
+import com.intellij.util.graph.Graph;
+import com.intellij.util.graph.GraphAlgorithms;
+import com.intellij.util.graph.GraphGenerator;
+import com.intellij.util.graph.InboundSemiGraph;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class CyclicDependenciesBuilder{
   private final @NotNull Project myProject;
@@ -87,7 +103,7 @@ public class CyclicDependenciesBuilder{
           final Set<PsiFile> psiFiles = builder.getDependencies().get(psiJavaFile);
           if (psiFiles == null) return;
           for (PsiPackage pack : packs) {
-            Set<PsiPackage> pack2Packages = myPackageDependencies.computeIfAbsent(pack, __ -> new HashSet<>());
+            Set<PsiPackage> pack2Packages = myPackageDependencies.computeIfAbsent(pack, _ -> new HashSet<>());
             for (PsiFile psiFile : psiFiles) {
               if (!(psiFile instanceof PsiJavaFile) ||
                   !projectFileIndex.isInSourceContent(psiFile.getVirtualFile()) ||
@@ -188,7 +204,7 @@ public class CyclicDependenciesBuilder{
     }
     final HashMap<PsiPackage, Set<List<PsiPackage>>> result = new HashMap<>();
     for (PsiPackage psiPackage : packages) {
-      Set<List<PsiPackage>> paths2Pack = result.computeIfAbsent(psiPackage, __ -> new HashSet<>());
+      Set<List<PsiPackage>> paths2Pack = result.computeIfAbsent(psiPackage, _ -> new HashSet<>());
       paths2Pack.addAll(GraphAlgorithms.getInstance().findCycles(myGraph, psiPackage));
     }
     return result;

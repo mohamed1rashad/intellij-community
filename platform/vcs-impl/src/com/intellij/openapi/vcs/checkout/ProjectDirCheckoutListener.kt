@@ -14,7 +14,7 @@ import java.nio.file.Path
 /**
  * Open project with `.idea`.
  */
-private class ProjectDirCheckoutListener : CheckoutListener {
+internal class ProjectDirCheckoutListener : CheckoutListener {
   override fun processCheckedOutDirectory(project: Project, directory: Path): Boolean {
     ApplicationManager.getApplication().assertIsNonDispatchThread()
 
@@ -25,6 +25,7 @@ private class ProjectDirCheckoutListener : CheckoutListener {
     runBlockingCancellable {
       ProjectManagerEx.getInstanceEx().openProjectAsync(directory, OpenProjectTask {
         projectToClose = project
+        runConfigurators = true
         projectRootDir = directory
       })
     }
@@ -35,7 +36,7 @@ private class ProjectDirCheckoutListener : CheckoutListener {
 /**
  * Open directory.
  */
-private class PlatformProjectCheckoutListener : CheckoutListener {
+internal class PlatformProjectCheckoutListener : CheckoutListener {
   override fun processCheckedOutDirectory(project: Project, directory: Path): Boolean {
     ApplicationManager.getApplication().assertIsNonDispatchThread()
 

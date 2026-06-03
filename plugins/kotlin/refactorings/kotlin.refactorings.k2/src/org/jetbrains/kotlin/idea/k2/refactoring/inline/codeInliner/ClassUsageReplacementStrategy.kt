@@ -6,14 +6,24 @@ import com.intellij.openapi.project.Project
 import org.jetbrains.kotlin.idea.base.analysis.api.utils.shortenReferences
 import org.jetbrains.kotlin.idea.base.psi.kotlinFqName
 import org.jetbrains.kotlin.idea.base.psi.replaced
-import org.jetbrains.kotlin.idea.k2.refactoring.modifyPsiWithOptimizedImports
 import org.jetbrains.kotlin.idea.refactoring.inline.codeInliner.CodeToInline
 import org.jetbrains.kotlin.idea.refactoring.inline.codeInliner.UsageReplacementStrategy
+import org.jetbrains.kotlin.idea.refactoring.modifyPsiWithOptimizedImports
 import org.jetbrains.kotlin.idea.references.KtSimpleNameReference
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.j2k.resolve
 import org.jetbrains.kotlin.name.FqName
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtCallElement
+import org.jetbrains.kotlin.psi.KtClassOrObject
+import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtElement
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtReferenceExpression
+import org.jetbrains.kotlin.psi.KtTypeArgumentList
+import org.jetbrains.kotlin.psi.KtUserType
+import org.jetbrains.kotlin.psi.createExpressionByPattern
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
 
 class ClassUsageReplacementStrategy(
@@ -39,15 +49,33 @@ class ClassUsageReplacementStrategy(
         when (val parent = usage.parent) {
             is KtUserType -> {
                 if (typeReplacement == null) return null
-                return {
+                return replacement@{
                     val oldArgumentList = parent.typeArgumentList?.copy() as? KtTypeArgumentList
-                    val replaced = parent.replaced(typeReplacement)
+                    val fqName = typeReplacement.referenceExpression?.resolve()?.kotlinFqName
+                    val typeReference = parent.referenceExpression?.mainReference?.takeIf { fqName != null }
+                    val replaced =
+                        modifyPsiWithOptimizedImports(usage.containingKtFile) {
+                            if (typeReference != null) typeReference.bindToFqName(fqName!!, KtSimpleNameReference.ShorteningMode.FORCED_SHORTENING) as? KtUserType
+                            else parent.replaced(typeReplacement)
+                        }
+                    if (replaced == null) return@replacement null
                     val newArgumentList = replaced.typeArgumentList
-                    if (oldArgumentList != null && oldArgumentList.arguments.size == newArgumentList?.arguments?.size) {
+                    if (typeReference != null) {
+                        val argumentList = typeReplacement.typeArgumentList
+                        if (argumentList != null) {
+                            if (newArgumentList == null) {
+                                replaced.add(argumentList)
+                            } else if (argumentList.arguments.size != newArgumentList.arguments.size){
+                                newArgumentList.replace(argumentList)
+                            }
+                        } else {
+                            newArgumentList?.delete()
+                        }
+                    } else if (oldArgumentList != null && oldArgumentList.arguments.size == newArgumentList?.arguments?.size) {
                         newArgumentList.replace(oldArgumentList)
                     }
 
-                    shortenReferences(replaced) as? KtElement
+                    shortenReferences(replaced)
                 }
             }
 
@@ -105,13 +133,15 @@ class ClassUsageReplacementStrategy(
         else
             callExpression
 
-        val result = if (expressionToReplace != newExpression) {
-            expressionToReplace.replaced(newExpression)
-        } else {
-            expressionToReplace
+        val result = modifyPsiWithOptimizedImports(callExpression.containingKtFile) {
+            if (expressionToReplace != newExpression) {
+                expressionToReplace.replaced(newExpression)
+            } else {
+                expressionToReplace
+            }
         }
 
-        return shortenReferences(result) as? KtElement
+        return shortenReferences(result)
     }
 }
 

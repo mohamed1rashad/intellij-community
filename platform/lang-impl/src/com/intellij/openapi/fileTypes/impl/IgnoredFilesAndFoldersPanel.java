@@ -24,8 +24,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.fileTypes.FileNameMatcherFactory;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.DefaultListModel;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
+import javax.swing.ListSelectionModel;
+import java.awt.BorderLayout;
+import java.awt.Point;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.Arrays;
@@ -47,9 +52,9 @@ final class IgnoredFilesAndFoldersPanel extends JPanel {
     ToolbarDecorator decorator = ToolbarDecorator.createDecorator(myPatternList)
                                                  .setScrollPaneBorder(JBUI.Borders.empty())
                                                  .setPanelBorder(JBUI.Borders.customLine(JBColor.border(),1,1,0,1))
-                                                 .setAddAction(__ -> addPattern())
-                                                 .setEditAction(__ -> editPattern())
-                                                 .setRemoveAction(__ -> removePattern())
+                                                 .setAddAction(_ -> addPattern())
+                                                 .setEditAction(_ -> editPattern())
+                                                 .setRemoveAction(_ -> removePattern())
                                                  .disableUpDownActions();
     add(decorator.createPanel(), BorderLayout.NORTH);
     JPanel listPanel = new JPanel(new BorderLayout());

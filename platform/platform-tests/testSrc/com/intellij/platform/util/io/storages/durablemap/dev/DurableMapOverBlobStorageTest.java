@@ -1,10 +1,9 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.util.io.storages.durablemap.dev;
 
-import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageHelper;
-import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageOverMMappedFile;
 import com.intellij.platform.util.io.storages.KeyDescriptorEx;
 import com.intellij.platform.util.io.storages.StorageFactory;
+import com.intellij.platform.util.io.storages.blobstorage.StreamlinedBlobStorageOverMMappedFile;
 import com.intellij.platform.util.io.storages.durablemap.DurableMapTestBase;
 import com.intellij.platform.util.io.storages.mmapped.MMappedFileStorageFactory;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy.WriterDecidesStrategy;
@@ -24,7 +23,7 @@ public class DurableMapOverBlobStorageTest extends DurableMapTestBase<String, St
 
   @Override
   protected @NotNull StorageFactory<DurableMapOverBlobStorage<String, String>> factory() {
-    var allocationStrategy = new WriterDecidesStrategy(StreamlinedBlobStorageHelper.MAX_CAPACITY, 256);
+    var allocationStrategy = new WriterDecidesStrategy(StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 256);
     StorageFactory<? extends StreamlinedBlobStorage> blobStorageFactory =
       MMappedFileStorageFactory.withDefaults()
         .compose(

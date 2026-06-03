@@ -6,6 +6,7 @@ import com.intellij.openapi.application.AppUIExecutor;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.diagnostic.ThrottledLogger;
 import com.intellij.openapi.extensions.ExtensionPointListener;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.progress.ProgressManager;
@@ -20,7 +21,19 @@ import com.intellij.util.SystemProperties;
 import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.indexing.*;
+import com.intellij.util.indexing.FileBasedIndex;
+import com.intellij.util.indexing.FileBasedIndexEx;
+import com.intellij.util.indexing.FileBasedIndexExtension;
+import com.intellij.util.indexing.FileBasedIndexImpl;
+import com.intellij.util.indexing.FileBasedIndexInfrastructureExtension;
+import com.intellij.util.indexing.FileContent;
+import com.intellij.util.indexing.ID;
+import com.intellij.util.indexing.IndexDataInitializer;
+import com.intellij.util.indexing.IndexInfrastructure;
+import com.intellij.util.indexing.IndexVersion;
+import com.intellij.util.indexing.IndexVersionRegistrationSink;
+import com.intellij.util.indexing.StorageException;
+import com.intellij.util.indexing.UpdatableIndex;
 import com.intellij.util.indexing.diagnostic.IndexStatisticGroup;
 import com.intellij.util.indexing.impl.IndexStorage;
 import com.intellij.util.indexing.impl.MapInputDataDiffBuilder;
@@ -35,7 +48,12 @@ import org.jetbrains.annotations.TestOnly;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -43,6 +61,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @ApiStatus.Internal
 public final class StubIndexImpl extends StubIndexEx {
   static final Logger LOG = Logger.getInstance(StubIndexImpl.class);
+  static final ThrottledLogger THROTTLED_LOG = new ThrottledLogger(LOG, 1000);
 
   public enum PerFileElementTypeStubChangeTrackingSource {
     Disabled,
@@ -422,7 +441,12 @@ public final class StubIndexImpl extends StubIndexEx {
   public @NotNull ModificationTracker getPerFileElementTypeModificationTracker(@NotNull IFileElementType fileElementType) {
     return () -> {
       if (PER_FILE_ELEMENT_TYPE_STUB_CHANGE_TRACKING_SOURCE == PerFileElementTypeStubChangeTrackingSource.ChangedFilesCollector) {
-        ReadAction.run(() -> {
+        if (StubTreeBuilder.isBuildingStub()) {
+          THROTTLED_LOG.error(
+            "Stub building must not rely on data from indexes because it introduces circular dependency indexes -> stub building -> resolve -> indexes. " +
+                    "File element type: "+ fileElementType);
+        }
+        ReadAction.runBlocking(() -> {
           if (FileBasedIndex.getInstance() instanceof FileBasedIndexImpl index) {
             index.getChangedFilesCollector().processFilesToUpdateInReadAction();
           }

@@ -1,6 +1,7 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.analysis.problemsView.toolWindow
 
+import com.intellij.analysis.problemsView.toolWindow.splitApi.HighlightingFileRoot
 import com.intellij.codeWithMe.ClientId
 import com.intellij.ide.PowerSaveMode
 import com.intellij.ide.TreeExpander
@@ -14,7 +15,11 @@ import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.ex.EditorMarkupModel
 import com.intellij.openapi.editor.ex.RangeHighlighterEx
 import com.intellij.openapi.editor.markup.AnalyzingType
-import com.intellij.openapi.fileEditor.*
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.openapi.vfs.VirtualFile
@@ -28,7 +33,7 @@ import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
 import org.jetbrains.concurrency.CancellablePromise
 
-class HighlightingPanel(project: Project, state: ProblemsViewState)
+open class HighlightingPanel(project: Project, state: ProblemsViewState) // open for RD frontend sub-class
   : ProblemsViewPanel(project, ID, state, ProblemsViewBundle.messagePointer("problems.view.highlighting")),
     FileEditorManagerListener, PowerSaveMode.Listener {
 
@@ -104,13 +109,15 @@ class HighlightingPanel(project: Project, state: ProblemsViewState)
     }.submit(AppExecutorUtil.getAppExecutorService())
   }
 
-  internal val currentRoot: ProblemsViewHighlightingFileRoot?
-    get() = treeModel.root as? ProblemsViewHighlightingFileRoot
-
-  private fun getCurrentDocument(): Document? = currentRoot?.document
+  @get:ApiStatus.Internal
+  val currentRoot: HighlightingFileRoot?
+    get() = treeModel.root as? HighlightingFileRoot
 
   @ApiStatus.Internal
-  fun setCurrentFile(virtualFile: VirtualFile?, document:Document?) {
+  open fun getCurrentDocument(): Document? = currentRoot?.document
+
+  @ApiStatus.Internal
+  open fun setCurrentFile(virtualFile: VirtualFile?, document:Document?) {
     if (virtualFile ==null || document == null) {
       if (treeModel.root == null) return
       treeModel.root = null
@@ -122,7 +129,8 @@ class HighlightingPanel(project: Project, state: ProblemsViewState)
     }
     powerSaveStateChanged()
   }
-  fun getCurrentFile(): VirtualFile? = currentRoot?.file
+
+  open fun getCurrentFile(): VirtualFile? = currentRoot?.file
 
   fun selectHighlighter(highlighter: RangeHighlighterEx) {
     val problem = currentRoot?.findProblem(highlighter) ?: return
@@ -153,7 +161,7 @@ class HighlightingPanel(project: Project, state: ProblemsViewState)
   @RequiresBackgroundThread
   private fun updateStatus() {
     ApplicationManager.getApplication().assertIsNonDispatchThread()
-    val status = ClientId.withClientId(session.clientId) { ReadAction.compute(ThrowableComputable { getCurrentStatus() })}
+    val status = ClientId.withClientId(session.clientId) { ReadAction.computeBlocking(ThrowableComputable { getCurrentStatus() })}
     if (previousStatus != status) {
       ApplicationManager.getApplication().invokeLater {
         if (!myDisposed) {

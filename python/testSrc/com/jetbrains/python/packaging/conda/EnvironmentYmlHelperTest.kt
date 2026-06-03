@@ -6,13 +6,14 @@ import com.intellij.openapi.vfs.VirtualFileManager
 import com.jetbrains.python.fixtures.PyTestCase
 import com.jetbrains.python.packaging.PyRequirement
 import com.jetbrains.python.packaging.PyRequirementParser
-import com.jetbrains.python.packaging.conda.environmentYml.format.CondaEnvironmentYmlParser
-import com.jetbrains.python.packaging.conda.environmentYml.format.EnvironmentYmlModifier
+import com.intellij.python.community.impl.conda.environmentYml.format.CondaEnvironmentYmlParser
+import com.intellij.python.community.impl.conda.environmentYml.format.EnvironmentYmlModifier
+import com.intellij.testFramework.common.timeoutRunBlocking
 import org.junit.jupiter.api.Assertions
 import java.io.File
 
 class EnvironmentYmlHelperTest : PyTestCase() {
-  fun testAddRequirementEmpty() {
+  fun testAddRequirementEmpty() = timeoutRunBlocking {
     val virtualFile = getVirtualFileByName("$testDataPath/requirement/environmentYmlEmpty/environment.yml")!!
 
     // Create a temporary copy of the file
@@ -39,7 +40,7 @@ class EnvironmentYmlHelperTest : PyTestCase() {
     Assertions.assertEquals(listOf(newPackageRequirement), updatedRequirements)
   }
 
-  fun testAddRequirement() {
+  fun testAddRequirement() = timeoutRunBlocking {
     val virtualFile = getVirtualFileByName("$testDataPath/requirement/environmentYml/environment.yml")!!
 
     // Create a temporary copy of the file

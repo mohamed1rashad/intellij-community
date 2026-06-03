@@ -6,9 +6,10 @@ import com.intellij.codeInsight.daemon.RainbowVisitor;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightInfoHolder;
 import com.intellij.codeInsight.highlighting.PassRunningAssert;
 import com.intellij.concurrency.JobLauncher;
+import com.intellij.concurrency.ThreadContext;
 import com.intellij.lang.annotation.HighlightSeverity;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.colors.TextAttributesScheme;
+import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
@@ -19,12 +20,19 @@ import com.intellij.psi.PsiFile;
 import com.intellij.util.Consumer;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.containers.ContainerUtil;
+import kotlinx.coroutines.Job;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
+
+import static com.intellij.openapi.diagnostic.LoggerKt.rethrowControlFlowException;
 
 class HighlightVisitorRunner {
   @NotNull private final PsiFile myPsiFile;
@@ -74,8 +82,8 @@ class HighlightVisitorRunner {
         clones.add(cloned);
       }
     }
-    if (!defaultHighlightVisitorAdded) {
-      clones.add(new DefaultHighlightVisitor(project, myHighlightErrorElements, false));
+    if (!defaultHighlightVisitorAdded && myHighlightErrorElements) {
+      clones.add(new DefaultHighlightVisitor(project));
     }
     return clones.toArray(HighlightVisitor.EMPTY_ARRAY);
   }
@@ -98,14 +106,14 @@ class HighlightVisitorRunner {
                       @NotNull Supplier<? extends HighlightInfoHolder> infoHolderProducer,
                       @NotNull ResultSink resultSink) {
     List<VisitorInfo> visitorInfos = ContainerUtil.map(visitors, v -> new VisitorInfo(v, new HashSet<>(), infoHolderProducer.get()));
-    if (GeneralHighlightingPass.LOG.isDebugEnabled()) {
-      GeneralHighlightingPass.LOG.debug("HighlightVisitorRunner: visitors: " + Arrays.toString(visitors)+"; psiFile="+psiFile);
+    ProgressIndicator progress = ProgressIndicatorProvider.getGlobalProgressIndicator();
+    if (GeneralHighlightingPass.LOG.isTraceEnabled()) {
+      GeneralHighlightingPass.LOG.trace("HighlightVisitorRunner: visitors: " + Arrays.toString(visitors)+"; psiFile="+psiFile+"; progress="+progress+"; context job:"+ThreadContext.currentThreadContext().get(Job.Key));
     }
-    boolean res =
-      JobLauncher.getInstance().invokeConcurrentlyUnderProgress(visitorInfos, ProgressIndicatorProvider.getGlobalProgressIndicator(), visitorInfo -> {
+    boolean res = JobLauncher.getInstance().invokeConcurrentlyUnderContextProgress(visitorInfos, visitorInfo -> {
         HighlightVisitor visitor = visitorInfo.visitor();
-        if (GeneralHighlightingPass.LOG.isDebugEnabled()) {
-          GeneralHighlightingPass.LOG.debug("HighlightVisitorRunner: running visitor: " + visitor+"("+visitor.getClass()+"); psiFile="+psiFile+"; "+Thread.currentThread());
+        if (GeneralHighlightingPass.LOG.isTraceEnabled()) {
+          GeneralHighlightingPass.LOG.trace("HighlightVisitorRunner: running visitor: " + visitor+"("+visitor.getClass()+"); psiFile="+psiFile+"; "+Thread.currentThread()+"; progress="+progress+"; context job:"+ThreadContext.currentThreadContext().get(Job.Key));
         }
         try {
           int[] sizeAfterRunVisitor = new int[1];
@@ -117,8 +125,8 @@ class HighlightVisitorRunner {
             sizeAfterRunVisitor[0] = holder.size();
           });
           reportOutOfRunVisitorInfos(sizeAfterRunVisitor[0], ANALYZE_AFTER_RUN_VISITOR_FAKE_PSI_ELEMENT, holder, visitor, resultSink);
-          if (GeneralHighlightingPass.LOG.isDebugEnabled()) {
-            GeneralHighlightingPass.LOG.debug("HighlightVisitorRunner: visitor finished " + visitor + "(" + visitor.getClass() + ")" +
+          if (GeneralHighlightingPass.LOG.isTraceEnabled()) {
+            GeneralHighlightingPass.LOG.trace("HighlightVisitorRunner: visitor finished " + visitor + "(" + visitor.getClass() + ") progress=" + progress+
                                               (result ? "" : " returned false") + "; holder: "+holder.size()+" results"+"; "+Thread.currentThread());
           }
           return result;
@@ -127,20 +135,20 @@ class HighlightVisitorRunner {
           throw e;
         }
         catch (Exception e) {
-          if (GeneralHighlightingPass.LOG.isDebugEnabled()) {
-            GeneralHighlightingPass.LOG.debug("GHP: visitor " + visitor + "(" + visitor.getClass() + ") threw " + ExceptionUtil.getThrowableText(e)+"; "+Thread.currentThread());
+          if (GeneralHighlightingPass.LOG.isTraceEnabled()) {
+            GeneralHighlightingPass.LOG.trace("GHP: visitor " + visitor + "(" + visitor.getClass() + ") threw " + ExceptionUtil.getThrowableText(e)+"; "+Thread.currentThread()+"; progress="+progress+"; context job:"+ThreadContext.currentThreadContext().get(Job.Key));
           }
           throw e;
         }
       });
-    if (GeneralHighlightingPass.LOG.isDebugEnabled()) {
-      GeneralHighlightingPass.LOG.debug("HighlightVisitorRunner: all visitors ran; result="+res+" visitorInfos="+visitorInfos+"; "+Thread.currentThread());
+    if (GeneralHighlightingPass.LOG.isTraceEnabled()) {
+      GeneralHighlightingPass.LOG.trace("HighlightVisitorRunner: all visitors ran; result="+res+" visitorInfos="+visitorInfos+"; "+Thread.currentThread()+"; progress="+progress+"; context job:"+ThreadContext.currentThreadContext().get(Job.Key));
     }
     return res;
   }
 
-  private static final PsiElement ANALYZE_BEFORE_RUN_VISITOR_FAKE_PSI_ELEMENT = HighlightInfoUpdaterImpl.createFakePsiElement();
-  private static final PsiElement ANALYZE_AFTER_RUN_VISITOR_FAKE_PSI_ELEMENT = HighlightInfoUpdaterImpl.createFakePsiElement();
+  private static final PsiElement ANALYZE_BEFORE_RUN_VISITOR_FAKE_PSI_ELEMENT = HighlightInfoUpdaterImpl.createFakePsiElement("ANALYZE_BEFORE_RUN_VISITOR");
+  private static final PsiElement ANALYZE_AFTER_RUN_VISITOR_FAKE_PSI_ELEMENT = HighlightInfoUpdaterImpl.createFakePsiElement("ANALYZE_AFTER_RUN_VISITOR");
   /**
    * report infos created outside the {@link #runVisitor} call (either before or after, inside the {@link HighlightVisitor#analyze} method), starting from the {@param fromIndex}
    */
@@ -195,13 +203,11 @@ class HighlightVisitorRunner {
           break;
         }
         catch (Exception e) {
-          if (Logger.shouldRethrow(e)) {
-            throw e;
-          }
+          rethrowControlFlowException(e);
           if (!failed) {
             GeneralHighlightingPass.LOG.error("In file: " + psiFile.getViewProvider().getVirtualFile(), e);
+            failed = true;
           }
-          failed = true;
         }
         for (int j = oldSize; j < holder.size(); j++) {
           HighlightInfo info = holder.get(j);

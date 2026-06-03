@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.lookup.impl
 
 import com.intellij.codeInsight.completion.impl.CamelHumpMatcher
@@ -7,7 +7,6 @@ import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupEx
 import com.intellij.openapi.client.ClientProjectSession
 import com.intellij.openapi.client.currentSession
-import com.intellij.openapi.components.service
 import com.intellij.openapi.components.serviceOrNull
 import com.intellij.openapi.diagnostic.fileLogger
 import com.intellij.openapi.editor.Editor
@@ -16,7 +15,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.HintHint
 import com.intellij.util.concurrency.annotations.RequiresEdt
-import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.ApiStatus.Internal
 import javax.swing.JComponent
 
@@ -27,7 +25,7 @@ interface ClientLookupManager {
   companion object {
     fun getInstance(session: ClientProjectSession): ClientLookupManager? = session.serviceOrNull()
 
-    fun getCurrentInstance(project: Project): ClientLookupManager = project.currentSession.service()
+    fun getCurrentInstance(project: Project): ClientLookupManager? = project.currentSession.serviceOrNull()
   }
 
   fun getActiveLookup(): LookupEx?
@@ -102,7 +100,6 @@ abstract class ClientLookupManagerBase(val session: ClientProjectSession) : Clie
   protected abstract fun createLookup(editor: Editor, arranger: LookupArranger, session: ClientProjectSession): LookupImpl
 }
 
-@ApiStatus.Experimental
 @Internal
 val LOOKUP_CUSTOMIZATION_EP: ExtensionPointName<LookupCustomizer> = ExtensionPointName("com.intellij.lookup.customizer")
 
@@ -113,7 +110,6 @@ val LOOKUP_CUSTOMIZATION_EP: ExtensionPointName<LookupCustomizer> = ExtensionPoi
  * This is intended to be used internally within the system and not exposed for external use.
  * Use [com.intellij.codeInsight.lookup.LookupManagerListener]
  */
-@ApiStatus.Experimental
 @Internal
 interface LookupCustomizer {
   fun customizeLookup(lookupImpl: LookupImpl)
@@ -132,7 +128,7 @@ class GuestLookupManager(session: ClientProjectSession) : ClientLookupManagerBas
     return GuestLookupImpl(session, editor, arranger)
   }
 
-  class GuestLookupImpl(session: ClientProjectSession, editor: Editor, arranger: LookupArranger) : LookupImpl(session, editor, arranger) {
+  private class GuestLookupImpl(session: ClientProjectSession, editor: Editor, arranger: LookupArranger) : LookupImpl(session, editor, arranger) {
     override fun doShowLookup(): Boolean {
       return true
     }

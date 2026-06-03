@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.jetbrains.python.psi;
 
 import com.jetbrains.python.ast.PyAstCallable;
@@ -36,6 +36,13 @@ public interface PyCallable extends PyAstCallable, PyTypedElement, PyQualifiedNa
   /**
    * Returns the return type of the callable independent of a call site.
    */
+  default PyType getReturnType(@NotNull TypeEvalContext context) {
+    return context.getReturnType(this);
+  }
+
+  /**
+   * Returns the return type of the callable independent of a call site.
+   */
   @Nullable
   PyType getReturnType(@NotNull TypeEvalContext context, @NotNull TypeEvalContext.Key key);
 
@@ -43,7 +50,7 @@ public interface PyCallable extends PyAstCallable, PyTypedElement, PyQualifiedNa
    * Returns the type of the call to the callable.
    */
   @Nullable
-  PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteExpression callSite);
+  PyType getCallType(@NotNull TypeEvalContext context, @NotNull PyCallSiteOwner callSite);
 
 
   /**
@@ -52,7 +59,7 @@ public interface PyCallable extends PyAstCallable, PyTypedElement, PyQualifiedNa
    */
   @Nullable
   PyType getCallType(@Nullable PyExpression receiver,
-                     @Nullable PyCallSiteExpression pyCallSiteExpression,
+                     @Nullable PyCallSiteOwner pyCallSiteExpression,
                      @NotNull Map<PyExpression, PyCallableParameter> parameters,
                      @NotNull TypeEvalContext context);
 

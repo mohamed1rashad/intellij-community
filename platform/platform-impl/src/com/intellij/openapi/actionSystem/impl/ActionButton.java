@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.actionSystem.impl;
 
 import com.intellij.diagnostic.PluginException;
@@ -6,9 +6,27 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.HelpTooltip;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.internal.statistic.collectors.fus.ui.persistence.ToolbarClicksCollector;
-import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.actionSystem.ex.*;
-import com.intellij.openapi.application.impl.InternalUICustomization;
+import com.intellij.openapi.actionSystem.ActionButtonComponent;
+import com.intellij.openapi.actionSystem.ActionClassMetaData;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionToolbar;
+import com.intellij.openapi.actionSystem.ActionUiKind;
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
+import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.AnActionHolder;
+import com.intellij.openapi.actionSystem.AnActionResult;
+import com.intellij.openapi.actionSystem.CommonDataKeys;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.actionSystem.Toggleable;
+import com.intellij.openapi.actionSystem.ex.ActionButtonLook;
+import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
+import com.intellij.openapi.actionSystem.ex.TooltipDescriptionProvider;
+import com.intellij.openapi.actionSystem.ex.TooltipLinkProvider;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.keymap.KeymapUtil;
@@ -19,6 +37,7 @@ import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.text.HtmlChunk;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.ui.ExperimentalUI;
@@ -34,14 +53,33 @@ import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
 import kotlin.Unit;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.accessibility.*;
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
+import javax.accessibility.Accessible;
+import javax.accessibility.AccessibleAction;
+import javax.accessibility.AccessibleContext;
+import javax.accessibility.AccessibleIcon;
+import javax.accessibility.AccessibleRole;
+import javax.accessibility.AccessibleState;
+import javax.accessibility.AccessibleStateSet;
+import javax.accessibility.AccessibleValue;
+import javax.swing.Icon;
+import javax.swing.JComponent;
+import javax.swing.JPopupMenu;
+import javax.swing.UIManager;
+import java.awt.AWTEvent;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Graphics;
+import java.awt.Insets;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.Objects;
@@ -127,7 +165,9 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
     addKeyListener(new KeyAdapter() {
       @Override
       public void keyReleased(KeyEvent e) {
-        if (e.getModifiers() == 0 && e.getKeyCode() == KeyEvent.VK_SPACE) {
+        if (e.getModifiersEx() == 0 &&
+            (e.getKeyCode() == KeyEvent.VK_SPACE ||
+             (e.getKeyCode() == KeyEvent.VK_DOWN && shallPaintDownArrow()))) {
           click();
         }
       }
@@ -219,8 +259,7 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
     AnActionEvent event = AnActionEvent.createEvent(getDataContext(), myPresentation, myPlace, uiKind, e);
     if (!isEnabled()) return;
     ActionManagerEx actionManager = (ActionManagerEx)event.getActionManager();
-    AnActionResult result = actionManager.performWithActionCallbacks(
-      myAction, event, () -> actionPerformed(event));
+    AnActionResult result = actionManager.performWithActionCallbacks(myAction, event, () -> actionPerformed(event));
     if (result.isPerformed()) {
       if (event.getInputEvent() instanceof MouseEvent) {
         ToolbarClicksCollector.record(myAction, myPlace, e, event.getDataContext());
@@ -311,7 +350,7 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
   public void addNotify() {
     super.addNotify();
     if (ActionToolbar.findToolbarBy(this) == null) {
-      ActionManagerEx.withLazyActionManager(null, __ -> { update(); return Unit.INSTANCE; });
+      ActionManagerEx.withLazyActionManager(null, _ -> { update(); return Unit.INSTANCE; });
     }
     else {
       updateToolTipText();
@@ -380,6 +419,10 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
     return size;
   }
 
+  public @NotNull Insets getIconInsets() {
+    return myInsets;
+  }
+
   public void setIconInsets(@Nullable Insets insets) {
     myInsets = insets != null ? JBInsets.create(insets) : JBInsets.emptyInsets();
   }
@@ -440,7 +483,7 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
     if (UISettings.isIdeHelpTooltipEnabled()) {
       HelpTooltip ht = myPresentation.getClientProperty(CUSTOM_HELP_TOOLTIP);
       if ((Strings.isNotEmpty(text) || Strings.isNotEmpty(description)) && ht == null) {
-        ht = new HelpTooltip().setTitle(text).setShortcut(getShortcutText());
+        ht = new HelpTooltip().setPlainTextTitle(text).setShortcut(getShortcutText());
         if (myAction instanceof TooltipLinkProvider) {
           TooltipLinkProvider.TooltipLink link = ((TooltipLinkProvider)myAction).getTooltipLink(this);
           if (link != null) {
@@ -448,8 +491,8 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
           }
         }
         String id = ActionManager.getInstance().getId(myAction);
-        if (!Objects.equals(text, description) && ((id != null && WHITE_LIST.contains(id)) || myAction instanceof TooltipDescriptionProvider)) {
-          ht.setDescription(description);
+        if (description != null && !Objects.equals(text, description) && ((id != null && WHITE_LIST.contains(id)) || myAction instanceof TooltipDescriptionProvider)) {
+          ht.setDescription(HtmlChunk.raw(description));
         }
       }
       if (ht != null) {
@@ -466,18 +509,13 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
     return KeymapUtil.getFirstKeyboardShortcutText(myAction);
   }
 
-  private final InternalUICustomization myCustomization = InternalUICustomization.getInstance();
-
   @Override
   public void paintComponent(Graphics g) {
     jComponentPaint(g);
-    if (myCustomization != null) {
-      g = myCustomization.preserveGraphics(g);
-    }
     paintButtonLook(g);
   }
 
-  // used in Rider, please don't change visibility
+  @ApiStatus.Internal
   protected void jComponentPaint(Graphics g) {
     super.paintComponent(g);
   }
@@ -518,7 +556,9 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
 
   @Override
   protected void processMouseEvent(MouseEvent e) {
-    IdeMouseEventDispatcher.requestFocusInNonFocusedWindow(e);
+    if (isRequestFocusEnabled()) {
+      IdeMouseEventDispatcher.requestFocusInNonFocusedWindow(e);
+    }
     super.processMouseEvent(e);
     if (e.isConsumed()) return;
     boolean skipPress = checkSkipPressForEvent(e);
@@ -554,6 +594,7 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
     }
   }
 
+  @ApiStatus.Internal
   protected void resetMouseState() {
     myMouseDown = false;
     ourGlobalMouseDown = false;
@@ -569,6 +610,7 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
   }
 
 
+  @ApiStatus.Internal
   protected boolean checkSkipPressForEvent(@NotNull MouseEvent e) {
     return e.isMetaDown() || e.getButton() != MouseEvent.BUTTON1;
   }
@@ -624,12 +666,11 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
 
   @Override
   public @NotNull AccessibleContext getAccessibleContext() {
-    AccessibleContext context = accessibleContext;
-    if(context == null) {
-      accessibleContext = context = new AccessibleActionButton();
+    if (accessibleContext == null) {
+      accessibleContext = new AccessibleActionButton();
     }
 
-    return context;
+    return accessibleContext;
   }
 
   protected class AccessibleActionButton extends JComponent.AccessibleJComponent implements AccessibleAction, AccessibleValue {
@@ -693,7 +734,7 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
       //  var1.add(AccessibleState.?);
       //}
 
-      if (state == ActionButtonComponent.PUSHED) {
+      if (state == PUSHED) {
         accessibleStateSet.add(AccessibleState.PRESSED);
       }
       if (isSelected()) {
@@ -702,6 +743,10 @@ public class ActionButton extends JComponent implements ActionButtonComponent, A
 
       if (isFocusOwner()) {
         accessibleStateSet.add(AccessibleState.FOCUSED);
+      }
+
+      if (shallPaintDownArrow()) {
+        accessibleStateSet.add(AccessibleState.EXPANDABLE);
       }
     }
 

@@ -9,7 +9,12 @@ import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.execution.configurations.PathEnvironmentVariableUtil;
 import com.intellij.execution.configurations.PtyCommandLine;
-import com.intellij.execution.process.*;
+import com.intellij.execution.process.CapturingProcessHandler;
+import com.intellij.execution.process.LocalPtyOptions;
+import com.intellij.execution.process.ProcessEvent;
+import com.intellij.execution.process.ProcessHandler;
+import com.intellij.execution.process.ProcessListener;
+import com.intellij.execution.process.ProcessOutput;
 import com.intellij.ide.IdeBundle;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
@@ -32,7 +37,12 @@ import com.intellij.util.Functions;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.io.File;
 import java.io.OutputStream;
@@ -41,7 +51,13 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -431,10 +447,15 @@ public class WSLDistribution implements AbstractWslDistribution {
     testOverriddenWslExe = path;
   }
 
+  private static final AtomicBoolean isAttemptToFindWslExeLogged = new AtomicBoolean(false);
+
   public static @Nullable Path findWslExe() {
     if (testOverriddenWslExe != null) return testOverriddenWslExe;
 
     File file = PathEnvironmentVariableUtil.findInPath(WSL_EXE);
+    if (LOG.isTraceEnabled() && isAttemptToFindWslExeLogged.compareAndSet(false, true)) {
+      LOG.trace(new Throwable("findWslExe called"));
+    }
     return file != null ? file.toPath() : null;
   }
 

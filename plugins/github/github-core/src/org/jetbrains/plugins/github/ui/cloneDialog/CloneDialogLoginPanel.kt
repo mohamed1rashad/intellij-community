@@ -31,9 +31,18 @@ import com.intellij.util.ui.JBInsets
 import com.intellij.util.ui.JBUI.Borders.empty
 import com.intellij.util.ui.JBUI.Panels.simplePanel
 import com.intellij.util.ui.UIUtil.getRegularPanelInsets
-import kotlinx.coroutines.*
+import git4idea.config.GitVcsApplicationSettings
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import org.jetbrains.plugins.github.api.GithubApiRequestExecutor
-import org.jetbrains.plugins.github.authentication.*
+import org.jetbrains.plugins.github.authentication.GHAuthType
+import org.jetbrains.plugins.github.authentication.GHLoginCollector
+import org.jetbrains.plugins.github.authentication.GHLoginData
+import org.jetbrains.plugins.github.authentication.GHLoginSource
+import org.jetbrains.plugins.github.authentication.GHServerOffering
 import org.jetbrains.plugins.github.authentication.accounts.GHAccountManager
 import org.jetbrains.plugins.github.authentication.accounts.GithubAccount
 import org.jetbrains.plugins.github.authentication.ui.GithubLoginPanel
@@ -137,6 +146,9 @@ internal class CloneDialogLoginPanel(
           .addWarningForPersistentCredentials(cs, accountManager.canPersistCredentials, ::panel)
           .align(AlignX.RIGHT)
       }
+      AccountsPanelFactory
+        .addWarningForEnabledCredentialHelper(GitVcsApplicationSettings.getInstance().isUseCredentialHelper, ::panel)
+        .align(AlignX.RIGHT)
     }
 
   fun cancelLogin() {

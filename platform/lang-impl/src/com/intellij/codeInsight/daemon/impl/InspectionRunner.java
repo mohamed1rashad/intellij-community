@@ -3,8 +3,23 @@ package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightingLevelManager;
-import com.intellij.codeInspection.*;
-import com.intellij.codeInspection.ex.*;
+import com.intellij.codeInspection.InspectionEngine;
+import com.intellij.codeInspection.InspectionManager;
+import com.intellij.codeInspection.InspectionProfile;
+import com.intellij.codeInspection.InspectionSuppressor;
+import com.intellij.codeInspection.InspectionUsageFUSStorage;
+import com.intellij.codeInspection.LanguageInspectionSuppressors;
+import com.intellij.codeInspection.LocalInspectionTool;
+import com.intellij.codeInspection.LocalInspectionToolSession;
+import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemsHolder;
+import com.intellij.codeInspection.RedundantSuppressInspectionBase;
+import com.intellij.codeInspection.RedundantSuppressionDetector;
+import com.intellij.codeInspection.ex.GlobalInspectionToolWrapper;
+import com.intellij.codeInspection.ex.InspectionElementsMerger;
+import com.intellij.codeInspection.ex.InspectionProfileWrapper;
+import com.intellij.codeInspection.ex.InspectionToolWrapper;
+import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
 import com.intellij.concurrency.JobLauncher;
 import com.intellij.concurrency.SensitiveProgressWrapper;
 import com.intellij.diagnostic.PluginException;
@@ -14,7 +29,6 @@ import com.intellij.internal.statistic.utils.StatisticsUploadAssistant;
 import com.intellij.lang.Language;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.lang.injection.InjectedLanguageManager;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.diagnostic.Logger;
@@ -28,9 +42,20 @@ import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.TextRangeScalarUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.ExternallyDefinedPsiElement;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementVisitor;
+import com.intellij.psi.PsiFile;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.util.*;
+import com.intellij.util.ArrayUtil;
+import com.intellij.util.AstLoadingFilter;
+import com.intellij.util.CommonProcessors;
+import com.intellij.util.InjectionUtils;
+import com.intellij.util.Processor;
+import com.intellij.util.concurrency.ThreadingAssertions;
+import com.intellij.util.concurrency.annotations.RequiresBackgroundThread;
+import com.intellij.util.concurrency.annotations.RequiresReadLock;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.HashSetQueue;
@@ -39,11 +64,21 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-class InspectionRunner {
+import static com.intellij.openapi.diagnostic.LoggerKt.rethrowControlFlowException;
+
+final class InspectionRunner {
   private static final Logger LOG = Logger.getInstance(InspectionRunner.class);
   private final PsiFile myPsiFile;
   private final TextRange myRestrictRange;
@@ -93,14 +128,16 @@ class InspectionRunner {
     }
   }
 
+  @RequiresBackgroundThread
+  @RequiresReadLock
   @Unmodifiable
   @NotNull
-  List<? extends InspectionContext> inspect(@NotNull List<? extends LocalInspectionToolWrapper> toolWrappers,
-                                            @Nullable HighlightSeverity minimumSeverity,
-                                            boolean addRedundantSuppressions,
-                                            @NotNull ApplyIncrementallyCallback applyIncrementallyCallback,
-                                            @NotNull Consumer<? super InspectionContext> contextFinishedCallback,
-                                            @Nullable Condition<? super LocalInspectionToolWrapper> enabledToolsPredicate) {
+  List<InspectionContext> inspect(@NotNull List<? extends LocalInspectionToolWrapper> toolWrappers,
+                                  @Nullable HighlightSeverity minimumSeverity,
+                                  boolean addRedundantSuppressions,
+                                  @NotNull ApplyIncrementallyCallback applyIncrementallyCallback,
+                                  @NotNull Consumer<? super InspectionContext> contextFinishedCallback,
+                                  @Nullable Condition<? super LocalInspectionToolWrapper> enabledToolsPredicate) {
     if (!shouldInspect(myPsiFile)) {
       return Collections.emptyList();
     }
@@ -159,7 +196,7 @@ class InspectionRunner {
           }
           tool.inspectionStarted(session, myIsOnTheFly);
 
-          List<? extends PsiElement> sortedInside = highlightInfoUpdater.sortByPsiElementFertility(myPsiFile, toolWrapper, toolWrapper.runForWholeFile() ? wholeInside : restrictedInside);
+          List<? extends PsiElement> sortedInside = HighlightInfoUpdaterImpl.sortByPsiElementFertility(myPsiFile, toolWrapper, toolWrapper.runForWholeFile() ? wholeInside : restrictedInside);
           List<? extends PsiElement> outside = toolWrapper.runForWholeFile() ? wholeOutside : restrictedOutside;
           InspectionContext context = new InspectionContext(toolWrapper, holder, visitor, sortedInside, outside, InspectionVisitorOptimizer.getAcceptingPsiTypes(visitor), myPsiFile);
           init.add(context);
@@ -167,7 +204,7 @@ class InspectionRunner {
       }
       //sort `init`, according to the priorities, saved earlier to run in order
       // but only for visible elements, because we don't care about the order in 'outside', and spending CPU on their rearrangement would be counterproductive
-      InspectionProfilerDataHolder.sortByLatencies(myPsiFile, init, highlightInfoUpdater);
+      InspectionProfilerDataHolder.sortByLatencies(myPsiFile, init);
 
       Processor<? super InspectionContext> contextProcessor = (context) -> {
         executeInImpatientReadAction(()-> {
@@ -287,19 +324,21 @@ class InspectionRunner {
 
   private void registerSuppressedElements(@NotNull PsiElement element, @NotNull LocalInspectionToolWrapper tool) {
     String id = tool.getID();
-    mySuppressedElements.computeIfAbsent(id, __ -> new HashSet<>()).add(element);
+    mySuppressedElements.computeIfAbsent(id, _ -> new HashSet<>()).add(element);
     String alternativeID = tool.getAlternativeID();
     if (alternativeID != null && !alternativeID.equals(id)) {
-      mySuppressedElements.computeIfAbsent(alternativeID, __ -> new HashSet<>()).add(element);
+      mySuppressedElements.computeIfAbsent(alternativeID, _ -> new HashSet<>()).add(element);
     }
     InspectionElementsMerger elementsMerger = InspectionElementsMerger.getMerger(tool.getShortName());
     if (elementsMerger != null) {
       for (String suppressId : elementsMerger.getSuppressIds()) {
-        mySuppressedElements.computeIfAbsent(suppressId, __ -> new HashSet<>()).add(element);
+        mySuppressedElements.computeIfAbsent(suppressId, _ -> new HashSet<>()).add(element);
       }
     }
   }
 
+  @RequiresReadLock
+  @RequiresBackgroundThread
   private void addRedundantSuppressions(@NotNull List<? extends InspectionContext> init,
                                         @NotNull List<? extends LocalInspectionToolWrapper> toolWrappers,
                                         @NotNull List<? super InspectionContext> result,
@@ -416,7 +455,7 @@ class InspectionRunner {
                                psiElement -> context.holder.visitElement(psiElement, context.visitor));
     }
     catch (Throwable t) {
-      if (Logger.shouldRethrow(t)) throw t;
+      rethrowControlFlowException(t);
       LOG.error(t);
     }
   }
@@ -483,7 +522,7 @@ class InspectionRunner {
         if (isSuppressedForHost || descriptorPsiElement != null && wrapper.getTool().isSuppressedFor(descriptorPsiElement)) {
           registerSuppressedElements(host, wrapper);
           // remove descriptor at index i from applying
-          descriptors = ContainerUtil.concat(descriptors.subList(0, i), descriptors.subList(i+1, descriptors.size()));
+          descriptors = ContainerUtil.remove(descriptors, i);
           if (LOG.isTraceEnabled()) {
             LOG.trace("startInspectingInjectedPsi:applyInjectedDescriptor: suppressed " + descriptor + " for tool " + wrapper);
           }
@@ -633,9 +672,11 @@ class InspectionRunner {
     }
   }
 
+  @RequiresBackgroundThread
+  @RequiresReadLock
   private static boolean shouldInspect(@NotNull PsiFile psiFile) {
-    ApplicationManager.getApplication().assertIsNonDispatchThread();
-    ApplicationManager.getApplication().assertReadAccessAllowed();
+    ThreadingAssertions.assertBackgroundThread();
+    ThreadingAssertions.assertReadAccess();
     HighlightingLevelManager highlightingLevelManager = HighlightingLevelManager.getInstance(psiFile.getProject());
     // for ESSENTIAL mode, it depends on the current phase: when we run regular LocalInspectionPass then don't, when we run Save All handler then run everything
     return highlightingLevelManager != null

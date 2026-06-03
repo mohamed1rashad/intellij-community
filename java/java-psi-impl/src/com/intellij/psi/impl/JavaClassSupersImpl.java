@@ -1,20 +1,36 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.psi.impl;
 
+import com.intellij.codeInsight.TypeNullability;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiCapturedWildcardType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiIntersectionType;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeParameter;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceBound;
 import com.intellij.psi.impl.source.resolve.graphInference.InferenceVariable;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiSearchScopeUtil;
-import com.intellij.psi.util.*;
-import com.intellij.util.ArrayUtil;
+import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.JavaClassSupers;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.PsiUtilCore;
+import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.containers.UnmodifiableHashMap;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static com.intellij.psi.impl.PsiSubstitutorImpl.PSI_EQUIVALENCE;
@@ -112,9 +128,8 @@ public final class JavaClassSupersImpl extends JavaClassSupers {
         PsiType targetType;
         if (paramCandidate instanceof PsiTypeParameter && paramCandidate != parameter) {
           targetType = outer.substituteWithBoundsPromotion((PsiTypeParameter)paramCandidate);
-          if (targetType != null && innerType.hasAnnotations()) {
-            PsiAnnotation[] typeAnnotations = targetType.getAnnotations();
-            targetType = targetType.annotate(() -> ArrayUtil.mergeArrays(innerType.getAnnotations(), typeAnnotations));
+          if (targetType != null && !innerType.getNullability().equals(TypeNullability.UNKNOWN)) {
+            targetType = targetType.withNullability(innerType.getNullability());
           }
         }
         else {

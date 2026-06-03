@@ -16,6 +16,7 @@
 package com.jetbrains.python.inspections;
 
 import com.google.common.collect.Sets;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.codeInspection.util.InspectionMessage;
 import com.intellij.openapi.util.NlsSafe;
@@ -29,7 +30,11 @@ import com.jetbrains.python.PyPsiBundle;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.codeInsight.typing.PyProtocolsKt;
 import com.jetbrains.python.documentation.PythonDocumentationProvider;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.PyArgumentList;
+import com.jetbrains.python.psi.PyBinaryExpression;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyCallSiteOwner;
+import com.jetbrains.python.psi.PySubscriptionExpression;
 import com.jetbrains.python.psi.impl.PyPsiUtils;
 import com.jetbrains.python.psi.types.PyClassLikeType;
 import com.jetbrains.python.psi.types.PyStructuralType;
@@ -47,32 +52,37 @@ import java.util.stream.Collectors;
 final class PyTypeCheckerInspectionProblemRegistrar {
 
   static void registerProblem(@NotNull PyInspectionVisitor visitor,
-                              @NotNull PyCallSiteExpression callSite,
+                              @NotNull PyCallSiteOwner callSite,
                               @NotNull List<PyType> argumentTypes,
                               @NotNull List<PyTypeCheckerInspection.AnalyzeCalleeResults> calleesResults,
-                              @NotNull TypeEvalContext context) {
+                              @NotNull TypeEvalContext context,
+                              @Nullable ProblemHighlightType highlightOverride) {
     if (calleesResults.size() == 1) {
-      registerSingleCalleeProblem(visitor, callSite, calleesResults.get(0), context);
+      registerSingleCalleeProblem(visitor, callSite, calleesResults.get(0), context, highlightOverride);
     }
     else if (!calleesResults.isEmpty()) {
-      registerMultiCalleeProblem(visitor, callSite, argumentTypes, calleesResults, context);
+      registerMultiCalleeProblem(visitor, callSite, argumentTypes, calleesResults, context, highlightOverride);
     }
   }
 
   private static void registerSingleCalleeProblem(@NotNull PyInspectionVisitor visitor,
-                                                  @NotNull PyCallSiteExpression callSite,
+                                                  @NotNull PyCallSiteOwner callSite,
                                                   @NotNull PyTypeCheckerInspection.AnalyzeCalleeResults calleeResults,
-                                                  @NotNull TypeEvalContext context) {
+                                                  @NotNull TypeEvalContext context,
+                                                  @Nullable ProblemHighlightType highlightOverride) {
     for (PyTypeCheckerInspection.AnalyzeArgumentResult argumentResult : calleeResults.getResults()) {
       if (argumentResult.isMatched()) continue;
 
-      visitor.registerProblem(argumentResult.getArgument(), getSingleCalleeProblemMessage(argumentResult, context));
+      registerWithOverride(visitor, argumentResult.getArgument(), getSingleCalleeProblemMessage(argumentResult, context),
+                           highlightOverride);
     }
 
     for (PyTypeCheckerInspection.UnexpectedArgumentForParamSpec unexpectedArgumentForParamSpec : calleeResults.getUnmatchedArguments()) {
       var argument = unexpectedArgumentForParamSpec.getArgument();
       var paramSpecTypeName = unexpectedArgumentForParamSpec.getParamSpecType().getVariableName();
-      visitor.registerProblem(argument, PyPsiBundle.message("INSP.type.checker.unexpected.argument.from.paramspec", paramSpecTypeName));
+      registerWithOverride(visitor, argument,
+                           PyPsiBundle.message("INSP.type.checker.unexpected.argument.from.paramspec", paramSpecTypeName),
+                           highlightOverride);
     }
 
     if (callSite instanceof PyCallExpression) {
@@ -84,31 +94,47 @@ final class PyTypeCheckerInspectionProblemRegistrar {
             var parameterName = unfilledParameterFromParamSpec.getParameter().getName();
             var paramSpecTypeName = unfilledParameterFromParamSpec.getParamSpecType().getVariableName();
             if (parameterName != null) {
-              visitor.registerProblem(rpar, PyPsiBundle.message("INSP.type.checker.unfilled.parameter.for.paramspec", parameterName, paramSpecTypeName));
+              registerWithOverride(visitor, rpar, PyPsiBundle.message("INSP.type.checker.unfilled.parameter.for.paramspec", parameterName,
+                                                                      paramSpecTypeName), highlightOverride);
             }
           }
 
           for (PyTypeCheckerInspection.UnfilledPositionalVararg unfilledParameterFromParamSpec : calleeResults.getUnfilledPositionalVarargs()) {
             var varargName = unfilledParameterFromParamSpec.varargName();
             var expectedTypes = unfilledParameterFromParamSpec.expectedTypes();
-            visitor.registerProblem(rpar, PyPsiBundle.message("INSP.type.checker.unfilled.vararg", varargName, expectedTypes));
+            registerWithOverride(visitor, rpar, PyPsiBundle.message("INSP.type.checker.unfilled.vararg", varargName, expectedTypes),
+                                 highlightOverride);
           }
         }
       }
     }
   }
 
-  private static void registerMultiCalleeProblem(@NotNull PyInspectionVisitor visitor,
-                                                 @NotNull PyCallSiteExpression callSite,
-                                                 @NotNull List<PyType> argumentTypes,
-                                                 @NotNull List<PyTypeCheckerInspection.AnalyzeCalleeResults> calleesResults,
-                                                 @NotNull TypeEvalContext context) {
-    if (callSite instanceof PyBinaryExpression) {
-      registerMultiCalleeProblemForBinaryExpression(visitor, (PyBinaryExpression)callSite, argumentTypes, calleesResults, context);
+  private static void registerWithOverride(@NotNull PyInspectionVisitor visitor,
+                                           @NotNull PsiElement element,
+                                           @NotNull @InspectionMessage String message,
+                                           @Nullable ProblemHighlightType highlightOverride) {
+    if (highlightOverride != null) {
+      visitor.registerProblem(element, message, highlightOverride);
     }
     else {
-      visitor.registerProblem(getMultiCalleeElementToHighlight(callSite),
-                              getMultiCalleeProblemMessage(argumentTypes, calleesResults, context, isOnTheFly(visitor)));
+      visitor.registerProblem(element, message);
+    }
+  }
+
+  private static void registerMultiCalleeProblem(@NotNull PyInspectionVisitor visitor,
+                                                 @NotNull PyCallSiteOwner callSite,
+                                                 @NotNull List<PyType> argumentTypes,
+                                                 @NotNull List<PyTypeCheckerInspection.AnalyzeCalleeResults> calleesResults,
+                                                 @NotNull TypeEvalContext context,
+                                                 @Nullable ProblemHighlightType highlightOverride) {
+    if (callSite instanceof PyBinaryExpression) {
+      registerMultiCalleeProblemForBinaryExpression(visitor, (PyBinaryExpression)callSite, argumentTypes, calleesResults, context,
+                                                    highlightOverride);
+    }
+    else {
+      registerWithOverride(visitor, getMultiCalleeElementToHighlight(callSite),
+                           getMultiCalleeProblemMessage(argumentTypes, calleesResults, context, isOnTheFly(visitor)), highlightOverride);
     }
   }
 
@@ -151,7 +177,8 @@ final class PyTypeCheckerInspectionProblemRegistrar {
     }
 
     if (expectedSubstitutedName != null) {
-      return PyPsiBundle.message("INSP.type.checker.expected.matched.type.got.type.instead", expectedSubstitutedName, expectedTypeName, actualTypeName);
+      return PyPsiBundle.message("INSP.type.checker.expected.matched.type.got.type.instead", expectedSubstitutedName, expectedTypeName,
+                                 actualTypeName);
     }
     else {
       return PyPsiBundle.message("INSP.type.checker.expected.type.got.type.instead", expectedTypeName, actualTypeName);
@@ -162,7 +189,8 @@ final class PyTypeCheckerInspectionProblemRegistrar {
                                                                     @NotNull PyBinaryExpression binaryExpression,
                                                                     @NotNull List<PyType> argumentTypes,
                                                                     @NotNull List<PyTypeCheckerInspection.AnalyzeCalleeResults> calleesResults,
-                                                                    @NotNull TypeEvalContext context) {
+                                                                    @NotNull TypeEvalContext context,
+                                                                    @Nullable ProblemHighlightType highlightOverride) {
     final Predicate<PyTypeCheckerInspection.AnalyzeCalleeResults> isRightOperatorResults =
       calleeResults -> binaryExpression.isRightOperator(calleeResults.getCallable());
 
@@ -174,17 +202,18 @@ final class PyTypeCheckerInspectionProblemRegistrar {
       : ContainerUtil.filter(calleesResults, calleeResults -> !isRightOperatorResults.test(calleeResults));
 
     if (preferredOperatorsResults.size() == 1) {
-      registerSingleCalleeProblem(visitor, binaryExpression, preferredOperatorsResults.get(0), context);
+      registerSingleCalleeProblem(visitor, binaryExpression, preferredOperatorsResults.get(0), context, highlightOverride);
     }
     else {
-      visitor.registerProblem(
+      registerWithOverride(visitor,
         allCalleesAreRightOperators ? binaryExpression.getLeftExpression() : binaryExpression.getRightExpression(),
-        getMultiCalleeProblemMessage(argumentTypes, preferredOperatorsResults, context, isOnTheFly(visitor))
+                           getMultiCalleeProblemMessage(argumentTypes, preferredOperatorsResults, context, isOnTheFly(visitor)),
+                           highlightOverride
       );
     }
   }
 
-  private static @NotNull PsiElement getMultiCalleeElementToHighlight(@NotNull PyCallSiteExpression callSite) {
+  private static @NotNull PsiElement getMultiCalleeElementToHighlight(@NotNull PyCallSiteOwner callSite) {
     if (callSite instanceof PyCallExpression call) {
       final PyArgumentList argumentList = call.getArgumentList();
 

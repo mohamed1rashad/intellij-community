@@ -1,14 +1,19 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:ApiStatus.Experimental
-
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.syntax.scripts
 
-import org.jetbrains.annotations.ApiStatus
 import java.io.InputStream
 import java.io.Writer
 import java.nio.file.Path
-import java.util.*
-import kotlin.io.path.*
+import java.util.Properties
+import java.util.ResourceBundle
+import kotlin.io.path.Path
+import kotlin.io.path.createFile
+import kotlin.io.path.createParentDirectories
+import kotlin.io.path.exists
+import kotlin.io.path.inputStream
+import kotlin.io.path.name
+import kotlin.io.path.nameWithoutExtension
+import kotlin.io.path.writer
 import kotlin.system.exitProcess
 
 /**

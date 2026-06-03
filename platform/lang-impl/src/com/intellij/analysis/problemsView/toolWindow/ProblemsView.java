@@ -27,7 +27,7 @@ import com.intellij.util.concurrency.ThreadingAssertions;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -45,6 +45,9 @@ public final class ProblemsView implements DumbAware, ToolWindowFactory {
     HighlightingPanel panel = getSelectedHighlightingPanel(contentManager.getSelectedContent());
     ToolWindowManagerImpl toolWindowManager = (ToolWindowManagerImpl) ToolWindowManager.getInstance(project);
     if (virtualFile == null || document == null || panel == null || !panel.isShowing()) {
+      if (virtualFile != null && document != null && panel != null && !panel.isShowing()) {
+        panel.setCurrentFile(virtualFile, document);
+      }
       ProblemsViewToolWindowUtils.INSTANCE.selectContent(contentManager, HighlightingPanel.ID);
       window.setAvailable(true, null);
       toolWindowManager.activateToolWindow(window.getId(), null, true, ToolWindowEventSource.InspectionsWidget);
@@ -167,8 +170,8 @@ public final class ProblemsView implements DumbAware, ToolWindowFactory {
           CompletableFuture<Void> future = new CompletableFuture<>();
           ((HighlightingPanel)panel).updateSelectedFile()
             .onError(throwable -> future.completeExceptionally(throwable))
-            .onSuccess(__->future.complete(null));
-          result = result.thenCompose(__->future);
+            .onSuccess(_->future.complete(null));
+          result = result.thenCompose(_->future);
         }
       }
     }

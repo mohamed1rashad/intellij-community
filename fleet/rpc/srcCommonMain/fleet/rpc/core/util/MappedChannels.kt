@@ -4,9 +4,16 @@ package fleet.rpc.core.util
 import fleet.util.async.catching
 import fleet.util.channels.channels
 import fleet.util.channels.use
-import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.*
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.launch
+import org.jetbrains.annotations.ApiStatus
 
+@ApiStatus.Internal
 @OptIn(DelicateCoroutinesApi::class)
 fun <T, U> ReceiveChannel<T>.map(f: (T) -> U): ReceiveChannel<U> {
   val original = this
@@ -21,6 +28,7 @@ fun <T, U> ReceiveChannel<T>.map(f: (T) -> U): ReceiveChannel<U> {
   return receive
 }
 
+@ApiStatus.Internal
 @OptIn(DelicateCoroutinesApi::class)
 fun <T, U> SendChannel<T>.map(f: (U) -> T): SendChannel<U> {
   val original = this

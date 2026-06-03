@@ -11,7 +11,8 @@ public final class GradleCommonClassNames {
   public static final @NonNls String GRADLE_API_PROJECT = "org.gradle.api.Project";
   public static final @NonNls String GRADLE_API_BASE_PLUGIN_CONVENTION = "org.gradle.api.plugins.BasePluginConvention";
   public static final @NonNls String GRADLE_API_JAVA_PLUGIN_CONVENTION = "org.gradle.api.plugins.JavaPluginConvention";
-  public static final @NonNls String GRADLE_API_JAVA_PLUGIN_EXTENSION = "org.gradle.api.plugins.internal.DefaultJavaPluginExtension";
+  public static final @NonNls String GRADLE_API_DEFAULT_JAVA_PLUGIN_EXTENSION = "org.gradle.api.plugins.internal.DefaultJavaPluginExtension";
+  public static final @NonNls String GRADLE_API_JAVA_PLUGIN_EXTENSION = "org.gradle.api.plugins.JavaPluginExtension";
   public static final @NonNls String GRADLE_API_APPLICATION_PLUGIN_CONVENTION = "org.gradle.api.plugins.ApplicationPluginConvention";
   public static final @NonNls String GRADLE_API_WAR_CONVENTION = "org.gradle.api.plugins.WarPluginConvention";
   public static final @NonNls String GRADLE_API_CONFIGURATION_CONTAINER = "org.gradle.api.artifacts.ConfigurationContainer";
@@ -93,6 +94,7 @@ public final class GradleCommonClassNames {
   public static final @NonNls String GRADLE_API_PROVIDER_PROVIDER = "org.gradle.api.provider.Provider";
   public static final @NonNls String GRADLE_API_PROVIDER_PROVIDER_CONVERTIBLE = "org.gradle.api.provider.ProviderConvertible";
   public static final @NonNls String GRADLE_PLUGIN_USE_PLUGIN_DEPENDENCY = "org.gradle.plugin.use.PluginDependency";
+  public static final @NonNls String GRADLE_PLUGIN_USE_PLUGIN_DEPENDENCY_SPEC = "org.gradle.plugin.use.PluginDependencySpec";
   public static final @NonNls String GRADLE_PLUGIN_USE_PLUGIN_DEPENDENCIES_SPEC = "org.gradle.plugin.use.PluginDependenciesSpec";
   public static final @NonNls String GRADLE_API_SUPPORTS_KOTLIN_ASSIGNMENT_OVERLOADING = "org.gradle.api.SupportsKotlinAssignmentOverloading";
 

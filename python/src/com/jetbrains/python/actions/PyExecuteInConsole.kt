@@ -7,6 +7,7 @@ import com.intellij.execution.target.value.TargetEnvironmentFunction
 import com.intellij.execution.ui.ExecutionConsole
 import com.intellij.execution.ui.RunContentDescriptor
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.project.Project
@@ -16,7 +17,15 @@ import com.intellij.openapi.wm.ToolWindowId
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentManager
 import com.intellij.xdebugger.XDebuggerManager
-import com.jetbrains.python.console.*
+import com.jetbrains.python.console.DescriptorType
+import com.jetbrains.python.console.PyCodeExecutor
+import com.jetbrains.python.console.PyExecuteConsoleCustomizer
+import com.jetbrains.python.console.PyTargetedCodeExecutor
+import com.jetbrains.python.console.PydevConsoleRunner
+import com.jetbrains.python.console.PythonConsoleRunnerFactory
+import com.jetbrains.python.console.PythonConsoleToolWindow
+import com.jetbrains.python.console.PythonConsoleView
+import com.jetbrains.python.console.PythonDebugLanguageConsoleView
 import com.jetbrains.python.run.PythonRunConfiguration
 import java.util.function.Consumer
 import java.util.function.Function
@@ -182,7 +191,7 @@ private fun startNewConsoleInstance(project: Project,
                                     listener: PydevConsoleRunner.ConsoleListener?,
                                     isRequestFocus: Boolean = false) {
   val consoleRunnerFactory = PythonConsoleRunnerFactory.getInstance()
-  val runner: PydevConsoleRunner = ApplicationManager.getApplication().runReadAction<PydevConsoleRunner> {
+  val runner: PydevConsoleRunner = runReadActionBlocking {
     if (executeInConsole == null || config == null) {
       consoleRunnerFactory.createConsoleRunner(project, null)
     }

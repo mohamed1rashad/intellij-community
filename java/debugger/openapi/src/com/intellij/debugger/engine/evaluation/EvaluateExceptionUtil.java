@@ -2,8 +2,16 @@
 package com.intellij.debugger.engine.evaluation;
 
 import com.intellij.debugger.JavaDebuggerBundle;
+import com.intellij.debugger.engine.DebuggerUtils;
 import com.intellij.openapi.util.text.StringUtil;
-import com.sun.jdi.*;
+import com.sun.jdi.AbsentInformationException;
+import com.sun.jdi.ClassNotLoadedException;
+import com.sun.jdi.ClassNotPreparedException;
+import com.sun.jdi.IncompatibleThreadStateException;
+import com.sun.jdi.InconsistentDebugInfoException;
+import com.sun.jdi.InvalidTypeException;
+import com.sun.jdi.InvocationException;
+import com.sun.jdi.ObjectCollectedException;
 
 public final class EvaluateExceptionUtil {
   public static final EvaluateException INCONSISTEND_DEBUG_INFO = createEvaluateException(
@@ -76,7 +84,11 @@ public final class EvaluateExceptionUtil {
     }
     else if (th instanceof InvocationException invocationException) {
       try {
-        return JavaDebuggerBundle.message("evaluation.error.method.exception", invocationException.exception().referenceType().name());
+        var ex = invocationException.exception();
+        var exName = ex.referenceType().name();
+        var exDetails = DebuggerUtils.tryExtractExceptionMessage(ex);
+        var exDesc = exName + (StringUtil.isEmpty(exDetails) ? "" : (": " + exDetails));
+        return JavaDebuggerBundle.message("evaluation.error.method.exception", exDesc);
       }
       catch (ObjectCollectedException e) {
         return JavaDebuggerBundle.message("evaluation.error.exception.collected");

@@ -16,9 +16,18 @@ import java.util.Date;
 public interface PluginDescriptor {
   @NotNull PluginId getPluginId();
 
+  /**
+   * @return a configured classloader instance for this plugin (or content module, hereinafter - module)
+   *  that can load classes of module's dependencies and module's own classes;
+   *  {@code null} if the module is not loaded in the application.
+   */
   @Nullable ClassLoader getPluginClassLoader();
 
+  /**
+   * @deprecated use {@link #getPluginClassLoader} instead
+   */
   @ApiStatus.Experimental
+  @Deprecated
   default @NotNull ClassLoader getClassLoader() {
     ClassLoader classLoader = getPluginClassLoader();
     return classLoader == null ? getClass().getClassLoader() : classLoader;
@@ -109,14 +118,4 @@ public interface PluginDescriptor {
    */
   @Deprecated
   boolean isEnabled();
-
-  /**
-   * @deprecated for removal. This method has no immediate effect and is, in fact, an implementation detail of plugin loading.
-   * <br>
-   * Instead, use {@link com.intellij.ide.plugins.PluginManagerCore#disablePlugin(PluginId)} and
-   * {@link com.intellij.ide.plugins.PluginManagerCore#enablePlugin(PluginId)}.
-   * Also, see {@link com.intellij.ide.plugins.PluginEnabler}.
-   */
-  @Deprecated
-  void setEnabled(boolean enabled);
 }

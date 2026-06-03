@@ -9,6 +9,7 @@ create_kotlinc_options(
     "kotlin.ExperimentalStdlibApi",
   ],
   x_consistent_data_class_copy_visibility = True,
+  x_context_parameters = True,
   x_jvm_default = "all-compatibility",
   x_lambdas = "class"
 )
@@ -17,11 +18,29 @@ jvm_library(
   name = "sign",
   module_name = "fleet.build.sign",
   visibility = ["//visibility:public"],
-  srcs = glob(["srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form"], allow_empty = True, exclude = ["**/module-info.java"]),
+  srcs = glob(["srcJvmMain/**/*.kt", "srcJvmMain/**/*.java", "srcJvmMain/**/*.form"], allow_empty = True),
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_sign",
   deps = [
     "@lib//:kotlin-stdlib",
     "@lib//:slf4j-api",
   ]
 )
+
+jvm_library(
+  name = "sign_test_lib",
+  testonly = True,
+  module_name = "fleet.build.sign",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_sign",
+  runtime_deps = [":sign"]
+)
 ### auto-generated section `build fleet.build.sign` end
+
+### auto-generated section `iml fleet.build.sign` start
+exports_files([
+  "fleet.build.sign.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml fleet.build.sign` end

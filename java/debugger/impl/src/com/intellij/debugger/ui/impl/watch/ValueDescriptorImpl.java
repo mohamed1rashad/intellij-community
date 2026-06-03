@@ -9,7 +9,11 @@ import com.intellij.debugger.engine.JavaValue;
 import com.intellij.debugger.engine.evaluation.CodeFragmentFactoryContextWrapper;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
-import com.intellij.debugger.impl.*;
+import com.intellij.debugger.impl.DebuggerContextImpl;
+import com.intellij.debugger.impl.DebuggerUtilsAsync;
+import com.intellij.debugger.impl.DebuggerUtilsEx;
+import com.intellij.debugger.impl.DebuggerUtilsImpl;
+import com.intellij.debugger.impl.PositionUtil;
 import com.intellij.debugger.memory.utils.NamesUtils;
 import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.debugger.settings.NodeRendererSettings;
@@ -18,7 +22,13 @@ import com.intellij.debugger.ui.tree.DebuggerTreeNode;
 import com.intellij.debugger.ui.tree.NodeDescriptor;
 import com.intellij.debugger.ui.tree.NodeDescriptorNameAdjuster;
 import com.intellij.debugger.ui.tree.ValueDescriptor;
-import com.intellij.debugger.ui.tree.render.*;
+import com.intellij.debugger.ui.tree.render.ClassRenderer;
+import com.intellij.debugger.ui.tree.render.CompoundReferenceRenderer;
+import com.intellij.debugger.ui.tree.render.DescriptorLabelListener;
+import com.intellij.debugger.ui.tree.render.NodeRenderer;
+import com.intellij.debugger.ui.tree.render.NodeRendererImpl;
+import com.intellij.debugger.ui.tree.render.OnDemandPresentationProvider;
+import com.intellij.debugger.ui.tree.render.OnDemandRenderer;
 import com.intellij.debugger.ui.tree.render.Renderer;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.application.ApplicationManager;
@@ -27,6 +37,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.platform.debugger.impl.shared.CoroutineUtilsKt;
 import com.intellij.psi.JavaPsiFacade;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiExpression;
@@ -34,10 +45,20 @@ import com.intellij.ui.JBColor;
 import com.intellij.xdebugger.frame.XValueModifier;
 import com.intellij.xdebugger.frame.XValueNode;
 import com.intellij.xdebugger.frame.presentation.XRegularValuePresentation;
-import com.intellij.xdebugger.impl.CoroutineUtilsKt;
 import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.ui.tree.ValueMarkup;
-import com.sun.jdi.*;
+import com.sun.jdi.ArrayReference;
+import com.sun.jdi.ClassObjectReference;
+import com.sun.jdi.ClassType;
+import com.sun.jdi.DoubleValue;
+import com.sun.jdi.FloatValue;
+import com.sun.jdi.ObjectCollectedException;
+import com.sun.jdi.ObjectReference;
+import com.sun.jdi.PrimitiveValue;
+import com.sun.jdi.StringReference;
+import com.sun.jdi.Type;
+import com.sun.jdi.VMDisconnectedException;
+import com.sun.jdi.Value;
 import kotlin.Unit;
 import kotlinx.coroutines.flow.Flow;
 import kotlinx.coroutines.flow.MutableSharedFlow;
@@ -47,7 +68,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.concurrency.Promise;
 import org.jetbrains.concurrency.Promises;
 
-import javax.swing.*;
+import javax.swing.Icon;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -478,7 +499,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
 
   @ApiStatus.Internal
   public Flow<@Nullable Renderer> getLastRendererFlow() {
-    return CoroutineUtilsKt.mapFlow(myRenderersChangedFlow, __ -> getLastRenderer());
+    return CoroutineUtilsKt.mapFlow(myRenderersChangedFlow, _ -> getLastRenderer());
   }
 
   public Renderer getLastRenderer() {
@@ -495,7 +516,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
 
   public CompletableFuture<NodeRenderer> getChildrenRenderer(DebugProcessImpl debugProcess) {
     if (OnDemandRenderer.isOnDemandForced(debugProcess)) {
-      return myInitFuture.thenApply(__ -> DebugProcessImpl.getDefaultRenderer(getValue()));
+      return myInitFuture.thenApply(_ -> DebugProcessImpl.getDefaultRenderer(getValue()));
     }
     return getRenderer(debugProcess);
   }
@@ -503,7 +524,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
   public CompletableFuture<NodeRenderer> getRenderer(DebugProcessImpl debugProcess) {
     DebuggerManagerThreadImpl.assertIsManagerThread();
     return myInitFuture
-      .thenCompose(__ -> DebuggerUtilsAsync.type(getValue()))
+      .thenCompose(_ -> DebuggerUtilsAsync.type(getValue()))
       .thenCompose(type -> getRenderer(type, debugProcess));
   }
 
@@ -553,7 +574,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
             try {
               return ReadAction.compute(() -> DebuggerTreeNodeExpression.substituteThis(
                 childrenRenderer.getChildValueExpression(new DebuggerTreeNodeMock(value), context),
-                ((PsiExpression)parentEvaluation), vDescriptor.getValue()
+                ((PsiExpression)parentEvaluation), vDescriptor.getValue(), vDescriptor.getDeclaredType()
               ));
             }
             catch (EvaluateException e) {
@@ -585,7 +606,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
           markName = e.getMarkName();
           promise = markers.markValue(value, new ValueMarkup(markName, new JBColor(0, 0), null));
         }
-        res = promise.then(__ -> ReadAction.nonBlocking(() -> JavaPsiFacade.getElementFactory(myProject)
+        res = promise.then(_ -> ReadAction.nonBlocking(() -> JavaPsiFacade.getElementFactory(myProject)
           .createExpressionFromText(markName + CodeFragmentFactoryContextWrapper.DEBUG_LABEL_SUFFIX,
                                     PositionUtil.getContextElement(context))).executeSynchronously());
       }
@@ -729,7 +750,7 @@ public abstract class ValueDescriptorImpl extends NodeDescriptorImpl implements 
 
   @ApiStatus.Internal
   public CompletableFuture<Boolean> canSetValueAsync() {
-    return myInitFuture.thenApply(__ -> isLvalue());
+    return myInitFuture.thenApply(_ -> isLvalue());
   }
 
   public XValueModifier getModifier(JavaValue value) {

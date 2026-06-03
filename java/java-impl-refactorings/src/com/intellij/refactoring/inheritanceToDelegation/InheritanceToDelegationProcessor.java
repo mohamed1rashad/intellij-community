@@ -9,20 +9,66 @@ import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.lang.findUsages.DescriptiveNameUtil;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.WindowManager;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAssignmentExpression;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiModifierListOwner;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiQualifiedExpression;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiResolveHelper;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiSuperExpression;
+import com.intellij.psi.PsiThisExpression;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeCastExpression;
+import com.intellij.psi.PsiTypes;
+import com.intellij.psi.PsiVariable;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
+import com.intellij.psi.impl.compiled.ClsElementImpl;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.search.searches.ClassInheritorsSearch;
-import com.intellij.psi.util.*;
+import com.intellij.psi.util.InheritanceUtil;
+import com.intellij.psi.util.MethodSignature;
+import com.intellij.psi.util.MethodSignatureUtil;
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.refactoring.BaseRefactoringProcessor;
 import com.intellij.refactoring.ConflictsDialogBase;
-import com.intellij.refactoring.inheritanceToDelegation.usageInfo.*;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.FieldAccessibility;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.InheritanceToDelegationUsageInfo;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.NoLongerOverridingSubClassMethodUsageInfo;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.NonDelegatedMemberUsageInfo;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.ObjectUpcastedUsageInfo;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.UnqualifiedNonDelegatedMemberUsageInfo;
+import com.intellij.refactoring.inheritanceToDelegation.usageInfo.UpcastedUsageInfo;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
 import com.intellij.refactoring.util.ConflictsUtil;
 import com.intellij.refactoring.util.RefactoringUIUtil;
@@ -43,7 +89,15 @@ import com.siyeh.ig.psiutils.SealedUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class InheritanceToDelegationProcessor extends BaseRefactoringProcessor {
   private static final Logger LOG = Logger.getInstance(InheritanceToDelegationProcessor.class);
@@ -779,7 +833,16 @@ public final class InheritanceToDelegationProcessor extends BaseRefactoringProce
             PsiMethod outerMethod = MethodSignatureUtil.findMethodBySignature(myClass, signature, false);
             if (outerMethod == null) {
               String visibility = checkOuterClassAbstractMethod(signature);
-              PsiMethod newOuterMethod = (PsiMethod)myClass.add(myMethod);
+              PsiMethod newOuterMethod;
+              if (myMethod instanceof ClsElementImpl clsElement) {
+                StringBuilder buffer = new StringBuilder();
+                clsElement.appendMirrorText(0, buffer);
+                PsiMethod methodCopy = myFactory.createMethodFromText(buffer.toString(), myMethod);
+                newOuterMethod = (PsiMethod)myClass.add(methodCopy);
+              }
+              else {
+                newOuterMethod = (PsiMethod)myClass.add(myMethod);
+              }
               PsiUtil.setModifierProperty(newOuterMethod, visibility, true);
               if (containingClass.isInterface() &&
                   !innerClass.isInterface() &&

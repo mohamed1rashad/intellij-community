@@ -22,14 +22,8 @@ interface IdeFrame {
 
 @Remote("com.intellij.openapi.wm.ex.StatusBarEx")
 interface StatusBar {
-  fun getBackgroundProcesses(): List<TaskInfoPair>
+  fun getBackgroundProcessModels(): List<Pair<TaskInfo?, ProgressModel?>>
   fun isProcessWindowOpen(): Boolean
-
-  @Remote("com.intellij.openapi.util.Pair")
-  interface TaskInfoPair {
-    fun getFirst(): TaskInfo?
-    fun getSecond(): ProgressIndicator?
-  }
 }
 
 fun Driver.getIdeFrame(project: Project): IdeFrame? {

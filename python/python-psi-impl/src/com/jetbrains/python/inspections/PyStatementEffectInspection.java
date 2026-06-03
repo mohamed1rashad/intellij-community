@@ -27,7 +27,24 @@ import com.jetbrains.python.PyPsiBundle;
 import com.jetbrains.python.PyTokenTypes;
 import com.jetbrains.python.inspections.quickfix.StatementEffectFunctionCallQuickFix;
 import com.jetbrains.python.inspections.quickfix.StatementEffectIntroduceVariableQuickFix;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.AccessDirection;
+import com.jetbrains.python.psi.PyBinaryExpression;
+import com.jetbrains.python.psi.PyCallExpression;
+import com.jetbrains.python.psi.PyConditionalExpression;
+import com.jetbrains.python.psi.PyElementType;
+import com.jetbrains.python.psi.PyEllipsisLiteralExpression;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyExpressionStatement;
+import com.jetbrains.python.psi.PyFunction;
+import com.jetbrains.python.psi.PyListCompExpression;
+import com.jetbrains.python.psi.PyParenthesizedExpression;
+import com.jetbrains.python.psi.PyPrefixExpression;
+import com.jetbrains.python.psi.PyReferenceExpression;
+import com.jetbrains.python.psi.PyStatementList;
+import com.jetbrains.python.psi.PyStringLiteralExpression;
+import com.jetbrains.python.psi.PyTryPart;
+import com.jetbrains.python.psi.PyTupleExpression;
+import com.jetbrains.python.psi.PyYieldExpression;
 import com.jetbrains.python.psi.types.PyType;
 import com.jetbrains.python.psi.types.TypeEvalContext;
 import org.jetbrains.annotations.NotNull;
@@ -38,7 +55,9 @@ import java.util.List;
 public final class PyStatementEffectInspection extends PyInspection {
 
   @Override
-  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly, @NotNull LocalInspectionToolSession session) {
+  public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder,
+                                                 boolean isOnTheFly,
+                                                 @NotNull LocalInspectionToolSession session) {
     return new Visitor(holder, PyInspectionVisitor.getContext(session));
   }
 
@@ -60,8 +79,9 @@ public final class PyStatementEffectInspection extends PyInspection {
         return;
       }
       final PyExpression expression = node.getExpression();
-      if (PsiTreeUtil.hasErrorElements(expression))
+      if (PsiTreeUtil.hasErrorElements(expression)) {
         return;
+      }
       if (hasEffect(expression)) return;
 
       // https://twitter.com/gvanrossum/status/112670605505077248
@@ -118,7 +138,7 @@ public final class PyStatementEffectInspection extends PyInspection {
           if (rightExpression != null) {
             type = myTypeEvalContext.getType(rightExpression);
             if (type != null) {
-              String rmethod = "__r" + method.substring(2); // __add__ -> __radd__
+              String rmethod = "__r" + method.substring(2); // __add_ -> __radd__
               if (!type.isBuiltin() && type.resolveMember(rmethod, null, AccessDirection.READ, getResolveContext()) != null) {
                 return true;
               }

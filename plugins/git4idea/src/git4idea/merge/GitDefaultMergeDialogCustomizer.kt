@@ -3,6 +3,8 @@ package git4idea.merge
 
 import com.intellij.diff.DiffEditorTitleCustomizer
 import com.intellij.dvcs.repo.Repository
+import com.intellij.openapi.diagnostic.getOrHandleException
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.NlsContexts
@@ -32,7 +34,13 @@ import com.intellij.vcs.log.ui.details.MultipleCommitInfoDialog
 import com.intellij.vcs.log.util.VcsLogUtil
 import git4idea.GitBranch
 import git4idea.GitRevisionNumber
-import git4idea.GitUtil.*
+import git4idea.GitUtil.CHERRY_PICK_HEAD
+import git4idea.GitUtil.HEAD
+import git4idea.GitUtil.MERGE_HEAD
+import git4idea.GitUtil.REBASE_HEAD
+import git4idea.GitUtil.getHead
+import git4idea.GitUtil.getRepositories
+import git4idea.GitUtil.getRepositoriesForFiles
 import git4idea.changes.GitChangeUtils
 import git4idea.history.GitCommitRequirements
 import git4idea.history.GitHistoryUtils
@@ -47,10 +55,12 @@ import git4idea.repo.GitRepositoryManager
 import org.jetbrains.annotations.Nls
 import javax.swing.JPanel
 
+private val LOG = logger<GitDefaultMergeDialogCustomizer>()
+
 internal open class GitDefaultMergeDialogCustomizer(
   private val project: Project
 ) : MergeDialogCustomizer() {
-  override fun getMultipleFileMergeDescription(files: MutableCollection<VirtualFile>): @NlsContexts.Label String {
+  override fun getMultipleFileMergeDescription(files: Collection<VirtualFile>): @NlsContexts.Label String {
     val repos = getRepositoriesForFiles(project, files)
       .ifEmpty { getRepositories(project).filter { it.stagingAreaHolder.allConflicts.isNotEmpty() } }
 
@@ -185,7 +195,11 @@ internal open class GitDefaultMergeDialogCustomizer(
   }
 
   private fun loadCherryPickCommitDetails(repository: GitRepository): CherryPickDetails? {
-    val result = GitLogUtil.collectMetadata(project, repository.root, listOf(CHERRY_PICK_HEAD)).singleOrNull() ?: return null
+    val result = runCatching {
+      GitLogUtil.collectMetadataForCommit(project, repository.root, CHERRY_PICK_HEAD)
+    }.getOrHandleException {
+      LOG.warn("Failed to load CHERRY_PICK_HEAD details for ${repository.root.name}", it)
+    } ?: return null
     return CherryPickDetails(result.id.toShortString(), result.author.name, result.fullMessage)
   }
 
@@ -213,7 +227,7 @@ internal fun getDescriptionForRebase(repository: GitRepository?, @NlsSafe rebasi
   }
 
   val conflictOnCommit =
-    if (repository != null) GitLogUtil.collectMetadata(repository.project, repository.root, listOf(REBASE_HEAD)).singleOrNull()
+    if (repository != null) GitLogUtil.collectMetadataForCommit(repository.project, repository.root, REBASE_HEAD)
     else null
 
   return if (conflictOnCommit == null) HtmlChunk.raw(description).toString()
@@ -287,7 +301,7 @@ private fun tryResolveRef(repository: GitRepository, @NlsSafe ref: String): Hash
     val revision = GitRevisionNumber.resolve(repository.project, repository.root, ref)
     return HashImpl.build(revision.asString())
   }
-  catch (e: VcsException) {
+  catch (_: VcsException) {
     return null
   }
 }

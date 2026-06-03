@@ -1,15 +1,24 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui;
 
-import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.actionSystem.ActionGroup;
+import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
+import com.intellij.openapi.actionSystem.ActionPopupMenu;
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JList;
+import javax.swing.JPopupMenu;
+import javax.swing.JTable;
+import javax.swing.JTree;
 import javax.swing.event.PopupMenuListener;
-import java.awt.*;
+import java.awt.Component;
+import java.awt.Point;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
@@ -83,20 +92,20 @@ public abstract class PopupHandler extends MouseAdapter {
   public static @NotNull MouseListener installPopupHandler(@NotNull JComponent component,
                                                            @NotNull ActionGroup group,
                                                            @NotNull String place) {
-    return installPopupMenu(component, place, null, null, __ -> group);
+    return installPopupMenu(component, place, null, null, _ -> group);
   }
 
   public static @NotNull PopupHandler installPopupMenu(@NotNull JComponent component,
                                                        @NotNull ActionGroup group,
                                                        @NotNull String place) {
-    return installPopupMenu(component, place, null, null, __ -> group);
+    return installPopupMenu(component, place, null, null, _ -> group);
   }
 
   public static @NotNull PopupHandler installPopupMenu(@NotNull JComponent component,
                                                        @NotNull ActionGroup group,
                                                        @NotNull String place,
                                                        @Nullable PopupMenuListener menuListener) {
-    return installPopupMenu(component, place, null, menuListener, __ -> group);
+    return installPopupMenu(component, place, null, menuListener, _ -> group);
   }
 
   /** @deprecated use {@link #installPopupMenu(JComponent, ActionGroup, String)} instead */
@@ -105,7 +114,7 @@ public abstract class PopupHandler extends MouseAdapter {
                                                            @NotNull ActionGroup group,
                                                            @NotNull String place,
                                                            @Nullable ActionManager actionManager) {
-    return installPopupMenu(component, place, actionManager, null, __ -> group);
+    return installPopupMenu(component, place, actionManager, null, _ -> group);
   }
 
   private static @NotNull PopupHandler installPopupMenu(@NotNull JComponent component,
@@ -184,13 +193,7 @@ public abstract class PopupHandler extends MouseAdapter {
   /** @deprecated Use {@link #installPopupMenu(JComponent, ActionGroup, String)} */
   @Deprecated
   public static MouseListener installUnknownPopupHandler(JComponent component, ActionGroup group, ActionManager actionManager) {
-    return installPopupMenu(component, ActionPlaces.UNKNOWN, actionManager, null, __ -> group);
-  }
-
-  /** @deprecated Use {@link #installPopupMenu(JComponent, ActionGroup, String)} */
-  @Deprecated(forRemoval = true)
-  public static MouseListener installUnknownPopupHandler(JComponent component, ActionGroup group) {
-    return installPopupMenu(component, ActionPlaces.UNKNOWN, null, null, __ -> group);
+    return installPopupMenu(component, ActionPlaces.UNKNOWN, actionManager, null, _ -> group);
   }
 
   @FunctionalInterface

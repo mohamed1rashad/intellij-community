@@ -1,10 +1,12 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.fileEditor.impl;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.EditorLockFreeTyping;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.event.DocumentListener;
 import com.intellij.openapi.editor.ex.DocumentEx;
+import com.intellij.openapi.editor.impl.DocumentImpl;
 import com.intellij.openapi.editor.impl.FrozenDocument;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileTypes.BinaryFileTypeDecompilers;
@@ -28,6 +30,7 @@ import java.nio.charset.Charset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 public abstract class FileDocumentManagerBase extends FileDocumentManager {
   public static final Key<Document> HARD_REF_TO_DOCUMENT_KEY = Key.create("HARD_REF_TO_DOCUMENT_KEY");
@@ -45,8 +48,9 @@ public abstract class FileDocumentManagerBase extends FileDocumentManager {
   }
 
   @Override
-  @RequiresReadLock
+  @RequiresReadLock(generateAssertion = false) // assert for real file
   public final @Nullable Document getDocument(@NotNull VirtualFile file) {
+    EditorLockFreeTyping.assertReadAccess(file);
     DocumentEx document = (DocumentEx)getCachedDocument(file);
     if (document != null) {
       return document;
@@ -56,7 +60,7 @@ public abstract class FileDocumentManagerBase extends FileDocumentManager {
       return null;
     }
 
-    boolean tooLarge = FileSizeLimit.isTooLarge(file.getLength(), file.getExtension());
+    boolean tooLarge = FileSizeLimit.isTooLargeForContentLoading(file.getLength(), file.getExtension());
     if (file.getFileType().isBinary() && tooLarge) {
       return null;
     }
@@ -145,6 +149,11 @@ public abstract class FileDocumentManagerBase extends FileDocumentManager {
       oldFile = document.getUserData(FILE_KEY);
       document.putUserData(FILE_KEY, virtualFile);
       virtualFile.putUserData(HARD_REF_TO_DOCUMENT_KEY, document);
+      // Do not keep the same file bound both through HARD_REF_TO_DOCUMENT_KEY and myDocumentCache.
+      FileDocumentManager manager = getInstance();
+      if (manager instanceof FileDocumentManagerBase) {
+        ((FileDocumentManagerBase)manager).myDocumentCache.remove(virtualFile);
+      }
     }
 
     if (fireBindingChangedEvent) {
@@ -190,10 +199,11 @@ public abstract class FileDocumentManagerBase extends FileDocumentManager {
   }
 
   @ApiStatus.Internal
-  public void unbindFileFromDocument(@NotNull VirtualFile file, @NotNull Document document) {
+  protected void unbindFileFromDocument(@NotNull VirtualFile file, @NotNull Document document) {
     myDocumentCache.remove(file);
     file.putUserData(HARD_REF_TO_DOCUMENT_KEY, null);
     document.putUserData(FILE_KEY, null);
+    DocumentImpl.processQueue(); // document maybe stuck in RangeMarkerTree queue
     fireFileBindingChanged(document, file, null);
   }
 
@@ -221,11 +231,16 @@ public abstract class FileDocumentManagerBase extends FileDocumentManager {
   }
 
   @ApiStatus.Internal
-  public void clearDocumentCache() {
+  protected void clearDocumentCache() {
     myDocumentCache.clear();
   }
 
   protected abstract void fileContentLoaded(@NotNull VirtualFile file, @NotNull Document document);
 
   protected abstract @NotNull DocumentListener getDocumentListener();
+
+  @ApiStatus.Internal
+  public void forEachCachedDocument(@NotNull Consumer<? super @NotNull Document> consumer) {
+    myDocumentCache.values().forEach(consumer);
+  }
 }

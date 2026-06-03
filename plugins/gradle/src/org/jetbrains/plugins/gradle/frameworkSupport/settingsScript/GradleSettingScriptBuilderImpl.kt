@@ -1,9 +1,11 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.frameworkSupport.settingsScript
 
+import com.intellij.util.io.systemIndependentPath
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.frameworkSupport.GradleDsl
 import java.nio.file.Path
+import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.io.path.name
 import kotlin.apply as applyKt
 
@@ -12,8 +14,6 @@ internal class GradleSettingScriptBuilderImpl(
   gradleDsl: GradleDsl,
 ) : AbstractGradleSettingScriptBuilderCore<GradleSettingScriptBuilderImpl>(gradleVersion, gradleDsl),
     GradleSettingScriptBuilder<GradleSettingScriptBuilderImpl> {
-
-  private val foojayPluginVersion = getFoojayPluginVersion()
 
   override fun apply(action: GradleSettingScriptBuilderImpl.() -> Unit) = applyKt(action)
 
@@ -27,7 +27,7 @@ internal class GradleSettingScriptBuilderImpl(
       }
       relativePath.startsWith("..") -> {
         include(projectName)
-        setProjectDir(":$projectName", relativePath.toString())
+        setProjectDir(":$projectName", relativePath.invariantSeparatorsPathString)
       }
       else -> {
         include(projectName)
@@ -37,6 +37,6 @@ internal class GradleSettingScriptBuilderImpl(
 
   override fun withFoojayPlugin() = apply {
     assert(isFoojayPluginSupported(gradleVersion))
-    withPlugin("org.gradle.toolchains.foojay-resolver-convention", foojayPluginVersion)
+    withPlugin("org.gradle.toolchains.foojay-resolver-convention", getFoojayPluginVersion(gradleVersion))
   }
 }

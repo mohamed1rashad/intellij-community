@@ -4,18 +4,37 @@ package com.jetbrains.python.refactoring.move.moduleMembers;
 import com.intellij.application.options.CodeStyle;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiNamedElement;
+import com.intellij.psi.PsiPolyVariantReference;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.ResolveResult;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.psi.util.QualifiedName;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyNames;
+import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
 import com.jetbrains.python.codeInsight.PyDunderAllReference;
 import com.jetbrains.python.codeInsight.controlflow.ScopeOwner;
 import com.jetbrains.python.codeInsight.dataflow.scope.ScopeUtil;
 import com.jetbrains.python.formatter.PyTrailingBlankLinesPostFormatProcessor;
-import com.jetbrains.python.psi.*;
+import com.jetbrains.python.psi.LanguageLevel;
+import com.jetbrains.python.psi.PyClass;
+import com.jetbrains.python.psi.PyElementGenerator;
+import com.jetbrains.python.psi.PyExpression;
+import com.jetbrains.python.psi.PyFile;
+import com.jetbrains.python.psi.PyGlobalStatement;
+import com.jetbrains.python.psi.PyImportStatementBase;
+import com.jetbrains.python.psi.PyQualifiedExpression;
+import com.jetbrains.python.psi.PyReferenceOwner;
+import com.jetbrains.python.psi.PyStarImportElement;
+import com.jetbrains.python.psi.PyStringLiteralExpression;
+import com.jetbrains.python.psi.PyUtil;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
 import com.jetbrains.python.psi.types.TypeEvalContext;
@@ -25,7 +44,11 @@ import com.jetbrains.python.refactoring.move.PyMoveRefactoringUtil;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import static com.jetbrains.python.psi.impl.PyImportStatementNavigator.getImportStatementByElement;
 
@@ -214,9 +237,17 @@ public class PyMoveSymbolProcessor {
     final LanguageLevel languageLevel = LanguageLevel.forElement(expression);
     if (srcFile != expression.getContainingFile()) {
       final QualifiedName qualifier = QualifiedNameFinder.findCanonicalImportPath(srcFile, expression);
-      PyPsiRefactoringUtil.insertImport(expression, srcFile, null, false);
-      final String newQualifiedReference = qualifier + "." + expression.getReferencedName();
-      expression.replace(generator.createExpressionFromText(languageLevel, newQualifiedReference));
+      if (PyCodeInsightSettings.getInstance().PREFER_FROM_IMPORT) {
+        PyPsiRefactoringUtil.insertImport(expression, srcFile, null, true);
+        final String moduleName = qualifier.getLastComponent();
+        final String newQualifiedReference = moduleName + "." + expression.getReferencedName();
+        expression.replace(generator.createExpressionFromText(languageLevel, newQualifiedReference));
+      }
+      else {
+        PyPsiRefactoringUtil.insertImport(expression, srcFile, null, false);
+        final String newQualifiedReference = qualifier + "." + expression.getReferencedName();
+        expression.replace(generator.createExpressionFromText(languageLevel, newQualifiedReference));
+      }
     }
     else {
       expression.replace(generator.createExpressionFromText(languageLevel, expression.getReferencedName()));

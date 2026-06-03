@@ -6,8 +6,11 @@ import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JComponent;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.LayoutManager;
 
 @ApiStatus.Internal
 public final class CombinedPopupLayout implements LayoutManager {
@@ -17,7 +20,7 @@ public final class CombinedPopupLayout implements LayoutManager {
   private final @Nullable JComponent highlightInfoComponent;
   private final @Nullable JComponent quickDocComponent;
 
-  CombinedPopupLayout(@Nullable JComponent highlightInfoComponent, @Nullable JComponent quickDocComponent) {
+  public CombinedPopupLayout(@Nullable JComponent highlightInfoComponent, @Nullable JComponent quickDocComponent) {
     this.highlightInfoComponent = highlightInfoComponent;
     this.quickDocComponent = quickDocComponent;
   }

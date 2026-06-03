@@ -28,7 +28,13 @@ import java.nio.file.Path
 import java.nio.file.SimpleFileVisitor
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.DosFileAttributeView
-import java.nio.file.attribute.PosixFilePermission.*
+import java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE
+import java.nio.file.attribute.PosixFilePermission.GROUP_READ
+import java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE
+import java.nio.file.attribute.PosixFilePermission.OTHERS_READ
+import java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE
+import java.nio.file.attribute.PosixFilePermission.OWNER_READ
+import java.nio.file.attribute.PosixFilePermission.OWNER_WRITE
 import java.util.EnumSet
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPInputStream
@@ -49,12 +55,10 @@ class BundledRuntimeImpl(
       val bundledRuntimePrefix = options.bundledRuntimePrefix
       return when {
         // no JCEF distribution for musl, see https://github.com/JetBrains/JetBrainsRuntime/releases
-        LibcImpl.current(OsFamily.currentOs) == LinuxLibcImpl.MUSL -> JetBrainsRuntimeDistribution.LIGHTWEIGHT.artifactPrefix
-        // required as a runtime for debugger tests
-        System.getProperty("intellij.build.jbr.setupSdk", "false").toBoolean() -> "jbrsdk-"
+        LibcImpl.current(OsFamily.currentOs) == LinuxLibcImpl.MUSL -> JetBrainsRuntimeDistribution.VANILLA.artifactPrefix
         bundledRuntimePrefix != null -> bundledRuntimePrefix
         productProperties != null -> productProperties.runtimeDistribution.artifactPrefix
-        else -> JetBrainsRuntimeDistribution.JCEF.artifactPrefix
+        else -> JetBrainsRuntimeDistribution.VANILLA.artifactPrefix
       }
     }
 
@@ -86,7 +90,7 @@ class BundledRuntimeImpl(
 
   override suspend fun extract(os: OsFamily, arch: JvmArchitecture, libc: LibcImpl, prefix: String): Path {
     val isMusl = os == OsFamily.LINUX && libc == LinuxLibcImpl.MUSL
-    val effectivePrefix = if (libc == LinuxLibcImpl.MUSL) JetBrainsRuntimeDistribution.LIGHTWEIGHT.artifactPrefix else prefix
+    val effectivePrefix = if (libc == LinuxLibcImpl.MUSL) JetBrainsRuntimeDistribution.VANILLA.artifactPrefix else prefix
     val targetDir = paths.communityHomeDir.resolve("build/download/${effectivePrefix}${build}-${os.jbrArchiveSuffix}-${if (isMusl) "musl-" else ""}$arch")
     val jbrDir = targetDir.resolve("jbr")
 
@@ -203,7 +207,9 @@ class BundledRuntimeImpl(
       @Override
       override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult {
         if (dir != destinationDir && SystemInfoRt.isUnix) {
-          Files.setPosixFilePermissions(dir, exeOrDir)
+          if (Files.getPosixFilePermissions(dir) != exeOrDir) {
+            Files.setPosixFilePermissions(dir, exeOrDir)
+          }
         }
         return FileVisitResult.CONTINUE
       }
@@ -211,7 +217,10 @@ class BundledRuntimeImpl(
       override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
         if (SystemInfoRt.isUnix) {
           val noExec = forWin || OWNER_EXECUTE !in Files.getPosixFilePermissions(file)
-          Files.setPosixFilePermissions(file, if (noExec) regular else exeOrDir)
+          val expected = if (noExec) regular else exeOrDir
+          if (Files.getPosixFilePermissions(file) != expected) {
+            Files.setPosixFilePermissions(file, expected)
+          }
         }
         else {
           Files.getFileAttributeView(file, DosFileAttributeView::class.java).setReadOnly(false)

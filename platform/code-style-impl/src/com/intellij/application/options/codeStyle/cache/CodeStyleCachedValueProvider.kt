@@ -2,7 +2,13 @@
 package com.intellij.application.options.codeStyle.cache
 
 import com.intellij.codeWithMe.ClientId
-import com.intellij.openapi.application.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.asContextElement
+import com.intellij.openapi.application.readAction
+import com.intellij.openapi.application.runReadActionBlocking
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.debug
@@ -24,7 +30,13 @@ import com.intellij.psi.codeStyle.modifier.TransientCodeStyleSettings
 import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import com.intellij.util.ArrayUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Runnable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
@@ -70,7 +82,7 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
     try {
       settings = computation.getCurrentResult()
     }
-    catch (ignored: ProcessCanceledException) {
+    catch (_: ProcessCanceledException) {
       computation.reset()
       LOG.debug { "Computation was cancelled for ${file.name}" }
       return CachedValueProvider.Result(null, ModificationTracker.EVER_CHANGED)
@@ -120,6 +132,8 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
     val tracker = SimpleModificationTracker()
     private var job: Job? = null
     private val scheduledRunnables = ArrayList<Runnable>()
+    private val scheduledRunnablesLock = Any()
+    private var scheduledRunnablesWereInvoked = false
     private var oldTrackerSetting: Long = 0
     private var insideRestartedComputation = false
 
@@ -148,7 +162,7 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
       }
       else {
         LOG.debug { "sync for ${file.name}" }
-        val success = app.runReadAction<Boolean>(::computeSettings)
+        val success = runReadActionBlocking(::computeSettings)
         if (app.isDispatchThread) {
           notifyCachedValueComputed(success)
         }
@@ -171,11 +185,14 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
 
     fun schedule(runnable: Runnable) {
       if (isActive.get()) {
-        scheduledRunnables.add(ClientId.decorateRunnable(runnable))
+        synchronized(scheduledRunnablesLock) {
+          if (!scheduledRunnablesWereInvoked) {
+            scheduledRunnables.add(ClientId.decorateRunnable(runnable))
+            return
+          }
+        }
       }
-      else {
-        runnable.run()
-      }
+      runnable.run()
     }
 
     /**
@@ -214,9 +231,17 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
           }
         }
 
+        // we need to reduce the number of the "setting changed" event to the minimum, 
+        // because it initiates the editors re-layout due to gutters layout: CPP-47563, IDEA-58496, ... 
         if (currentResult !== currSettings) {
           currentResult = currSettings
           tracker.incModificationCount()
+          // The `tryGetSettings()` call pushes the `currentResult` into the cache 
+          // without auto-triggering the computation due to `computation.inActive == true` status.          
+          val cachedSettings = tryGetSettings()
+          if (currentResult !== cachedSettings) {
+            LOG.error("Cache corruption: check `isActive` protection inside the `getCurrentResult()`!");    
+          }
         }
         LOG.debug { "Computation ended for ${file.name}" }
       }
@@ -241,8 +266,11 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
     }
 
     fun reset() {
-      scheduledRunnables.clear()
-      isActive.set(false)
+      synchronized(scheduledRunnablesLock) {
+        scheduledRunnables.clear()
+        isActive.set(false)
+        scheduledRunnablesWereInvoked = false
+      }
       LOG.debug { "Computation reset for ${file.name}" }
     }
 
@@ -262,8 +290,11 @@ internal class CodeStyleCachedValueProvider(val fileSupplier: Supplier<VirtualFi
         return
       }
       LOG.debug { "running scheduled runnables for ${file.name}" }
-      for (runnable in scheduledRunnables) {
-        runnable.run()
+      synchronized(scheduledRunnablesLock) {
+        for (runnable in scheduledRunnables) {
+          runnable.run()
+        }
+        scheduledRunnablesWereInvoked = true
       }
       if (shouldFireEvent && !project.isDisposed) {
         /* IJPL-179136

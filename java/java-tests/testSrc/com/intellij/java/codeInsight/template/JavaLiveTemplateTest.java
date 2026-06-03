@@ -5,10 +5,26 @@ import com.intellij.JavaTestUtil;
 import com.intellij.codeInsight.CodeInsightSettings;
 import com.intellij.codeInsight.daemon.impl.quickfix.EmptyExpression;
 import com.intellij.codeInsight.lookup.Lookup;
-import com.intellij.codeInsight.template.*;
+import com.intellij.codeInsight.template.JavaCodeContextType;
+import com.intellij.codeInsight.template.JavaStringContextType;
+import com.intellij.codeInsight.template.Template;
+import com.intellij.codeInsight.template.TemplateActionContext;
+import com.intellij.codeInsight.template.TemplateContextType;
 import com.intellij.codeInsight.template.actions.SaveAsTemplateAction;
-import com.intellij.codeInsight.template.impl.*;
-import com.intellij.codeInsight.template.macro.*;
+import com.intellij.codeInsight.template.impl.ConstantNode;
+import com.intellij.codeInsight.template.impl.EmptyNode;
+import com.intellij.codeInsight.template.impl.MacroCallNode;
+import com.intellij.codeInsight.template.impl.TemplateContextTypes;
+import com.intellij.codeInsight.template.impl.TemplateImpl;
+import com.intellij.codeInsight.template.impl.TemplateManagerImpl;
+import com.intellij.codeInsight.template.impl.TemplateSettings;
+import com.intellij.codeInsight.template.impl.TextExpression;
+import com.intellij.codeInsight.template.macro.BaseCompleteMacro;
+import com.intellij.codeInsight.template.macro.CompleteMacro;
+import com.intellij.codeInsight.template.macro.CompleteSmartMacro;
+import com.intellij.codeInsight.template.macro.MethodNameMacro;
+import com.intellij.codeInsight.template.macro.MethodReturnTypeMacro;
+import com.intellij.codeInsight.template.macro.VariableOfTypeMacro;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.editor.impl.DocumentImpl;
 import com.intellij.pom.java.JavaFeature;
@@ -251,6 +267,12 @@ public class JavaLiveTemplateTest extends LiveTemplateTestCase {
     checkResult();
   }
 
+  public void testSoutpLambda() {
+    configure();
+    startTemplate("soutp", "Java");
+    checkResult();
+  }
+
   public void testItm() {
     configure();
     startTemplate("itm", "Java");
@@ -298,7 +320,7 @@ public class JavaLiveTemplateTest extends LiveTemplateTestCase {
     Set<TemplateContextType> contextTypeSet = TemplateManagerImpl
       .getApplicableContextTypes(TemplateActionContext.expanding(myFixture.getFile(), myFixture.getEditor()));
     List<Class<? extends TemplateContextType>> applicableContextTypesClasses = ContainerUtil.map(contextTypeSet, TemplateContextType::getClass);
-    List<Class<? extends JavaCodeContextType>> declarationTypes = Arrays.asList(JavaCodeContextType.Declaration.class, JavaCodeContextType.NormalClassDeclarationAfterShortMainMethod.class);
+    List<Class<? extends JavaCodeContextType>> declarationTypes = Arrays.asList(JavaCodeContextType.Declaration.class);
 
     assertEquals(declarationTypes, applicableContextTypesClasses);
   }
@@ -345,6 +367,8 @@ public class JavaLiveTemplateTest extends LiveTemplateTestCase {
       assertTrue(isApplicable("class Foo { <caret>xxx String[] foo(String[] bar) {} }", template));
       assertFalse(isApplicable("<caret>", template));
       assertFalse(isApplicable("int a = 1; <caret>", template));
+      assertFalse(isApplicable("class Foo { void test(<caret>xxx) {} }", template));
+      assertFalse(isApplicable("record Foo(<caret>xxx) {}", template));
     });
     IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_1_8, () -> {
       assertFalse(isApplicable("class Foo { <caret>xxx }", template));
@@ -358,6 +382,8 @@ public class JavaLiveTemplateTest extends LiveTemplateTestCase {
       assertTrue(isApplicable("class Foo { <caret>xxx String[] foo(String[] bar) {} }", template));
       assertFalse(isApplicable("<caret>", template));
       assertFalse(isApplicable("int a = 1; <caret>", template));
+      assertFalse(isApplicable("class Foo { void test(<caret>xxx) {} }", template));
+      assertFalse(isApplicable("record Foo(<caret>xxx) {}", template));
     });
     IdeaTestUtil.withLevel(getModule(), JavaFeature.IMPLICIT_CLASSES.getStandardLevel(), () -> {
       assertFalse(isApplicable("class Foo { <caret>xxx }", template));
@@ -976,6 +1002,17 @@ public class JavaLiveTemplateTest extends LiveTemplateTestCase {
     IdeaTestUtil.withLevel(getModule(), LanguageLevel.JDK_21, () -> {
       assertFalse(isApplicable("class Foo {void x(){ <caret>JUNK }", template));
     });
+  }
+
+  public void testSoutNotAvailableAfterDot() {
+    final TemplateImpl template =
+      TemplateSettings.getInstance().getTemplate("sout", "Java");
+      assertFalse(isApplicable("""
+                                 class A{
+                                  public static void main(){
+                                    .<caret>
+                                  }
+                                 }""", template));
   }
 
   @Override

@@ -1,20 +1,47 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.util.concurrency
 
-import com.intellij.concurrency.*
+import com.intellij.concurrency.IntelliJContextElement
+import com.intellij.concurrency.IntelliJThreadContextElement
+import com.intellij.concurrency.TestElement
+import com.intellij.concurrency.TestElement2
+import com.intellij.concurrency.TestElement2Key
+import com.intellij.concurrency.TestElementKey
+import com.intellij.concurrency.callable
+import com.intellij.concurrency.currentThreadContext
+import com.intellij.concurrency.currentThreadOverriddenContextOrNull
+import com.intellij.concurrency.installThreadContext
+import com.intellij.concurrency.runnable
 import com.intellij.execution.process.ProcessIOExecutorService
-import com.intellij.openapi.application.*
-import com.intellij.openapi.progress.*
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.currentThreadContextModality
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.progress.blockingContext
+import com.intellij.openapi.progress.timeoutWaitUp
 import com.intellij.openapi.util.Conditions
 import com.intellij.platform.ide.progress.ModalTaskOwner
 import com.intellij.platform.ide.progress.TaskCancellation
+import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.common.timeoutRunBlocking
 import com.intellij.testFramework.junit5.SystemProperty
 import com.intellij.testFramework.junit5.TestApplication
 import com.intellij.util.application
 import com.intellij.util.getValue
 import com.intellij.util.setValue
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.completeWith
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import org.jetbrains.concurrency.AsyncPromise
 import org.junit.jupiter.api.Assertions
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -25,11 +52,15 @@ import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.jupiter.api.extension.InvocationInterceptor
 import org.junit.jupiter.api.extension.ReflectiveInvocationContext
 import java.lang.reflect.Method
-import java.util.concurrent.*
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.Result
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlin.test.assertEquals
@@ -265,7 +296,7 @@ class ThreadContextPropagationTest {
         runAction = true // read action is allowed to complete now
         while (true) {
           try {
-            future.get(100, TimeUnit.MILLISECONDS)
+            PlatformTestUtil.waitForFuture(future)
             break
           }
           catch (_: TimeoutException) {
@@ -321,11 +352,13 @@ class ThreadContextPropagationTest {
     finished.await()
   }
 
-  class MyIjElement(val eventTracker: AtomicBoolean) : IntelliJContextElement, AbstractCoroutineContextElement(MyIjElement) {
+  class MyIjElement(val eventTracker: AtomicBoolean) : IntelliJThreadContextElement<Unit>, AbstractCoroutineContextElement(MyIjElement) {
     companion object Key : CoroutineContext.Key<MyIjElement>
 
     override fun produceChildElement(parentContext: CoroutineContext, isStructured: Boolean): IntelliJContextElement = this
-    override fun afterChildCompleted(context: CoroutineContext) = eventTracker.set(true)
+    override fun beforeStarted(context: CoroutineContext) {
+    }
+    override fun afterCompleted(context: CoroutineContext, oldState: Unit) = eventTracker.set(true)
   }
 
   @Test
@@ -339,11 +372,13 @@ class ThreadContextPropagationTest {
     assertTrue(tracker.get())
   }
 
-  class MyCancellableIjElement(val eventTracker: AtomicBoolean) : IntelliJContextElement, AbstractCoroutineContextElement(MyIjElement) {
+  class MyCancellableIjElement(val eventTracker: AtomicBoolean) : IntelliJThreadContextElement<Unit>, AbstractCoroutineContextElement(MyIjElement) {
     companion object Key : CoroutineContext.Key<MyIjElement>
 
     override fun produceChildElement(parentContext: CoroutineContext, isStructured: Boolean): IntelliJContextElement = this
-    override fun childCanceled(context: CoroutineContext) = eventTracker.set(true)
+    override fun beforeStarted(context: CoroutineContext) {}
+    override fun afterCompleted(context: CoroutineContext, oldState: Unit) {}
+    override fun canceled(context: CoroutineContext) = eventTracker.set(true)
   }
 
   @Test
@@ -390,11 +425,12 @@ class ThreadContextPropagationTest {
     }
   }
 
-  class MyFaultyIjElement2(val e: Throwable) : IntelliJContextElement, AbstractCoroutineContextElement(MyFaultyIjElement2) {
+  class MyFaultyIjElement2(val e: Throwable) : IntelliJThreadContextElement<Unit>, AbstractCoroutineContextElement(MyFaultyIjElement2) {
     companion object Key : CoroutineContext.Key<MyFaultyIjElement2>
 
     override fun produceChildElement(parentContext: CoroutineContext, isStructured: Boolean): IntelliJContextElement? = this
-    override fun beforeChildStarted(context: CoroutineContext) = throw e
+    override fun beforeStarted(context: CoroutineContext) = throw e
+    override fun afterCompleted(context: CoroutineContext, oldState: Unit) {}
   }
 
   @Test

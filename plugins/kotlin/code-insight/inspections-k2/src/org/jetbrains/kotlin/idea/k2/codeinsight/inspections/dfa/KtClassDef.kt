@@ -99,7 +99,7 @@ class KtClassDef(
         analyze(module) {
             val classLikeSymbol = pointer.restoreSymbol() ?: return@analyze null
             val psi = classLikeSymbol.psi ?: return@analyze null
-            buildClassType(classLikeSymbol).asPsiType(psi, true)
+            typeCreator.classType(classLikeSymbol).asPsiType(psi, true)
         }
 
     override fun equals(other: Any?): Boolean =
@@ -115,7 +115,7 @@ class KtClassDef(
     private fun correctFqName(fqNameUnsafe: FqNameUnsafe): String =
         JavaToKotlinClassMap.mapKotlinToJava(fqNameUnsafe)?.asFqNameString() ?: fqNameUnsafe.asString()
 
-    fun asConstraint() = when {
+    fun asConstraint(): TypeConstraint.Exact = when {
         kind == KaClassKind.OBJECT -> TypeConstraints.singleton(this)
         else -> TypeConstraints.exactClass(this)
     }

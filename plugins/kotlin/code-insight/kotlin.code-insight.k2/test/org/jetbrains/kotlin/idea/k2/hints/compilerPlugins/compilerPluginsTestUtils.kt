@@ -3,6 +3,8 @@ package org.jetbrains.kotlin.idea.k2.hints.compilerPlugins
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.OrderRootType
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.TestOnly
 import org.jetbrains.kotlin.idea.base.psi.userDataCached
 import org.jetbrains.kotlin.idea.fir.extensions.KotlinK2BundledCompilerPlugins
 import org.jetbrains.kotlin.idea.resolve.KOTLINX_SERIALIZATION_CORE_JVM_MAVEN_COORDINATES
@@ -14,13 +16,27 @@ import java.io.File
 import kotlin.io.path.absolutePathString
 import com.intellij.openapi.module.Module as OpenapiModule
 
-internal fun <T> OpenapiModule.withCompilerPlugin(
+@ApiStatus.Internal
+@TestOnly
+fun <T> OpenapiModule.withCompilerPlugin(
     plugin: KotlinK2BundledCompilerPlugins,
     options: String? = null,
     action: () -> T
 ): T {
     val pluginJar = plugin.bundledJarLocation
 
+    addPluginLibraryToClassPath(plugin)
+
+    return withCustomCompilerOptions(
+        "// COMPILER_ARGUMENTS: -Xplugin=${pluginJar.absolutePathString()} ${options?.let { "-P $it" }.orEmpty()}",
+        project,
+        module = this
+    ) {
+        action()
+    }
+}
+
+internal fun OpenapiModule.addPluginLibraryToClassPath(plugin: KotlinK2BundledCompilerPlugins) {
     when (plugin) {
         KotlinK2BundledCompilerPlugins.KOTLINX_SERIALIZATION_COMPILER_PLUGIN -> {
             ConfigLibraryUtil.addLibrary(this, "serialization-core") {
@@ -29,14 +45,6 @@ internal fun <T> OpenapiModule.withCompilerPlugin(
         }
 
         else -> {}
-    }
-
-    return withCustomCompilerOptions(
-        "// COMPILER_ARGUMENTS: -Xplugin=${pluginJar.absolutePathString()} ${options?.let { "-P $it" }.orEmpty()}",
-        project,
-        module = this
-    ) {
-        action()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.quickfix;
 
@@ -19,10 +19,10 @@ import org.junit.runner.RunWith;
 @TestDataPath("$CONTENT_ROOT")
 @RunWith(JUnit3RunnerWithInners.class)
 @TestMetadata("testData/quickfix")
-public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMultiFileTest {
+public abstract class QuickFixMultiFileTestGenerated extends AbstractK1QuickFixMultiFileTest {
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/addAnnotationTarget")
-    public static class AddAnnotationTarget extends AbstractQuickFixMultiFileTest {
+    public static class AddAnnotationTarget extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -41,7 +41,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/addExclExclCall")
-    public static class AddExclExclCall extends AbstractQuickFixMultiFileTest {
+    public static class AddExclExclCall extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -85,7 +85,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/addGenericUpperBound")
-    public static class AddGenericUpperBound extends AbstractQuickFixMultiFileTest {
+    public static class AddGenericUpperBound extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -104,7 +104,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/addSpreadOperatorForArrayAsVarargAfterSam")
-    public static class AddSpreadOperatorForArrayAsVarargAfterSam extends AbstractQuickFixMultiFileTest {
+    public static class AddSpreadOperatorForArrayAsVarargAfterSam extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -113,6 +113,11 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         private void runTest(String testDataFilePath) throws Exception {
             KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
+        }
+
+        @TestMetadata("noSam.test")
+        public void testNoSam() throws Exception {
+            runTest("testData/quickfix/addSpreadOperatorForArrayAsVarargAfterSam/noSam.test");
         }
 
         @TestMetadata("withError.test")
@@ -124,16 +129,11 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
         public void testWithWarning() throws Exception {
             runTest("testData/quickfix/addSpreadOperatorForArrayAsVarargAfterSam/withWarning.test");
         }
-
-        @TestMetadata("withoutWarning.test")
-        public void testWithoutWarning() throws Exception {
-            runTest("testData/quickfix/addSpreadOperatorForArrayAsVarargAfterSam/withoutWarning.test");
-        }
     }
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/addTypeAnnotationToValueParameter")
-    public static class AddTypeAnnotationToValueParameter extends AbstractQuickFixMultiFileTest {
+    public static class AddTypeAnnotationToValueParameter extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -152,10 +152,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/autoImports")
-    public abstract static class AutoImports extends AbstractQuickFixMultiFileTest {
+    public abstract static class AutoImports extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/callableReference")
-        public static class CallableReference extends AbstractQuickFixMultiFileTest {
+        public static class CallableReference extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -254,7 +254,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/callablesDeclaredInClasses")
-        public static class CallablesDeclaredInClasses extends AbstractQuickFixMultiFileTest {
+        public static class CallablesDeclaredInClasses extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -293,51 +293,154 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/innerClass")
-        public static class InnerClass extends AbstractQuickFixMultiFileTest {
-            @java.lang.Override
-            @org.jetbrains.annotations.NotNull
-            public final KotlinPluginMode getPluginMode() {
-                return KotlinPluginMode.K1;
+        public abstract static class InnerClass extends AbstractK1QuickFixMultiFileTest {
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("testData/quickfix/autoImports/innerClass/typealiased")
+            public static class Typealiased extends AbstractK1QuickFixMultiFileTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K1;
+                }
+
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInCallableReference.test")
+                public void testInnerClassViaTypeAliasInCallableReference() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInCallableReference.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInCallableReference_implicitReceiver.test")
+                public void testInnerClassViaTypeAliasInCallableReference_implicitReceiver() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInCallableReference_implicitReceiver.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInCallableReference_wrongReceiver.test")
+                public void testInnerClassViaTypeAliasInCallableReference_wrongReceiver() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInCallableReference_wrongReceiver.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression.test")
+                public void testInnerClassViaTypeAliasInExpression() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_implicitReceiver.test")
+                public void testInnerClassViaTypeAliasInExpression_implicitReceiver() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_implicitReceiver.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_implicitReceiver_noCall.test")
+                public void testInnerClassViaTypeAliasInExpression_implicitReceiver_noCall() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_implicitReceiver_noCall.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_implicitReceiver_wrongReceiver.test")
+                public void testInnerClassViaTypeAliasInExpression_implicitReceiver_wrongReceiver() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_implicitReceiver_wrongReceiver.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_incompatibleTypeParams.test")
+                public void testInnerClassViaTypeAliasInExpression_incompatibleTypeParams() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_incompatibleTypeParams.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_infixCall.test")
+                public void testInnerClassViaTypeAliasInExpression_infixCall() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_infixCall.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_nestedTypeAlias.test")
+                public void testInnerClassViaTypeAliasInExpression_nestedTypeAlias() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_nestedTypeAlias.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_noCall.test")
+                public void testInnerClassViaTypeAliasInExpression_noCall() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_noCall.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_safeCall.test")
+                public void testInnerClassViaTypeAliasInExpression_safeCall() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_safeCall.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_subClass.test")
+                public void testInnerClassViaTypeAliasInExpression_subClass() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_subClass.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_wrongExplicitReceiver_correctImplicitReceiver.test")
+                public void testInnerClassViaTypeAliasInExpression_wrongExplicitReceiver_correctImplicitReceiver() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_wrongExplicitReceiver_correctImplicitReceiver.test");
+                }
+
+                @TestMetadata("innerClassViaTypeAliasInExpression_wrongReceiver.test")
+                public void testInnerClassViaTypeAliasInExpression_wrongReceiver() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/innerClassViaTypeAliasInExpression_wrongReceiver.test");
+                }
+
+                @TestMetadata("nestedInterfaceViaTypeAliasInExpression.test")
+                public void testNestedInterfaceViaTypeAliasInExpression() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/nestedInterfaceViaTypeAliasInExpression.test");
+                }
+
+                @TestMetadata("nestedObjectViaTypeAliasInExpression.test")
+                public void testNestedObjectViaTypeAliasInExpression() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/typealiased/nestedObjectViaTypeAliasInExpression.test");
+                }
             }
 
-            private void runTest(String testDataFilePath) throws Exception {
-                KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
-            }
+            @RunWith(JUnit3RunnerWithInners.class)
+            @TestMetadata("testData/quickfix/autoImports/innerClass")
+            public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
+                @java.lang.Override
+                @org.jetbrains.annotations.NotNull
+                public final KotlinPluginMode getPluginMode() {
+                    return KotlinPluginMode.K1;
+                }
 
-            @TestMetadata("innerClassInCallableReference.test")
-            public void testInnerClassInCallableReference() throws Exception {
-                runTest("testData/quickfix/autoImports/innerClass/innerClassInCallableReference.test");
-            }
+                private void runTest(String testDataFilePath) throws Exception {
+                    KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
+                }
 
-            @TestMetadata("innerClassInCallableReference_fromJava.test")
-            public void testInnerClassInCallableReference_fromJava() throws Exception {
-                runTest("testData/quickfix/autoImports/innerClass/innerClassInCallableReference_fromJava.test");
-            }
+                @TestMetadata("innerClassInCallableReference.test")
+                public void testInnerClassInCallableReference() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/innerClassInCallableReference.test");
+                }
 
-            @TestMetadata("innerClassInExpression.test")
-            public void testInnerClassInExpression() throws Exception {
-                runTest("testData/quickfix/autoImports/innerClass/innerClassInExpression.test");
-            }
+                @TestMetadata("innerClassInCallableReference_fromJava.test")
+                public void testInnerClassInCallableReference_fromJava() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/innerClassInCallableReference_fromJava.test");
+                }
 
-            @TestMetadata("innerClassInExpression_fromJava.test")
-            public void testInnerClassInExpression_fromJava() throws Exception {
-                runTest("testData/quickfix/autoImports/innerClass/innerClassInExpression_fromJava.test");
-            }
+                @TestMetadata("innerClassInExpression.test")
+                public void testInnerClassInExpression() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/innerClassInExpression.test");
+                }
 
-            @TestMetadata("innerClassInTypeReference.test")
-            public void testInnerClassInTypeReference() throws Exception {
-                runTest("testData/quickfix/autoImports/innerClass/innerClassInTypeReference.test");
-            }
+                @TestMetadata("innerClassInExpression_fromJava.test")
+                public void testInnerClassInExpression_fromJava() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/innerClassInExpression_fromJava.test");
+                }
 
-            @TestMetadata("innerClassInTypeReference_fromJava.test")
-            public void testInnerClassInTypeReference_fromJava() throws Exception {
-                runTest("testData/quickfix/autoImports/innerClass/innerClassInTypeReference_fromJava.test");
+                @TestMetadata("innerClassInTypeReference.test")
+                public void testInnerClassInTypeReference() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/innerClassInTypeReference.test");
+                }
+
+                @TestMetadata("innerClassInTypeReference_fromJava.test")
+                public void testInnerClassInTypeReference_fromJava() throws Exception {
+                    runTest("testData/quickfix/autoImports/innerClass/innerClassInTypeReference_fromJava.test");
+                }
             }
         }
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/invisible")
-        public static class Invisible extends AbstractQuickFixMultiFileTest {
+        public static class Invisible extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -376,7 +479,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/invoke")
-        public static class Invoke extends AbstractQuickFixMultiFileTest {
+        public static class Invoke extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -465,7 +568,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/kt21515")
-        public static class Kt21515 extends AbstractQuickFixMultiFileTest {
+        public static class Kt21515 extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -484,10 +587,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports/mismatchingArgs")
-        public abstract static class MismatchingArgs extends AbstractQuickFixMultiFileTest {
+        public abstract static class MismatchingArgs extends AbstractK1QuickFixMultiFileTest {
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/autoImports/mismatchingArgs/inapplicable")
-            public static class Inapplicable extends AbstractQuickFixMultiFileTest {
+            public static class Inapplicable extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -531,7 +634,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/autoImports/mismatchingArgs")
-            public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+            public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -641,7 +744,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/autoImports")
-        public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+        public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -1322,6 +1425,11 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
                 runTest("testData/quickfix/autoImports/noneApplicableFromInstanceButExtension.before.Main.kt");
             }
 
+            @TestMetadata("notAnAnnotationClass.before.Main.kt")
+            public void testNotAnAnnotationClass() throws Exception {
+                runTest("testData/quickfix/autoImports/notAnAnnotationClass.before.Main.kt");
+            }
+
             @TestMetadata("notExcludedClass.before.Main.kt")
             public void testNotExcludedClass() throws Exception {
                 runTest("testData/quickfix/autoImports/notExcludedClass.before.Main.kt");
@@ -1456,10 +1564,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/changeSignature")
-    public abstract static class ChangeSignature extends AbstractQuickFixMultiFileTest {
+    public abstract static class ChangeSignature extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/changeSignature/jk")
-        public static class Jk extends AbstractQuickFixMultiFileTest {
+        public static class Jk extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -1578,7 +1686,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/changeSignature/kj")
-        public static class Kj extends AbstractQuickFixMultiFileTest {
+        public static class Kj extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -1602,7 +1710,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/changeSignature")
-        public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+        public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -1652,7 +1760,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/convertJavaInterfaceToClass")
-    public static class ConvertJavaInterfaceToClass extends AbstractQuickFixMultiFileTest {
+    public static class ConvertJavaInterfaceToClass extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -1671,13 +1779,13 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/createFromUsage")
-    public abstract static class CreateFromUsage extends AbstractQuickFixMultiFileTest {
+    public abstract static class CreateFromUsage extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/createFromUsage/createClass")
-        public abstract static class CreateClass extends AbstractQuickFixMultiFileTest {
+        public abstract static class CreateClass extends AbstractK1QuickFixMultiFileTest {
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createClass/annotationEntry")
-            public static class AnnotationEntry extends AbstractQuickFixMultiFileTest {
+            public static class AnnotationEntry extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -1706,10 +1814,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createClass/callExpression")
-            public abstract static class CallExpression extends AbstractQuickFixMultiFileTest {
+            public abstract static class CallExpression extends AbstractK1QuickFixMultiFileTest {
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createClass/callExpression/typeArguments")
-                public static class TypeArguments extends AbstractQuickFixMultiFileTest {
+                public static class TypeArguments extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -1748,7 +1856,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createClass/callExpression")
-                public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+                public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -1818,7 +1926,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createClass/delegationSpecifier")
-            public static class DelegationSpecifier extends AbstractQuickFixMultiFileTest {
+            public static class DelegationSpecifier extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -1852,7 +1960,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createClass/importDirective")
-            public static class ImportDirective extends AbstractQuickFixMultiFileTest {
+            public static class ImportDirective extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -1901,7 +2009,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createClass/referenceExpression")
-            public static class ReferenceExpression extends AbstractQuickFixMultiFileTest {
+            public static class ReferenceExpression extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -1960,7 +2068,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createClass/typeReference")
-            public static class TypeReference extends AbstractQuickFixMultiFileTest {
+            public static class TypeReference extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2005,13 +2113,13 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/createFromUsage/createFunction")
-        public abstract static class CreateFunction extends AbstractQuickFixMultiFileTest {
+        public abstract static class CreateFunction extends AbstractK1QuickFixMultiFileTest {
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createFunction/call")
-            public abstract static class Call extends AbstractQuickFixMultiFileTest {
+            public abstract static class Call extends AbstractK1QuickFixMultiFileTest {
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createFunction/call/extension")
-                public static class Extension extends AbstractQuickFixMultiFileTest {
+                public static class Extension extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2050,7 +2158,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createFunction/call/member")
-                public static class Member extends AbstractQuickFixMultiFileTest {
+                public static class Member extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2099,7 +2207,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createFunction/call/simple")
-                public static class Simple extends AbstractQuickFixMultiFileTest {
+                public static class Simple extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2118,7 +2226,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createFunction/call/typeArguments")
-                public static class TypeArguments extends AbstractQuickFixMultiFileTest {
+                public static class TypeArguments extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2148,7 +2256,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createFunction/fromJava")
-            public static class FromJava extends AbstractQuickFixMultiFileTest {
+            public static class FromJava extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2187,7 +2295,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createFunction/fromKotlinToJava")
-            public static class FromKotlinToJava extends AbstractQuickFixMultiFileTest {
+            public static class FromKotlinToJava extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2212,7 +2320,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/createFromUsage/createSecondaryConstructor")
-        public static class CreateSecondaryConstructor extends AbstractQuickFixMultiFileTest {
+        public static class CreateSecondaryConstructor extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2246,10 +2354,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/createFromUsage/createVariable")
-        public abstract static class CreateVariable extends AbstractQuickFixMultiFileTest {
+        public abstract static class CreateVariable extends AbstractK1QuickFixMultiFileTest {
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createVariable/parameter")
-            public static class Parameter extends AbstractQuickFixMultiFileTest {
+            public static class Parameter extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2278,7 +2386,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createVariable/primaryParameter")
-            public static class PrimaryParameter extends AbstractQuickFixMultiFileTest {
+            public static class PrimaryParameter extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2302,10 +2410,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/createFromUsage/createVariable/property")
-            public abstract static class Property extends AbstractQuickFixMultiFileTest {
+            public abstract static class Property extends AbstractK1QuickFixMultiFileTest {
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createVariable/property/extension")
-                public static class Extension extends AbstractQuickFixMultiFileTest {
+                public static class Extension extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2339,7 +2447,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createVariable/property/fieldFromJava")
-                public static class FieldFromJava extends AbstractQuickFixMultiFileTest {
+                public static class FieldFromJava extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2378,7 +2486,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                 @RunWith(JUnit3RunnerWithInners.class)
                 @TestMetadata("testData/quickfix/createFromUsage/createVariable/property")
-                public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+                public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
                     @java.lang.Override
                     @org.jetbrains.annotations.NotNull
                     public final KotlinPluginMode getPluginMode() {
@@ -2387,6 +2495,11 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
                     private void runTest(String testDataFilePath) throws Exception {
                         KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
+                    }
+
+                    @TestMetadata("propertyWithUnresolvedTypeOnJava.before.Main.kt")
+                    public void testPropertyWithUnresolvedTypeOnJava() throws Exception {
+                        runTest("testData/quickfix/createFromUsage/createVariable/property/propertyWithUnresolvedTypeOnJava.before.Main.kt");
                     }
 
                     @TestMetadata("staticValOnJavaClass.before.Main.kt")
@@ -2435,13 +2548,13 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/deprecatedSymbolUsage")
-    public abstract static class DeprecatedSymbolUsage extends AbstractQuickFixMultiFileTest {
+    public abstract static class DeprecatedSymbolUsage extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/deprecatedSymbolUsage/classUsages")
-        public abstract static class ClassUsages extends AbstractQuickFixMultiFileTest {
+        public abstract static class ClassUsages extends AbstractK1QuickFixMultiFileTest {
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/deprecatedSymbolUsage/classUsages")
-            public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+            public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2460,7 +2573,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/deprecatedSymbolUsage/classUsages/wholeProject")
-            public static class WholeProject extends AbstractQuickFixMultiFileTest {
+            public static class WholeProject extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2495,7 +2608,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/deprecatedSymbolUsage/imports")
-        public static class Imports extends AbstractQuickFixMultiFileTest {
+        public static class Imports extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2541,6 +2654,11 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
                 runTest("testData/quickfix/deprecatedSymbolUsage/imports/addImports.before.Main.kt");
             }
 
+            @TestMetadata("addImportsForCompanionReplacement.before.Main.kt")
+            public void testAddImportsForCompanionReplacement() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/imports/addImportsForCompanionReplacement.before.Main.kt");
+            }
+
             @TestMetadata("addImportsSimple.before.Main.kt")
             public void testAddImportsSimple() throws Exception {
                 runTest("testData/quickfix/deprecatedSymbolUsage/imports/addImportsSimple.before.Main.kt");
@@ -2556,18 +2674,43 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
                 runTest("testData/quickfix/deprecatedSymbolUsage/imports/changeImports.before.Main.kt");
             }
 
+            @TestMetadata("conflictingImports.before.Main.kt")
+            public void testConflictingImports() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/imports/conflictingImports.before.Main.kt");
+            }
+
+            @TestMetadata("conflictingImportsClass.before.Main.kt")
+            public void testConflictingImportsClass() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/imports/conflictingImportsClass.before.Main.kt");
+            }
+
+            @TestMetadata("conflictingImportsObject.before.Main.kt")
+            public void testConflictingImportsObject() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/imports/conflictingImportsObject.before.Main.kt");
+            }
+
             @TestMetadata("rootPackage.before.Main.kt")
             public void testRootPackage() throws Exception {
                 runTest("testData/quickfix/deprecatedSymbolUsage/imports/rootPackage.before.Main.kt");
+            }
+
+            @TestMetadata("sameShortNameAnnotation.before.Main.kt")
+            public void testSameShortNameAnnotation() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/imports/sameShortNameAnnotation.before.Main.kt");
+            }
+
+            @TestMetadata("sameShortNameTypeAlias.before.Main.kt")
+            public void testSameShortNameTypeAlias() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/imports/sameShortNameTypeAlias.before.Main.kt");
             }
         }
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/deprecatedSymbolUsage/typeAliases")
-        public abstract static class TypeAliases extends AbstractQuickFixMultiFileTest {
+        public abstract static class TypeAliases extends AbstractK1QuickFixMultiFileTest {
             @RunWith(JUnit3RunnerWithInners.class)
             @TestMetadata("testData/quickfix/deprecatedSymbolUsage/typeAliases/wholeProject")
-            public static class WholeProject extends AbstractQuickFixMultiFileTest {
+            public static class WholeProject extends AbstractK1QuickFixMultiFileTest {
                 @java.lang.Override
                 @org.jetbrains.annotations.NotNull
                 public final KotlinPluginMode getPluginMode() {
@@ -2587,7 +2730,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/deprecatedSymbolUsage/typeArguments")
-        public static class TypeArguments extends AbstractQuickFixMultiFileTest {
+        public static class TypeArguments extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2606,7 +2749,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/deprecatedSymbolUsage")
-        public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+        public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2622,6 +2765,11 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
                 runTest("testData/quickfix/deprecatedSymbolUsage/javaDeprecated.before.Main.kt");
             }
 
+            @TestMetadata("javaDeprecatedNamedArg.before.Main.kt")
+            public void testJavaDeprecatedNamedArg() throws Exception {
+                runTest("testData/quickfix/deprecatedSymbolUsage/javaDeprecatedNamedArg.before.Main.kt");
+            }
+
             @TestMetadata("toMethodFromCompanionObject.before.Main.kt")
             public void testToMethodFromCompanionObject() throws Exception {
                 runTest("testData/quickfix/deprecatedSymbolUsage/toMethodFromCompanionObject.before.Main.kt");
@@ -2630,7 +2778,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/deprecatedSymbolUsage/wholeProject")
-        public static class WholeProject extends AbstractQuickFixMultiFileTest {
+        public static class WholeProject extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2655,7 +2803,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/increaseVisibility")
-    public static class IncreaseVisibility extends AbstractQuickFixMultiFileTest {
+    public static class IncreaseVisibility extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -2694,7 +2842,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/makePrivateAndOverrideMember")
-    public static class MakePrivateAndOverrideMember extends AbstractQuickFixMultiFileTest {
+    public static class MakePrivateAndOverrideMember extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -2713,7 +2861,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/makeUpperBoundNonNullable")
-    public static class MakeUpperBoundNonNullable extends AbstractQuickFixMultiFileTest {
+    public static class MakeUpperBoundNonNullable extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -2747,7 +2895,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/memberVisibilityCanBePrivate")
-    public static class MemberVisibilityCanBePrivate extends AbstractQuickFixMultiFileTest {
+    public static class MemberVisibilityCanBePrivate extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -2766,10 +2914,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/migration")
-    public abstract static class Migration extends AbstractQuickFixMultiFileTest {
+    public abstract static class Migration extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/migration/conflictingExtension")
-        public static class ConflictingExtension extends AbstractQuickFixMultiFileTest {
+        public static class ConflictingExtension extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2793,7 +2941,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/migration/javaAnnotationPositionedArguments")
-        public static class JavaAnnotationPositionedArguments extends AbstractQuickFixMultiFileTest {
+        public static class JavaAnnotationPositionedArguments extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2823,10 +2971,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/modifiers")
-    public abstract static class Modifiers extends AbstractQuickFixMultiFileTest {
+    public abstract static class Modifiers extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/modifiers/addOpenToClassDeclaration")
-        public static class AddOpenToClassDeclaration extends AbstractQuickFixMultiFileTest {
+        public static class AddOpenToClassDeclaration extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2855,7 +3003,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/modifiers")
-        public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+        public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2870,12 +3018,17 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
             public void testConstVal() throws Exception {
                 runTest("testData/quickfix/modifiers/constVal.before.Main.kt");
             }
+
+            @TestMetadata("constValQualified.before.Main.kt")
+            public void testConstValQualified() throws Exception {
+                runTest("testData/quickfix/modifiers/constValQualified.before.Main.kt");
+            }
         }
     }
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/moveToSealedParent")
-    public static class MoveToSealedParent extends AbstractQuickFixMultiFileTest {
+    public static class MoveToSealedParent extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -2899,10 +3052,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/optIn")
-    public abstract static class OptIn extends AbstractQuickFixMultiFileTest {
+    public abstract static class OptIn extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/optIn/multifile")
-        public static class Multifile extends AbstractQuickFixMultiFileTest {
+        public static class Multifile extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -2947,7 +3100,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/optimizeImports")
-    public static class OptimizeImports extends AbstractQuickFixMultiFileTest {
+    public static class OptimizeImports extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -2976,10 +3129,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/override")
-    public abstract static class Override extends AbstractQuickFixMultiFileTest {
+    public abstract static class Override extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/override/nothingToOverride")
-        public static class NothingToOverride extends AbstractQuickFixMultiFileTest {
+        public static class NothingToOverride extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -3008,7 +3161,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/override/overriddenJavaAccessor")
-        public static class OverriddenJavaAccessor extends AbstractQuickFixMultiFileTest {
+        public static class OverriddenJavaAccessor extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -3042,7 +3195,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/override/wrongNullabilityForJavaOverride")
-        public static class WrongNullabilityForJavaOverride extends AbstractQuickFixMultiFileTest {
+        public static class WrongNullabilityForJavaOverride extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -3072,7 +3225,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/removeUnused")
-    public static class RemoveUnused extends AbstractQuickFixMultiFileTest {
+    public static class RemoveUnused extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -3126,7 +3279,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/replaceWithSafeCall")
-    public static class ReplaceWithSafeCall extends AbstractQuickFixMultiFileTest {
+    public static class ReplaceWithSafeCall extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -3185,7 +3338,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/replaceWithSafeCallForScopeFunction")
-    public static class ReplaceWithSafeCallForScopeFunction extends AbstractQuickFixMultiFileTest {
+    public static class ReplaceWithSafeCallForScopeFunction extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -3209,7 +3362,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/specifySuperExplicitly")
-    public static class SpecifySuperExplicitly extends AbstractQuickFixMultiFileTest {
+    public static class SpecifySuperExplicitly extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -3233,7 +3386,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/surroundWithNullCheck")
-    public static class SurroundWithNullCheck extends AbstractQuickFixMultiFileTest {
+    public static class SurroundWithNullCheck extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -3262,7 +3415,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/typeImports")
-    public static class TypeImports extends AbstractQuickFixMultiFileTest {
+    public static class TypeImports extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {
@@ -3281,10 +3434,10 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/typeMismatch")
-    public abstract static class TypeMismatch extends AbstractQuickFixMultiFileTest {
+    public abstract static class TypeMismatch extends AbstractK1QuickFixMultiFileTest {
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/typeMismatch/definitelyNonNullableTypes")
-        public static class DefinitelyNonNullableTypes extends AbstractQuickFixMultiFileTest {
+        public static class DefinitelyNonNullableTypes extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -3303,7 +3456,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/typeMismatch/genericVarianceViolation")
-        public static class GenericVarianceViolation extends AbstractQuickFixMultiFileTest {
+        public static class GenericVarianceViolation extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -3322,7 +3475,7 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
         @RunWith(JUnit3RunnerWithInners.class)
         @TestMetadata("testData/quickfix/typeMismatch")
-        public static class Uncategorized extends AbstractQuickFixMultiFileTest {
+        public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
             @java.lang.Override
             @org.jetbrains.annotations.NotNull
             public final KotlinPluginMode getPluginMode() {
@@ -3347,31 +3500,54 @@ public abstract class QuickFixMultiFileTestGenerated extends AbstractQuickFixMul
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/when")
-    public static class When extends AbstractQuickFixMultiFileTest {
-        @java.lang.Override
-        @org.jetbrains.annotations.NotNull
-        public final KotlinPluginMode getPluginMode() {
-            return KotlinPluginMode.K1;
+    public abstract static class When extends AbstractK1QuickFixMultiFileTest {
+        @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("testData/quickfix/when/contextSensitiveResolution")
+        public static class ContextSensitiveResolution extends AbstractK1QuickFixMultiFileTest {
+            @java.lang.Override
+            @org.jetbrains.annotations.NotNull
+            public final KotlinPluginMode getPluginMode() {
+                return KotlinPluginMode.K1;
+            }
+
+            private void runTest(String testDataFilePath) throws Exception {
+                KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
+            }
+
+            @TestMetadata("addRemainingBranchesEnumAnotherPackage.before.Main.kt")
+            public void testAddRemainingBranchesEnumAnotherPackage() throws Exception {
+                runTest("testData/quickfix/when/contextSensitiveResolution/addRemainingBranchesEnumAnotherPackage.before.Main.kt");
+            }
         }
 
-        private void runTest(String testDataFilePath) throws Exception {
-            KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
-        }
+        @RunWith(JUnit3RunnerWithInners.class)
+        @TestMetadata("testData/quickfix/when")
+        public static class Uncategorized extends AbstractK1QuickFixMultiFileTest {
+            @java.lang.Override
+            @org.jetbrains.annotations.NotNull
+            public final KotlinPluginMode getPluginMode() {
+                return KotlinPluginMode.K1;
+            }
 
-        @TestMetadata("addRemainingBranchesAnotherPackage.before.Main.kt")
-        public void testAddRemainingBranchesAnotherPackage() throws Exception {
-            runTest("testData/quickfix/when/addRemainingBranchesAnotherPackage.before.Main.kt");
-        }
+            private void runTest(String testDataFilePath) throws Exception {
+                KotlinTestUtils.runTest(this::doTestWithExtraFile, this, testDataFilePath);
+            }
 
-        @TestMetadata("addRemainingBranchesAnotherPackageAll.before.Main.kt")
-        public void testAddRemainingBranchesAnotherPackageAll() throws Exception {
-            runTest("testData/quickfix/when/addRemainingBranchesAnotherPackageAll.before.Main.kt");
+            @TestMetadata("addRemainingBranchesAnotherPackage.before.Main.kt")
+            public void testAddRemainingBranchesAnotherPackage() throws Exception {
+                runTest("testData/quickfix/when/addRemainingBranchesAnotherPackage.before.Main.kt");
+            }
+
+            @TestMetadata("addRemainingBranchesAnotherPackageAll.before.Main.kt")
+            public void testAddRemainingBranchesAnotherPackageAll() throws Exception {
+                runTest("testData/quickfix/when/addRemainingBranchesAnotherPackageAll.before.Main.kt");
+            }
         }
     }
 
     @RunWith(JUnit3RunnerWithInners.class)
     @TestMetadata("testData/quickfix/wrapWithSafeLetCall")
-    public static class WrapWithSafeLetCall extends AbstractQuickFixMultiFileTest {
+    public static class WrapWithSafeLetCall extends AbstractK1QuickFixMultiFileTest {
         @java.lang.Override
         @org.jetbrains.annotations.NotNull
         public final KotlinPluginMode getPluginMode() {

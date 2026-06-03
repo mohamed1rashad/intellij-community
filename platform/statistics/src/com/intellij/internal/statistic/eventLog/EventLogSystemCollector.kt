@@ -8,6 +8,7 @@ import com.intellij.internal.statistic.eventLog.connection.metadata.EventLogMeta
 import com.intellij.internal.statistic.eventLog.connection.metadata.EventLogMetadataUpdateError
 import com.intellij.internal.statistic.eventLog.connection.metadata.EventLogMetadataUpdateStage
 import com.intellij.internal.statistic.eventLog.events.EventFields
+import com.intellij.internal.statistic.eventLog.events.EventId2
 import com.intellij.internal.statistic.eventLog.events.EventId3
 import com.intellij.internal.statistic.eventLog.events.EventPair
 import com.intellij.internal.statistic.eventLog.uploader.EventLogUploadException.EventLogUploadErrorType
@@ -15,7 +16,7 @@ import com.intellij.internal.statistic.service.fus.collectors.CounterUsagesColle
 import com.intellij.internal.statistic.uploader.EventLogExternalSendConfig
 import com.intellij.openapi.util.text.StringUtil
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.Locale
 
 /**
  * The event log group records internal events of metadata event-log for each recorder.
@@ -28,81 +29,77 @@ import java.util.*
  */
 @Suppress("StatisticsCollectorNotRegistered")
 @ApiStatus.Internal
-internal class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLoggerProvider) : CounterUsagesCollector() {
+open class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLoggerProvider) : CounterUsagesCollector() {
   private val id = "${eventLoggerProvider.recorderId.lowercase(Locale.ENGLISH)}.event.log"
-  private val GROUP = EventLogGroup(id,
-                                    // Increase the group's versions locally
-                                    // and not increase the versions in all StatisticsEventLoggerProvider
-                                    // in case of any changes in the groups
-                                    eventLoggerProvider.version + 2,
-                                    eventLoggerProvider.recorderId,
-                                    "Events related to the ${eventLoggerProvider.recorderId} statistics, such as logs sent, metadata updated, etc.")
+  private val GROUP = EventLogGroup(
+    id,
+    // Increase the group's versions locally
+    // and not increase the versions in all StatisticsEventLoggerProvider
+    // in case of any changes in the groups
+    eventLoggerProvider.version + 4,
+    eventLoggerProvider.recorderId
+  )
   override fun getGroup(): EventLogGroup = GROUP
 
-  private val metadataLoadedEvent = GROUP.registerEvent("metadata.loaded",EventFields.Version, METADATA_LOADED_DESCRIPTION)
-  private val metadataUpdatedEvent = GROUP.registerEvent("metadata.updated", EventFields.Version, METADATA_UPDATED_DESCRIPTION)
-  private val metadataLoadFailedEvent = GROUP.registerEvent("metadata.load.failed",
-                                                            stageMetadataLoadFailedField,
-                                                            errorMetadataLoadFailedField,
-                                                            codeMetadataLoadFailedField,
-                                                            METADATA_LOAD_FAILED_DESCRIPTION)
-  private val metadataUpdateFailedEvent = GROUP.registerEvent("metadata.update.failed",
-                                                              stageMetadataUpdateFailedField,
-                                                              errorMetadataUpdateFailedField,
-                                                              codeMetadataUpdateFailedField,
-                                                              METADATA_UPDATE_FAILED_DESCRIPTION)
-  private val logsSendEvent = GROUP.registerVarargEvent("logs.send",
-                                                        LOGS_SEND_DESCRIPTION,
-                                                        totalLogsSendField,
-                                                        sendLogsSendField,
-                                                        failedLogsSendField,
-                                                        externalLogsSendField,
-                                                        pathsLogsField,
-                                                        succeedLogsSendField,
-                                                        errorsLogsSendField)
-  private val externalSendStartedEvent = GROUP.registerEvent("external.send.started",
-                                                             sendTSExternalSendStarted,
-                                                             EXTERNAL_SEND_STARTED_DESCRIPTION)
-  private val externalSendFinishedEvent = GROUP.registerEvent("external.send.finished",
-                                                              sendTSExternalSendFinishedField,
-                                                              succeedExternalSendFinishedField,
-                                                              errorExternalSendFinishedField,
-                                                              EXTERNAL_SEND_FINISHED_DESCRIPTION)
-  private val externalSendCommandCreationStartedEvent = GROUP.registerEvent("external.send.command.creation.started",
-                                                                            EXTERNAL_SEND_COMMAND_CREATION_STARTED_DESCRIPTION)
-  private val externalSendCommandCreationFinishedEvent = GROUP.registerVarargEvent("external.send.command.creation.finished",
-                                                                                   EXTERNAL_SEND_COMMAND_CREATION_FINISHED_DESCRIPTION,
-                                                                                   succeedExternalSendCommandCreationFinishedField,
-                                                                                   errorExternalSendCommandCreationFinishedField)
-  private val loadingConfigFailedEvent = GROUP.registerVarargEvent("loading.config.failed",
-                                                                   LOADING_CONFIG_FAILED_DESCRIPTION,
-                                                                   errorLoadingConfigFailedField,
-                                                                   errorTSLoadingConfigFailedField)
-
-  private val sentFilesCountCalculated: EventId3<Int, Int, Int> = GROUP.registerEvent("sent.logs.files.calculated",
-                                                                                      totalFilesCount,
-                                                                                      maxSentFilesCount,
-                                                                                      sentFilesCount,
-                                                                                      "Calculate the count of logs files to send"
+  private val metadataLoadedEvent = GROUP.registerEvent("metadata.loaded", EventFields.Version)
+  private val metadataUpdatedEvent = GROUP.registerEvent("metadata.updated", EventFields.Version)
+  private val metadataLoadFailedEvent = GROUP.registerEvent(
+    "metadata.load.failed",
+    stageMetadataLoadFailedField, errorMetadataLoadFailedField, codeMetadataLoadFailedField
+  )
+  private val metadataUpdateFailedEvent = GROUP.registerEvent(
+    "metadata.update.failed",
+    stageMetadataUpdateFailedField, errorMetadataUpdateFailedField, codeMetadataUpdateFailedField
+  )
+  private val logsSendEvent = GROUP.registerVarargEvent(
+    "logs.send",
+    totalLogsSendField, sendLogsSendField, failedLogsSendField, externalLogsSendField, pathsLogsField,
+    succeedLogsSendField, errorsLogsSendField
+  )
+  private val externalSendStartedEvent = GROUP.registerEvent("external.send.started", sendTSExternalSendStarted)
+  private val externalSendFinishedEvent = GROUP.registerEvent(
+    "external.send.finished",
+    sendTSExternalSendFinishedField, succeedExternalSendFinishedField, errorExternalSendFinishedField
+  )
+  private val externalSendCommandCreationStartedEvent = GROUP.registerEvent("external.send.command.creation.started")
+  private val externalSendCommandCreationFinishedEvent = GROUP.registerVarargEvent(
+    "external.send.command.creation.finished",
+    succeedExternalSendCommandCreationFinishedField, errorExternalSendCommandCreationFinishedField
+  )
+  private val loadingConfigFailedEvent = GROUP.registerVarargEvent(
+    "loading.config.failed",
+    errorLoadingConfigFailedField, errorTSLoadingConfigFailedField
+  )
+  private val sentFilesCountCalculated = GROUP.registerEvent(
+    "sent.logs.files.calculated",
+    totalFilesCount, maxSentFilesCount, sentFilesCount
+  )
+  private val deletedFilesCalculated: EventId3<Int, Int, Int> = GROUP.registerEvent("deleted.logs.files.calculated",
+                                                                                    totalFilesCount, deletedFilesCount, failedDeletingFilesCount
   )
 
-  private val dictionariesLoadedEvent = GROUP.registerEvent("dictionaries.loaded", DICTIONARIES_LOADED_DESCRIPTION)
-  private val dictionariesLoadFailedEvent = GROUP.registerEvent("dictionaries.load.failed",
-                                                            stageMetadataLoadFailedField,
-                                                            errorMetadataLoadFailedField,
-                                                            codeMetadataLoadFailedField,
-                                                            DICTIONARIES_LOAD_FAILED_DESCRIPTION)
-  private val dictionaryUpdatedEvent = GROUP.registerEvent(
-    "dictionary.updated",
-    EventFields.Long("dictionary_last_modified"),
-    DICTIONARY_UPDATED_DESCRIPTION
+  private val fileMetricsCalculated: EventId2<Long, Int> = GROUP.registerEvent("logs.file.metrics.calculated",
+                                                                               fileSizeBytes, eventsCount
   )
 
-  private val dictionaryUpdateFailedEvent = GROUP.registerEvent("dictionary.update.failed",
-                                                              stageMetadataUpdateFailedField,
-                                                              errorMetadataUpdateFailedField,
-                                                              codeMetadataUpdateFailedField,
-                                                              DICTIONARY_UPDATE_FAILED_DESCRIPTION)
+  private val dictionaryListLoadFailed = GROUP.registerEvent(
+    "dictionary.list.load.failed",
+    stageMetadataLoadFailedField, errorMetadataLoadFailedField, codeMetadataLoadFailedField
+  )
+  private val dictionaryListUpdateFailed = GROUP.registerEvent(
+    "dictionary.list.update.failed",
+    stageMetadataUpdateFailedField, errorMetadataUpdateFailedField, codeMetadataUpdateFailedField
+  )
+  private val dictionaryLoadedEvent = GROUP.registerEvent("dictionary.loaded", EventFields.Long("dictionary_last_modified"))
+  private val dictionaryLoadFailedEvent = GROUP.registerEvent(
+    "dictionary.load.failed",
+    stageMetadataLoadFailedField, errorMetadataLoadFailedField, codeMetadataLoadFailedField
+  )
+  private val dictionaryUpdatedEvent = GROUP.registerEvent("dictionary.updated", EventFields.Long("dictionary_last_modified"))
+  private val dictionaryUpdateFailedEvent = GROUP.registerEvent(
+    "dictionary.update.failed",
+    stageMetadataUpdateFailedField, errorMetadataUpdateFailedField, codeMetadataUpdateFailedField
+  )
 
   fun logMetadataLoaded(version: String?) = metadataLoadedEvent.log(version)
   fun logMetadataUpdated(version: String?) = metadataUpdatedEvent.log(version)
@@ -114,21 +111,17 @@ internal class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLogge
     metadataUpdateFailedEvent.log(error.updateStage, error.errorType, error.errorCode)
   }
 
-  fun logFilesSend(total: Int,
-                   succeed: Int,
-                   failed: Int,
-                   external: Boolean,
-                   successfullySentFiles: List<String>,
-                   errors: List<Int>) =
-    logsSendEvent.log(totalLogsSendField.with(total),
-                      sendLogsSendField.with(succeed + failed),
-                      failedLogsSendField.with(failed),
-                      externalLogsSendField.with(external),
-                      pathsLogsField.with(successfullySentFiles),
-                      succeedLogsSendField.with(succeed),
-                      errorsLogsSendField.with(errors)
+  fun logFilesSend(total: Int, succeed: Int, failed: Int, external: Boolean, successfullySentFiles: List<String>, errors: List<Int>) {
+    logsSendEvent.log(
+      totalLogsSendField.with(total),
+      sendLogsSendField.with(succeed + failed),
+      failedLogsSendField.with(failed),
+      externalLogsSendField.with(external),
+      pathsLogsField.with(successfullySentFiles),
+      succeedLogsSendField.with(succeed),
+      errorsLogsSendField.with(errors)
     )
-
+  }
 
   fun logStartingExternalSend(time: Long) {
     externalSendStartedEvent.log(time)
@@ -163,9 +156,23 @@ internal class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLogge
     sentFilesCountCalculated.log(totalFilesCount, maxSentFilesCount,sentFilesCount)
   }
 
-  fun logDictionariesLoaded() = dictionariesLoadedEvent.log()
-  fun logDictionariesLoadFailed(error: EventLogMetadataUpdateError) {
-    dictionariesLoadFailedEvent.log(error.updateStage, error.errorType, error.errorCode)
+  fun logDeletedFilesCalculated(totalFilesCount: Int, deletedFilesCount: Int, failedDeletingFilesCount: Int) {
+    deletedFilesCalculated.log(totalFilesCount, deletedFilesCount, failedDeletingFilesCount)
+  }
+
+  fun logFileMetricsCalculated(fileSizeBytes: Long, eventsCount: Int,) {
+    fileMetricsCalculated.log(fileSizeBytes, eventsCount)
+  }
+
+  fun logDictionaryListLoadFailed(error: EventLogMetadataUpdateError) {
+    dictionaryListLoadFailed.log(error.updateStage, error.errorType, error.errorCode)
+  }
+  fun logDictionaryListUpdateFailed(error: EventLogMetadataUpdateError) {
+    dictionaryListUpdateFailed.log(error.updateStage, error.errorType, error.errorCode)
+  }
+  fun logDictionaryLoaded(lastModified: Long) = dictionaryLoadedEvent.log(lastModified)
+  fun logDictionaryLoadFailed(error: EventLogMetadataUpdateError) {
+    dictionaryLoadFailedEvent.log(error.updateStage, error.errorType, error.errorCode)
   }
   fun logDictionaryUpdated(lastModified: Long) = dictionaryUpdatedEvent.log(lastModified)
   fun logDictionaryUpdateFailed(error: EventLogMetadataUpdateError) {
@@ -173,22 +180,16 @@ internal class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLogge
   }
 
   companion object {
-    private const val METADATA_LOADED_DESCRIPTION = "The metric is recorded in case the metadata was loaded"
-    private const val METADATA_UPDATED_DESCRIPTION = "The metric is recorded in case the metadata was updated"
     private const val STAGE_METADATA_LOAD_FAILED_DESCRIPTION = "Indicates if metadata load was failed during loading stage (loading) or loaded " +
                                                                "metadata was invalid (parsing)."
     private const val ERROR_METADATA_LOAD_FAILED_DESCRIPTION = "The error name in case the metadata load was failed. The error may occur during " +
                                                                "parsing metadata from local cache."
-    private const val METADATA_LOAD_FAILED_DESCRIPTION = "The event is recorded when IDE can't load metadata from a local cache. Local metadata " +
-                                                         "is loaded on IDE start or on an explicit test action."
     private const val STAGE_METADATA_UPDATE_FAILED_DESCRIPTION = "Indicates if metadata update was failed during loading stage (loading) or " +
                                                                  "loaded metadata was invalid (parsing)."
     private const val ERROR_METADATA_UPDATE_FAILED_DESCRIPTION = "The error name in case the metadata update was failed, an error may occur on " +
                                                                  "loading or parsing stages."
     private const val CODE_METADATA_UPDATE_FAILED_DESCRIPTION = "In case loading request failed - the metric is recorded response code if it " +
                                                                 "was different from 200."
-    private const val METADATA_UPDATE_FAILED_DESCRIPTION = "The event is recorded when IDE can't update metadata. Update metadata can be " +
-                                                           "triggered by a scheduler or via an explicit test action."
     private const val TOTAL_LOGS_SEND_DESCRIPTION = "Total amount of existing for sending event-log files"
     private const val SEND_LOGS_SEND_DESCRIPTION = "Amount of event log files attempted to send"
     private const val FAILED_LOGS_SEND_DESCRIPTION = "Amount of event-log files which were failed to send"
@@ -197,35 +198,15 @@ internal class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLogge
     private const val ERRORS_LOGS_SEND_DESCRIPTION = "The list of integers which identify error codes. If error is less than 100, the problem is " +
                                                      "in data structure (e.g. invalid recorder code), if error is between 100 and 600 it's error " +
                                                      "code from an HTTP request."
-    private const val LOGS_SEND_DESCRIPTION = "The metric is recorded the sending or attempt to send the statistics event logs and the " +
-                                              "corresponding attributes, e.g. number of total amount of files, number of sent files or amount of " +
-                                              "files which were failed to send."
     private const val SEND_TS_EXTERNAL_SEND_STARTED_DESCRIPTION = "Actual time when sending was started"
-    private const val EXTERNAL_SEND_STARTED_DESCRIPTION = "Indicates that external process of sending data was started. Note: the time of the " +
-                                                          "event doesn't correspond to a real event time because it's recorded when IDE is " +
-                                                          "opened after external send."
     private const val SEND_TS_EXTERNAL_SEND_FINISHED_DESCRIPTION = "Actual time when sending was finished"
     private const val SUCCEED_EXTERNAL_SEND_FINISHED_DESCRIPTION = "Shows if external process sent data successfully or not"
     private const val ERROR_EXTERNAL_SEND_FINISHED_DESCRIPTION = "The error name in case the sending was failed, e.g. 'no arguments', 'not permitted server', 'no application config' etc."
-    private const val EXTERNAL_SEND_FINISHED_DESCRIPTION = "Indicates that external process sent data or failed with an error. Note: the time of " +
-                                                           "the event doesn't correspond to a real event time because it's recorded when IDE is " +
-                                                           "opened after external send."
-    private const val EXTERNAL_SEND_COMMAND_CREATION_STARTED_DESCRIPTION = "The event is recorded on IDE close when we start creating a command " +
-                                                                           "to start external upload process."
     private const val SUCCEED_EXTERNAL_SEND_COMMAND_CREATION_FINISHED_DESCRIPTION = "Shows if command to start external upload process was " +
                                                                                     "finished successfully or not"
     private const val ERROR_EXTERNAL_SEND_COMMAND_CREATION_FINISHED_DESCRIPTION = "The error name in case command to start external upload " +
                                                                                   "process was failed, e.g. 'no logs', 'no temp folder' etc."
-    private const val EXTERNAL_SEND_COMMAND_CREATION_FINISHED_DESCRIPTION = "The event is recorded when we created a command and ready to start " +
-                                                                            "it or when creation failed with an error."
     private const val ERROR_TS_LOADING_CONFIG_FAILED_DESCRIPTION = "Error time stamp is added if error happened in external process"
-    private const val LOADING_CONFIG_FAILED_DESCRIPTION = "Event is recorded if loading config (i.e. send entrypoint, metadata url, etc) failed."
-    private const val DICTIONARIES_LOAD_FAILED_DESCRIPTION = "The event is recorded when IDE can't load dictionary storage from a local cache. Local storage " +
-                                                         "is loaded on IDE start or on an explicit test action."
-    private const val DICTIONARIES_LOADED_DESCRIPTION = "The metric is recorded in case dictionary storage was loaded"
-    private const val DICTIONARY_UPDATED_DESCRIPTION = "The metric is recorded in case a dictionary was updated"
-    private const val DICTIONARY_UPDATE_FAILED_DESCRIPTION = "The event is recorded when IDE can't update a dictionary. Update metadata including dictionaries can be " +
-                                                           "triggered by a scheduler or via an explicit test action."
     private val stageMetadataLoadFailedField = EventFields.Enum<EventLogMetadataUpdateStage>("stage",
                                                                                              STAGE_METADATA_LOAD_FAILED_DESCRIPTION)
     private val errorMetadataLoadFailedField = EventFields.String("error",
@@ -256,8 +237,13 @@ internal class EventLogSystemCollector(eventLoggerProvider: StatisticsEventLogge
                                                                                                           ERROR_EXTERNAL_SEND_COMMAND_CREATION_FINISHED_DESCRIPTION)
     private val errorLoadingConfigFailedField = EventFields.StringValidatedByCustomRule("error", ClassNameRuleValidator::class.java)
     private val errorTSLoadingConfigFailedField = EventFields.Long("error_ts", ERROR_TS_LOADING_CONFIG_FAILED_DESCRIPTION)
-    private val totalFilesCount = EventFields.Int("total_files_count", "The total logs files count")
-    private val maxSentFilesCount = EventFields.Int("max_sent_files_count", "The max sent logs files count")
-    private val sentFilesCount = EventFields.Int("sent_files_count", "The sent logs files count")
+    private val totalFilesCount = EventFields.Int("total_files_count", "The total number of log files")
+    private val maxSentFilesCount = EventFields.Int("max_sent_files_count", "The max number of log files which are acceptable for sending")
+    private val sentFilesCount = EventFields.Int("sent_files_count", "The number of log files which are ready for sending")
+    private val deletedFilesCount = EventFields.Int("deleted_files_count", "The number of deleting log files")
+    private val failedDeletingFilesCount = EventFields.Int("failed_deleting_files_count", "The number of log files which were failed to delete")
+    private val fileSizeBytes = EventFields.Long("file_size_bytes", "File size in bytes")
+    private val eventsCount = EventFields.Int("events_count", "Number of events in the file")
+
   }
 }

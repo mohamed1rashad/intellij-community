@@ -4,7 +4,12 @@ package org.jetbrains.kotlin.idea.gradleTooling
 import org.jetbrains.kotlin.gradle.idea.proto.Extras
 import org.jetbrains.kotlin.gradle.idea.proto.toByteArray
 import org.jetbrains.kotlin.idea.gradleTooling.serialization.ideaKotlinSerializationContextOrNull
-import org.jetbrains.kotlin.tooling.core.*
+import org.jetbrains.kotlin.tooling.core.Extras
+import org.jetbrains.kotlin.tooling.core.MutableExtras
+import org.jetbrains.kotlin.tooling.core.extrasKeyOf
+import org.jetbrains.kotlin.tooling.core.mutableExtrasOf
+import org.jetbrains.kotlin.tooling.core.toMutableExtras
+import org.jetbrains.kotlin.tooling.core.withValue
 import java.io.Serializable
 
 /**
@@ -39,7 +44,12 @@ class IdeaKotlinExtras private constructor(private val extras: MutableExtras) : 
         private val binaryExtras: ByteArray?,
     ) : Serializable {
         private fun readResolve(): Any {
-            val context = ideaKotlinSerializationContextOrNull ?: return IdeaKotlinExtras(mutableExtrasOf())
+            val context = ideaKotlinSerializationContextOrNull
+            if (context == null) {
+                return if (binaryExtras != null) {
+                    IdeaKotlinExtras(mutableExtrasOf(Companion.binaryExtras withValue binaryExtras))
+                } else IdeaKotlinExtras(mutableExtrasOf())
+            }
             val extrasEntries = if (extras != null) context.Extras(extras)?.entries.orEmpty() else emptySet()
             val binaryExtrasEntries = if (binaryExtras != null) context.Extras(binaryExtras)?.entries.orEmpty() else emptySet()
             return IdeaKotlinExtras((extrasEntries + binaryExtrasEntries).toMutableExtras())

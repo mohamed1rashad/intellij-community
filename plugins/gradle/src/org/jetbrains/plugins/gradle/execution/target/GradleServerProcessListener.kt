@@ -15,8 +15,8 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import com.intellij.util.text.nullize
 import org.gradle.initialization.BuildEventConsumer
-import org.gradle.tooling.BuildCancelledException
 import org.gradle.tooling.ResultHandler
+import org.jetbrains.plugins.gradle.util.GradleBundle
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -48,11 +48,16 @@ internal class GradleServerProcessListener(
     if (event.text != null) {
       targetProgressIndicator.addText(event.text, outputType)
     }
+    if (event.exitCode != 0) {
+      targetProgressIndicator.addText(GradleBundle.message("gradle.target.execution.crash"), ProcessOutputType.STDERR)
+      // no need to wait for proper listener job termination
+      listenerJob?.cancel(true)
+    }
   }
 
   override fun onTextAvailable(event: ProcessEvent, outputType: Key<*>) {
     log.traceIfNotEmpty(event.text)
-    if (connectionAddressReceived.get()) {
+    if (connectionAddressReceived.get() && outputType !== ProcessOutputTypes.STDERR) {
       return
     }
     if (outputType === ProcessOutputTypes.STDERR) {

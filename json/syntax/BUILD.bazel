@@ -1,6 +1,6 @@
 ### auto-generated section `build intellij.json.syntax` start
 load("//build:compiler-options.bzl", "create_kotlinc_options")
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
+load("@rules_jvm//:jvm.bzl", "jvm_library", "jvm_provided_library")
 
 create_kotlinc_options(
   name = "custom_syntax",
@@ -8,27 +8,47 @@ create_kotlinc_options(
   x_no_param_assertions = True
 )
 
-resourcegroup(
-  name = "syntax_resources",
-  srcs = glob(["resources/**/*"]),
-  strip_prefix = "resources"
+jvm_provided_library(
+  name = "platform_multiplatformSupport_provided",
+  lib = "//platform/multiplatformSupport"
 )
 
 jvm_library(
   name = "syntax",
   module_name = "intellij.json.syntax",
   visibility = ["//visibility:public"],
-  srcs = glob(["gen/**/*.kt", "gen/**/*.java", "src/**/*.kt", "src/**/*.java", "src/**/*.form"], allow_empty = True),
-  resources = [":syntax_resources"],
+  srcs = glob(["gen/**/*.kt", "gen/**/*.java", "src/**/*.kt", "src/**/*.java", "src/**/*.form", "srcJvm/**/*.kt", "srcJvm/**/*.java", "srcJvm/**/*.form"], allow_empty = True),
+  resources = glob(["resources/**/*"]),
+  resource_strip_prefix = "resources",
   kotlinc_opts = ":custom_syntax",
   deps = [
     "@lib//:kotlin-stdlib",
     "//platform/syntax/syntax-api:syntax",
     "//platform/syntax/syntax-util:util",
-  ],
-  exports = [
-    "//platform/syntax/syntax-api:syntax",
-    "//platform/syntax/syntax-util:util",
+    "@lib//:jetbrains-annotations",
+    ":platform_multiplatformSupport_provided",
+  ]
+)
+
+jvm_library(
+  name = "syntax_test_lib",
+  testonly = True,
+  module_name = "intellij.json.syntax",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  kotlinc_opts = ":custom_syntax",
+  runtime_deps = [
+    ":syntax",
+    "//platform/syntax/syntax-api:syntax_test_lib",
+    "//platform/syntax/syntax-util:util_test_lib",
+    "//platform/multiplatformSupport",
+    "//platform/multiplatformSupport:multiplatformSupport_test_lib",
   ]
 )
 ### auto-generated section `build intellij.json.syntax` end
+
+### auto-generated section `iml intellij.json.syntax` start
+exports_files([
+  "intellij.json.syntax.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.json.syntax` end

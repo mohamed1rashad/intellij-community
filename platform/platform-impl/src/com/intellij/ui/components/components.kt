@@ -4,22 +4,36 @@ package com.intellij.ui.components
 
 import com.intellij.BundleBase
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.*
 import com.intellij.openapi.ui.BrowseFolderDescriptor.Companion.asBrowseFolderDescriptor
+import com.intellij.openapi.ui.ComponentWithBrowseButton
 import com.intellij.openapi.ui.ComponentWithBrowseButton.BrowseFolderActionListener
+import com.intellij.openapi.ui.DialogPanel
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.DialogWrapper.IdeModalityType
+import com.intellij.openapi.ui.TextComponentAccessor
+import com.intellij.openapi.ui.TextComponentAccessors
+import com.intellij.openapi.ui.TextFieldWithBrowseButton
+import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.openapi.ui.ex.MultiLineLabel
-import com.intellij.openapi.util.NlsContexts.*
+import com.intellij.openapi.util.NlsContexts.BorderTitle
 import com.intellij.openapi.util.NlsContexts.Checkbox
+import com.intellij.openapi.util.NlsContexts.DetailedDescription
+import com.intellij.openapi.util.NlsContexts.DialogMessage
+import com.intellij.openapi.util.NlsContexts.DialogTitle
 import com.intellij.openapi.util.NlsContexts.Label
+import com.intellij.openapi.util.NlsContexts.RadioButton
+import com.intellij.openapi.util.NlsContexts.Tooltip
 import com.intellij.openapi.vcs.changes.issueLinks.LinkMouseListenerBase
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.*
-import com.intellij.util.Consumer
+import com.intellij.ui.BrowserHyperlinkListener
+import com.intellij.ui.DocumentAdapter
+import com.intellij.ui.IdeBorderFactory
+import com.intellij.ui.SimpleColoredComponent
+import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.TextFieldWithHistoryWithBrowseButton
 import com.intellij.util.FontUtil
 import com.intellij.util.SmartList
 import com.intellij.util.io.URLUtil
@@ -28,8 +42,20 @@ import com.intellij.util.ui.SwingHelper
 import com.intellij.util.ui.SwingHelper.addHistoryOnExpansion
 import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
-import javax.swing.*
+import java.awt.BorderLayout
+import java.awt.Color
+import java.awt.Component
+import java.awt.Font
+import java.awt.LayoutManager2
+import javax.swing.Action
+import javax.swing.JCheckBox
+import javax.swing.JComponent
+import javax.swing.JEditorPane
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JPasswordField
+import javax.swing.JRadioButton
+import javax.swing.JTextField
 import javax.swing.event.DocumentEvent
 import javax.swing.event.HyperlinkListener
 import javax.swing.text.BadLocationException
@@ -47,9 +73,8 @@ fun Label(@Label text: String, style: UIUtil.ComponentStyle? = null, fontColor: 
  * That's unexpected behavior
  */
 @ApiStatus.ScheduledForRemoval
-@ApiStatus.Internal
 @Deprecated("Use correspondent constructors JLabel/JBLabel/MultiLineLabel, depends on situation")
-fun Label(
+private fun Label(
   @Label text: String,
   style: UIUtil.ComponentStyle? = null,
   fontColor: UIUtil.FontColor? = null,
@@ -83,15 +108,7 @@ fun Label(
 }
 
 @ApiStatus.ScheduledForRemoval
-@Deprecated("Use Kotlin UI DSL, method Row.link", level = DeprecationLevel.ERROR)
-fun Link(@Label text: String, style: UIUtil.ComponentStyle? = null, action: () -> Unit): JComponent {
-  val result = ActionLink(text) { action() }
-  style?.let { UIUtil.applyStyle(it, result) }
-  return result
-}
-
-@ApiStatus.ScheduledForRemoval
-@Deprecated("Use Kotlin UI DSL, methods like Row.text, Row.comment or Cell.comment")
+@Deprecated("Use Kotlin UI DSL, methods like Row.text, Row.comment or Cell.comment", level = DeprecationLevel.ERROR)
 @JvmOverloads
 fun noteComponent(@Label note: String, linkHandler: ((url: String) -> Unit)? = null): JComponent {
   val matcher = URLUtil.HREF_PATTERN.matcher(note)
@@ -149,19 +166,6 @@ fun CheckBox(@Checkbox text: String, selected: Boolean = false, toolTip: @Toolti
   val component = JCheckBox(BundleBase.replaceMnemonicAmpersand(text), selected)
   toolTip?.let { component.toolTipText = it }
   return component
-}
-
-@ApiStatus.ScheduledForRemoval
-@ApiStatus.Internal
-@Deprecated("Use Kotlin UI DSL, method Panel.group")
-@JvmOverloads
-fun Panel(@BorderTitle title: String? = null, layout: LayoutManager2? = BorderLayout()): JPanel {
-  val panel = JPanel(layout)
-  title?.let {
-    @Suppress("HardCodedStringLiteral")
-    setTitledBorder(title = it, panel = panel, hasSeparator = false)
-  }
-  return panel
 }
 
 fun DialogPanel(title: @BorderTitle String? = null, layout: LayoutManager2? = BorderLayout()): DialogPanel {

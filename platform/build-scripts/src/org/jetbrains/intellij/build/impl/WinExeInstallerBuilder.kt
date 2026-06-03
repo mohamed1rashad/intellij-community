@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.openapi.util.io.NioFiles
@@ -75,8 +75,7 @@ internal suspend fun buildNsisInstaller(
     generator.generateUninstallerFile(nsiConfDir.resolve("un_idea_win.nsh"))
 
     prepareConfigurationFiles(nsiConfDir, uninstallerFileName, customizer, context, arch)
-    for (it in customizer.customNsiConfigurationFiles) {
-      val file = Path.of(it)
+    for (file in customizer.customNsiConfigurationFiles) {
       val copy = nsiConfDir.resolve(file.fileName)
       Files.copy(file, copy, StandardCopyOption.REPLACE_EXISTING)
       copy.setLastModifiedTime(FileTime.from(context.options.buildDateInSeconds, TimeUnit.SECONDS))
@@ -89,7 +88,6 @@ internal suspend fun buildNsisInstaller(
     spanBuilder("run NSIS tool to build .exe installer for Windows").use {
       val timeout = 2.hours
       if (OsFamily.currentOs == OsFamily.WINDOWS) {
-        @Suppress("SpellCheckingInspection")
         runProcess(
           args = listOf(
             nsisBin.toString(),
@@ -101,7 +99,8 @@ internal suspend fun buildNsisInstaller(
             "${nsiConfDir}/idea.nsi",
           ),
           workingDir = box,
-          timeout
+          timeout = timeout,
+          attachStdOutToException = true,
         )
       }
       else {
@@ -117,8 +116,9 @@ internal suspend fun buildNsisInstaller(
             "${nsiConfDir}/idea.nsi",
           ),
           workingDir = box,
-          timeout,
+          timeout = timeout,
           additionalEnvVariables = mapOf("NSISDIR" to nsisDir.toString(), "LC_CTYPE" to "C.UTF-8"),
+          attachStdOutToException = true,
         )
       }
     }
@@ -139,7 +139,7 @@ internal suspend fun buildNsisInstaller(
 
   if (customizer.publishUninstaller) {
     val uninstallerFile = context.paths.artifactDir.resolve(uninstallerFileName)
-    check(Files.exists(uninstallerFile)) { "Windows uninstaller is missing." }
+    check(Files.exists(uninstallerFile)) { "Windows uninstaller is missing: $uninstallerFile" }
     context.notifyArtifactBuilt(uninstallerFile)
   }
 
@@ -157,7 +157,7 @@ private suspend fun prepareNsis(context: BuildContext, tempDir: Path): Pair<Path
     nsisDir
   }
   val ext = if (OsFamily.currentOs == OsFamily.WINDOWS) ".exe" else "-${OsFamily.currentOs.dirName}-${JvmArchitecture.currentJvmArch.dirName}"
-  @Suppress("SpellCheckingInspection") val nsisBin = nsisDir.resolve("Bin/makensis${ext}")
+  val nsisBin = nsisDir.resolve("Bin/makensis${ext}")
   require(nsisBin.isRegularFile()) { "'${nsisDir.fileName}' is missing" }
   NioFiles.setExecutable(nsisBin)
   return nsisDir to nsisBin
@@ -173,7 +173,7 @@ private suspend fun prepareConfigurationFiles(nsiConfDir: Path, uninstallerFileN
     else customizer.fileAssociations.joinToString(separator = ",") { if (it.startsWith(".")) it else ".${it}" }
   val appInfo = context.applicationInfo
   val uninstallFeedbackPage = if (appInfo.isEAP) null else customizer.getUninstallFeedbackPageUrl(appInfo)
-  val installDirAndShortcutName = customizer.getNameForInstallDirAndDesktopShortcut(appInfo, context.buildNumber)
+  val installDirAndShortcutName = customizer.getNameForInstallDirAndDesktopShortcut(context)
   val fileVersionNum = amendVersionNumber(context.buildNumber.replace(".SNAPSHOT", ".0"))
   val productVersionNum = amendVersionNumber(appInfo.majorVersion + '.' + appInfo.minorVersion)
   val versionString = if (appInfo.isEAP) context.buildNumber else "${appInfo.majorVersion}.${appInfo.minorVersion}"
@@ -188,7 +188,7 @@ private suspend fun prepareConfigurationFiles(nsiConfDir: Path, uninstallerFileN
       "'${signTool}' '%1'"
     }
     OsFamily.currentOs == OsFamily.WINDOWS -> {
-      "COPY /B /Y '%1' '${uninstallerCopy}'"
+      $$"COPY /B /Y $\\\"%1$\\\" $\\\"$${uninstallerCopy}$\\\""
     }
     else -> {
       "cp -f '%1' '${uninstallerCopy}'"
@@ -197,12 +197,11 @@ private suspend fun prepareConfigurationFiles(nsiConfDir: Path, uninstallerFileN
 
   Files.writeString(nsiConfDir.resolve("config.nsi"), $$"""
     !define INSTALLER_ARCH $${expectedArch}
-    !define IMAGES_LOCATION "$${Path.of(customizer.installerImagesPath!!)}"
+    !define IMAGES_LOCATION "$${customizer.installerImagesPath ?: context.productProperties.imagesDirectoryPath!!.resolve("win")}"
 
     !define MANUFACTURER "$${appInfo.shortCompanyName}"
     !define MUI_PRODUCT "$${customizer.getFullNameIncludingEdition(appInfo)}"
     !define MUI_PRODUCT_ALT "$${customizer.getAlternativeFullNameIncludingEdition(appInfo) ?: ""}"
-    !define PRODUCT_FULL_NAME "$${customizer.getFullNameIncludingEditionAndVendor(appInfo)}"
     !define PRODUCT_EXE_FILE "$${context.productProperties.baseFileName}64.exe"
     !define PRODUCT_ICON_FILE "install.ico"
     !define PRODUCT_UNINSTALL_ICON_FILE "uninstall.ico"
@@ -230,12 +229,7 @@ private suspend fun prepareSignTool(nsiConfDir: Path, context: BuildContext, uni
   val toolFile =
     context.proprietaryBuildTools.signTool.commandLineClient(context, OsFamily.currentOs, JvmArchitecture.currentJvmArch)
     ?: error("No command line sign tool is configured")
-  val extensions = BuildOptions.WIN_SIGN_OPTIONS
-                     .takeIf { it.any() }
-                     ?.entries?.asSequence()
-                     ?.map { "${it.key}=${it.value}" }
-                     ?.joinToString(prefix = " -extensions ", separator = ",")
-                   ?: ""
+  val extensions = BuildOptions.WIN_SIGN_OPTIONS.takeIf { it.any() }?.entries?.joinToString(prefix = " -extensions ", separator = ",") { "${it.key}=${it.value}" } ?: ""
   val scriptFile = Files.writeString(nsiConfDir.resolve("sign-tool.cmd"), when (OsFamily.currentOs) {
     // moving the file back and forth is required for NSIS to fail if signing didn't happen
     OsFamily.WINDOWS -> """

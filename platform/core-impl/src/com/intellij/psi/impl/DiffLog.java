@@ -5,18 +5,27 @@ import com.intellij.lang.ASTNode;
 import com.intellij.lang.FileASTNode;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.pom.PomManager;
 import com.intellij.pom.PomModel;
 import com.intellij.pom.event.PomModelEvent;
 import com.intellij.pom.impl.PomTransactionBase;
 import com.intellij.pom.tree.TreeAspect;
 import com.intellij.pom.tree.events.impl.TreeChangeEventImpl;
-import com.intellij.psi.*;
+import com.intellij.psi.AbstractFileViewProvider;
+import com.intellij.psi.FileViewProvider;
+import com.intellij.psi.PsiDocumentManager;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiInvalidElementAccessException;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.impl.source.tree.CompositeElement;
 import com.intellij.psi.impl.source.tree.FileElement;
+import com.intellij.psi.impl.source.tree.TreeElement;
 import com.intellij.psi.impl.source.tree.TreeUtil;
+import com.intellij.psi.impl.source.tree.mvcc.InternalPsiVersioning;
+import com.intellij.psi.impl.source.tree.mvcc.VersionedPsiConsistencyException;
 import com.intellij.util.diff.DiffTreeChangeBuilder;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -142,6 +151,9 @@ public class DiffLog implements DiffTreeChangeBuilder<ASTNode,ASTNode> {
     private final @NotNull ASTNode myOldNode;
 
     private DeleteEntry(@NotNull ASTNode oldParent, @NotNull ASTNode oldNode) {
+      if (oldParent instanceof TreeElement && oldNode instanceof TreeElement && ((TreeElement)oldParent).isVersioned() != ((TreeElement)oldNode).isVersioned()) {
+        throw new IllegalStateException("Operation between incompatible elements");
+      }
       myOldParent = oldParent;
       myOldNode = oldNode;
     }
@@ -232,6 +244,8 @@ public class DiffLog implements DiffTreeChangeBuilder<ASTNode,ASTNode> {
     private final @NotNull CompositeElement myNewRoot;
 
     private ReplaceElementWithEvents(@NotNull CompositeElement oldRoot, @NotNull CompositeElement newRoot) {
+      // here we can allow having a different versioning relations -- this is a preparatory phase of document commit which gathers the nodes that need to be replaced
+      // later in the write part we will versionize `newRoot` and insert it into `oldRoot`
       myOldRoot = oldRoot;
       myNewRoot = newRoot;
       // parse in background to reduce time spent in EDT and to ensure the newRoot light containing file is still valid
@@ -252,7 +266,7 @@ public class DiffLog implements DiffTreeChangeBuilder<ASTNode,ASTNode> {
         viewProvider.beforeContentsSynchronized();
 
         Document document = viewProvider.getDocument();
-        PsiDocumentManagerBase documentManager = (PsiDocumentManagerBase)PsiDocumentManager.getInstance(file.getProject());
+        PsiDocumentManagerEx documentManager = (PsiDocumentManagerEx)PsiDocumentManager.getInstance(file.getProject());
         PsiToDocumentSynchronizer.DocumentChangeTransaction transaction = documentManager.getSynchronizer().getTransaction(document);
 
         if (transaction == null) {

@@ -7,12 +7,12 @@ import com.intellij.codeInsight.lookup.AutoCompletionPolicy;
 import com.intellij.codeInsight.lookup.Lookup;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
+import com.intellij.idea.TestFor;
 import com.intellij.openapi.vfs.StandardFileSystems;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.codeInsight.PyCodeInsightSettings;
-import com.jetbrains.python.codeInsight.completion.PyModuleNameCompletionContributor;
 import com.jetbrains.python.codeInsight.typing.PyTypeShed;
 import com.jetbrains.python.documentation.docstrings.DocStringFormat;
 import com.jetbrains.python.fixture.PythonCommonTestCase;
@@ -21,7 +21,11 @@ import com.jetbrains.python.sdk.legacy.PythonSdkUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
 
@@ -29,7 +33,6 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
   protected void setUp() throws Exception {
     super.setUp();
     myFixture.setTestDataPath(getTestDataPath());
-    PyModuleNameCompletionContributor.ENABLED = false;
   }
 
   protected void doTest() {
@@ -447,6 +450,19 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
 
   // PY-34493
   public void testSuperMethodAnnotationsNotCopiedFromPyiStub() {
+    PyCodeInsightSettings settings = PyCodeInsightSettings.getInstance();
+    boolean old = settings.COPY_TYPE_ANNOTATIONS_FROM_STUBS;
+    settings.COPY_TYPE_ANNOTATIONS_FROM_STUBS = false;
+    try {
+      doMultiFileTest();
+    }
+    finally {
+      settings.COPY_TYPE_ANNOTATIONS_FROM_STUBS = old;
+    }
+  }
+
+  @TestFor(issues="PY-79218")
+  public void testSuperMethodAnnotationsAreCopiedFromPyiStub() {
     doMultiFileTest();
   }
 
@@ -1216,10 +1232,10 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
   public void testSetNameBuiltinMethod() {
     runWithLanguageLevel(LanguageLevel.PYTHON36,
                          () -> {
-                           doTestByText("class Cl(object):\n" +
-                                        "  def __set_n<caret>");
-                           myFixture.checkResult("class Cl(object):\n" +
-                                                 "  def __set_name__(self, owner, name):");
+                           doTestByText("class Cl:\n" +
+                                        "  def __set_name_<caret>");
+                           myFixture.checkResult("class Cl:\n" +
+                                                 "  def __set_name__(self, owner: object, name: str):");
                          });
   }
 
@@ -1227,10 +1243,14 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
   public void testFsPathBuiltinMethod() {
     runWithLanguageLevel(LanguageLevel.PYTHON36,
                          () -> {
-                           doTestByText("class Cl(object):\n" +
+                           doTestByText("class Cl:\n" +
                                         "  def __fspa<caret>");
-                           myFixture.checkResult("class Cl(object):\n" +
-                                                 "  def __fspath__(self):");
+                           myFixture.checkResult("""
+                                                   from typing import AnyStr
+                                                   
+                                                   
+                                                   class Cl:
+                                                     def __fspath__(self) -> AnyStr:""");
                          });
   }
 
@@ -1387,7 +1407,7 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
       () -> {
         final List<String> suggested = doTestByText("def __<caret>");
         assertNotNull(suggested);
-        assertContainsElements(suggested, "__getattr__(name)", "__dir__()");
+        assertContainsElements(suggested, "__dir__() -> Iterable[object]", "__getattr__(name: str) -> object");
       }
     );
   }
@@ -1400,7 +1420,7 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
         final List<String> suggested = doTestByText("class A:\n" +
                                                     "    def __<caret>");
         assertNotNull(suggested);
-        assertContainsElements(suggested, "__class_getitem__(cls, item)");
+        assertContainsElements(suggested, "__class_getitem__(cls, item: object) -> object");
       }
     );
   }
@@ -1444,7 +1464,7 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
     final List<String> suggested = doTestByText("class A(object):\n" +
                                                 "    def __<caret>");
     assertNotNull(suggested);
-    assertContainsElements(suggested, "__init__(self)");
+    assertContainsElements(suggested, "__init__(self):");
   }
 
   // PY-28461
@@ -2251,6 +2271,26 @@ public abstract class PythonCommonCompletionTest extends PythonCommonTestCase {
       // TODO Use regular doMultiFileTest once PY-73173 is fixed
       assertEquals(1, Collections.frequency(variants, "MyClass"));
     });
+  }
+
+  // PY-62203 PY-84778
+  public void testMatchingSymbolsAndModulesSuggestedTogether() {
+    myFixture.copyDirectoryToProject(getTestName(true), "");
+    myFixture.configureByFile("a.py");
+    myFixture.complete(CompletionType.BASIC, 1);
+    assertContainsElements(myFixture.getLookupElementStrings(), "dataclasses", "dataclass");
+  }
+
+  @TestFor(issues="PY-79218")
+  public void test() {
+    doTestByText(
+      """
+        class A:
+            def f(self, a: int) -> str: ...
+        
+        class B(A):
+            def f<caret>
+        """);
   }
 
   private static void runWithImportableNamesInBasicCompletionDisabled(@NotNull Runnable action) {

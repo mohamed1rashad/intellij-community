@@ -39,6 +39,7 @@ PKGS = [
     "java.desktop/sun.lwawt",
     "java.desktop/sun.lwawt.macosx",
     "java.desktop/sun.swing",
+    "java.desktop/sun.swing.text",
     "jdk.attach/sun.tools.attach",
     "jdk.compiler/com.sun.tools.javac.api",
     "jdk.internal.jvmstat/sun.jvmstat.monitor",
@@ -47,6 +48,7 @@ PKGS = [
 
 ADD_OPENS_FLAGS = ["--add-opens=" + pkg + "=ALL-UNNAMED" for pkg in PKGS]
 
+# Mirrors COMMON_VM_OPTIONS in VmOptionsGenerator.kt
 JAVA_TEST_FLAGS = [
     "-Didea.classpath.index.enabled=false",
     "-Djava.awt.headless=true",
@@ -55,6 +57,7 @@ JAVA_TEST_FLAGS = [
     "-Djava.system.class.loader=com.intellij.util.lang.PathClassLoader",
     "-Didea.reset.classpath.from.manifest=true",
     "-Dintellij.build.use.compiled.classes=false",
+    "-Djava.util.zip.use.nio.for.zip.file.access=true",
 ]
 
 JAVA_TEST_ARGS = [
@@ -67,8 +70,10 @@ TEST_FRAMEWORK_DEPS = [
   "@community//platform/testFramework/bootstrap:tools-testsBootstrap",
   "@community//platform/util:util-tests_test_lib",
 
-  "@lib//:junit5Vintage",
-  "@lib//:junit4",
+  # Provide test engines to run actual tests
+  # Junit 3/4 is also run by junit5 via junit vintage
+  "@community//libraries/junit5-vintage",
+  "@community//libraries/junit5-launcher",
 ]
 
 # needed to avoid runtime duplications in jps_test of community/platform/util/BUILD.bazel
@@ -82,13 +87,59 @@ def _normalize_runtime_dep(dep):
         return "@community//platform/util:util-tests_test_lib"
     return dep
 
-def jps_test(name, jvm_flags = [], runtime_deps = [], args = [], data = [], tags = [], **kwargs):
+def _classes_duration_data():
+    repo = native.repository_name()
+    module = native.module_name()
+
+    # The top-level checkout has no explicit `module(name = "ultimate")`, so its main repository reports an empty module name.
+    if repo == "@" and not module:
+        return "//:tests/classes-duration"
+
+    # When the top-level checkout builds `@community//...`, the classes-duration target still lives in the canonical main repo.
+    if repo != "@" and module == "community":
+        return "@@//:tests/classes-duration"
+
+    # Standalone `community/bazel.cmd` runs with `repo == "@"` and `module == "community"`, so no extra data is added there.
+    if repo == "@" and module == "community":
+        return None
+
+    fail("Unexpected repository/module combination for tests-options.bzl: repository_name=%r module_name=%r" % (repo, module))
+
+def jps_test(name, jvm_flags = [], runtime_deps = [], args = [], data = [], tags = [], sandbox = False, env = {}, **kwargs):
     # Merge user-provided args with our default ones
     all_jvm_flags = JAVA_TEST_FLAGS + ADD_OPENS_FLAGS + jvm_flags
     all_args = JAVA_TEST_ARGS + args
 
     normalized_runtime_deps = [_normalize_runtime_dep(d) for d in runtime_deps]
     all_runtime_deps = depset(TEST_FRAMEWORK_DEPS + normalized_runtime_deps).to_list()
+
+    all_data = list(data)
+    all_tags = list(tags)
+    all_env = dict(env)
+
+    # required for com.intellij.openapi.projectRoots.impl.JavaSdkImpl.internalJdkAnnotationsPath
+    # almost all tests in monorepo need it, so we add it to all tests
+    all_data.append("@community//java:mockJDK")
+
+    # handled by com.intellij.tests.JUnit5BazelRunner.main
+    all_env["JB_TEST_SANDBOX"] = str(sandbox)
+
+    classes_duration_data = _classes_duration_data()
+    if classes_duration_data != None:
+        all_data.append(classes_duration_data)
+
+    if sandbox:
+        if "block-network" not in all_tags:
+            all_tags.append("block-network")
+
+        if "no-sandbox" in all_tags:
+            fail("sandboxed (by sandbox parameter to jps_test) tests should not have no-sandbox tag")
+    else:
+        # so com.intellij.tests.JUnit5BazelRunner.guessBazelWorkspaceDir will find a real workspace root
+        all_data.append("@community//:intellij.idea.community.main.iml")
+
+        if "no-sandbox" not in all_tags:
+            all_tags.append("no-sandbox")
 
     # https://bazel.build/reference/be/java#java_test
     # https://bazel.build/reference/be/common-definitions#common-attributes-tests
@@ -102,13 +153,9 @@ def jps_test(name, jvm_flags = [], runtime_deps = [], args = [], data = [], tags
         # settings size also sets test timeout to 1 hours
         # which is also a reasonable tests timeout for current state of things
         size = "enormous",
-        tags = tags,
-        data = [
-            # so com.intellij.tests.JUnit5BazelRunner.guessBazelWorkspaceDir will find a real workspace root
-            "@community//:intellij.idea.community.main.iml",
-            # required for com.intellij.openapi.projectRoots.impl.JavaSdkImpl.internalJdkAnnotationsPath
-            "@community//java:mockJDK",
-        ] + data,
+        tags = all_tags,
+        data = all_data,
+        env = all_env,
         use_testrunner = False,
-        **kwargs
+        **kwargs,
     )

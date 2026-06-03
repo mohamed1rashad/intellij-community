@@ -1,14 +1,19 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.util.io.storages.blobstorage;
 
 import com.intellij.openapi.util.IntRef;
+import com.intellij.openapi.util.io.FileTooBigException;
+import com.intellij.platform.util.io.storages.StorageTestingUtils;
 import com.intellij.util.io.ClosedStorageException;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy.DataLengthPlusFixedPercentStrategy;
 import com.intellij.util.io.blobstorage.SpaceAllocationStrategy.WriterDecidesStrategy;
 import com.intellij.util.io.blobstorage.StreamlinedBlobStorage;
-import com.intellij.platform.util.io.storages.StorageTestingUtils;
-import it.unimi.dsi.fastutil.ints.*;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntArraySet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 import org.jetbrains.annotations.NotNull;
 import org.junit.Before;
 import org.junit.Test;
@@ -28,7 +33,13 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static com.intellij.util.io.blobstorage.StreamlinedBlobStorage.NULL_ID;
 import static java.nio.charset.StandardCharsets.US_ASCII;
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 @RunWith(Theories.class)
 public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobStorage> extends BlobStorageTestBase<S> {
@@ -40,14 +51,14 @@ public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobSt
   @DataPoints
   public static List<SpaceAllocationStrategy> allocationStrategiesToTry() {
     return Arrays.asList(
-      new WriterDecidesStrategy(StreamlinedBlobStorageHelper.MAX_CAPACITY, 1024),
-      new WriterDecidesStrategy(StreamlinedBlobStorageHelper.MAX_CAPACITY, 256),
-      new DataLengthPlusFixedPercentStrategy(256, 1024, StreamlinedBlobStorageHelper.MAX_CAPACITY, 30),
-      new DataLengthPlusFixedPercentStrategy(64, 256, StreamlinedBlobStorageHelper.MAX_CAPACITY, 30),
+      new WriterDecidesStrategy(StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 1024),
+      new WriterDecidesStrategy(StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 256),
+      new DataLengthPlusFixedPercentStrategy(256, 1024, StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 30),
+      new DataLengthPlusFixedPercentStrategy(64, 256, StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 30),
 
       //put stress on allocation/reallocation code paths
-      new DataLengthPlusFixedPercentStrategy(64, 128, StreamlinedBlobStorageHelper.MAX_CAPACITY, 0),
-      new DataLengthPlusFixedPercentStrategy(2, 2, StreamlinedBlobStorageHelper.MAX_CAPACITY, 0)
+      new DataLengthPlusFixedPercentStrategy(64, 128, StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 0),
+      new DataLengthPlusFixedPercentStrategy(2, 2, StreamlinedBlobStorageOverMMappedFile.MAX_CAPACITY, 0)
     );
   }
 
@@ -136,8 +147,13 @@ public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobSt
   @Test
   public void wasClosedProperly_isTrueForNewStorage() throws IOException {
     assertTrue(
-      "New empty storage is always 'closed properly'",
+      "New empty storage is 'closed properly'",
       storage.wasClosedProperly()
+    );
+
+    assertTrue(
+      "New empty storage is 'always closed properly'",
+      storage.wasAlwaysClosedProperly()
     );
   }
 
@@ -146,8 +162,12 @@ public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobSt
     storage.close();
     storage = openStorage(storagePath);
     assertTrue(
-      "Storage is 'closed properly' if it was closed and opened again",
+      "Storage is 'closed properly' if it was properly closed and opened again",
       storage.wasClosedProperly()
+    );
+    assertTrue(
+      "Storage is 'always closed properly' if it was properly closed and opened again",
+      storage.wasAlwaysClosedProperly()
     );
   }
 
@@ -226,7 +246,7 @@ public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobSt
 
   @Test
   public void manyRecordsWritten_WithBigPayload_CouldAllBeReadBackUnchanged_ById() throws Exception {
-    //Specifically check payloads close to maxPayloadSize (-some margin for record header)
+    //Specifically check payloads close to maxPayloadSize
 
     int enoughRecordsButNotTooManyToNotTriggerOoM = 100;
     ThreadLocalRandom rnd = ThreadLocalRandom.current();
@@ -254,7 +274,7 @@ public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobSt
     //maxPayloadSupported is generally about records being on a single page.
     // But don't want to expose recordSize/payloadSize internal relationship, neither recordHeader size, hence
     // I just vary payload size _around_ storage.maxPayloadSupported() to check that records are either stored
-    // OK, or throw IAE without breaking the storage
+    // OK, or throw FileTooBigException without breaking the storage
     final int margin = 16;
     final int maxPayloadSupported = storage.maxPayloadSupported();
     final List<StorageRecord> recordsActuallyWritten = new ArrayList<>();
@@ -273,7 +293,7 @@ public abstract class StreamlinedBlobStorageTestBase<S extends StreamlinedBlobSt
       }
       fail("_Some_ payload size around PAGE_SIZE must be rejected by storage");
     }
-    catch (IllegalArgumentException | IllegalStateException e) {
+    catch (FileTooBigException e) {
       //this is expectable
     }
 

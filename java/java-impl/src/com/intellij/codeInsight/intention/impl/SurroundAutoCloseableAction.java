@@ -5,13 +5,36 @@ import com.intellij.codeInsight.CodeInsightUtilCore;
 import com.intellij.codeInsight.template.impl.ConstantNode;
 import com.intellij.java.JavaBundle;
 import com.intellij.lang.java.JavaLanguage;
-import com.intellij.lang.surroundWith.ModCommandSurrounder;
+import com.intellij.lang.surroundWith.PsiUpdateModCommandSurrounder;
 import com.intellij.lang.surroundWith.SurroundDescriptor;
 import com.intellij.lang.surroundWith.Surrounder;
-import com.intellij.modcommand.*;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModPsiUpdater;
+import com.intellij.modcommand.Presentation;
+import com.intellij.modcommand.PsiUpdateModCommandAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.pom.java.JavaFeature;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiCodeBlock;
+import com.intellij.psi.PsiDeclarationStatement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiErrorElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiJavaToken;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiResourceList;
+import com.intellij.psi.PsiResourceVariable;
+import com.intellij.psi.PsiStatement;
+import com.intellij.psi.PsiTryStatement;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiWhiteSpace;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.codeStyle.VariableKind;
 import com.intellij.psi.search.LocalSearchScope;
@@ -45,7 +68,7 @@ public final class SurroundAutoCloseableAction extends PsiUpdateModCommandAction
   }
 
   @Override
-  protected void invoke(@NotNull ActionContext context, @NotNull PsiElement element, @NotNull ModPsiUpdater updater) {
+  public void invoke(@NotNull ActionContext context, @NotNull PsiElement element, @NotNull ModPsiUpdater updater) {
     PsiLocalVariable variable = findVariable(element);
     if (variable != null) {
       processVariable(context.project(), updater, variable);
@@ -257,7 +280,7 @@ public final class SurroundAutoCloseableAction extends PsiUpdateModCommandAction
     return JavaBundle.message("intention.surround.resource.with.ARM.block");
   }
 
-  public static final class Template extends ModCommandSurrounder implements SurroundDescriptor {
+  public static final class Template extends PsiUpdateModCommandSurrounder implements SurroundDescriptor {
     private final Surrounder[] mySurrounders = {this};
 
     @Override
@@ -292,11 +315,11 @@ public final class SurroundAutoCloseableAction extends PsiUpdateModCommandAction
     }
 
     @Override
-    public @NotNull ModCommand surroundElements(@NotNull ActionContext context, @NotNull PsiElement @NotNull [] elements) {
-      if (elements.length == 1) {
-        return new SurroundAutoCloseableAction().perform(context, elements[0]);
+    public void surroundElements(@NotNull ActionContext context, @NotNull PsiElement @NotNull [] elementsInCopy, @NotNull ModPsiUpdater updater) {
+      if (elementsInCopy.length == 1) {
+        SurroundAutoCloseableAction action = new SurroundAutoCloseableAction();
+        action.invoke(context, elementsInCopy[0], updater);
       }
-      return ModCommand.nop();
     }
   }
 }

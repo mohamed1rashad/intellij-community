@@ -9,6 +9,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.AccessToken
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.command.impl.UndoManagerImpl
@@ -39,11 +40,8 @@ import com.intellij.testFramework.common.runAll
 import com.intellij.util.containers.forEachGuaranteed
 import com.intellij.util.io.sanitizeFileName
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import org.jetbrains.annotations.ApiStatus
-import org.junit.jupiter.api.extension.AfterAllCallback
-import org.junit.jupiter.api.extension.BeforeAllCallback
-import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.rules.ExternalResource
 import org.junit.rules.TestRule
 import org.junit.runner.Description
@@ -81,20 +79,40 @@ open class ApplicationRule : TestRule {
   protected open fun after() { }
 }
 
-@ApiStatus.ScheduledForRemoval
-@Deprecated("Use com.intellij.testFramework.junit5.TestApplication annotation")
-open class ApplicationExtension : BeforeAllCallback, AfterAllCallback {
-  companion object {
-    init {
-      Logger.setFactory(TestLoggerFactory::class.java)
+/**
+ * A JUnit4 rule which runs tests inside this class with the corresponding [ApplicationManagerEx.isInStressTest] flag,
+ * using [ApplicationManagerEx.runInStressTest] method.
+ * Stress tests have special words in their name, see [TestFrameworkUtil.isStressTest] for details.
+ *        E.g. tests `foo()`,`fooStress()` are run with `isStressTest=false`,`isStressTest=true` correspondingly.
+ * Usage example:
+ * ```
+ * class MyTest {
+ *   // run stress tests, e.g. `testStress` or 'myPerforemanceTest` with `inStressTest=true`, all other tests with `inStressTest=false`
+ *   @Rule stressTestRule = new StressTestRule();
+ * }
+ * ```
+ * For JUnit5, use [com.intellij.testFramework.junit5.impl.StressTestApplicationExtension] extension instead.
+ *
+ * @param forceIsStressTest if specified, all tests are run with this flag regardless of their name.
+ *        E.g.:
+ *
+ *        class MyTest {
+ *          // run all tests with `inStressTest=true`
+ *          @Rule stressTestRule = new StressTestRule(true);
+ *        }
+ */
+class StressTestRule(val forceIsStressTest:Boolean?=null) : TestRule {
+  override fun apply(
+    base: Statement,
+    description: Description,
+  ): Statement {
+    return object : Statement() {
+      override fun evaluate() {
+        val stressTest = forceIsStressTest ?: TestFrameworkUtil.isStressTest(description.methodName, description.testClass)
+        ApplicationManagerEx.runInStressTest<RuntimeException>(stressTest) { base.evaluate() }
+      }
     }
   }
-
-  override fun beforeAll(context: ExtensionContext) {
-    TestApplicationManager.getInstance()
-  }
-
-  override fun afterAll(context: ExtensionContext) { }
 }
 
 /**
@@ -376,10 +394,12 @@ internal fun Project.closeProject(save: Boolean = false) {
 }
 
 suspend fun Project.closeProjectAsync(save: Boolean = false) {
-  if (save) {
-    saveWorkspaceModel()
+  withContext(NonCancellable) {
+    if (save) {
+      saveWorkspaceModel()
+    }
+    ProjectManagerEx.getInstanceEx().forceCloseProjectAsync(project = this@closeProjectAsync, save)
   }
-  ProjectManagerEx.getInstanceEx().forceCloseProjectAsync(project = this, save)
 }
 
 suspend fun openProjectAsync(path: Path, vararg activities: ProjectActivity): Project {

@@ -8,11 +8,13 @@ import com.intellij.openapi.diff.DiffBundle;
 import com.intellij.openapi.project.Project;
 import com.intellij.util.ui.AsyncProcessIcon;
 import com.intellij.util.ui.JBUI;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
 
 import static com.intellij.diff.util.DiffUtil.createMessagePanel;
 
@@ -25,7 +27,12 @@ public class UnifiedDiffPanel extends DiffPanelBase {
 
   private final @NotNull AsyncProcessIcon.Big myBusyIcon;
 
-  public UnifiedDiffPanel(@Nullable Project project, @NotNull JComponent content, @NotNull DiffContext context) {
+  @ApiStatus.Internal
+  public UnifiedDiffPanel(@Nullable Project project, @NotNull JComponent content) {
+    this(project, content, null);
+  }
+
+  public UnifiedDiffPanel(@Nullable Project project, @NotNull JComponent content, @Nullable DiffContext context) {
     super(project, context);
     myBusyIcon = new AsyncProcessIcon.Big("UnifiedDiff");
     JPanel centerPanel = JBUI.Panels.simplePanel(content).addToTop(myNotificationsPanel);

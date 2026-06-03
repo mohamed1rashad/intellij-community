@@ -21,23 +21,38 @@ import kotlinx.coroutines.CoroutineScope
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.plugins.textmate.TextMateService.LOG
-import org.jetbrains.plugins.textmate.bundles.*
+import org.jetbrains.plugins.textmate.bundles.BundleType
 import org.jetbrains.plugins.textmate.bundles.BundleType.Companion.detectBundleType
+import org.jetbrains.plugins.textmate.bundles.TextMateBundleReader
+import org.jetbrains.plugins.textmate.bundles.TextMateFileNameMatcher
+import org.jetbrains.plugins.textmate.bundles.TextMateNioResourceReader
+import org.jetbrains.plugins.textmate.bundles.readSublimeBundle
+import org.jetbrains.plugins.textmate.bundles.readTextMateBundle
+import org.jetbrains.plugins.textmate.bundles.readVSCBundle
 import org.jetbrains.plugins.textmate.configuration.TextMateBuiltinBundlesSettings
 import org.jetbrains.plugins.textmate.configuration.TextMateUserBundlesSettings
 import org.jetbrains.plugins.textmate.editor.fileNameExtensions
 import org.jetbrains.plugins.textmate.language.TextMateConcurrentMapInterner
 import org.jetbrains.plugins.textmate.language.TextMateInterner
 import org.jetbrains.plugins.textmate.language.TextMateLanguageDescriptor
-import org.jetbrains.plugins.textmate.language.preferences.*
+import org.jetbrains.plugins.textmate.language.preferences.Preferences
+import org.jetbrains.plugins.textmate.language.preferences.PreferencesRegistry
+import org.jetbrains.plugins.textmate.language.preferences.PreferencesRegistryBuilder
+import org.jetbrains.plugins.textmate.language.preferences.PreferencesRegistryImpl
+import org.jetbrains.plugins.textmate.language.preferences.ShellVariablesRegistry
+import org.jetbrains.plugins.textmate.language.preferences.ShellVariablesRegistryBuilder
+import org.jetbrains.plugins.textmate.language.preferences.ShellVariablesRegistryImpl
+import org.jetbrains.plugins.textmate.language.preferences.SnippetsRegistry
+import org.jetbrains.plugins.textmate.language.preferences.SnippetsRegistryBuilder
+import org.jetbrains.plugins.textmate.language.preferences.SnippetsRegistryImpl
 import org.jetbrains.plugins.textmate.language.syntax.TextMateSyntaxTableBuilder
 import org.jetbrains.plugins.textmate.language.syntax.TextMateSyntaxTableCore
 import org.jetbrains.plugins.textmate.language.syntax.highlighting.TextMateTextAttributesAdapter
 import org.jetbrains.plugins.textmate.language.syntax.selector.TextMateSelectorWeigherImpl
 import org.jetbrains.plugins.textmate.language.syntax.selector.caching
-import org.jetbrains.plugins.textmate.plist.JsonOrXmlPlistReader
-import org.jetbrains.plugins.textmate.plist.JsonPlistReader
+import org.jetbrains.plugins.textmate.plist.JsonOrXmlOrYamlPlistReader
 import org.jetbrains.plugins.textmate.plist.XmlPlistReader
+import org.jetbrains.plugins.textmate.plist.YamlPlistReader
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
@@ -229,7 +244,7 @@ class TextMateServiceImpl(private val myScope: CoroutineScope) : TextMateService
     if (directory != null) {
       val resourceReader = TextMateNioResourceReader(directory)
       val bundleType = detectBundleType(resourceReader, directory.name)
-      val plistReader = JsonOrXmlPlistReader(jsonReader = JsonPlistReader(), xmlReader = XmlPlistReader())
+      val plistReader = JsonOrXmlOrYamlPlistReader(xmlReader = XmlPlistReader(), yamlReader = YamlPlistReader())
       return when (bundleType) {
         BundleType.TEXTMATE -> readTextMateBundle(directory.name, plistReader, resourceReader)
         BundleType.SUBLIME -> readSublimeBundle(directory.name, plistReader, resourceReader)

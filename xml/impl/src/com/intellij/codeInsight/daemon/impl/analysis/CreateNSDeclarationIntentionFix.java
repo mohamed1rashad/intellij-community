@@ -35,7 +35,11 @@ import com.intellij.psi.impl.cache.impl.id.IdTableBuilding;
 import com.intellij.psi.meta.PsiMetaData;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtilCore;
-import com.intellij.psi.xml.*;
+import com.intellij.psi.xml.XmlAttribute;
+import com.intellij.psi.xml.XmlDocument;
+import com.intellij.psi.xml.XmlFile;
+import com.intellij.psi.xml.XmlTag;
+import com.intellij.psi.xml.XmlToken;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.xml.XmlElementDescriptor;
@@ -458,7 +462,7 @@ public class CreateNSDeclarationIntentionFix implements HintAction, LocalQuickFi
         marker = null;
       }
       final XmlNamespaceHelper helper = XmlNamespaceHelper.getHelper(myXmlFile);
-      helper.insertNamespaceDeclaration(myXmlFile, myEditor, Collections.singleton(namespace), prefix, __ -> {
+      helper.insertNamespaceDeclaration(myXmlFile, myEditor, Collections.singleton(namespace), prefix, _ -> {
         if (myEditor != null && !namespace.isEmpty()) {
           myEditor.getCaretModel().moveToOffset(marker.getStartOffset());
         }

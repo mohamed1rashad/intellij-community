@@ -5,11 +5,9 @@ package com.intellij.platform.workspace.jps.entities
 
 import com.intellij.platform.workspace.storage.EntitySource
 import com.intellij.platform.workspace.storage.EntityType
-import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
 import com.intellij.platform.workspace.storage.annotations.Parent
-import com.intellij.platform.workspace.storage.impl.containers.toMutableWorkspaceList
 import com.intellij.platform.workspace.storage.url.VirtualFileUrl
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.NonNls
@@ -17,6 +15,10 @@ import org.jetbrains.annotations.NonNls
 /**
  * Stores order of excluded roots in iml file.
  * This is needed to ensure that corresponding tags are saved in the same order to avoid unnecessary modifications of iml file.
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface SourceRootOrderEntity : WorkspaceEntity {
@@ -26,8 +28,8 @@ interface SourceRootOrderEntity : WorkspaceEntity {
   val contentRootEntity: ContentRootEntity
 
   //region generated code
-  @Deprecated(message = "Use ModifiableSourceRootOrderEntity instead")
-  interface Builder : ModifiableSourceRootOrderEntity {
+  @Deprecated(message = "Use SourceRootOrderEntityBuilder instead")
+  interface Builder : SourceRootOrderEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getContentRootEntity(): ContentRootEntity.Builder = contentRootEntity as ContentRootEntity.Builder
 
@@ -70,6 +72,10 @@ val ContentRootEntity.sourceRootOrder: SourceRootOrderEntity?
 
 /**
  * Describes custom properties of [SourceFolder][com.intellij.openapi.roots.SourceFolder].
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface CustomSourceRootPropertiesEntity : WorkspaceEntity {
@@ -79,8 +85,8 @@ interface CustomSourceRootPropertiesEntity : WorkspaceEntity {
   val sourceRoot: SourceRootEntity
 
   //region generated code
-  @Deprecated(message = "Use ModifiableCustomSourceRootPropertiesEntity instead")
-  interface Builder : ModifiableCustomSourceRootPropertiesEntity {
+  @Deprecated(message = "Use CustomSourceRootPropertiesEntityBuilder instead")
+  interface Builder : CustomSourceRootPropertiesEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getSourceRoot(): SourceRootEntity.Builder = sourceRoot as SourceRootEntity.Builder
 
@@ -123,6 +129,10 @@ val SourceRootEntity.customSourceRootProperties: CustomSourceRootPropertiesEntit
 /**
  * Stores order of excluded roots in iml file.
  * This is needed to ensure that corresponding tags are saved in the same order to avoid unnecessary modifications of iml file.
+ *
+ * **Do not add new fields to this entity.** New fields are not serialized to the .iml file and will be
+ * lost when the project is reopened. To store additional data, declare a new entity with a
+ * [@Parent][com.intellij.platform.workspace.storage.annotations.Parent] reference to this one.
  */
 @Internal
 interface ExcludeUrlOrderEntity : WorkspaceEntity {
@@ -132,8 +142,8 @@ interface ExcludeUrlOrderEntity : WorkspaceEntity {
   val contentRoot: ContentRootEntity
 
   //region generated code
-  @Deprecated(message = "Use ModifiableExcludeUrlOrderEntity instead")
-  interface Builder : ModifiableExcludeUrlOrderEntity {
+  @Deprecated(message = "Use ExcludeUrlOrderEntityBuilder instead")
+  interface Builder : ExcludeUrlOrderEntityBuilder {
     @Deprecated(message = "Use new API instead")
     fun getContentRoot(): ContentRootEntity.Builder = contentRoot as ContentRootEntity.Builder
 

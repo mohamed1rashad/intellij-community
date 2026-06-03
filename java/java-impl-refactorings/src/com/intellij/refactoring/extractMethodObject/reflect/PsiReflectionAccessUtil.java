@@ -2,22 +2,48 @@
 package com.intellij.refactoring.extractMethodObject.reflect;
 
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiCapturedWildcardType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiEllipsisType;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiJavaFile;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodReferenceExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiWildcardType;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.psiutils.ExpectedTypeUtils;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.Set;
 
 /**
  * @author Vitaliy.Bibaev
  */
-final class PsiReflectionAccessUtil {
+@ApiStatus.Internal
+public final class PsiReflectionAccessUtil {
   public static boolean isPublicMember(@NotNull PsiMember classMember) {
     return classMember.hasModifierProperty(PsiModifier.PUBLIC) && isAccessible(classMember.getContainingClass());
   }
@@ -152,23 +178,32 @@ final class PsiReflectionAccessUtil {
   }
 
   public static boolean isAccessibleType(@NotNull PsiType type) {
+    return isAccessibleType(type, false);
+  }
+
+  public static boolean isAccessibleTypeParameterBound(@NotNull PsiType type) {
+    return isAccessibleType(type, true);
+  }
+
+  private static boolean isAccessibleType(@NotNull PsiType type, boolean allowTypeParameters) {
     if (type instanceof PsiArrayType) {
-      return isAccessibleType(type.getDeepComponentType());
+      return isAccessibleType(type.getDeepComponentType(), allowTypeParameters);
     }
 
     if (TypeConversionUtil.isPrimitiveAndNotNull(type)) return true;
 
     if (type instanceof PsiCapturedWildcardType capturedWildcardType) {
-      return isAccessibleType(capturedWildcardType.getWildcard());
+      return isAccessibleType(capturedWildcardType.getWildcard(), allowTypeParameters);
     }
 
     if (type instanceof PsiWildcardType wildcardType) {
       var bound = wildcardType.getBound();
-      return bound == null || isAccessibleType(bound);
+      return bound == null || isAccessibleType(bound, allowTypeParameters);
     }
 
     PsiClass psiClass = PsiTypesUtil.getPsiClass(type);
-    return isAccessible(psiClass) && !hasInaccessibleGenerics(type);
+    return allowTypeParameters && psiClass instanceof PsiTypeParameter ||
+           isAccessible(psiClass) && !hasInaccessibleGenerics(type, allowTypeParameters);
   }
 
   public static @NotNull PsiType nearestAccessibleType(@NotNull PsiType type, @NotNull PsiElement context) {
@@ -203,8 +238,12 @@ final class PsiReflectionAccessUtil {
   }
 
   private static boolean hasInaccessibleGenerics(@NotNull PsiType type) {
+    return hasInaccessibleGenerics(type, false);
+  }
+
+  private static boolean hasInaccessibleGenerics(@NotNull PsiType type, boolean allowTypeParameters) {
     if (type instanceof PsiClassType) {
-      return !ContainerUtil.and(((PsiClassType)type).getParameters(), x -> isAccessibleType(x));
+      return !ContainerUtil.and(((PsiClassType)type).getParameters(), x -> isAccessibleType(x, allowTypeParameters));
     }
     return false;
   }

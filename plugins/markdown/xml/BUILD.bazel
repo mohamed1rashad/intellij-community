@@ -1,18 +1,13 @@
 ### auto-generated section `build intellij.markdown.xml` start
-load("@rules_jvm//:jvm.bzl", "jvm_library", "resourcegroup")
-
-resourcegroup(
-  name = "xml_resources",
-  srcs = glob(["src/main/resources/**/*"]),
-  strip_prefix = "src/main/resources"
-)
+load("@rules_jvm//:jvm.bzl", "jvm_library")
 
 jvm_library(
   name = "xml",
   module_name = "intellij.markdown.xml",
   visibility = ["//visibility:public"],
   srcs = glob(["src/main/kotlin/**/*.kt", "src/main/kotlin/**/*.java", "src/main/kotlin/**/*.form"], allow_empty = True),
-  resources = [":xml_resources"],
+  resources = glob(["src/main/resources/**/*"]),
+  resource_strip_prefix = "src/main/resources",
   deps = [
     "//plugins/markdown/core:markdown",
     "//xml/xml-psi-impl:psi-impl",
@@ -24,4 +19,29 @@ jvm_library(
   ],
   runtime_deps = ["//platform/backend"]
 )
+
+jvm_library(
+  name = "xml_test_lib",
+  testonly = True,
+  module_name = "intellij.markdown.xml",
+  visibility = ["//visibility:public"],
+  srcs = glob([], allow_empty = True),
+  runtime_deps = [
+    ":xml",
+    "//plugins/markdown/core:markdown_test_lib",
+    "//xml/xml-psi-impl:psi-impl_test_lib",
+    "//platform/core-ui:core-ui_test_lib",
+    "//platform/core-api:core_test_lib",
+    "//xml/xml-parser:parser_test_lib",
+    "//platform/core-impl:core-impl_test_lib",
+    "//platform/lang-impl:lang-impl_test_lib",
+    "//platform/backend:backend_test_lib",
+  ]
+)
 ### auto-generated section `build intellij.markdown.xml` end
+
+### auto-generated section `iml intellij.markdown.xml` start
+exports_files([
+  "intellij.markdown.xml.iml",
+], visibility = ["//visibility:public"])
+### auto-generated section `iml intellij.markdown.xml` end

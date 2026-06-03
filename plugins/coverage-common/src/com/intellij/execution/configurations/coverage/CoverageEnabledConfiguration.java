@@ -1,7 +1,12 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.execution.configurations.coverage;
 
-import com.intellij.coverage.*;
+import com.intellij.coverage.CoverageBundle;
+import com.intellij.coverage.CoverageEngine;
+import com.intellij.coverage.CoverageFileProvider;
+import com.intellij.coverage.CoverageRunner;
+import com.intellij.coverage.CoverageSuite;
+import com.intellij.coverage.DefaultCoverageFileProvider;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -16,6 +21,8 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Date;
 
@@ -241,7 +248,12 @@ public abstract class CoverageEnabledConfiguration implements JDOMExternalizable
     }
 
     Path coverageRootPath = Path.of(PathManager.getSystemPath(), "coverage");
-    coverageRootPath.toFile().mkdirs();
+    try {
+      Files.createDirectories(coverageRootPath);
+    }
+    catch (IOException e) {
+      throw new RuntimeException(e);
+    }
 
     String projectName = FileUtil.sanitizeFileName(myConfiguration.getProject().getName());
     String configName = FileUtil.sanitizeFileName(myConfiguration.getName());

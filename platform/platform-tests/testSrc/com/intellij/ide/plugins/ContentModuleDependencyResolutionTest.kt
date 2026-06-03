@@ -1,21 +1,26 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins
 
-import com.intellij.platform.plugins.testFramework.PluginSetTestBuilder
-import com.intellij.platform.testFramework.plugins.*
+import com.intellij.platform.pluginSystem.parser.impl.elements.ModuleVisibilityValue
+import com.intellij.platform.pluginSystem.testFramework.PluginSetSpecBuilder
+import com.intellij.platform.pluginSystem.testFramework.buildPluginSetState
+import com.intellij.platform.testFramework.plugins.content
+import com.intellij.platform.testFramework.plugins.dependencies
+import com.intellij.platform.testFramework.plugins.module
 import com.intellij.testFramework.rules.InMemoryFsExtension
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
-import java.nio.file.Path
-import com.intellij.platform.testFramework.plugins.plugin as buildPlugin
 
 internal class ContentModuleDependencyResolutionTest {
+  init {
+    PluginManagerCore.isUnitTestMode = true // FIXME git rid of this IJPL-220869
+  }
+
   @RegisterExtension
   @JvmField
   val inMemoryFs = InMemoryFsExtension()
-
-  private val pluginDirPath get() = inMemoryFs.fs.getPath("/").resolve("plugin")
+  private var loadingErrors: List<PluginLoadingError> = emptyList()
 
   @Test
   fun `reference to modules from the same plugin without namespace`() {
@@ -44,7 +49,9 @@ internal class ContentModuleDependencyResolutionTest {
     val pluginSet = buildPluginSet {
       plugin("core") {
         content(namespace = "jetbrains") {
-          module("platform") {}
+          module("platform") {
+            moduleVisibility = ModuleVisibilityValue.PUBLIC
+          }
         }
       }
       plugin("foo") {
@@ -69,6 +76,7 @@ internal class ContentModuleDependencyResolutionTest {
       plugin("core") {
         content(namespace = "jetbrains") {
           module("platform") {}
+          module("util") {}
         }
       }
       plugin("foo") {
@@ -76,18 +84,25 @@ internal class ContentModuleDependencyResolutionTest {
           module("foo") {
             dependencies {
               module("platform")
+              module("util")
             }
           }
           module("platform") {}
         }
+        content(namespace = "custom") {
+          module("util") {}
+        }
       }
     }
     val foo = pluginSet.getEnabledModule("foo")
-    val dependency = foo.moduleDependencies.modules.single()
-    assertThat(dependency.name).isEqualTo("platform")
-    assertThat(dependency.namespace).isNotEqualTo(PluginModuleId.JETBRAINS_NAMESPACE)
+    assertThat(foo.moduleDependencies.modules).hasSize(2)
+    val (dependency1, dependency2) = foo.moduleDependencies.modules
+    assertThat(dependency1.name).isEqualTo("platform")
+    assertThat(dependency1.namespace).isNotEqualTo(PluginModuleId.JETBRAINS_NAMESPACE)
     val fooPlatform = pluginSet.getEnabledPlugin("foo").contentModules.first { it.moduleId.name == "platform" }
-    assertThat(dependency.namespace).isEqualTo(fooPlatform.moduleId.namespace)
+    assertThat(dependency1.namespace).isEqualTo(fooPlatform.moduleId.namespace)
+    assertThat(dependency2.name).isEqualTo("util")
+    assertThat(dependency2.namespace).isEqualTo("custom")
   }
 
   @Test
@@ -120,20 +135,71 @@ internal class ContentModuleDependencyResolutionTest {
     assertThat(dependency.namespace).isEqualTo("bar_ns")
   }
 
-  private fun buildPluginSet(builder: PluginSetSpecBuilder.() -> Unit): PluginSet {
-    builder(PluginSetSpecBuilder(pluginDirPath))
-    return PluginSetTestBuilder.fromPath(pluginDirPath).build()
+  @Test
+  fun `modules with same name in different namespaces`() {
+    val pluginSet = buildPluginSet {
+      plugin("foo") {
+        content(namespace = "foo_ns") {
+          module("foo") {
+            dependencies {
+              module("common")
+            }
+          }
+          module("common") {}
+        }
+      }
+      plugin("bar") {
+        content(namespace = "bar_ns") {
+          module("bar") {
+            dependencies {
+              module("common")
+            }
+          }
+          module("common") {}
+        }
+      }
+    }
+    val fooModule = pluginSet.getEnabledModule("foo")
+    assertThat(fooModule.moduleDependencies.modules.single()).isEqualTo(PluginModuleId("common", "foo_ns"))
+    val barModule = pluginSet.getEnabledModule("bar")
+    assertThat(barModule.moduleDependencies.modules.single()).isEqualTo(PluginModuleId("common", "bar_ns"))
   }
-}
 
-private class PluginSetSpecBuilder(private val pluginsDirPath: Path) {
-  fun plugin(id: String? = null, body: PluginSpecBuilder.() -> Unit) {
-    val pluginSpec = if (id != null) {
-      buildPlugin(id, body)
+  @Test
+  fun `modules with same name and different namespaces in the same plugin`() {
+    val pluginSet = buildPluginSet {
+      plugin("foo") {
+        content(namespace = "namespace1") {
+          module("foo1") {
+            dependencies {
+              module("foo2")
+            }
+          }
+        }
+        content(namespace = "namespace2") {
+          module("foo2") {
+            dependencies {
+              module("foo3")
+            }
+          }
+        }
+        content {
+          module("foo3") {}
+        }
+      }
     }
-    else {
-      buildPlugin(body = body)
-    }
-    pluginSpec.buildDir(pluginsDirPath.resolve(pluginSpec.id!!))
+    assertThat(pluginSet).hasExactlyEnabledModulesWithoutMainDescriptors("foo1", "foo2", "foo3")
+    val foo1Module = pluginSet.getEnabledModule("foo1")
+    val foo2Module = pluginSet.getEnabledModule("foo2")
+    val foo3Module = pluginSet.getEnabledModule("foo3")
+    assertThat(foo1Module.moduleDependencies.modules.single()).isEqualTo(foo2Module.moduleId)
+    assertThat(foo2Module.moduleDependencies.modules.single()).isEqualTo(foo3Module.moduleId)
+  }
+
+  private fun buildPluginSet(builder: PluginSetSpecBuilder.() -> Unit): PluginSet {
+    val pluginsDirPath = inMemoryFs.fs.getPath("/").resolve("plugins")
+    val state = buildPluginSetState(pluginsDirPath, builder = builder)
+    loadingErrors = state.loadingErrors
+    return state.pluginSet
   }
 }

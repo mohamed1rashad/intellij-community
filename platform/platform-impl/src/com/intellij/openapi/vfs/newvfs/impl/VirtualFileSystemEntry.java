@@ -1,18 +1,25 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vfs.newvfs.impl;
 
 import com.intellij.core.CoreBundle;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
+import com.intellij.openapi.diagnostic.ControlFlowException;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.impl.LoadTextUtil;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.util.io.FileAttributes;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.InvalidVirtualFileAccessException;
+import com.intellij.openapi.vfs.LocalFileSystem;
+import com.intellij.openapi.vfs.VFileProperty;
+import com.intellij.openapi.vfs.VfsUtilCore;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileSystem;
+import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.openapi.vfs.encoding.EncodingManager;
 import com.intellij.openapi.vfs.encoding.EncodingRegistry;
-import com.intellij.openapi.vfs.impl.local.LocalFileSystemImpl;
+import com.intellij.openapi.vfs.impl.SymlinksCapableFileSystem;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFile;
 import com.intellij.openapi.vfs.newvfs.NewVirtualFileSystem;
 import com.intellij.openapi.vfs.newvfs.persistent.PersistentFS;
@@ -21,8 +28,13 @@ import com.intellij.serviceContainer.AlreadyDisposedException;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.LineSeparator;
 import com.intellij.util.LocalTimeCounter;
+import com.intellij.util.concurrency.annotations.RequiresWriteLock;
 import org.intellij.lang.annotations.MagicConstant;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.VisibleForTesting;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -126,9 +138,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     VfsDataFlags.CHILDREN_CASE_SENSITIVE;
 
   @MagicConstant(flagsFromClass = VfsDataFlags.class)
-  @interface Flags {
-  }
-
+  @interface Flags { }
 
   private final int id;
   private volatile VirtualDirectoryImpl parent;
@@ -138,8 +148,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   private volatile CachedFileType cachedFileType;
 
   static {
-    //noinspection ConstantValue
-    assert ~ALL_FLAGS_MASK == LocalTimeCounter.TIME_MASK : "ALL_FLAGS_MASK and MOD_COUNTER_MASK must combined into full int32";
+    assert ~ALL_FLAGS_MASK == LocalTimeCounter.MOD_COUNTER_MASK : "ALL_FLAGS_MASK and MOD_COUNTER_MASK must combined into full int32";
   }
 
   VirtualFileSystemEntry(int id, @NotNull VfsData.Segment segment, @Nullable VirtualDirectoryImpl parent) {
@@ -163,7 +172,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     PersistentFSImpl owningPersistentFS = owningVfsData.owningPersistentFS();
     if (!owningPersistentFS.isOwnData(owningVfsData)) {
       if (!owningPersistentFS.isConnected()) {
-        return new AlreadyDisposedException("VFS is disconnected, all it's files are invalid now");
+        return new AlreadyDisposedException("VFS is disconnected, all its files are invalid now");
       }
       else {
         //PersistentFSImpl re-creates VfsData on (re-)connect
@@ -173,6 +182,13 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     }
     return null;
   }
+
+  /**
+   * @return {@link VfsData} this entry is owned by
+   * @throws AlreadyDisposedException if {@link PersistentFS} is disconnected
+   * @throws AssertionError           if the entry is 'alien': i.e., currently connected {@link PersistentFS} has {@link VfsData} different
+   *                                  from {@link VfsData} this entry is owned by
+   */
   VfsData getVfsData() {
     VfsData owningVfsData = segment.owningVfsData();
     Throwable error = owningDiscrepancyError(owningVfsData);
@@ -207,8 +223,9 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
   }
 
   void registerLink(@NotNull VirtualFileSystem fs) {
-    if (fs instanceof LocalFileSystemImpl && isSymlink() && isValid()) {
-      ((LocalFileSystemImpl)fs).symlinkUpdated(id, parent, getNameSequence(), getPath(), getCanonicalPath());
+    if (fs instanceof SymlinksCapableFileSystem scfs && scfs.isSymlinksSupported()
+        && isSymlink() && isValid()) {
+      scfs.symlinkUpdated(id, parent, getNameSequence(), getPath(), getCanonicalPath());
     }
   }
 
@@ -219,16 +236,18 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
   @Override
   public @NotNull String getName() {
-    PersistentFSImpl pfs = owningPersistentFS();
-    if (pfs == null) {
-      return "<FS-is-disposed>";//shutdown-safe
+    VfsData owningVfsData = segment.owningVfsData();
+    PersistentFSImpl pfs = owningVfsData.owningPersistentFS();
+    Throwable error = owningDiscrepancyError(owningVfsData);
+    if (error != null) {
+      if (!pfs.isConnected()) {
+        return "(VFS is disposed: #" + id + ")";
+      }
+      else {
+        return "(alien file: #" + id + ")";
+      }
     }
     return pfs.getName(id);
-  }
-
-  @Override
-  public @NotNull CharSequence getNameSequence() {
-    return getName();
   }
 
   public final int getNameId() {
@@ -292,7 +311,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
   @Override
   public void markDirty() {
-    if (!isDirty()) {
+    if (!isDirty()) {//TODO RC: [isDirty() -> markDirtyInternal()] are non-atomic!
       markDirtyInternal();
       VirtualFileSystemEntry parent = getParent();
       if (parent != null) parent.markDirty();
@@ -474,12 +493,14 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     return computePath("", "");
   }
 
+  @RequiresWriteLock
   @Override
   public void delete(Object requestor) throws IOException {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
     owningPersistentFS().deleteFile(requestor, this);
   }
 
+  @RequiresWriteLock
   @Override
   public void rename(Object requestor, @NotNull @NonNls String newName) throws IOException {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
@@ -488,6 +509,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     owningPersistentFS().renameFile(requestor, this, newName);
   }
 
+  @RequiresWriteLock
   @Override
   public @NotNull VirtualFile createChildData(Object requestor, @NotNull String name) throws IOException {
     validateName(name);
@@ -519,6 +541,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     return owningPersistentFS().getLength(this);
   }
 
+  @RequiresWriteLock
   @Override
   public @NotNull VirtualFile copy(Object requestor, @NotNull VirtualFile newParent, @NotNull String copyName) throws IOException {
     if (getFileSystem() != newParent.getFileSystem()) {
@@ -532,6 +555,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     return EncodingRegistry.doActionAndRestoreEncoding(this, () -> owningPersistentFS().copyFile(requestor, this, newParent, copyName));
   }
 
+  @RequiresWriteLock
   @Override
   public void move(Object requestor, @NotNull VirtualFile newParent) throws IOException {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
@@ -570,6 +594,7 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     return id;
   }
 
+  @RequiresWriteLock
   @Override
   public @NotNull VirtualFile createChildDirectory(Object requestor, @NotNull String name) throws IOException {
     validateName(name);
@@ -598,17 +623,23 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
       //    session. General policy is that such files must not exist: if VFS is reconnected, _all_ the VirtualFiles from
       //    previous session must be thrown out and must not be used _in any way_. By default, we consider _any_ use of such
       //    'alien' files a code bug, so we throw AssertionError if a VFile from a previous VFS epoch is used _in any way_
-      //    (see getVfsData() for details).
+      //    (see owningDiscrepancyError() for details).
       //
       //    Unfortunately, reality always strikes back against our best hopes: there are some cases, mainly in older junit3-4
       //    tests, there VirtualFiles _leaked_ from one test to another, with VFS re-connected in between -- which leads to
       //    flaky 'Alien file object' assertions failing the tests. So we're forced to compromise our integrity: isValid()
       //    is the only method that _doesn't_ throw the AssertionError for alien files, but returns false instead.
       //    In other words: we now consider an 'alien' file as 'invalid' file, instead of a primordial sin.
-      VfsData owningVfsData = getVfsData();
+      VfsData owningVfsData = segment.owningVfsData();
       Throwable error = owningDiscrepancyError(owningVfsData);
       if (error != null) {
-        Logger.getInstance(VirtualFileSystemEntry.class).warn(error);
+        Logger log = Logger.getInstance(VirtualFileSystemEntry.class);
+        if (error instanceof ControlFlowException) {
+          log.warn(new Exception(error));
+        }
+        else{
+          log.warn(error);
+        }
       }
       return error == null && owningVfsData.isFileValid(id);
     }
@@ -682,6 +713,11 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
     private static final boolean DEBUG = LOG.isDebugEnabled();
   }
 
+  /**
+   * Mark the VFS entry as invalid (deleted).
+   * The method changes state of VFS _in-memory_ entry only -- persistent data ({@link com.intellij.openapi.vfs.newvfs.persistent.FSRecordsImpl})
+   * is not affected, and 'deleted' flag there must be set separately.
+   */
   @ApiStatus.Internal
   public void invalidate(@NotNull Object source, @NotNull Object reason) {
     getVfsData().invalidateFile(id);
@@ -874,6 +910,11 @@ public abstract class VirtualFileSystemEntry extends NewVirtualFile {
 
     @Override
     public boolean allChildrenLoaded() {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean allChildrenCached() {
       throw new UnsupportedOperationException();
     }
 

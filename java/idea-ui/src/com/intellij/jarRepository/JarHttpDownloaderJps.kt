@@ -10,7 +10,6 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.roots.AnnotationOrderRootType
 import com.intellij.openapi.roots.OrderRootType
 import com.intellij.openapi.roots.impl.libraries.LibraryEx
 import com.intellij.openapi.util.io.FileUtil
@@ -18,7 +17,11 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.newvfs.VfsImplUtil
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.TestOnly
 import org.jetbrains.concurrency.AsyncPromise
@@ -48,6 +51,8 @@ class JarHttpDownloaderJps(val project: Project, val coroutineScope: CoroutineSc
 
     @JvmStatic
     fun getInstance(project: Project): JarHttpDownloaderJps = project.service<JarHttpDownloaderJps>()
+
+    private const val ANNOTATION_ROOT_TYPE_NAME = "ANNOTATIONS"
 
     private fun collectRelativePathsForJarHttpDownloaderOrLog(project: Project?, library: LibraryEx): CollectResult {
       if (library.getKind() != RepositoryLibraryType.REPOSITORY_LIBRARY_KIND) {
@@ -102,7 +107,7 @@ class JarHttpDownloaderJps(val project: Project, val coroutineScope: CoroutineSc
           else {
             // allow existing annotation roots on disk to be excluded from downloading
             // continue
-            if (rootType == AnnotationOrderRootType.getInstance() && path.exists()) {
+            if (rootType.name() == ANNOTATION_ROOT_TYPE_NAME && path.exists()) {
               return@mapNotNull null
             }
 

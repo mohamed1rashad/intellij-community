@@ -9,8 +9,9 @@ import com.intellij.modcommand.ModPsiUpdater
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiElement
+import com.intellij.psi.SmartPsiElementPointer
+import com.intellij.psi.createSmartPointer
 import org.jetbrains.kotlin.analysis.api.KaSession
-import org.jetbrains.kotlin.analysis.api.analyze
 import org.jetbrains.kotlin.analysis.api.components.evaluate
 import org.jetbrains.kotlin.analysis.api.types.symbol
 import org.jetbrains.kotlin.idea.base.psi.safeDeparenthesize
@@ -23,7 +24,17 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
-import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.KtBinaryExpression
+import org.jetbrains.kotlin.psi.KtCallExpression
+import org.jetbrains.kotlin.psi.KtExpression
+import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.KtQualifiedExpression
+import org.jetbrains.kotlin.psi.KtVariableDeclaration
+import org.jetbrains.kotlin.psi.KtVisitor
+import org.jetbrains.kotlin.psi.KtVisitorVoid
+import org.jetbrains.kotlin.psi.createExpressionByPattern
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.utils.addToStdlib.safeAs
@@ -59,24 +70,16 @@ class ConvertArgumentToSetInspection : KotlinApplicableInspectionBase<KtExpressi
             /* descriptionTemplate = */ KotlinBundle.message("can.convert.argument.to.set"),
             /* highlightType = */ ProblemHighlightType.GENERIC_ERROR_OR_WARNING,
             /* onTheFly = */ onTheFly,
-            /* ...fixes = */ ConvertArgumentToSetFix(),
+            /* ...fixes = */ ConvertArgumentToSetFix(context.map { it.createSmartPointer() }),
         )
     }
 
-    private class ConvertArgumentToSetFix : KotlinModCommandQuickFix<KtExpression>() {
+    private class ConvertArgumentToSetFix(val args: List<SmartPsiElementPointer<KtExpression>>) : KotlinModCommandQuickFix<KtExpression>() {
         override fun getFamilyName(): String = KotlinBundle.message("convert.argument.to.set.fix.text")
 
         override fun applyFix(project: Project, element: KtExpression, updater: ModPsiUpdater) {
-            val arguments = analyze(element) {
-                when (element) {
-                    is KtCallExpression -> getConvertibleArguments(element)
-                    is KtBinaryExpression -> getConvertibleArguments(element)
-                    else -> null
-                }
-            } ?: return
-
-            for (arg in arguments) {
-                arg.replace(KtPsiFactory(project).createExpressionByPattern("$0.toSet()", arg))
+            for (arg in args.mapNotNull { it.element }) {
+                updater.getWritable(arg).replace(KtPsiFactory(project).createExpressionByPattern("$0.toSet()", arg))
             }
         }
     }
@@ -192,10 +195,9 @@ private fun KaSession.isLikeConstantExpressionListOf(element: KtExpression): Boo
     return when (element) {
         is KtNameReferenceExpression -> { // Try to resolve the name and check if it is declared with a constant `listOf`-like function
             val candidate = element.mainReference.resolve()
-            if (candidate is KtVariableDeclaration && !candidate.isVar) candidate.children.mapNotNull { getCallExpressionIfAny(it) }.run {
+            candidate is KtVariableDeclaration && !candidate.isVar && candidate.children.mapNotNull { getCallExpressionIfAny(it) }.run {
                 isNotEmpty() && all { it.isLikeConstantExpressionListOf() }
             }
-            else false
         }
 
         else -> getCallExpressionIfAny(element)?.isLikeConstantExpressionListOf() ?: false

@@ -8,12 +8,18 @@ import com.intellij.internal.statistic.service.fus.collectors.TooltipActionsLogg
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.IdeActions;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.util.NlsContexts.Tooltip;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.*;
+import com.intellij.ui.ColorUtil;
+import com.intellij.ui.ExperimentalUI;
+import com.intellij.ui.HintHint;
+import com.intellij.ui.LightweightHint;
+import com.intellij.ui.ScrollPaneFactory;
+import com.intellij.ui.WidthBasedLayout;
 import com.intellij.util.ui.GridBag;
 import com.intellij.util.ui.Html;
 import com.intellij.util.ui.JBUI;
@@ -22,16 +28,35 @@ import com.intellij.util.ui.accessibility.AccessibleContextDelegate;
 import com.intellij.util.ui.accessibility.ScreenReader;
 import com.intellij.util.ui.update.ComparableObject;
 import com.intellij.xml.util.XmlStringUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.accessibility.AccessibleContext;
-import javax.swing.*;
+import javax.swing.JComponent;
+import javax.swing.JEditorPane;
+import javax.swing.JLayeredPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollBar;
+import javax.swing.JScrollPane;
+import javax.swing.LayoutFocusTraversalPolicy;
+import javax.swing.ScrollPaneConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
-import java.awt.*;
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
+import java.awt.MouseInfo;
+import java.awt.Point;
+import java.awt.PointerInfo;
+import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.net.URL;
 import java.util.ArrayList;
@@ -68,96 +93,30 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
     myText = text;
   }
 
-  private static @NotNull JPanel createMainPanel(@NotNull HintHint hintHint,
-                                                 @NotNull JScrollPane pane,
-                                                 @NotNull JEditorPane editorPane,
-                                                 boolean highlightActions,
-                                                 boolean hasSeparators) {
-    int leftBorder = CONTENT_PADDING;
-    int rightBorder = 12;
-    final class MyPanel extends JPanel implements WidthBasedLayout {
-      private MyPanel() {
-        super(new GridBagLayout());
-      }
-
-      @Override
-      public int getPreferredWidth() {
-        return getPreferredSize().width;
-      }
-
-      @Override
-      public int getPreferredHeight(int width) {
-        Dimension size = editorPane.getSize();
-        int editorPaneInsets = leftBorder + rightBorder + getSideComponentWidth();
-        editorPane.setSize(width - editorPaneInsets, Math.max(1, size.height));
-        int height;
-        try {
-          height = getPreferredSize().height;
-          if (width - editorPaneInsets < editorPane.getMinimumSize().width) {
-            JScrollBar scrollBar = pane.getHorizontalScrollBar();
-            if (scrollBar != null) height += scrollBar.getPreferredSize().height;
-          }
-        }
-        finally {
-          editorPane.setSize(size);
-        }
-        return height;
-      }
-
-      @Override
-      public AccessibleContext getAccessibleContext() {
-        return new AccessibleContextDelegate(editorPane.getAccessibleContext()) {
-          @Override
-          protected Container getDelegateParent() {
-            return getParent();
-          }
-        };
-      }
-
-      private int getSideComponentWidth() {
-        GridBagLayout layout = (GridBagLayout)getLayout();
-        Component sideComponent = null;
-        GridBagConstraints sideComponentConstraints = null;
-        boolean unsupportedLayout = false;
-        for (Component component : getComponents()) {
-          GridBagConstraints c = layout.getConstraints(component);
-          if (c.gridx > 0) {
-            if (sideComponent == null && c.gridy == 0) {
-              sideComponent = component;
-              sideComponentConstraints = c;
-            }
-            else {
-              unsupportedLayout = true;
-            }
-          }
-        }
-        if (unsupportedLayout) {
-          Logger.getInstance(LineTooltipRenderer.class).error("Unsupported tooltip layout");
-        }
-        if (sideComponent == null) {
-          return 0;
-        }
-        else {
-          Insets insets = sideComponentConstraints.insets;
-          return sideComponent.getPreferredSize().width + (insets == null ? 0 : insets.left + insets.right);
-        }
-      }
-    }
-    JPanel grid = new MyPanel();
-    GridBag bag = new GridBag()
+  @ApiStatus.Internal
+  public static @NotNull JPanel createLayoutingPanel(@NotNull HintHint hintHint,
+                                                     @NotNull JScrollPane scrollPane,
+                                                     @NotNull JEditorPane editorPane,
+                                                     boolean highlightActions,
+                                                     boolean hasSeparators) {
+    final int leftBorder = CONTENT_PADDING;
+    final int rightBorder = 12;
+    
+    final JPanel layoutingPanel = new TooltipLayoutingPanel(scrollPane, editorPane, leftBorder, rightBorder);
+    final GridBag bag = new GridBag()
       .anchor(GridBagConstraints.CENTER)
       //weight is required for correct working scrollpane inside gridbaglayout
       .weightx(1.0)
       .weighty(1.0)
       .fillCell();
 
-    pane.setBorder(JBUI.Borders.empty(10, leftBorder, (highlightActions ? 10 : (hasSeparators ? 8 : 3)), rightBorder));
-    grid.add(pane, bag);
-    grid.setBackground(hintHint.getTextBackground());
-    grid.setBorder(JBUI.Borders.empty());
-    grid.setOpaque(hintHint.isOpaqueAllowed());
+    scrollPane.setBorder(JBUI.Borders.empty(10, leftBorder, (highlightActions ? 10 : (hasSeparators ? 8 : 3)), rightBorder));
+    layoutingPanel.add(scrollPane, bag);
+    layoutingPanel.setBackground(hintHint.getTextBackground());
+    layoutingPanel.setBorder(JBUI.Borders.empty());
+    layoutingPanel.setOpaque(hintHint.isOpaqueAllowed());
 
-    return grid;
+    return layoutingPanel;
   }
 
   @Override
@@ -175,6 +134,34 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
                                                                         HintManager.HIDE_BY_SCROLLING, 0, false, hintHint);
     }
     return hint;
+  }
+
+  @ApiStatus.Internal
+  public static @NotNull JScrollPane createScrollPane(JEditorPane editorPane, HintHint hintHint) {
+    final JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(editorPane, true);
+
+    scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+    scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+
+    scrollPane.setOpaque(hintHint.isOpaqueAllowed());
+    scrollPane.getViewport().setOpaque(hintHint.isOpaqueAllowed());
+
+    scrollPane.setBackground(hintHint.getTextBackground());
+    scrollPane.getViewport().setBackground(hintHint.getTextBackground());
+    scrollPane.setViewportBorder(null);
+
+    return scrollPane;
+  }
+
+  @ApiStatus.Internal
+  public static @NotNull JEditorPane createEditorPane(@Nls String textToDisplay, HintHint hintHint, JLayeredPane layeredPane, boolean limitWidthToScreen) {
+    final JEditorPane editorPane = IdeTooltipManager.initPane(
+      new Html(textToDisplay).setKeepFont(true),
+      hintHint, layeredPane, limitWidthToScreen
+    );
+    UIUtil.enableEagerSoftWrapping(editorPane);
+    editorPane.putClientProperty(UIUtil.TEXT_COPY_ROOT, Boolean.TRUE);
+    return editorPane;
   }
 
   public LightweightHint createHint(@NotNull Editor editor,
@@ -201,36 +188,24 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
     JLayeredPane layeredPane = editorComponent.getRootPane().getLayeredPane();
 
     String textToDisplay = colorizeSeparators(dressedText);
-    JEditorPane editorPane = IdeTooltipManager.initPane(new Html(textToDisplay).setKeepFont(true),
-                                                        hintHint, layeredPane, limitWidthToScreen);
-    UIUtil.enableEagerSoftWrapping(editorPane);
-    editorPane.putClientProperty(UIUtil.TEXT_COPY_ROOT, Boolean.TRUE);
+    final JEditorPane editorPane = createEditorPane(textToDisplay, hintHint, layeredPane, limitWidthToScreen);
+
     hintHint.setContentActive(isContentAction(dressedText));
     if (!hintHint.isAwtTooltip()) {
       correctLocation(editor, editorPane, p, alignToRight, expanded, myCurrentWidth);
     }
 
-    JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(editorPane, true);
-
-    scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-    scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
-
-    scrollPane.setOpaque(hintHint.isOpaqueAllowed());
-    scrollPane.getViewport().setOpaque(hintHint.isOpaqueAllowed());
-
-    scrollPane.setBackground(hintHint.getTextBackground());
-    scrollPane.getViewport().setBackground(hintHint.getTextBackground());
-    scrollPane.setViewportBorder(null);
+    final JScrollPane scrollPane = createScrollPane(editorPane, hintHint);
 
     if (hintHint.isRequestFocus()) {
       editorPane.setFocusable(true);
     }
 
     List<AnAction> actions = new ArrayList<>();
-    JPanel grid = createMainPanel(hintHint, scrollPane, editorPane, highlightActions, !textToDisplay.equals(dressedText));
+    final JPanel layoutingPanel = createLayoutingPanel(hintHint, scrollPane, editorPane, highlightActions, !textToDisplay.equals(dressedText));
     if (ScreenReader.isActive()) {
-      grid.setFocusTraversalPolicyProvider(true);
-      grid.setFocusTraversalPolicy(new LayoutFocusTraversalPolicy() {
+      layoutingPanel.setFocusTraversalPolicyProvider(true);
+      layoutingPanel.setFocusTraversalPolicy(new LayoutFocusTraversalPolicy() {
         @Override
         public Component getDefaultComponent(Container aContainer) {
           return editorPane;
@@ -241,7 +216,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
         }
       });
     }
-    LightweightHint hint = new LightweightHint(grid) {
+    LightweightHint hint = new LightweightHint(layoutingPanel) {
 
       @Override
       public void hide() {
@@ -287,7 +262,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
 
           String description = e.getDescription();
           if (description != null &&
-              handle(description, editor)) {
+              WriteIntentReadAction.compute(() -> handle(description, editor))) {
             hint.hide();
             return;
           }
@@ -298,7 +273,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
       }
     });
 
-    fillPanel(editor, grid, hint, hintHint, actions, reloader, highlightActions);
+    fillPanel(editor, layoutingPanel, hint, hintHint, actions, reloader, highlightActions);
 
     return hint;
   }
@@ -501,6 +476,89 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
       myHintHint.setRequestFocus(ScreenReader.isActive() && e.getInputEvent() instanceof KeyEvent);
       TooltipActionsLogger.logShowDescription(e.getProject(), TooltipActionsLogger.Source.Shortcut, e.getInputEvent(), e.getPlace());
       myReloader.reload(!myExpanded);
+    }
+  }
+
+  private static final class TooltipLayoutingPanel extends JPanel implements WidthBasedLayout {
+    @NotNull private final JScrollPane pane;
+    @NotNull private final JEditorPane editorPane;
+    private final int leftBorder;
+    private final int rightBorder;
+
+    private TooltipLayoutingPanel(
+      @NotNull JScrollPane pane,
+      @NotNull JEditorPane editorPane,
+      int leftBorder,
+      int rightBorder
+    ) {
+      super(new GridBagLayout());
+      this.pane = pane;
+      this.editorPane = editorPane;
+      this.leftBorder = leftBorder;
+      this.rightBorder = rightBorder;
+    }
+
+    @Override
+    public int getPreferredWidth() {
+      return getPreferredSize().width;
+    }
+
+    @Override
+    public int getPreferredHeight(int width) {
+      Dimension size = editorPane.getSize();
+      int editorPaneInsets = leftBorder + rightBorder + getSideComponentWidth();
+      editorPane.setSize(width - editorPaneInsets, Math.max(1, size.height));
+      int height;
+      try {
+        height = getPreferredSize().height;
+        if (width - editorPaneInsets < editorPane.getMinimumSize().width) {
+          JScrollBar scrollBar = pane.getHorizontalScrollBar();
+          if (scrollBar != null) height += scrollBar.getPreferredSize().height;
+        }
+      }
+      finally {
+        editorPane.setSize(size);
+      }
+      return height;
+    }
+
+    @Override
+    public AccessibleContext getAccessibleContext() {
+      return new AccessibleContextDelegate(editorPane.getAccessibleContext()) {
+        @Override
+        protected Container getDelegateParent() {
+          return getParent();
+        }
+      };
+    }
+
+    private int getSideComponentWidth() {
+      GridBagLayout layout = (GridBagLayout)getLayout();
+      Component sideComponent = null;
+      GridBagConstraints sideComponentConstraints = null;
+      boolean unsupportedLayout = false;
+      for (Component component : getComponents()) {
+        GridBagConstraints c = layout.getConstraints(component);
+        if (c.gridx > 0) {
+          if (sideComponent == null && c.gridy == 0) {
+            sideComponent = component;
+            sideComponentConstraints = c;
+          }
+          else {
+            unsupportedLayout = true;
+          }
+        }
+      }
+      if (unsupportedLayout) {
+        Logger.getInstance(LineTooltipRenderer.class).error("Unsupported tooltip layout");
+      }
+      if (sideComponent == null) {
+        return 0;
+      }
+      else {
+        Insets insets = sideComponentConstraints.insets;
+        return sideComponent.getPreferredSize().width + (insets == null ? 0 : insets.left + insets.right);
+      }
     }
   }
 }

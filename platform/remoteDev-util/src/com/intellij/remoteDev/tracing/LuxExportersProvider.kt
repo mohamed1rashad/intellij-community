@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.remoteDev.tracing
 
 import com.intellij.openapi.diagnostic.logger
@@ -12,7 +12,7 @@ import io.opentelemetry.sdk.metrics.export.MetricExporter
 import java.nio.file.Path
 import kotlin.time.Duration.Companion.seconds
 
-private class LuxExportersProvider : OpenTelemetryExporterProvider {
+internal class LuxExportersProvider : OpenTelemetryExporterProvider {
   override fun getMetricsExporters(): List<MetricExporter> {
     if (System.getProperty(OpenTelemetryUtils.RDCT_LUX_METRICS_DIAGNOSTIC_FLAG) == null) {
       return emptyList()

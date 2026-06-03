@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.completion;
 
 import com.intellij.codeInsight.lookup.LookupElement;
@@ -6,6 +6,8 @@ import com.intellij.codeInsight.lookup.LookupElementPresentation;
 import com.intellij.lang.Language;
 import com.intellij.lang.LanguageExtension;
 import com.intellij.lang.LanguageExtensionWithAny;
+import com.intellij.modcompletion.ModCompletionItemFilter;
+import com.intellij.modcompletion.ModCompletionItemProvider;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.extensions.ExtensionPointName;
@@ -19,15 +21,22 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiReference;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.Consumer;
+import com.intellij.util.PlatformUtils;
 import com.intellij.util.ProcessingContext;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 /**
  * <b>Completion FAQ</b><p>
@@ -224,19 +233,50 @@ public abstract class CompletionContributor implements PossiblyDumbAware {
   }
 
   public static @NotNull List<CompletionContributor> forParameters(@NotNull CompletionParameters parameters) {
-    return ReadAction.compute(() -> {
+    return ReadAction.computeBlocking(() -> {
       PsiElement position = parameters.getPosition();
-      return forLanguageHonorDumbness(PsiUtilCore.getLanguageAtOffset(position.getContainingFile(), parameters.getOffset()),
-                                      position.getProject());
+      Language language = PsiUtilCore.getLanguageAtOffset(position.getContainingFile(), parameters.getOffset());
+      return forLanguageHonorDumbness(language, position.getProject());
     });
   }
 
+  @ApiStatus.Internal
   public static @NotNull List<CompletionContributor> forLanguage(@NotNull Language language) {
-    return INSTANCE.forKey(language);
+    boolean isRDFrontend = NewRdCompletionSupport.isFrontendRdCompletionOn() && PlatformUtils.isJetBrainsClient();
+
+    List<CompletionContributor> contributors;
+    if (isRDFrontend) {
+      contributors = ContainerUtil.filter(INSTANCE.forKey(language), c -> c instanceof FrontendCompletionContributor);
+    }
+    else {
+      contributors = INSTANCE.forKey(language);
+    }
+
+    List<ModCompletionItemProvider> providers = ModCompletionItemProvider.forLanguage(language);
+    if (providers.isEmpty()) {
+      return contributors;
+    }
+    List<ModCompletionItemFilter> filters = ModCompletionItemFilter.EP_NAME.allForLanguage(language);
+
+    Map<Class<? extends CompletionContributor>, Integer> order = IntStream.range(0, contributors.size())
+      .boxed().collect(Collectors.toMap(idx -> contributors.get(idx).getClass(), Function.identity(), (a, b) -> a));
+
+    Stream<Map.Entry<Integer, CompletionContributor>> modContributors = providers
+      .stream()
+      .filter(ModCompletionItemProvider::isEnabled)
+      .map(provider -> Map.entry(order.getOrDefault(provider.getAnchorContributor(), -1),
+                                 new CompletionItemContributor(provider, ContainerUtil.filter(filters, f -> f.isApplicableFor(provider)))));
+    return Stream.concat(
+      modContributors, IntStream.range(0, contributors.size()).mapToObj(idx -> Map.entry(idx, contributors.get(idx))))
+      .sorted(Map.Entry.comparingByKey())
+      .map(Map.Entry::getValue)
+      .toList();
   }
 
+  @ApiStatus.Internal
   public static @NotNull List<CompletionContributor> forLanguageHonorDumbness(@NotNull Language language, @NotNull Project project) {
-    return DumbService.getInstance(project).filterByDumbAwareness(forLanguage(language));
+    List<CompletionContributor> contributors = forLanguage(language);
+    return DumbService.getInstance(project).filterByDumbAwareness(contributors);
   }
 
   private static final LanguageExtension<CompletionContributor> INSTANCE = new LanguageExtensionWithAny<>(EP.getName());

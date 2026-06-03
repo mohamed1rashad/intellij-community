@@ -3,7 +3,7 @@ package com.intellij.python.sdk.ui.evolution.ui
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.python.community.impl.uv.common.icons.PythonCommunityImplUVCommonIcons
+import com.intellij.python.uv.common.icons.PythonUvCommonIcons
 import com.intellij.python.sdk.ui.PySdkUiBundle
 import com.intellij.python.sdk.ui.evolution.sdk.EvoModuleSdk
 import com.intellij.python.sdk.ui.evolution.ui.components.EvoTreeLazyNodeElement
@@ -24,14 +24,14 @@ internal val autoSetupWithAIAction = object : AnAction(
 internal val defaultUvAction = object : AnAction(
   { PySdkUiBundle.message("evo.sdk.status.bar.popup.shortcuts.uv") },
   { "" },
-  PythonCommunityImplUVCommonIcons.UV,
+  PythonUvCommonIcons.UV,
 ) {
   override fun actionPerformed(e: AnActionEvent) {
   }
 }
 
 
-private class AutoconfigSelectSdkProvider() : EvoSelectSdkProvider {
+internal class AutoconfigSelectSdkProvider() : EvoSelectSdkProvider {
   override fun getTreeElement(evoModuleSdk: EvoModuleSdk) = EvoTreeLazyNodeElement(
     text = PySdkUiBundle.message("evo.sdk.status.bar.popup.shortcuts.best.options"),
     icon = AllIcons.General.Layout
@@ -57,7 +57,7 @@ private val ratingIcons = listOf(
   AllIcons.Ide.Rating1,
 )
 
-private class RunConfiguratorAction(
+internal class RunConfiguratorAction(
   intention: String,
   order: Int,
 ) : AnAction({ intention }, { intention }, ratingIcons.getOrElse(order, { AllIcons.Ide.Rating1 })) {

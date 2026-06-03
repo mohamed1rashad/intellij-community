@@ -3,7 +3,14 @@ package com.intellij.platform.workspace.storage.tests.ordering
 
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.entities
-import com.intellij.platform.workspace.storage.testEntities.entities.*
+import com.intellij.platform.workspace.storage.testEntities.entities.LeftEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.MiddleEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.MiddleEntityBuilder
+import com.intellij.platform.workspace.storage.testEntities.entities.MySource
+import com.intellij.platform.workspace.storage.testEntities.entities.NamedChildEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.NamedEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.modifyLeftEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.modifyNamedEntity
 import com.intellij.platform.workspace.storage.tests.builderFrom
 import com.intellij.platform.workspace.storage.tests.from
 import com.intellij.platform.workspace.storage.toBuilder
@@ -101,9 +108,9 @@ class AbstractChildrenOrderingTest {
       )
     }
 
-    assertEquals("One", entity.children[0].asSafely<ModifiableMiddleEntity>()!!.property)
-    assertEquals("Two", entity.children[1].asSafely<ModifiableMiddleEntity>()!!.property)
-    assertEquals("Three", entity.children[2].asSafely<ModifiableMiddleEntity>()!!.property)
+    assertEquals("One", entity.children[0].asSafely<MiddleEntityBuilder>()!!.property)
+    assertEquals("Two", entity.children[1].asSafely<MiddleEntityBuilder>()!!.property)
+    assertEquals("Three", entity.children[2].asSafely<MiddleEntityBuilder>()!!.property)
   }
 
   @ParameterizedTest

@@ -3,7 +3,11 @@
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.analysis.AnalysisBundle;
-import com.intellij.codeHighlighting.*;
+import com.intellij.codeHighlighting.MainHighlightingPassFactory;
+import com.intellij.codeHighlighting.Pass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPass;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassFactoryRegistrar;
+import com.intellij.codeHighlighting.TextEditorHighlightingPassRegistrar;
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightInfoHolder;
 import com.intellij.lang.Language;
 import com.intellij.openapi.editor.Document;
@@ -50,7 +54,7 @@ final class ChameleonSyntaxHighlightingPass extends ProgressableTextEditorHighli
       Project project = psiFile.getProject();
       TextRange restrict = FileStatusMap.getDirtyTextRange(editor.getDocument(), psiFile, Pass.UPDATE_ALL);
       if (restrict == null) return new ProgressableTextEditorHighlightingPass.EmptyPass(project, editor.getDocument());
-      ProperTextRange priority = HighlightingSessionImpl.getFromCurrentIndicator(psiFile).getVisibleRange();
+      ProperTextRange priority = DaemonCodeAnalyzerEx.getInstanceEx(project).getHighlightSessionFromCurrentIndicator(psiFile).getVisibleRange();
       return new ChameleonSyntaxHighlightingPass(psiFile, editor.getDocument(), ProperTextRange.create(restrict), priority, editor);
     }
 

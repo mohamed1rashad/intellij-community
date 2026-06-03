@@ -1,7 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.vcs.changes.actions.diff;
 
-import com.intellij.diff.*;
+import com.intellij.diff.DiffContentFactory;
+import com.intellij.diff.DiffContentFactoryEx;
+import com.intellij.diff.DiffEditorTitleCustomizer;
+import com.intellij.diff.DiffRequestFactory;
+import com.intellij.diff.DiffVcsDataKeys;
 import com.intellij.diff.chains.DiffRequestProducer;
 import com.intellij.diff.chains.DiffRequestProducerException;
 import com.intellij.diff.contents.DiffContent;
@@ -18,6 +22,7 @@ import com.intellij.diff.util.DiffUtil;
 import com.intellij.diff.util.Side;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diff.DiffBundle;
+import com.intellij.openapi.diff.impl.DiffTitleWithDetailsCustomizers;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
@@ -25,12 +30,20 @@ import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.UserDataHolder;
-import com.intellij.openapi.vcs.*;
-import com.intellij.openapi.vcs.changes.*;
+import com.intellij.openapi.vcs.AbstractVcs;
+import com.intellij.openapi.vcs.FilePath;
+import com.intellij.openapi.vcs.FileStatus;
+import com.intellij.openapi.vcs.VcsDataKeys;
+import com.intellij.openapi.vcs.VcsException;
+import com.intellij.openapi.vcs.changes.ByteBackedContentRevision;
+import com.intellij.openapi.vcs.changes.Change;
+import com.intellij.openapi.vcs.changes.ChangeListChange;
+import com.intellij.openapi.vcs.changes.ChangesUtil;
+import com.intellij.openapi.vcs.changes.ContentRevision;
+import com.intellij.openapi.vcs.changes.CurrentContentRevision;
 import com.intellij.openapi.vcs.changes.actions.diff.lst.LocalChangeListDiffRequest;
 import com.intellij.openapi.vcs.changes.ui.ChangeDiffRequestChain;
 import com.intellij.openapi.vcs.changes.ui.ChangesBrowserNode;
-import com.intellij.openapi.diff.impl.DiffTitleWithDetailsCustomizers;
 import com.intellij.openapi.vcs.impl.LineStatusTrackerManager;
 import com.intellij.openapi.vcs.merge.MergeData;
 import com.intellij.openapi.vcs.merge.MergeUtils;
@@ -38,12 +51,17 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 import static com.intellij.util.ObjectUtils.tryCast;
 import static com.intellij.vcsUtil.VcsUtil.getShortRevisionString;
@@ -264,11 +282,27 @@ public final class ChangeDiffRequestProducer implements DiffRequestProducer, Cha
     return request;
   }
 
-  private @NotNull List<DiffEditorTitleCustomizer> createTitleCustomizers() {
+  @ApiStatus.Internal
+  public @NotNull List<DiffEditorTitleCustomizer> createTitleCustomizers() {
     return DiffTitleWithDetailsCustomizers.getTitleCustomizers(myProject, myChange,
-                                                               (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_LEFT_CONTENT_TITLE),
-                                                               (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_RIGHT_CONTENT_TITLE)
+                                                               getLeftContentTitle(),
+                                                               getRightContentTitle()
     );
+  }
+
+  @ApiStatus.Internal
+  public @Nls String getLeftContentTitle() {
+    return (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_LEFT_CONTENT_TITLE);
+  }
+
+  @ApiStatus.Internal
+  public @Nls String getRightContentTitle() {
+    return (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_RIGHT_CONTENT_TITLE);
+  }
+
+  @ApiStatus.Internal
+  public @Nls String getEditorTabTitle() {
+    return (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_EDITOR_TAB_TITLE);
   }
 
   @SuppressWarnings("unchecked")
@@ -315,7 +349,8 @@ public final class ChangeDiffRequestProducer implements DiffRequestProducer, Cha
     }
   }
 
-  private @NotNull SimpleDiffRequest createSimpleRequest(@Nullable Project project,
+  @ApiStatus.Internal
+  public @NotNull SimpleDiffRequest createSimpleRequest(@Nullable Project project,
                                                          @NotNull Change change,
                                                          @NotNull UserDataHolder context,
                                                          @NotNull ProgressIndicator indicator) throws DiffRequestProducerException {
@@ -329,16 +364,16 @@ public final class ChangeDiffRequestProducer implements DiffRequestProducer, Cha
     if (bRev != null) checkContentRevision(project, bRev, context, indicator);
     if (aRev != null) checkContentRevision(project, aRev, context, indicator);
 
-    final String editorTabTitle = (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_EDITOR_TAB_TITLE);
+    final String editorTabTitle = getEditorTabTitle();
     String title = editorTabTitle == null ? getRequestTitle(change) : editorTabTitle;
 
     indicator.setIndeterminate(true);
     DiffContent content1 = createContent(project, bRev, context, indicator);
     DiffContent content2 = createContent(project, aRev, context, indicator);
 
-    final String userLeftRevisionTitle = (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_LEFT_CONTENT_TITLE);
+    final String userLeftRevisionTitle = getLeftContentTitle();
     String beforeRevisionTitle = userLeftRevisionTitle != null ? userLeftRevisionTitle : getRevisionTitle(bRev, getBaseVersion());
-    final String userRightRevisionTitle = (String)myChangeContext.get(DiffUserDataKeysEx.VCS_DIFF_RIGHT_CONTENT_TITLE);
+    final String userRightRevisionTitle = getRightContentTitle();
     String afterRevisionTitle = userRightRevisionTitle != null ? userRightRevisionTitle : getRevisionTitle(aRev, getYourVersion());
 
     SimpleDiffRequest request = new SimpleDiffRequest(title, content1, content2, beforeRevisionTitle, afterRevisionTitle);

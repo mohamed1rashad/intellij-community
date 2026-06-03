@@ -21,13 +21,22 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.StartupUiUtil.isUnderDarcula
 import com.intellij.util.ui.UIUtil
 import org.jetbrains.annotations.ApiStatus
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Graphics
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
+import java.awt.Rectangle
 import java.awt.event.ActionEvent
 import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.function.Consumer
-import javax.swing.*
+import javax.swing.JComponent
+import javax.swing.JPanel
+import javax.swing.JProgressBar
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 
 /**
  * This component was copy-pasted from `InlineProgressIndicator` with the following modification:
@@ -74,7 +83,8 @@ open class ProgressComponent(val isCompact: Boolean, val info: TaskInfo, progres
       createCompactTextAndProgress(component)
       component.add(createButtonPanel(
         eastButtons.map{ b: ProgressButton -> b.button }), BorderLayout.EAST)
-      component.setToolTipText(indicatorModel.title + ". " + IdeBundle.message("progress.text.clickToViewProgressWindow"))
+      component.setToolTipText(computeTooltipText(indicatorModel))
+      component.getAccessibleContext().accessibleDescription = "" // override tooltip
     }
     else {
       component.setLayout(BorderLayout())
@@ -131,11 +141,11 @@ open class ProgressComponent(val isCompact: Boolean, val info: TaskInfo, progres
   }
 
   protected fun createCancelButton(): ProgressButton {
-    val cancelButton = InplaceButton(
+    val cancelButton = createInplaceButton(
       IconButton(indicatorModel.getCancelTooltipText(),
                  if (isCompact) AllIcons.Process.StopSmall else AllIcons.Process.Stop,
                  if (isCompact) AllIcons.Process.StopSmallHovered else AllIcons.Process.StopHovered),
-      ActionListener { _: ActionEvent? -> cancelRequest() }).setFillBg(false)
+      ActionListener { _: ActionEvent? -> cancelRequest() })
 
     cancelButton.isVisible = indicatorModel.isCancellable()
 
@@ -144,6 +154,12 @@ open class ProgressComponent(val isCompact: Boolean, val info: TaskInfo, progres
 
   protected open fun cancelRequest() {
     indicatorModel.cancel()
+  }
+
+  protected fun createInplaceButton(source: IconButton, listener: ActionListener): InplaceButton {
+    return (if (isCompact) StatusBarProgressButton(source, listener) else InplaceButton(source, listener)).also {
+      it.setFillBg(false)
+    }
   }
 
   open fun getText(): @NlsContexts.ProgressText String? {
@@ -329,5 +345,23 @@ open class ProgressComponent(val isCompact: Boolean, val info: TaskInfo, progres
       wrapper.setBorder(JBUI.Borders.empty(0, 3, 0, 2))
       return wrapper
     }
+
+    @NlsContexts.Tooltip
+    fun computeTooltipText(indicatorModel: ProgressModel?): String {
+      return if (indicatorModel != null) {
+        indicatorModel.title + ". " + IdeBundle.message("progress.text.clickToViewProgressWindow")
+      }
+      else {
+        IdeBundle.message("progress.text.clickToViewProgressWindow")
+      }
+    }
+  }
+}
+
+private class StatusBarProgressButton : InplaceButton, WidgetEffectBoundsProvider {
+  constructor(source: IconButton, listener: ActionListener) : super(source, listener)
+
+  override fun getWidgetEffectBounds(): Rectangle {
+    return Rectangle(size).also { it.grow(JBUI.scale(3), JBUI.scale(3)) }
   }
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 
 package org.jetbrains.kotlin.idea.fir.navigation;
 
@@ -40,6 +40,31 @@ public class FirGotoTypeDeclarationTestGenerated extends AbstractFirGotoTypeDecl
         runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/classInstance.test");
     }
 
+    @TestMetadata("enum.test")
+    public void testEnum() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/enum.test");
+    }
+
+    @TestMetadata("enum2.test")
+    public void testEnum2() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/enum2.test");
+    }
+
+    @TestMetadata("enum3.test")
+    public void testEnum3() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/enum3.test");
+    }
+
+    @TestMetadata("enum4.test")
+    public void testEnum4() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/enum4.test");
+    }
+
+    @TestMetadata("enumTypealias.test")
+    public void testEnumTypealias() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/enumTypealias.test");
+    }
+
     @TestMetadata("explicitParameterInLambda.test")
     public void testExplicitParameterInLambda() throws Exception {
         runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/explicitParameterInLambda.test");
@@ -75,6 +100,41 @@ public class FirGotoTypeDeclarationTestGenerated extends AbstractFirGotoTypeDecl
         runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeInParameter.test");
     }
 
+    @TestMetadata("genericTypeParameter.test")
+    public void testGenericTypeParameter() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameter.test");
+    }
+
+    @TestMetadata("genericTypeParameterBounded.test")
+    public void testGenericTypeParameterBounded() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameterBounded.test");
+    }
+
+    @TestMetadata("genericTypeParameterCallSite.test")
+    public void testGenericTypeParameterCallSite() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameterCallSite.test");
+    }
+
+    @TestMetadata("genericTypeParameterClassMember.test")
+    public void testGenericTypeParameterClassMember() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameterClassMember.test");
+    }
+
+    @TestMetadata("genericTypeParameterLambdaIt.test")
+    public void testGenericTypeParameterLambdaIt() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameterLambdaIt.test");
+    }
+
+    @TestMetadata("genericTypeParameterMultiple.test")
+    public void testGenericTypeParameterMultiple() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameterMultiple.test");
+    }
+
+    @TestMetadata("genericTypeParameterReceiver.test")
+    public void testGenericTypeParameterReceiver() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/genericTypeParameterReceiver.test");
+    }
+
     @TestMetadata("itExtensionLambda.test")
     public void testItExtensionLambda() throws Exception {
         runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/itExtensionLambda.test");
@@ -93,6 +153,11 @@ public class FirGotoTypeDeclarationTestGenerated extends AbstractFirGotoTypeDecl
     @TestMetadata("noParametersLambda.test")
     public void testNoParametersLambda() throws Exception {
         runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/noParametersLambda.test");
+    }
+
+    @TestMetadata("smartCast.test")
+    public void testSmartCast() throws Exception {
+        runTest("../../idea/tests/testData/navigation/gotoTypeDeclaration/smartCast.test");
     }
 
     @TestMetadata("thisExtensionFunction.test")

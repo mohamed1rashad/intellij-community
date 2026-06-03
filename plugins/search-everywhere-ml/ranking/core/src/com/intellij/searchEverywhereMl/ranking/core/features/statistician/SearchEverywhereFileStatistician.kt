@@ -5,8 +5,10 @@ import com.intellij.openapi.module.Module
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.psi.PsiFileSystemItem
 
-private class SearchEverywhereFileStatistician : SearchEverywhereStatistician<Any>(PsiFileSystemItem::class.java,
+internal class SearchEverywhereFileStatistician : SearchEverywhereStatistician<Any>(PsiFileSystemItem::class.java,
                                                                                    PsiItemWithPresentation::class.java) {
+  override val requiresReadAction: Boolean = true
+
   override fun getValue(element: Any, location: String) = getFileWithVirtualFile(element)
     ?.virtualFile
     ?.path

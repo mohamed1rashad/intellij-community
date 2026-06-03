@@ -1,9 +1,8 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.dvcs.ignore
 
 import com.intellij.CommonBundle
 import com.intellij.icons.AllIcons
-import com.intellij.ide.BrowserUtil
 import com.intellij.ide.projectView.actions.MarkRootsManager
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.idea.ActionsBundle
@@ -11,18 +10,18 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.runInEdt
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.help.HelpManager
 import com.intellij.openapi.module.ModuleUtil
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.roots.OrderEnumerator
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.registry.Registry
@@ -41,6 +40,8 @@ import com.intellij.openapi.vcs.changes.ui.SelectFilesDialog
 import com.intellij.openapi.vcs.ignore.IgnoredToExcludedSynchronizerConstants.ASKED_MARK_IGNORED_FILES_AS_EXCLUDED_PROPERTY
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.backend.workspace.WorkspaceModel
+import com.intellij.platform.backend.workspace.virtualFile
+import com.intellij.platform.backend.workspace.workspaceModel
 import com.intellij.platform.ide.progress.withModalProgress
 import com.intellij.platform.workspace.jps.entities.ContentRootEntity
 import com.intellij.platform.workspace.jps.entities.SourceRootEntity
@@ -51,11 +52,16 @@ import com.intellij.util.Alarm
 import com.intellij.util.messages.impl.subscribeAsFlow
 import com.intellij.util.ui.update.MergingUpdateQueue
 import com.intellij.util.ui.update.Update
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import org.jetbrains.annotations.ApiStatus
-import java.util.*
+import java.util.Objects
 import java.util.function.Function
 import javax.swing.JComponent
 
@@ -99,7 +105,7 @@ class IgnoredToExcludedSynchronizer(project: Project, private val cs: CoroutineS
       LOG.debug("updateNotificationState, acquiredFiles", acquiredFiles)
       val filesToRemove = acquiredFiles
         .asSequence()
-        .filter { file -> runReadAction { fileIndex.isExcluded(file) } || sourceRoots.contains(file) }
+        .filter { file -> runReadActionBlocking { fileIndex.isExcluded(file) } || sourceRoots.contains(file) }
         .toList()
       LOG.debug("updateNotificationState, filesToRemove", filesToRemove)
 
@@ -207,7 +213,7 @@ class IgnoredToExcludedSynchronizer(project: Project, private val cs: CoroutineS
 }
 
 private fun markIgnoredAsExcluded(project: Project, files: Collection<VirtualFile>) {
-  val ignoredDirsByModule = runReadAction {
+  val ignoredDirsByModule = runReadActionBlocking {
     files
       .groupBy { ModuleUtil.findModuleForFile(it, project) }
       //if the directory already excluded then ModuleUtil.findModuleForFile return null and this will filter out such directories from processing.
@@ -223,8 +229,10 @@ private fun markIgnoredAsExcluded(project: Project, files: Collection<VirtualFil
   }
 }
 
-private fun getProjectSourceRoots(project: Project): Set<VirtualFile> = runReadAction {
-  OrderEnumerator.orderEntries(project).withoutSdk().withoutLibraries().sources().usingCache().roots.toHashSet()
+private fun getProjectSourceRoots(project: Project): Set<VirtualFile> {
+  return project.workspaceModel.currentSnapshot.entities(SourceRootEntity::class.java).mapNotNull {
+    it.url.virtualFile
+  }.toSet()
 }
 
 private fun containsShelfDirectoryOrUnderIt(filePath: FilePath, shelfPath: String) =
@@ -256,7 +264,7 @@ private fun determineIgnoredDirsToExclude(project: Project, ignoredPaths: Collec
     //shelf directory usually contains in project and excluding it prevents local history to work on it
     .filterNot { containsShelfDirectoryOrUnderIt(it, shelfPath) }
     .mapNotNull(FilePath::getVirtualFile)
-    .filterNot { runReadAction { fileIndex.isExcluded(it) } }
+    .filterNot { runReadActionBlocking { fileIndex.isExcluded(it) } }
     //do not propose to exclude if there is a source root inside
     .filterNot { ignored -> sourceRoots.contains(ignored) }
     .toList()
@@ -314,7 +322,7 @@ class IgnoredToExcludeNotificationProvider : EditorNotificationProvider, DumbAwa
       panel.createActionLabel(message("ignore.to.exclude.notification.action.view")) { showIgnoredAction(project) }
       panel.createActionLabel(message("ignore.to.exclude.notification.action.mute"), muteAction(project))
       panel.createActionLabel(message("ignore.to.exclude.notification.action.details")) {
-        BrowserUtil.browse("https://www.jetbrains.com/help/idea/content-roots.html#folder-categories")
+        HelpManager.getInstance().invokeHelp("help.content.roots.folder.categories")
       }
       panel
     }

@@ -1,4 +1,2 @@
-f:com.intellij.platform.eel.provider.EelProviderUtil
-f:com.intellij.platform.eel.provider.utils.EelChannelUtilsKt
-f:com.intellij.platform.eel.provider.utils.EelProcessUtilsKt
-f:com.intellij.platform.eel.provider.utils.IjentTunnelsUtil
+f:com.intellij.platform.eel.provider.EelProviderProjectUtilKt
+- sf:getEelMachine(com.intellij.openapi.project.Project):com.intellij.platform.eel.EelMachine

@@ -2,14 +2,47 @@
 package com.intellij.codeInsight.intention;
 
 import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
+import com.intellij.codeInspection.redundantCast.RemoveRedundantCastUtil;
 import com.intellij.icons.AllIcons;
 import com.intellij.java.JavaBundle;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
 import com.intellij.lang.java.JavaLanguage;
-import com.intellij.modcommand.*;
+import com.intellij.modcommand.ActionContext;
+import com.intellij.modcommand.ModCommand;
+import com.intellij.modcommand.ModCommandAction;
+import com.intellij.modcommand.ModPsiUpdater;
+import com.intellij.modcommand.Presentation;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsContexts;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiExpressionList;
+import com.intellij.psi.PsiExpressionStatement;
+import com.intellij.psi.PsiIdentifier;
+import com.intellij.psi.PsiImplicitClass;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiMethodCallExpression;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiNewExpression;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiReference;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiReferenceList;
+import com.intellij.psi.PsiReturnStatement;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeCastExpression;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.SmartPointerManager;
+import com.intellij.psi.SmartPsiElementPointer;
 import com.intellij.psi.codeStyle.CodeStyleManager;
 import com.intellij.psi.impl.light.LightModifierList;
 import com.intellij.psi.impl.source.resolve.JavaResolveUtil;
@@ -17,6 +50,7 @@ import com.intellij.psi.search.searches.ReferencesSearch;
 import com.intellij.psi.util.PsiFormatUtil;
 import com.intellij.psi.util.PsiFormatUtilBase;
 import com.intellij.psi.util.PsiUtil;
+import com.intellij.psi.util.RedundantCastUtil;
 import com.intellij.ui.NewUiValue;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.VisibilityUtil;
@@ -27,7 +61,11 @@ import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
 
 public final class ReplaceConstructorWithFactoryAction implements ModCommandAction {
   @Override
@@ -138,9 +176,38 @@ public final class ReplaceConstructorWithFactoryAction implements ModCommandActi
         Objects.requireNonNull(factoryCallRef.getQualifierExpression()).replace(qualifier);
       }
 
-      ct.replaceAndRestoreComments(newExpression, factoryCall);
+      PsiClassType rawConstructorCallType = getTypeOfProbablyNeededCast(newExpression);
+      PsiExpression replacement = rawConstructorCallType == null
+                                  ? factoryCall
+                                  : castRawFactoryCall(factory, rawConstructorCallType, newExpression, factoryCall);
+      PsiElement result = ct.replaceAndRestoreComments(newExpression, replacement);
+      if (result instanceof PsiTypeCastExpression castExpression && RedundantCastUtil.isCastRedundant(castExpression)) {
+        RemoveRedundantCastUtil.removeCast(castExpression);
+      }
     }
     updater.rename(factoryMethod, names);
+  }
+
+  /// Returns the type of cast that might be needed in some context when `newExpression` is replaced with the factory method,
+  /// null otherwise.
+  /// Cast may be needed when `newExpression` type is raw and `newExpression` is not a statement.
+  /// The actual necessity of the cast depends on the surrounding context in which `newExpression` is replaced with the factory method.
+  private static @Nullable PsiClassType getTypeOfProbablyNeededCast(@NotNull PsiNewExpression newExpression) {
+    PsiElement parent = PsiUtil.skipParenthesizedExprUp(newExpression.getParent());
+    if (parent instanceof PsiExpressionStatement) return null;
+    PsiType type = newExpression.getType();
+    return type instanceof PsiClassType classType && classType.isRaw() ? classType : null;
+  }
+
+  private static @NotNull PsiExpression castRawFactoryCall(@NotNull PsiElementFactory factory,
+                                                           @NotNull PsiClassType rawConstructorCallType,
+                                                           @NotNull PsiNewExpression newExpression,
+                                                           @NotNull PsiMethodCallExpression factoryCall) {
+    PsiTypeCastExpression castExpression = (PsiTypeCastExpression)factory.createExpressionFromText("(A)factoryCall", newExpression);
+    PsiTypeElement castType = castExpression.getCastType();
+    Objects.requireNonNull(castType).replace(factory.createTypeElement(rawConstructorCallType.rawType()));
+    Objects.requireNonNull(castExpression.getOperand()).replace(factoryCall);
+    return castExpression;
   }
 
   private static List<String> suggestNames(@NotNull PsiClass psiClass, @NotNull String baseName) {

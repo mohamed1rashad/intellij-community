@@ -3,11 +3,18 @@ package com.intellij.psi.impl.search;
 
 import com.intellij.concurrency.JobLauncher;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaElementVisitor;
+import com.intellij.psi.JavaRecursiveElementVisitor;
+import com.intellij.psi.JavaRecursiveElementWalkingVisitor;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiCompiledElement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiManager;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.PsiShortNamesCache;
@@ -17,7 +24,11 @@ import com.intellij.util.Processor;
 import com.intellij.util.QueryExecutor;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 public final class AllClassesSearchExecutor implements QueryExecutor<PsiClass, AllClassesSearch.SearchParameters> {
   @Override
@@ -56,7 +67,7 @@ public final class AllClassesSearchExecutor implements QueryExecutor<PsiClass, A
     sorted.sort(String.CASE_INSENSITIVE_ORDER);
 
     PsiShortNamesCache cache = PsiShortNamesCache.getInstance(project);
-    return JobLauncher.getInstance().invokeConcurrentlyUnderProgress(sorted, ProgressIndicatorProvider.getGlobalProgressIndicator(), name ->
+    return JobLauncher.getInstance().invokeConcurrentlyUnderContextProgress(sorted, name ->
       processByName(project, scope, processor, cache, name));
   }
 
@@ -127,7 +138,7 @@ public final class AllClassesSearchExecutor implements QueryExecutor<PsiClass, A
         super.visitClass(aClass);
       }
     };
-    ApplicationManager.getApplication().runReadAction(() -> scopeRoot.accept(visitor));
+    ReadAction.runBlocking(() -> scopeRoot.accept(visitor));
 
     return !stopped[0];
   }

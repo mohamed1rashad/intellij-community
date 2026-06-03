@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.testFramework
 
 import com.intellij.gradle.toolingExtension.util.GradleVersionUtil
@@ -6,7 +6,11 @@ import com.intellij.openapi.externalSystem.util.runWriteActionAndGet
 import com.intellij.openapi.externalSystem.util.runWriteActionAndWait
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.*
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.findDocument
+import com.intellij.openapi.vfs.findOrCreateFile
+import com.intellij.openapi.vfs.readText
+import com.intellij.openapi.vfs.writeText
 import com.intellij.testFramework.utils.editor.commitToPsi
 import com.intellij.testFramework.utils.editor.reloadFromDisk
 import com.intellij.testFramework.utils.vfs.createFile
@@ -15,14 +19,17 @@ import com.intellij.util.concurrency.annotations.RequiresWriteLock
 import org.gradle.util.GradleVersion
 import org.jetbrains.plugins.gradle.testFramework.util.withBuildFile
 import org.jetbrains.plugins.gradle.testFramework.util.withSettingsFile
+import java.nio.file.Path
 
 abstract class GradleProjectTestCase : GradleProjectBaseTestCase() {
 
   @get:JvmName("myProject")
   val project: Project get() = gradleFixture.project
   val module: Module get() = gradleFixture.module
-  val projectRoot: VirtualFile get() = gradleFixture.fileFixture.root
+  val mainModule: Module get() = gradleFixture.mainModule
+  val projectRoot: VirtualFile get() = gradleFixture.fileFixture.projectRoot
   val projectPath: String get() = projectRoot.path
+  val projectNioPath: Path get() = projectRoot.toNioPath()
 
   fun isGradleAtLeast(version: String): Boolean = GradleVersionUtil.isGradleAtLeast(gradleVersion, version)
   fun isGradleOlderThan(version: String): Boolean = GradleVersionUtil.isGradleOlderThan(gradleVersion, version)

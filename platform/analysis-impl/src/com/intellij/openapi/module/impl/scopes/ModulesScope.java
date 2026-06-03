@@ -1,4 +1,4 @@
-// Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.openapi.module.impl.scopes;
 
 import com.intellij.codeInsight.multiverse.CodeInsightContext;
@@ -10,12 +10,21 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ProjectFileIndex;
 import com.intellij.openapi.roots.ProjectRootManager;
 import com.intellij.openapi.vfs.VirtualFile;
-import com.intellij.psi.search.*;
+import com.intellij.psi.search.ActualCodeInsightContextInfo;
+import com.intellij.psi.search.CodeInsightContextAwareSearchScope;
+import com.intellij.psi.search.CodeInsightContextAwareSearchScopes;
+import com.intellij.psi.search.CodeInsightContextFileInfo;
+import com.intellij.psi.search.CodeInsightContextInfo;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 public class ModulesScope extends GlobalSearchScope implements CodeInsightContextAwareSearchScope, ActualCodeInsightContextInfo {
   private final ProjectFileIndex myProjectFileIndex;
@@ -50,14 +59,13 @@ public class ModulesScope extends GlobalSearchScope implements CodeInsightContex
   public @NotNull CodeInsightContextFileInfo getFileInfo(@NotNull VirtualFile file) {
     Set<Module> modulesOfFile = myProjectFileIndex.getModulesForFile(file, true);
     Collection<Module> intersection = ContainerUtil.intersection(myModules, modulesOfFile);
-    if (!intersection.isEmpty()) {
-      ProjectModelContextBridge bridge = ProjectModelContextBridge.getInstance(Objects.requireNonNull(getProject()));
-      List<ModuleContext> contexts = ContainerUtil.mapNotNull(intersection, m -> bridge.getContext(m));
-      return CodeInsightContextAwareSearchScopes.createContainingContextFileInfo(contexts);
-    }
-    else {
+    if (intersection.isEmpty()) {
       return CodeInsightContextAwareSearchScopes.DoesNotContainFileInfo();
     }
+
+    ProjectModelContextBridge bridge = ProjectModelContextBridge.getInstance(Objects.requireNonNull(getProject()));
+    List<ModuleContext> contexts = ContainerUtil.mapNotNull(intersection, m -> bridge.getContext(m));
+    return CodeInsightContextAwareSearchScopes.createContainingContextFileInfo(contexts, !contexts.isEmpty());
   }
 
   @ApiStatus.Experimental

@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.plugins.gradle.execution.build
 
 import com.intellij.build.BuildViewManager
@@ -10,6 +10,7 @@ import com.intellij.execution.runners.ExecutionEnvironment
 import com.intellij.execution.scratch.JavaScratchConfiguration
 import com.intellij.openapi.compiler.CompilerPaths
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.rethrowControlFlowException
 import com.intellij.openapi.externalSystem.model.execution.ExternalSystemTaskExecutionSettings
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemRunConfiguration.PROGRESS_LISTENER_KEY
 import com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil
@@ -25,7 +26,14 @@ import com.intellij.platform.eel.getOrThrow
 import com.intellij.platform.eel.path.EelPath
 import com.intellij.platform.eel.provider.asNioPath
 import com.intellij.platform.eel.provider.getEelDescriptor
-import com.intellij.task.*
+import com.intellij.platform.eel.provider.toEelApi
+import com.intellij.task.BuildTask
+import com.intellij.task.ExecuteRunConfigurationTask
+import com.intellij.task.ModuleBuildTask
+import com.intellij.task.ProjectTask
+import com.intellij.task.ProjectTaskContext
+import com.intellij.task.ProjectTaskRunner
+import com.intellij.task.TaskRunnerResults.FAILURE
 import com.intellij.task.TaskRunnerResults.SUCCESS
 import com.intellij.util.text.nullize
 import kotlinx.coroutines.async
@@ -38,7 +46,9 @@ import org.jetbrains.concurrency.Promise
 import org.jetbrains.concurrency.asPromise
 import org.jetbrains.plugins.gradle.GradleJavaCoroutineScope.gradleCoroutineScope
 import org.jetbrains.plugins.gradle.service.execution.loadHotswapDetectionInitScript
-import org.jetbrains.plugins.gradle.service.task.GradleTaskManager.*
+import org.jetbrains.plugins.gradle.service.task.GradleTaskManager.INIT_SCRIPT_KEY
+import org.jetbrains.plugins.gradle.service.task.GradleTaskManager.INIT_SCRIPT_PREFIX_KEY
+import org.jetbrains.plugins.gradle.service.task.GradleTaskManager.VERSION_SPECIFIC_SCRIPTS_KEY
 import org.jetbrains.plugins.gradle.settings.GradleProjectSettings
 import org.jetbrains.plugins.gradle.util.GradleBundle
 import org.jetbrains.plugins.gradle.util.GradleConstants.SYSTEM_ID
@@ -64,9 +74,16 @@ class GradleProjectTaskRunner : ProjectTaskRunner() {
   override fun run(project: Project, context: ProjectTaskContext, vararg tasks: ProjectTask): Promise<Result> {
     return project.gradleCoroutineScope.async<Result> {
       mutex.withLock {
-        run(project, context, tasks.asList())
+        try {
+          run(project, context, tasks.asList())
+          SUCCESS
+        }
+        catch (exception: Exception) {
+          // Platform automatically converts only control flow exceptions
+          rethrowControlFlowException(exception)
+          FAILURE
+        }
       }
-      SUCCESS
     }.asCompletableFuture().asPromise()
   }
 
@@ -170,10 +187,6 @@ class GradleProjectTaskRunner : ProjectTaskRunner() {
     if (context != null && context.runConfiguration is JavaScratchConfiguration) {
       return false
     }
-    return canRun(projectTask)
-  }
-
-  override fun canRun(projectTask: ProjectTask): Boolean {
     if (projectTask is ModuleBuildTask) {
       return isDelegatedBuildEnabled(projectTask.module)
     }

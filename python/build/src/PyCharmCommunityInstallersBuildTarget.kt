@@ -1,16 +1,13 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
-@file:Suppress("SSBasedInspection")
-
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.intellij.build.BuildOptions
 import org.jetbrains.intellij.build.BuildPaths.Companion.COMMUNITY_ROOT
-import org.jetbrains.intellij.build.impl.BuildContextImpl
 import org.jetbrains.intellij.build.impl.buildDistributions
+import org.jetbrains.intellij.build.impl.createBuildContext
 import org.jetbrains.intellij.build.pycharm.PyCharmBuildUtils
 import org.jetbrains.intellij.build.pycharm.PyCharmCommunityProperties
 
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 object PyCharmCommunityInstallersBuildTarget {
   @JvmStatic
   fun main(args: Array<String>) {
@@ -28,7 +25,7 @@ object PyCharmCommunityInstallersBuildTarget {
           BuildOptions.WINDOWS_ZIP_STEP,
         )
       }
-      val context = BuildContextImpl.createContext(
+      val context = createBuildContext(
         projectHome = COMMUNITY_ROOT.communityRoot,
         productProperties = PyCharmCommunityProperties(COMMUNITY_ROOT.communityRoot),
         options = options,

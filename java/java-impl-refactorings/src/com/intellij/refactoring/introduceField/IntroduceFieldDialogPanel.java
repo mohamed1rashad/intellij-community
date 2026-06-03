@@ -3,18 +3,29 @@ package com.intellij.refactoring.introduceField;
 
 import com.intellij.codeInsight.TestFrameworks;
 import com.intellij.java.refactoring.JavaRefactoringBundle;
-import com.intellij.psi.*;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiLocalVariable;
+import com.intellij.psi.PsiMethod;
 import com.intellij.psi.util.PsiTreeUtil;
-import com.intellij.refactoring.JavaRefactoringSettings;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.ui.JavaVisibilityPanel;
 import com.intellij.refactoring.ui.TypeSelectorManager;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.util.ui.JBInsets;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
+import javax.swing.JComponent;
+import javax.swing.JPanel;
+import javax.swing.JRadioButton;
+import java.awt.BorderLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.event.ItemListener;
+
+import static com.intellij.refactoring.introduceField.JavaIntroduceFieldService.InitializationPlace;
 
 public class IntroduceFieldDialogPanel extends IntroduceFieldCentralPanel {
   private JRadioButton myRbInConstructor;
@@ -38,25 +49,23 @@ public class IntroduceFieldDialogPanel extends IntroduceFieldCentralPanel {
   }
 
   @Override
-  protected void initializeControls(PsiExpression initializerExpression, BaseExpressionToFieldHandler.InitializationPlace ourLastInitializerPlace) {
+  protected void initializeControls(PsiExpression initializerExpression, InitializationPlace ourLastInitializerPlace) {
     initializeInitializerPlace(initializerExpression, ourLastInitializerPlace);
-    String ourLastVisibility = JavaRefactoringSettings.getInstance().INTRODUCE_FIELD_VISIBILITY;
-    if (ourLastVisibility == null) {
-      ourLastVisibility = PsiModifier.PRIVATE;
-    }
+    String ourLastVisibility = new IntroduceFieldHelper().getVisibility();
     myVisibilityPanel.setVisibility(ourLastVisibility);
     super.initializeControls(initializerExpression, ourLastInitializerPlace);
   }
 
   @Override
   protected void initializeInitializerPlace(PsiExpression initializerExpression,
-                                            BaseExpressionToFieldHandler.InitializationPlace ourLastInitializerPlace) {
+                                            InitializationPlace ourLastInitializerPlace) {
     if (initializerExpression != null) {
-      setEnabledInitializationPlaces(initializerExpression);
+      setEnabledInitializationPlaces(initializerExpression, hasSetUpChoice());
       if (!myAllowInitInMethod) {
         myRbInCurrentMethod.setEnabled(false);
       }
-    } else {
+    }
+    else {
       myRbInConstructor.setEnabled(false);
       myRbInCurrentMethod.setEnabled(false);
       myRbInFieldDeclaration.setEnabled(false);
@@ -65,22 +74,28 @@ public class IntroduceFieldDialogPanel extends IntroduceFieldCentralPanel {
 
     final PsiMethod setUpMethod = TestFrameworks.getInstance().findSetUpMethod(myParentClass);
     if (myInitializerExpression != null && PsiTreeUtil.isAncestor(setUpMethod, myInitializerExpression, false) && myRbInSetUp.isEnabled() ||
-        ourLastInitializerPlace == BaseExpressionToFieldHandler.InitializationPlace.IN_SETUP_METHOD && TestFrameworks.getInstance().isTestClass(myParentClass) && myRbInSetUp.isEnabled()) {
+        ourLastInitializerPlace == InitializationPlace.IN_SETUP_METHOD &&
+        TestFrameworks.getInstance().isTestClass(myParentClass) &&
+        myRbInSetUp.isEnabled()) {
       myRbInSetUp.setSelected(true);
     }
-    else if (ourLastInitializerPlace == BaseExpressionToFieldHandler.InitializationPlace.IN_CONSTRUCTOR) {
+    else if (ourLastInitializerPlace == InitializationPlace.IN_CONSTRUCTOR) {
       if (myRbInConstructor.isEnabled()) {
         myRbInConstructor.setSelected(true);
-      } else {
+      }
+      else {
         selectInCurrentMethod();
       }
-    } else if (ourLastInitializerPlace == BaseExpressionToFieldHandler.InitializationPlace.IN_FIELD_DECLARATION) {
+    }
+    else if (ourLastInitializerPlace == InitializationPlace.IN_FIELD_DECLARATION) {
       if (myRbInFieldDeclaration.isEnabled()) {
         myRbInFieldDeclaration.setSelected(true);
-      } else {
+      }
+      else {
         selectInCurrentMethod();
       }
-    } else {
+    }
+    else {
       selectInCurrentMethod();
     }
   }
@@ -98,22 +113,22 @@ public class IntroduceFieldDialogPanel extends IntroduceFieldCentralPanel {
   }
 
   @Override
-  public BaseExpressionToFieldHandler.InitializationPlace getInitializerPlace() {
+  public InitializationPlace getInitializerPlace() {
     if (myRbInConstructor.isSelected()) {
-      return BaseExpressionToFieldHandler.InitializationPlace.IN_CONSTRUCTOR;
+      return InitializationPlace.IN_CONSTRUCTOR;
     }
     if (myRbInCurrentMethod.isSelected()) {
-      return BaseExpressionToFieldHandler.InitializationPlace.IN_CURRENT_METHOD;
+      return InitializationPlace.IN_CURRENT_METHOD;
     }
     if (myRbInFieldDeclaration.isSelected()) {
-      return BaseExpressionToFieldHandler.InitializationPlace.IN_FIELD_DECLARATION;
+      return InitializationPlace.IN_FIELD_DECLARATION;
     }
     if (myRbInSetUp != null && myRbInSetUp.isSelected()) {
-      return BaseExpressionToFieldHandler.InitializationPlace.IN_SETUP_METHOD;
+      return InitializationPlace.IN_SETUP_METHOD;
     }
 
     LOG.assertTrue(false);
-    return BaseExpressionToFieldHandler.InitializationPlace.IN_FIELD_DECLARATION;
+    return InitializationPlace.IN_FIELD_DECLARATION;
   }
 
   @Override
@@ -190,10 +205,11 @@ public class IntroduceFieldDialogPanel extends IntroduceFieldCentralPanel {
     boolean inOnlyConstructor = myIsCurrentMethodConstructor && myParentClass.getConstructors().length == 1;
     myRbInConstructor.setEnabled(initializedInConstructor && !myWillBeDeclaredStatic && !inOnlyConstructor);
     enableFinal(false);
-    if (myRbInSetUp != null){
+    if (myRbInSetUp != null) {
       if (!initializedInSetup) {
         myRbInSetUp.setEnabled(false);
-      } else {
+      }
+      else {
         return true;
       }
     }

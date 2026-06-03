@@ -7,6 +7,7 @@ import com.intellij.openapi.application.runWriteActionAndWait
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.projectRoots.ProjectJdkTable
 import com.intellij.openapi.projectRoots.Sdk
+import com.intellij.openapi.projectRoots.impl.ProjectJdkImpl
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.roots.OrderRootType
 import com.intellij.openapi.util.Disposer
@@ -15,13 +16,18 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.testFramework.*
+import com.intellij.testFramework.ApplicationRule
+import com.intellij.testFramework.IndexingTestUtil
+import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.VfsTestUtil
 import com.intellij.testFramework.assertions.Assertions.assertThat
+import com.intellij.testFramework.replaceService
 import com.intellij.testFramework.rules.ProjectModelRule
 import com.jetbrains.python.PythonMockSdk
 import com.jetbrains.python.PythonPluginDisposable
 import com.jetbrains.python.psi.LanguageLevel
 import com.jetbrains.python.psi.PyUtil
+import org.jdom.Element
 import org.jetbrains.annotations.NotNull
 import org.junit.Assume.assumeTrue
 import org.junit.ClassRule
@@ -42,6 +48,7 @@ class PySdkPathsTest {
 
   @Test
   fun sysPathEntryIsExcludedPath() {
+    createModule()
     val sdk = PythonMockSdk.create()
 
     val excluded = createInSdkRoot(sdk, "my_excluded")
@@ -50,7 +57,7 @@ class PySdkPathsTest {
     sdk.putUserData(PythonSdkType.MOCK_SYS_PATH_KEY, listOf(sdk.homePath, excluded.path, included.path))
     mockPythonPluginDisposable()
     runWriteActionAndWait {
-      sdk.getOrCreateAdditionalData()
+      sdk.pySdkAdditionalData
 
       sdk.sdkModificator.apply {
         (sdkAdditionalData as PythonSdkAdditionalData).setExcludedPathsFromVirtualFiles(setOf(excluded))
@@ -78,7 +85,7 @@ class PySdkPathsTest {
       module.pythonSdk = it
     }
 
-    runWriteActionAndWait { sdk.getOrCreateAdditionalData() }.apply { setAddedPathsFromVirtualFiles(setOf(moduleRoot)) }
+    runWriteActionAndWait { sdk.pySdkAdditionalData }.apply { setAddedPathsFromVirtualFiles(setOf(moduleRoot)) }
 
     updateSdkPaths(sdk)
 
@@ -119,7 +126,7 @@ class PySdkPathsTest {
 
     mockPythonPluginDisposable()
     runWriteActionAndWait {
-      sdk.getOrCreateAdditionalData()
+      sdk.pySdkAdditionalData
 
       sdk.sdkModificator.apply {
         (sdkAdditionalData as PythonSdkAdditionalData).setAddedPathsFromVirtualFiles(setOf(userAddedPath))
@@ -190,7 +197,7 @@ class PySdkPathsTest {
     mockPythonPluginDisposable()
 
     runWriteActionAndWait {
-      sdk.getOrCreateAdditionalData()
+      sdk.pySdkAdditionalData
 
       sdk.sdkModificator.apply {
         (sdkAdditionalData as PythonSdkAdditionalData).setAddedPathsFromVirtualFiles(setOf(userAddedPath))
@@ -271,6 +278,43 @@ class PySdkPathsTest {
                moduleDependencies = listOf())
   }
 
+  /**
+   * PY-88807: SDKs with remote home paths (Docker Compose, SFTP, etc.) that lost their
+   * additional data during upgrades must not crash [pySdkAdditionalData].
+   * Simulates the real scenario: an SDK is serialized with a remote home path, then
+   * deserialized — [PythonSdkType.loadAdditionalData] returns [PyInvalidSdk] for stale
+   * remote interpreters, and [pySdkAdditionalData] must recognize it.
+   */
+  @Test
+  fun getOrCreateAdditionalDataForRemoteSdkDoesNotCrash() {
+    mockPythonPluginDisposable()
+    val sdkType = PythonSdkType.getInstance()
+
+    for (remotePath in listOf(
+      "docker-compose://[/home/user/project/docker-compose.yml]:gossip//usr/local/bin/python",
+      "sftp://root@127.0.0.1:2222/virtualenv/bin/python",
+      "docker://python:latest/usr/local/bin/python",
+    )) {
+      val sdk = ProjectJdkTable.getInstance().createSdk("Remote SDK", sdkType) as ProjectJdkImpl
+      runWriteActionAndWait {
+        sdk.sdkModificator.apply {
+          // Simulate an old SDK that had remote additional data from a previous IDE version that doesn't exist anymore
+          // and one of non-local home paths
+          homePath = remotePath
+          sdkAdditionalData = PythonSdkAdditionalData()
+          commitChanges()
+        }
+      }
+      // Round-trip: serialize then deserialize — readExternal triggers loadAdditionalData
+      val element = Element("jdk")
+      sdk.writeExternal(element)
+      sdk.readExternal(element)
+
+      assertThat(sdk.sdkAdditionalData).isSameAs(PyInvalidSdk)
+      assertThat(sdk.pySdkAdditionalData).isSameAs(PyInvalidSdk)
+    }
+  }
+
   private fun registerSdk(it: Sdk) {
     WriteAction.runAndWait<RuntimeException> {
       ProjectJdkTable.getInstance().addJdk(it, projectModel.disposableRule.disposable)
@@ -285,7 +329,7 @@ class PySdkPathsTest {
     val module = projectModel.createModule(name)
     assertThat(PyUtil.getSourceRoots(module)).isEmpty()
 
-    module.rootManager.modifiableModel.apply {
+   ModuleRootManager.getInstance(module).modifiableModel.apply {
       addContentEntry(moduleRoot)
       runWriteActionAndWait { commit() }
     }
@@ -299,10 +343,13 @@ class PySdkPathsTest {
     return runWriteActionAndWait {
       val venv = moduleRoot.createChildDirectory(this, "venv")
 
-      venv.createChildData(this, "pyvenv.cfg")  // see PythonSdkUtil.getVirtualEnvRoot
+      venv.createChildData(this, "pyvenv.cfg")  // see PythonEnvironment.Venv detection
 
       val bin = venv.createChildDirectory(this, "bin")
-      bin.createChildData(this, "python")
+      // PythonEnvironment.detectPythonEnvironment requires an executable binary.
+      bin.createChildData(this, "python").toNioPath().toFile().setExecutable(true)
+
+      venv.createChildDirectory(this, "lib")
 
       venv
     }

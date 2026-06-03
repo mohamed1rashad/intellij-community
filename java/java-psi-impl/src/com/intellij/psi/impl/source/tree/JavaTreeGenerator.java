@@ -8,7 +8,32 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.pom.java.LanguageLevel;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnonymousClass;
+import com.intellij.psi.PsiArrayType;
+import com.intellij.psi.PsiCapturedWildcardType;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiClassType;
+import com.intellij.psi.PsiCompiledElement;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiExpression;
+import com.intellij.psi.PsiIntersectionType;
+import com.intellij.psi.PsiJavaCodeReferenceElement;
+import com.intellij.psi.PsiJavaParserFacade;
+import com.intellij.psi.PsiJavaToken;
+import com.intellij.psi.PsiLambdaExpressionType;
+import com.intellij.psi.PsiManager;
+import com.intellij.psi.PsiMember;
+import com.intellij.psi.PsiMethodReferenceType;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiModifierList;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiReferenceExpression;
+import com.intellij.psi.PsiSubstitutor;
+import com.intellij.psi.PsiType;
+import com.intellij.psi.PsiTypeElement;
+import com.intellij.psi.PsiTypeParameter;
+import com.intellij.psi.PsiWildcardType;
 import com.intellij.psi.impl.GeneratedMarkerVisitor;
 import com.intellij.psi.impl.source.DummyHolder;
 import com.intellij.psi.impl.source.DummyHolderFactory;
@@ -134,7 +159,7 @@ public final class JavaTreeGenerator implements TreeGenerator {
 
   private static TreeElement markGeneratedIfNeeded(@NotNull PsiElement original, @NotNull TreeElement copy) {
     if (CodeEditUtil.isNodeGenerated(original.getNode())) {
-      copy.acceptTree(new GeneratedMarkerVisitor());
+      copy.acceptTree(new GeneratedMarkerVisitor(copy));
     }
     return copy;
   }
@@ -142,7 +167,7 @@ public final class JavaTreeGenerator implements TreeGenerator {
   private static TreeElement createReference(final Project project, final String text, boolean mark) {
     final PsiJavaParserFacade parserFacade = JavaPsiFacade.getInstance(project).getParserFacade();
     final TreeElement element = (TreeElement)parserFacade.createReferenceFromText(text, null).getNode();
-    if (mark) element.acceptTree(new GeneratedMarkerVisitor());
+    if (mark) element.acceptTree(new GeneratedMarkerVisitor(element));
     return element;
   }
 

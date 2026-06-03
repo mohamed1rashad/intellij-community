@@ -1,14 +1,15 @@
 // Copyright 2000-2025 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+@file:OptIn(EntityStorageInstrumentationApi::class)
+
 package com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.impl
 
 import com.intellij.platform.workspace.storage.ConnectionId
 import com.intellij.platform.workspace.storage.EntitySource
-import com.intellij.platform.workspace.storage.EntityType
 import com.intellij.platform.workspace.storage.GeneratedCodeApiVersion
 import com.intellij.platform.workspace.storage.GeneratedCodeImplVersion
-import com.intellij.platform.workspace.storage.ModifiableWorkspaceEntity
 import com.intellij.platform.workspace.storage.MutableEntityStorage
 import com.intellij.platform.workspace.storage.WorkspaceEntity
+import com.intellij.platform.workspace.storage.WorkspaceEntityBuilder
 import com.intellij.platform.workspace.storage.WorkspaceEntityInternalApi
 import com.intellij.platform.workspace.storage.impl.ModifiableWorkspaceEntityBase
 import com.intellij.platform.workspace.storage.impl.WorkspaceEntityBase
@@ -17,8 +18,8 @@ import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInst
 import com.intellij.platform.workspace.storage.instrumentation.EntityStorageInstrumentationApi
 import com.intellij.platform.workspace.storage.metadata.model.EntityMetadata
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.EnumPropsEntity
+import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.EnumPropsEntityBuilder
 import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.EnumPropsEnum
-import com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.ModifiableEnumPropsEntity
 
 @GeneratedCodeApiVersion(3)
 @GeneratedCodeImplVersion(7)
@@ -27,9 +28,7 @@ internal class EnumPropsEntityImpl(private val dataSource: EnumPropsEntityData) 
 
   private companion object {
 
-
-    private val connections = listOf<ConnectionId>(
-    )
+    private val connections = listOf<ConnectionId>()
 
   }
 
@@ -50,8 +49,8 @@ internal class EnumPropsEntityImpl(private val dataSource: EnumPropsEntityData) 
   }
 
 
-  internal class Builder(result: EnumPropsEntityData?) : ModifiableWorkspaceEntityBase<EnumPropsEntity, EnumPropsEntityData>(
-    result), ModifiableEnumPropsEntity {
+  internal class Builder(result: EnumPropsEntityData?) : ModifiableWorkspaceEntityBase<EnumPropsEntity, EnumPropsEntityData>(result),
+                                                         EnumPropsEntityBuilder {
     internal constructor() : this(EnumPropsEntityData())
 
     override fun applyToBuilder(builder: MutableEntityStorage) {
@@ -64,15 +63,13 @@ internal class EnumPropsEntityImpl(private val dataSource: EnumPropsEntityData) 
           error("Entity EnumPropsEntity is already created in a different builder")
         }
       }
-
       this.diff = builder
       addToBuilder()
       this.id = getEntityData().createEntityId()
-      // After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
-      // Builder may switch to snapshot at any moment and lock entity data to modification
+// After adding entity data to the builder, we need to unbind it and move the control over entity data to builder
+// Builder may switch to snapshot at any moment and lock entity data to modification
       this.currentEntityData = null
-
-      // Process linked entities that are connected without a builder
+// Process linked entities that are connected without a builder
       processLinkedEntities(builder)
       checkInitialization() // TODO uncomment and check failed tests
     }
@@ -108,7 +105,6 @@ internal class EnumPropsEntityImpl(private val dataSource: EnumPropsEntityData) 
         changedProperty.add("entitySource")
 
       }
-
     override var someEnum: EnumPropsEnum
       get() = getEntityData().someEnum
       set(value) {
@@ -120,6 +116,7 @@ internal class EnumPropsEntityImpl(private val dataSource: EnumPropsEntityData) 
 
     override fun getEntityClass(): Class<EnumPropsEntity> = EnumPropsEntity::class.java
   }
+
 }
 
 @OptIn(WorkspaceEntityInternalApi::class)
@@ -128,14 +125,13 @@ internal class EnumPropsEntityData : WorkspaceEntityData<EnumPropsEntity>() {
 
   internal fun isSomeEnumInitialized(): Boolean = ::someEnum.isInitialized
 
-  override fun wrapAsModifiable(diff: MutableEntityStorage): ModifiableWorkspaceEntity<EnumPropsEntity> {
+  override fun wrapAsModifiable(diff: MutableEntityStorage): WorkspaceEntityBuilder<EnumPropsEntity> {
     val modifiable = EnumPropsEntityImpl.Builder(null)
     modifiable.diff = diff
     modifiable.id = createEntityId()
     return modifiable
   }
 
-  @OptIn(EntityStorageInstrumentationApi::class)
   override fun createEntity(snapshot: EntityStorageInstrumentation): EnumPropsEntity {
     val entityId = createEntityId()
     return snapshot.initializeEntity(entityId) {
@@ -147,17 +143,15 @@ internal class EnumPropsEntityData : WorkspaceEntityData<EnumPropsEntity>() {
   }
 
   override fun getMetadata(): EntityMetadata {
-    return MetadataStorageImpl.getMetadataByTypeFqn(
-      "com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.EnumPropsEntity") as EntityMetadata
+    return MetadataStorageImpl.getMetadataByTypeFqn("com.intellij.platform.workspace.storage.testEntities.entities.cacheVersion.EnumPropsEntity") as EntityMetadata
   }
 
   override fun getEntityInterface(): Class<out WorkspaceEntity> {
     return EnumPropsEntity::class.java
   }
 
-  override fun createDetachedEntity(parents: List<ModifiableWorkspaceEntity<*>>): ModifiableWorkspaceEntity<*> {
-    return EnumPropsEntity(someEnum, entitySource) {
-    }
+  override fun createDetachedEntity(parents: List<WorkspaceEntityBuilder<*>>): WorkspaceEntityBuilder<*> {
+    return EnumPropsEntity(someEnum, entitySource)
   }
 
   override fun getRequiredParents(): List<Class<out WorkspaceEntity>> {
@@ -168,9 +162,7 @@ internal class EnumPropsEntityData : WorkspaceEntityData<EnumPropsEntity>() {
   override fun equals(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as EnumPropsEntityData
-
     if (this.entitySource != other.entitySource) return false
     if (this.someEnum != other.someEnum) return false
     return true
@@ -179,9 +171,7 @@ internal class EnumPropsEntityData : WorkspaceEntityData<EnumPropsEntity>() {
   override fun equalsIgnoringEntitySource(other: Any?): Boolean {
     if (other == null) return false
     if (this.javaClass != other.javaClass) return false
-
     other as EnumPropsEntityData
-
     if (this.someEnum != other.someEnum) return false
     return true
   }

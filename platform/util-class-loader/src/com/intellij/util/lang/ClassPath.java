@@ -10,9 +10,25 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.nio.ByteBuffer;
-import java.nio.file.*;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -419,7 +435,11 @@ public final class ClassPath {
     return loaders.get(loaderIndex);
   }
 
-  // TODO: synchronized should not be needed
+
+  /**
+   * @deprecated this method may not return all items in the classpath, use {@link #getFiles()} instead
+   */
+  @Deprecated
   public synchronized @NotNull List<Path> getBaseUrls() {
     List<Path> result = new ArrayList<>();
     for (Loader loader : loaders) {

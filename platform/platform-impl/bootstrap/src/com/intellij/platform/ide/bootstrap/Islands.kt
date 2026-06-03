@@ -11,6 +11,7 @@ import com.intellij.openapi.application.EDT
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.extensions.PluginId
+import com.intellij.ui.ExperimentalUI
 import com.intellij.ui.JBColor
 import com.intellij.util.PlatformUtils
 import kotlinx.coroutines.Dispatchers
@@ -20,21 +21,24 @@ import org.jetbrains.annotations.ApiStatus
 @ApiStatus.Internal
 suspend fun applyIslandsTheme(afterImportSettings: Boolean) {
   val app = ApplicationManager.getApplication()
-  if (!app.isEAP || app.isUnitTestMode || app.isHeadlessEnvironment || AppMode.isRemoteDevHost() || PlatformUtils.isDataSpell()) {
+  if (app.isUnitTestMode || app.isHeadlessEnvironment || AppMode.isRemoteDevHost()) {
     return
   }
 
-  if (System.getProperty("platform.experiment.ab.manual.option", "") == "control.option") {
+  if (System.getProperty("platform.experiment.ab.manual.option", "") == "control.option"
+      || ExperimentalUI.switchedFromClassicToIslands == true) {
     return
   }
 
   val properties = serviceAsync<PropertiesComponent>()
 
-  if (PlatformUtils.isRider() && !properties.getBoolean("rider.color.scheme.updated", false)) {
-    properties.setValue("rider.color.scheme.updated", true)
+  if (PlatformUtils.isRider() && (!properties.getBoolean("rider.color.scheme.updated", false) || afterImportSettings)) {
+    if (!afterImportSettings) {
+      properties.setValue("rider.color.scheme.updated", true)
+    }
 
     val finish = withContext(Dispatchers.EDT) {
-      changeColorSchemeForRiderIslandsDarkTheme()
+      changeColorSchemeForRiderIslandsDarkTheme(afterImportSettings)
     }
     if (finish) {
       return
@@ -42,39 +46,40 @@ suspend fun applyIslandsTheme(afterImportSettings: Boolean) {
   }
 
   if (afterImportSettings) {
-    if (properties.getValue("ide.islands.show.feedback2") != "show.promo") {
+    if (properties.getValue("ide.islands.show.feedback3") != "done") {
+      enableIslandsDarcula(properties)
       return
     }
   }
-  else if (properties.getBoolean("ide.islands.ab2", false)) {
+  else if (properties.getBoolean("ide.islands.ab3", false)) {
+    enableIslandsDarcula(properties)
     return
   }
 
-  // ignore users who were enabled in 25.2
-  if (properties.getValue("ide.islands.show.feedback") != null) {
-    return
-  }
-
-  properties.setValue("ide.islands.ab2", true)
+  properties.setValue("ide.islands.ab3", true)
 
   withContext(Dispatchers.EDT) {
-    enableTheme()
+    enableTheme(properties)
   }
 }
 
-private suspend fun enableTheme() {
+private suspend fun enableTheme(properties: PropertiesComponent) {
   val lafManager = serviceAsync<LafManager>()
-  if (lafManager.autodetect) {
-    return
-  }
-
   val currentTheme = lafManager.currentUIThemeLookAndFeel?.id ?: return
+
   if (currentTheme != "ExperimentalDark" && currentTheme != "ExperimentalLight" && currentTheme != "ExperimentalLightWithLightHeader") {
+    if (currentTheme == "Islands Light" || currentTheme == "Islands Dark") {
+      resetLafSettingsToDefault(lafManager, serviceAsync<UiThemeProviderListManager>())
+    }
+    else {
+      enableIslandsDarcula(properties)
+    }
     return
   }
 
-  val colorsManager = EditorColorsManager.getInstance()
+  val colorsManager = serviceAsync<EditorColorsManager>()
   val currentEditorTheme = colorsManager.globalScheme.displayName
+
   if (currentEditorTheme != "Light" && currentEditorTheme != "Dark" && currentEditorTheme != "Rider Light" && currentEditorTheme != "Rider Dark") {
     return
   }
@@ -86,9 +91,10 @@ private suspend fun enableTheme() {
 
   val isLight = JBColor.isBright()
 
-  val newTheme = UiThemeProviderListManager.getInstance().findThemeById(if (isLight) "Islands Light" else "Islands Dark") ?: return
+  val themeManager = serviceAsync<UiThemeProviderListManager>()
+  val newTheme = themeManager.findThemeById(if (isLight) "Islands Light" else "Islands Dark") ?: return
 
-  PropertiesComponent.getInstance().setValue("ide.islands.show.feedback2", "show.promo")
+  properties.setValue("ide.islands.show.feedback3", "done")
 
   lafManager.setCurrentLookAndFeel(newTheme, true)
 
@@ -101,15 +107,19 @@ private suspend fun enableTheme() {
 
   newTheme.installEditorScheme(colorsManager.getScheme(editorScheme) ?: colorsManager.defaultScheme)
 
+  resetLafSettingsToDefault(lafManager, themeManager)
+
   lafManager.updateUI()
 }
 
-private suspend fun changeColorSchemeForRiderIslandsDarkTheme(): Boolean {
-  val colorsManager = EditorColorsManager.getInstance()
+private suspend fun changeColorSchemeForRiderIslandsDarkTheme(afterImportSettings: Boolean): Boolean {
   val lafManager = serviceAsync<LafManager>()
   val currentLaf = lafManager.currentUIThemeLookAndFeel ?: return false
 
-  if (currentLaf.id != "Islands Dark" || colorsManager.globalScheme.displayName != "Rider Dark") {
+  val colorsManager = serviceAsync<EditorColorsManager>()
+  val colorScheme = if (afterImportSettings) "Islands Dark" else "Rider Dark"
+
+  if (currentLaf.id != "Islands Dark" || colorsManager.globalScheme.displayName != colorScheme) {
     return false
   }
 
@@ -118,4 +128,50 @@ private suspend fun changeColorSchemeForRiderIslandsDarkTheme(): Boolean {
   lafManager.updateUI()
 
   return true
+}
+
+private fun resetLafSettingsToDefault(lafManager: LafManager, themeManager: UiThemeProviderListManager) {
+  val defaultLightLaf = themeManager.findThemeById("Islands Light") ?: return
+  var defaultDarkLaf = themeManager.findThemeById("Islands Dark") ?: return
+
+  if (lafManager.autodetect && JBColor.isBright() && lafManager.preferredDarkThemeId == "Darcula") {
+    val newDarcula = themeManager.findThemeById("Islands Darcula")
+    if (newDarcula != null) {
+      defaultDarkLaf = newDarcula
+    }
+  }
+
+  lafManager.setPreferredLightLaf(defaultLightLaf)
+  lafManager.setPreferredDarkLaf(defaultDarkLaf)
+  lafManager.resetPreferredEditorColorScheme()
+}
+
+private suspend fun enableIslandsDarcula(properties: PropertiesComponent) {
+  if (properties.getBoolean("ide.islands.new.darcula", false)) {
+    return
+  }
+
+  properties.setValue("ide.islands.new.darcula", true)
+
+  val id = PluginId.getId("com.intellij.classic.ui")
+  if (PluginManagerCore.findPlugin(id) != null && !PluginManagerCore.isDisabled(id)) {
+    return
+  }
+
+  val lafManager = serviceAsync<LafManager>()
+  val currentTheme = lafManager.currentUIThemeLookAndFeel?.id ?: return
+
+  val themeManager = serviceAsync<UiThemeProviderListManager>()
+  val newTheme = themeManager.findThemeById("Islands Darcula") ?: return
+
+  if (currentTheme != "Darcula") {
+    if (lafManager.autodetect && JBColor.isBright() && lafManager.preferredDarkThemeId == "Darcula") {
+      lafManager.setPreferredDarkLaf(newTheme)
+    }
+    return
+  }
+
+  lafManager.setCurrentLookAndFeel(newTheme, true)
+  lafManager.setPreferredDarkLaf(newTheme)
+  lafManager.updateUI()
 }

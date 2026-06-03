@@ -26,7 +26,7 @@ import org.editorconfig.Utils
 import org.editorconfig.Utils.configValueForKey
 import org.editorconfig.plugincomponents.EditorConfigPropertiesService
 import java.nio.charset.Charset
-import java.util.*
+import java.util.TreeMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -146,6 +146,9 @@ internal class EditorConfigEncodingCache : SettingsSavingComponent {
 
   class VfsListener : BulkVirtualFileListenerAdapter(object : VirtualFileListener {
     override fun fileCreated(event: VirtualFileEvent) {
+      if (event.isFromRefresh) {
+        return
+      }
       val file = event.file
       val project = ProjectLocator.getInstance().guessProjectForFile(file)
       if (project != null && Utils.isEnabledFor(project, file)) {

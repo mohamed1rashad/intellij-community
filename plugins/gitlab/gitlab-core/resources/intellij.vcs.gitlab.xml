@@ -1,12 +1,14 @@
 <idea-plugin visibility="public">
   <resource-bundle>messages.GitLabBundle</resource-bundle>
 
+  <!-- region Generated dependencies - run `Generate Product Layouts` to regenerate -->
   <dependencies>
-    <plugin id="com.intellij.modules.lang"/>
     <plugin id="Git4Idea"/>
-    <module name="intellij.platform.vcs.log"/>
     <module name="intellij.platform.collaborationTools"/>
+    <module name="intellij.platform.vcs.log"/>
+    <module name="intellij.vcs.git.shared"/>
   </dependencies>
+  <!-- endregion -->
 
   <extensionPoints>
     <extensionPoint qualifiedName="intellij.vcs.gitlab.titleGenerator"
@@ -59,6 +61,13 @@
     <editorFactoryListener
       implementation="org.jetbrains.plugins.gitlab.mergerequest.ui.editor.GitLabMergeRequestEditorReviewController$InstallerListener"/>
 
+    <customPasteProvider id="CommentFileLinkPasteProvider"
+                         implementation="org.jetbrains.plugins.gitlab.ui.comment.CommitFilePasteProvider"/>
+
+    <completion.contributor language="any"
+                            implementationClass="org.jetbrains.plugins.gitlab.ui.GitlabMarkdownCompletionContributor"/>
+    <typedHandler implementation="org.jetbrains.plugins.gitlab.ui.GitlabMarkdownTypedHandler"/>
+
     <registryKey key="vcs.gitlab.connect.silently"
                  description="Connect to GitLab repository without an explicit user action"
                  defaultValue="true"/>
@@ -66,8 +75,20 @@
     <registryKey defaultValue="5" description="Request polling attempts" key="gitlab.request.polling.attempts"/>
     <registryKey defaultValue="62" description="Days until an entry in the viewed/not viewed state store is considered stale"
                  key="gitlab.viewed.state.stale.timeout"/>
+    <registryKey key="gitlab.merge.requests.load.project.with.rest" defaultValue="true"
+                 description="Load the project details purely with REST API"/>
+
     <registryKey defaultValue="0" description="The number of merge requests at the top of the list to pre-emptively load and cache"
                  key="gitlab.merge.requests.cached.from.list"/>
+
+    <registryKey defaultValue="true" description="Enable file uploading action for review notes"
+                 key="gitlab.merge.requests.file.upload.enabled"/>
+    <applicationSettings service="org.jetbrains.plugins.gitlab.authentication.accounts.GitLabPersistentAccounts"/>
+    <projectSettings service="org.jetbrains.plugins.gitlab.mergerequest.ui.filters.GitLabMergeRequestsPersistentFiltersHistory"/>
+    <projectSettings service="org.jetbrains.plugins.gitlab.mergerequest.GitLabMergeRequestsPreferences"/>
+    <projectSettings service="org.jetbrains.plugins.gitlab.mergerequest.ui.details.model.GitLabPersistentMergeRequestChangesViewedState"/>
+    <projectSettings service="org.jetbrains.plugins.gitlab.authentication.accounts.GitLabProjectDefaultAccountHolder"/>
+    <applicationSettings service="org.jetbrains.plugins.gitlab.GitLabSettings"/>
   </extensions>
 
   <extensions defaultExtensionNs="com.intellij.statistics">
@@ -210,9 +231,7 @@
            class="org.jetbrains.plugins.gitlab.mergerequest.ui.diff.action.GitLabMergeRequestDiffReviewDiscussionsToggleAction"
            icon="AllIcons.Actions.Show"
            popup="true">
-      <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings"
-                    relative-to-action="Vcs.Diff.ToggleDiffAligningMode"
-                    anchor="before"/>
+      <add-to-group group-id="Diff.EditorGutterPopupMenu.EditorSettings"/>
     </group>
     <action id="GitLab.MergeRequest.Review.Submit"
             class="org.jetbrains.plugins.gitlab.mergerequest.diff.action.GitLabMergeRequestDiffSubmitReviewAction"/>
@@ -222,7 +241,7 @@
       <override-text place="EditorTabPopup"/>
       <override-text place="ProjectViewPopup" use-text-of-place="EditorTabPopup"/>
       <override-text place="EditorPopup" use-text-of-place="EditorTabPopup"/>
-      <override-text place="FavoritesPopup" use-text-of-place="EditorTabPopup"/>
+      <override-text place="BookmarksPopup" use-text-of-place="EditorTabPopup"/>
       <add-to-group group-id="Git.Hosting.Open.In.Browser.Group"/>
     </group>
 

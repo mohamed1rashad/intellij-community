@@ -1,4 +1,4 @@
-// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2026 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.plugins
 
 import com.intellij.testFramework.PlatformTestUtil.getCommunityPath
@@ -8,6 +8,8 @@ import com.intellij.testFramework.assertions.CleanupSnapshots
 import com.intellij.testFramework.rules.TempDirectory
 import com.intellij.util.io.sanitizeFileName
 import com.intellij.util.io.write
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import org.intellij.lang.annotations.Language
 import org.jetbrains.jps.model.JpsElementFactory
 import org.jetbrains.jps.model.JpsProject
@@ -49,7 +51,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `dependency on a plugin is specified as a plugin`() {
+  fun `dependency on a plugin is specified as a plugin`() = runBlocking(Dispatchers.Default) {
     val project = produceDependencyAndDependentPlugins()
     val result = validatePluginModel(project)
     assertThat(result.errors).isEmpty()
@@ -57,7 +59,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `dependency on a plugin must be specified as a plugin`() {
+  fun `dependency on a plugin must be specified as a plugin`() = runBlocking(Dispatchers.Default) {
     val project = produceDependencyAndDependentPlugins {
       it.replace("<plugin id=\"dependency\"/>", "<module name=\"intellij.dependent\"/>")
     }
@@ -67,7 +69,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `dependency on a plugin must be resolvable`() {
+  fun `dependency on a plugin must be resolvable`() = runBlocking(Dispatchers.Default) {
     val project = produceDependencyAndDependentPlugins {
       it.replace("<plugin id=\"dependency\"/>", "<plugin id=\"incorrectId\"/>")
     }
@@ -77,7 +79,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `module must not depend on a parent plugin`() {
+  fun `module must not depend on a parent plugin`() = runBlocking(Dispatchers.Default) {
     val project = producePluginWithContentModule {
       it.replace("<plugin id=\"com.intellij.modules.lang\"/>", "<plugin id=\"$TEST_PLUGIN_ID\"/>")
     }
@@ -88,24 +90,31 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `content module in the same source module`() {
+  fun `content module in the same source module`() = runBlocking(Dispatchers.Default) {
     val project = producePluginWithContentModuleInTheSameSourceModule()
-    val result = validatePluginModel(project)
-    assertThat(result.errors).isEmpty()
-    assertWithMatchSnapshot(result.graphAsString(root))
-  }
-
-  @Test
-  fun `validate dependencies of content module in the same source module`() {
-    val project = producePluginWithContentModuleInTheSameSourceModule {
-      it.replace("<dependencies>", "<dependencies><module name=\"com.intellij.diagram\"/>")
-    }
-
     val result = validatePluginModel(project)
     assertWithMatchSnapshot(result.errorsAsString())
   }
 
-  private fun validatePluginModel(project: JpsProject): PluginValidationResult = validatePluginModel(project, root)
+  @Test
+  fun `validate dependencies of content module in the same source module`() = runBlocking(Dispatchers.Default) {
+    val project = producePluginWithContentModuleInTheSameSourceModule {
+      it.replace("<dependencies>", "<dependencies><module name=\"com.intellij.diagram\"/>")
+    }
+
+    val result = validatePluginModel(
+      project,
+      projectHomePath = root,
+      validationOptions = PluginValidationOptions(
+        pluginsToContentModulesWithoutDedicatedJpsModules = mapOf(
+          "AngularJs" to listOf("intellij.angularJs/diagram")
+        )
+      )
+    )
+    assertWithMatchSnapshot(result.errorsAsString())
+  }
+
+  private suspend fun validatePluginModel(project: JpsProject): PluginValidationResult = validatePluginModel(project, root)
 
   private fun producePluginWithContentModuleInTheSameSourceModule(
     mutator: (String) -> String = { it },
@@ -140,7 +149,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `module must not have dependencies in old format`() {
+  fun `module must not have dependencies in old format`(): Unit = runBlocking(Dispatchers.Default) {
     val project = producePluginWithContentModule {
       it.replace("</dependencies>", "</dependencies><depends>com.intellij.modules.lang</depends>")
     }
@@ -158,7 +167,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `dependencies from required to optional are not allowed`() {
+  fun `dependencies from required to optional are not allowed`(): Unit = runBlocking(Dispatchers.Default) {
     val project = JpsElementFactory.getInstance().createModel().project
     createModuleWithXml(
       name = "intellij.plugin",
@@ -188,7 +197,7 @@ class PluginModelValidatorTest {
   }
   
   @Test
-  fun `dependencies from embedded to optional are not allowed`() {
+  fun `dependencies from embedded to optional are not allowed`(): Unit = runBlocking(Dispatchers.Default) {
     val project = JpsElementFactory.getInstance().createModel().project
     createModuleWithXml(
       name = "intellij.plugin",
@@ -218,7 +227,7 @@ class PluginModelValidatorTest {
   }
 
   @Test
-  fun `dependencies on private modules from other plugins are not allowed`() {
+  fun `dependencies on private modules from other plugins are not allowed`(): Unit = runBlocking(Dispatchers.Default) {
     val project = JpsElementFactory.getInstance().createModel().project
     createModuleWithXml(
       name = "intellij.plugin1",
@@ -255,13 +264,13 @@ class PluginModelValidatorTest {
     val result = validatePluginModel(project)
     assertThat(result.errorsAsString()).contains("""
       |Module 'intellij.private.module' has 'private' (default) visibility in 'intellij.plugin1' but it is used as a dependency in 
-      |a plugin 'intellij.plugin2'.
+      |a module 'intellij.module2' in a plugin 'intellij.plugin2'.
       |Use 'internal' or 'public' visibility instead by adding 'visibility' attribute to the root tag of intellij.private.module.xml
     """.trimMargin())
   }
 
   @Test
-  fun `dependencies on internal modules from other namespace are not allowed`() {
+  fun `dependencies on internal modules from other namespace are not allowed`(): Unit = runBlocking(Dispatchers.Default) {
     val project = JpsElementFactory.getInstance().createModel().project
     createModuleWithXml(
       name = "intellij.plugin1",
